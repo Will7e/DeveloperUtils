@@ -11,9 +11,13 @@ import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useKeepAlive } from "@/hooks/useKeepAlive";
+
 
 function App() {
   useKeyboardShortcuts();
+  useKeepAlive();
+
 
   return (
     <TooltipProvider delayDuration={300}>
