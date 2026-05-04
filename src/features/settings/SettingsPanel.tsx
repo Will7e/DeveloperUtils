@@ -18,7 +18,7 @@ export function SettingsPanel() {
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <div className="settings-header-title">
-            <Settings style={{ width: 15, height: 15, color: "#818cf8" }} />
+            <Settings style={{ width: 15, height: 15, color: "#0ea5e9" }} />
             <span>Settings</span>
           </div>
           <button className="toolbar-icon-btn" onClick={toggleSettings}>
@@ -145,7 +145,7 @@ export function SettingsPanel() {
             <label className="settings-label">
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {editorSettings.soundEffects ? (
-                  <Volume2 style={{ width: 13, height: 13, color: "#818cf8" }} />
+                  <Volume2 style={{ width: 13, height: 13, color: "#0ea5e9" }} />
                 ) : (
                   <VolumeX style={{ width: 13, height: 13, opacity: 0.4 }} />
                 )}

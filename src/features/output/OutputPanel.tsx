@@ -41,7 +41,7 @@ export function OutputPanel() {
       {/* Header */}
       <div className="output-header">
         <div className="output-header-left">
-          <Terminal style={{ width: 14, height: 14, color: "#818cf8" }} />
+          <Terminal style={{ width: 14, height: 14, color: "#0ea5e9" }} />
           <span className="output-title">Console</span>
           {isRunning && (
             <div className="running-indicator">
@@ -66,7 +66,7 @@ export function OutputPanel() {
                   style={{
                     width: 24,
                     height: 24,
-                    color: showHistory ? "#818cf8" : undefined,
+                    color: showHistory ? "#0ea5e9" : undefined,
                   }}
                 >
                   <Clock style={{ width: 12, height: 12 }} />

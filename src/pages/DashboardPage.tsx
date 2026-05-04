@@ -90,8 +90,8 @@ export function DashboardPage() {
           <ToolCard
             to="/compiler"
             icon={<Code2 className="h-5 w-5" />}
-            iconColor="#818cf8"
-            glowColor="rgba(129, 140, 248, 0.12)"
+            iconColor="#0ea5e9"
+            glowColor="rgba(14, 165, 233, 0.12)"
             title="Cloud Compiler"
             description="Multi-language execution engine with live preview and deep Monaco integration."
             available
@@ -99,24 +99,24 @@ export function DashboardPage() {
 
           <ToolCard
             icon={<Terminal className="h-5 w-5" />}
-            iconColor="#a78bfa"
-            glowColor="rgba(167, 139, 250, 0.12)"
+            iconColor="#38bdf8"
+            glowColor="rgba(56, 189, 248, 0.12)"
             title="Terminal Shell"
             description="Direct access to a sandboxed environment for rapid CLI prototyping."
           />
 
           <ToolCard
             icon={<Zap className="h-5 w-5" />}
-            iconColor="#34d399"
-            glowColor="rgba(52, 211, 153, 0.12)"
+            iconColor="#2dd4bf"
+            glowColor="rgba(45, 212, 191, 0.12)"
             title="API Tester"
             description="A premium alternative to Postman for rapid API exploration and debugging."
           />
 
           <ToolCard
             icon={<Cpu className="h-5 w-5" />}
-            iconColor="#60a5fa"
-            glowColor="rgba(96, 165, 250, 0.12)"
+            iconColor="#0ea5e9"
+            glowColor="rgba(14, 165, 233, 0.12)"
             title="System Monitor"
             description="Real-time visualization of resource allocation and performance metrics."
           />

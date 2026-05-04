@@ -214,7 +214,7 @@ export function Toolbar() {
             <button
               className="toolbar-icon-btn"
               onClick={toggleOutputPanel}
-              style={{ color: outputPanelOpen ? "#818cf8" : undefined }}
+              style={{ color: outputPanelOpen ? "#0ea5e9" : undefined }}
             >
               <Terminal />
             </button>

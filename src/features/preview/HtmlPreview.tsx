@@ -55,7 +55,7 @@ export function HtmlPreview() {
       {/* Header */}
       <div className="html-preview-header">
         <div className="html-preview-header-left">
-          <Globe style={{ width: 14, height: 14, color: "#818cf8" }} />
+          <Globe style={{ width: 14, height: 14, color: "#0ea5e9" }} />
           <span className="html-preview-title">Live Preview</span>
           <span className="html-preview-badge">Auto</span>
         </div>
@@ -69,7 +69,7 @@ export function HtmlPreview() {
                 style={{
                   width: 24,
                   height: 24,
-                  color: viewMode === "mobile" ? "#818cf8" : undefined,
+                  color: viewMode === "mobile" ? "#0ea5e9" : undefined,
                 }}
               >
                 {viewMode === "desktop" ? (
