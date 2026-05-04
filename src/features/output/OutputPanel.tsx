@@ -98,7 +98,7 @@ export function OutputPanel() {
                 <X style={{ width: 13, height: 13 }} />
               </button>
             </TooltipTrigger>
-            <TooltipContent>Close Panel (⌘J)</TooltipContent>
+            <TooltipContent>Close Panel <kbd>⌘J</kbd></TooltipContent>
           </Tooltip>
         </div>
       </div>

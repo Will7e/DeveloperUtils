@@ -166,7 +166,7 @@ export function Toolbar() {
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>Run Code (⌘↵)</TooltipContent>
+            <TooltipContent>Run Code <kbd>⌘↵</kbd></TooltipContent>
           </Tooltip>
         )}
 
@@ -183,7 +183,7 @@ export function Toolbar() {
               <Terminal />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Console (⌘J)</TooltipContent>
+          <TooltipContent>Console <kbd>⌘J</kbd></TooltipContent>
         </Tooltip>
 
         {/* Settings */}
@@ -193,7 +193,7 @@ export function Toolbar() {
               <Settings />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Settings (⌘,)</TooltipContent>
+          <TooltipContent>Settings <kbd>⌘,</kbd></TooltipContent>
         </Tooltip>
       </div>
 
