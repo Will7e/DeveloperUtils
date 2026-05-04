@@ -20,7 +20,7 @@ export function LibraryTool() {
       className={cn("lib-layout", isDragging && "lib-layout-dragging")}
     >
       {/* Sidebar */}
-      <div className="lib-layout-sidebar" style={{ width: sidebarWidth }}>
+      <div className="lib-layout-sidebar" style={{ width: `${sidebarWidth}px` }}>
         <LibrarySidebar />
       </div>
 
