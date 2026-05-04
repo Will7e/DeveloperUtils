@@ -4,6 +4,28 @@
 
 import { X, Settings, Volume2, VolumeX } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
+import { 
+  Tooltip, 
+  TooltipTrigger, 
+  TooltipContent 
+} from "@/components/ui/tooltip";
+
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 export function SettingsPanel() {
   const settingsOpen = useAppStore((s) => s.settingsOpen);
@@ -21,9 +43,11 @@ export function SettingsPanel() {
             <Settings style={{ width: 15, height: 15, color: "#0ea5e9" }} />
             <span>Settings</span>
           </div>
-          <button className="toolbar-icon-btn" onClick={toggleSettings}>
-            <X style={{ width: 15, height: 15 }} />
-          </button>
+          <ActionTooltip content="Close Settings (Esc)" side="left">
+            <button className="toolbar-icon-btn" onClick={toggleSettings}>
+              <X style={{ width: 15, height: 15 }} />
+            </button>
+          </ActionTooltip>
         </div>
 
         <div className="settings-body">

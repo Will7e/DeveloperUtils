@@ -24,6 +24,28 @@ import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
+import { 
+  Tooltip, 
+  TooltipTrigger, 
+  TooltipContent 
+} from "@/components/ui/tooltip";
+
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 interface PaletteAction {
   id: string;
@@ -289,9 +311,11 @@ export function CommandPalette() {
             }}
             onKeyDown={handleKeyDown}
           />
-          <button className="palette-close" onClick={toggleCommandPalette}>
-            <X style={{ width: 14, height: 14 }} />
-          </button>
+          <ActionTooltip content="Close Palette (Esc)" side="left">
+            <button className="palette-close" onClick={toggleCommandPalette}>
+              <X style={{ width: 14, height: 14 }} />
+            </button>
+          </ActionTooltip>
         </div>
 
         <div className="palette-list" ref={listRef}>

@@ -23,6 +23,28 @@ import { useAppStore } from "@/stores/app.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
 import { cn } from "@/lib/utils";
+import { 
+  Tooltip, 
+  TooltipTrigger, 
+  TooltipContent 
+} from "@/components/ui/tooltip";
+
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 const languageIcons: Record<Language, React.ReactNode> = {
   javascript: <span className="lang-icon lang-js">JS</span>,
@@ -181,28 +203,30 @@ export function Sidebar() {
                   )}
                 </div>
                 <div className="sidebar-file-actions">
-                  <button
-                    className="sidebar-file-action-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRenamingId(file.id);
-                      setRenameValue(file.name);
-                    }}
-                    title="Rename"
-                  >
-                    <FileType className="h-3 w-3" />
-                  </button>
-                  {files.length > 1 && (
+                  <ActionTooltip content="Rename File" side="top">
                     <button
-                      className="sidebar-file-action-btn sidebar-file-delete"
+                      className="sidebar-file-action-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteFile(file.id);
+                        setRenamingId(file.id);
+                        setRenameValue(file.name);
                       }}
-                      title="Delete"
                     >
-                      <X className="h-3 w-3" />
+                      <FileType className="h-3 w-3" />
                     </button>
+                  </ActionTooltip>
+                  {files.length > 1 && (
+                    <ActionTooltip content="Delete File" side="top">
+                      <button
+                        className="sidebar-file-action-btn sidebar-file-delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteFile(file.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </ActionTooltip>
                   )}
                 </div>
               </div>

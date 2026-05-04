@@ -157,21 +157,27 @@ export function MainLayout() {
             onClick={toggleSettings}
           />
 
-          <button
-            className="nav-collapse-btn"
-            onClick={toggleSidebarCollapse}
-            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            type="button"
-          >
-            {sidebarCollapsed ? (
-              <ChevronsRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronsLeft className="h-4 w-4" />
-                <span className="nav-collapse-label">Collapse</span>
-              </>
-            )}
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="nav-collapse-btn"
+                onClick={toggleSidebarCollapse}
+                type="button"
+              >
+                {sidebarCollapsed ? (
+                  <ChevronsRight className="h-4 w-4" />
+                ) : (
+                  <>
+                    <ChevronsLeft className="h-4 w-4" />
+                    <span className="nav-collapse-label">Collapse</span>
+                  </>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+            </TooltipContent>
+          </Tooltip>
         </div>
       </nav>
 

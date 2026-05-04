@@ -17,6 +17,23 @@ import { formatDuration } from "@/lib/utils";
 import { playSound } from "@/lib/sounds";
 import type { Language } from "@/types";
 
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
+
 const tabIcons: Record<Language, string> = {
   javascript: "JS",
   typescript: "TS",
@@ -263,27 +280,30 @@ export function EditorTabs() {
                 </>
               )}
               {files.length > 1 && (
-                <span
-                  className="tab-close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteFile(file.id);
-                  }}
-                >
-                  <X className="h-3 w-3" />
-                </span>
+                <ActionTooltip content="Close Tab" side="bottom">
+                  <span
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteFile(file.id);
+                    }}
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                </ActionTooltip>
               )}
             </button>
           ))}
 
-          <button
-            ref={btnRef}
-            className="tab-new"
-            onClick={handleToggleMenu}
-            title="New File"
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <ActionTooltip content="New File" side="bottom">
+            <button
+              ref={btnRef}
+              className="tab-new"
+              onClick={handleToggleMenu}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </ActionTooltip>
         </div>
 
         {/* ── Premium Toolbar Actions ─────────────────────────── */}
