@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompilerPage } from "@/pages/CompilerPage";
 import { DashboardPage } from "@/pages/DashboardPage";
+import { JsonFormatterPage } from "@/pages/JsonFormatterPage";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
@@ -26,6 +27,7 @@ function App() {
           <Route element={<MainLayout />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/compiler" element={<CompilerPage />} />
+            <Route path="/json-formatter" element={<JsonFormatterPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
