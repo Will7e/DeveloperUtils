@@ -1,12 +1,20 @@
 // ============================================================
-// Editor Tabs — File tabs with new-file dropdown
+// Editor Tabs — File tabs with new-file dropdown & run controls
 // ============================================================
 
-import { useState, useRef, useEffect } from "react";
-import { X, Plus } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { X, Plus, Terminal, Play, Square, Loader2, Eye } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { LANGUAGE_CONFIGS } from "@/config";
 import { cn } from "@/lib/utils";
+import { compilerService } from "@/services/compiler.service";
+import { formatDuration } from "@/lib/utils";
+import { playSound } from "@/lib/sounds";
 import type { Language } from "@/types";
 
 const tabIcons: Record<Language, string> = {
@@ -37,8 +45,28 @@ export function EditorTabs() {
   const renameFile = useAppStore((s) => s.renameFile);
   const createFile = useAppStore((s) => s.createFile);
 
+  // Run-related state
+  const isRunning = useAppStore((s) => s.isRunning);
+  const setIsRunning = useAppStore((s) => s.setIsRunning);
+  const addOutputEntry = useAppStore((s) => s.addOutputEntry);
+  const addExecutionResult = useAppStore((s) => s.addExecutionResult);
+  const clearOutput = useAppStore((s) => s.clearOutput);
+  const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
+  const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
+  const setExecutionStartTime = useAppStore((s) => s.setExecutionStartTime);
+  const setOutputFlash = useAppStore((s) => s.setOutputFlash);
+  const addToast = useAppStore((s) => s.addToast);
+  const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
+  const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
+  const cancelExecution = useAppStore((s) => s.cancelExecution);
+
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  const activeFile = files.find((f) => f.id === activeFileId);
+  const isHtml = activeFile?.language === "html";
+  const isJson = activeFile?.language === "json";
+  const canRun = activeFile && !isHtml && !isJson;
 
   // Close menu on outside click
   useEffect(() => {
@@ -68,6 +96,124 @@ export function EditorTabs() {
     createFile(`untitled${config.extension}`, lang);
     setShowMenu(false);
   };
+
+  // ── Run Code ──────────────────────────────────────────────
+  const handleRun = useCallback(async () => {
+    if (!activeFile || isRunning || isHtml || isJson) return;
+
+    // Ensure output panel is visible when running
+    if (!outputPanelOpen) {
+      toggleOutputPanel();
+    }
+
+    setIsRunning(true);
+    setExecutionStartTime(Date.now());
+    clearOutput();
+
+    if (soundEffects) playSound("run");
+
+    addOutputEntry({
+      type: "info",
+      content: `Running ${activeFile.name}...`,
+    });
+
+    addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
+
+    try {
+      if (activeFile.language === "python") {
+        const ready = await compilerService.isReady("python");
+        if (!ready) {
+          addOutputEntry({
+            type: "info",
+            content: "Loading Python runtime (Pyodide)...",
+          });
+          await compilerService.initialize("python");
+        }
+      }
+
+      if (activeFile.language === "typescript") {
+        const ready = await compilerService.isReady("typescript");
+        if (!ready) {
+          addOutputEntry({
+            type: "info",
+            content: "Loading TypeScript compiler...",
+          });
+          await compilerService.initialize("typescript");
+        }
+      }
+
+      const result = await compilerService.execute(
+        activeFile.content,
+        activeFile.language,
+        { timeout: executionTimeout }
+      );
+
+      addExecutionResult(result);
+
+      if (result.stdout) {
+        addOutputEntry({ type: "stdout", content: result.stdout });
+      }
+      if (result.stderr) {
+        addOutputEntry({ type: "stderr", content: result.stderr });
+      }
+
+      const isSuccess = result.exitCode === 0;
+      addOutputEntry({
+        type: isSuccess ? "success" : "error",
+        content: isSuccess
+          ? `Completed in ${formatDuration(result.duration)}`
+          : `Exit code ${result.exitCode} (${formatDuration(result.duration)})`,
+      });
+
+      setOutputFlash(isSuccess ? "success" : "error");
+      if (soundEffects) playSound(isSuccess ? "success" : "error");
+
+    } catch (error) {
+      addOutputEntry({
+        type: "error",
+        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      setOutputFlash("error");
+      if (soundEffects) playSound("error");
+    } finally {
+      setIsRunning(false);
+      setExecutionStartTime(null);
+    }
+  }, [
+    activeFile,
+    isRunning,
+    isHtml,
+    isJson,
+    outputPanelOpen,
+    setIsRunning,
+    clearOutput,
+    addOutputEntry,
+    addExecutionResult,
+    toggleOutputPanel,
+    setExecutionStartTime,
+    setOutputFlash,
+    addToast,
+    soundEffects,
+    executionTimeout,
+  ]);
+
+  // ── Cancel Execution ──────────────────────────────────────
+  const handleCancel = useCallback(async () => {
+    if (!isRunning) return;
+
+    await compilerService.cancel();
+    cancelExecution();
+
+    addOutputEntry({
+      type: "error",
+      content: "⛔ Execution cancelled by user",
+    });
+
+    setOutputFlash("error");
+    if (soundEffects) playSound("error");
+
+    addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+  }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, soundEffects, addToast]);
 
   return (
     <>
@@ -129,17 +275,79 @@ export function EditorTabs() {
               )}
             </button>
           ))}
+
+          <button
+            ref={btnRef}
+            className="tab-new"
+            onClick={handleToggleMenu}
+            title="New File"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* New file button */}
-        <button
-          ref={btnRef}
-          className="tab-new"
-          onClick={handleToggleMenu}
-          title="New File"
-        >
-          <Plus />
-        </button>
+        {/* ── Premium Toolbar Actions ─────────────────────────── */}
+        <div className="tabs-toolbar">
+          <div className="tabs-toolbar-sep" />
+
+          {/* Console toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={cn(
+                  "console-toggle-btn",
+                  outputPanelOpen && "console-toggle-btn-active"
+                )}
+                onClick={toggleOutputPanel}
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                <span className="console-toggle-label">Console</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Toggle Console <kbd>⌘J</kbd></TooltipContent>
+          </Tooltip>
+
+          <div className="tabs-toolbar-sep" />
+
+          {/* Run / Stop / Preview button */}
+          {isHtml ? (
+            <div className="tabs-preview-badge">
+              <Eye className="h-3.5 w-3.5" />
+              <span>Preview</span>
+            </div>
+          ) : isRunning ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="tabs-run-btn tabs-run-btn-stop"
+                  onClick={handleCancel}
+                >
+                  <Square className="h-3 w-3" style={{ fill: "currentColor" }} />
+                  <span>Stop</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Cancel Execution <kbd>⌘⇧C</kbd></TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="tabs-run-btn"
+                  onClick={handleRun}
+                  disabled={!canRun}
+                >
+                  {isJson ? (
+                    <Eye className="h-3.5 w-3.5" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
+                  )}
+                  <span>Run</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Run Code <kbd>⌘↵</kbd></TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {/* New file dropdown — rendered as fixed-position portal to avoid overflow clipping */}
