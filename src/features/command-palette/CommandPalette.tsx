@@ -233,9 +233,9 @@ export function CommandPalette() {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
-    const selected = list.children[selectedIndex] as HTMLElement;
+    const selected = list.querySelector(".palette-item-active") as HTMLElement;
     if (selected) {
-      selected.scrollIntoView({ block: "nearest" });
+      selected.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [selectedIndex]);
 
