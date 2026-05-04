@@ -19,6 +19,28 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
+import { 
+  Tooltip, 
+  TooltipTrigger, 
+  TooltipContent 
+} from "@/components/ui/tooltip";
+
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 export function FormatterTool() {
   const type = useAppStore((s) => s.formatterType);
@@ -149,26 +171,28 @@ export function FormatterTool() {
           
           {/* Type Dropdown */}
           <div className="relative" ref={dropdownRef}>
-            <button 
-              className={cn(
-                "formatter-type-btn",
-                showTypeDropdown && "formatter-type-btn-active"
-              )}
-              onClick={() => setShowTypeDropdown(!showTypeDropdown)}
-            >
-              {type === "json" ? (
-                <Braces className="h-3.5 w-3.5 text-accent" />
-              ) : (
-                <FileCode className="h-3.5 w-3.5 text-accent" />
-              )}
-              <span className="text-[11px] font-semibold uppercase tracking-wider">
-                {type}
-              </span>
-              <ChevronDown className={cn(
-                "h-3 w-3 transition-transform duration-200",
-                showTypeDropdown && "rotate-180"
-              )} />
-            </button>
+            <ActionTooltip content="Switch between JSON and XML" side="bottom">
+              <button 
+                className={cn(
+                  "formatter-type-btn",
+                  showTypeDropdown && "formatter-type-btn-active"
+                )}
+                onClick={() => setShowTypeDropdown(!showTypeDropdown)}
+              >
+                {type === "json" ? (
+                  <Braces className="h-3.5 w-3.5 text-accent" />
+                ) : (
+                  <FileCode className="h-3.5 w-3.5 text-accent" />
+                )}
+                <span className="text-[11px] font-semibold uppercase tracking-wider">
+                  {type}
+                </span>
+                <ChevronDown className={cn(
+                  "h-3 w-3 transition-transform duration-200",
+                  showTypeDropdown && "rotate-180"
+                )} />
+              </button>
+            </ActionTooltip>
 
             {showTypeDropdown && (
               <div className="formatter-dropdown">
@@ -201,49 +225,54 @@ export function FormatterTool() {
         </div>
         
         <div className="toolbar-right">
-          <button 
-            className="toolbar-btn" 
-            onClick={handleSample}
-            title={`Load sample ${type.toUpperCase()}`}
-          >
-            Sample
-          </button>
+          <ActionTooltip content={`Load sample ${type.toUpperCase()}`} side="bottom">
+            <button 
+              className="toolbar-btn" 
+              onClick={handleSample}
+            >
+              Sample
+            </button>
+          </ActionTooltip>
           <div className="toolbar-sep" />
-          <button 
-            className="toolbar-btn" 
-            onClick={handleFormat}
-            disabled={!currentInput || !!error}
-            title={`Prettify ${type.toUpperCase()}`}
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-            Format
-          </button>
-          <button 
-            className="toolbar-btn" 
-            onClick={handleMinify}
-            disabled={!currentInput || !!error}
-            title={`Minify ${type.toUpperCase()}`}
-          >
-            <Minimize2 className="h-3.5 w-3.5" />
-            Minify
-          </button>
-          <button 
-            className="toolbar-btn" 
-            onClick={handleCopy}
-            disabled={!currentInput}
-            title="Copy to clipboard"
-          >
-            {copied ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
-            Copy
-          </button>
-          <button 
-            className="toolbar-btn text-red hover:bg-red-dim" 
-            onClick={handleClear}
-            title="Clear current"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Clear
-          </button>
+          <ActionTooltip content={`Prettify ${type.toUpperCase()}`} side="bottom">
+            <button 
+              className="toolbar-btn" 
+              onClick={handleFormat}
+              disabled={!currentInput || !!error}
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              Format
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content={`Minify ${type.toUpperCase()}`} side="bottom">
+            <button 
+              className="toolbar-btn" 
+              onClick={handleMinify}
+              disabled={!currentInput || !!error}
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              Minify
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content="Copy to clipboard" side="bottom">
+            <button 
+              className="toolbar-btn" 
+              onClick={handleCopy}
+              disabled={!currentInput}
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
+              Copy
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content="Clear current input" side="bottom">
+            <button 
+              className="toolbar-btn text-red hover:bg-red-dim" 
+              onClick={handleClear}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear
+            </button>
+          </ActionTooltip>
         </div>
       </div>
 
@@ -271,17 +300,18 @@ export function FormatterTool() {
         <div className="json-output-section">
           <div className="section-header-row">
             <div className="section-label">Preview</div>
-            <button 
-              className="preview-fullscreen-btn"
-              onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
-              title={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"}
-            >
-              {isPreviewFullscreen ? (
-                <Shrink className="h-3.5 w-3.5" />
-              ) : (
-                <Expand className="h-3.5 w-3.5" />
-              )}
-            </button>
+            <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
+              <button 
+                className="preview-fullscreen-btn"
+                onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
+              >
+                {isPreviewFullscreen ? (
+                  <Shrink className="h-3.5 w-3.5" />
+                ) : (
+                  <Expand className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </ActionTooltip>
           </div>
           
           <div className="json-tree-container">
