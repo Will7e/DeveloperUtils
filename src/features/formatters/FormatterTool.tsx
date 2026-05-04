@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
+import { useResizable } from "@/hooks/useResizable";
 import { 
   Tooltip, 
   TooltipTrigger, 
@@ -53,6 +54,15 @@ export function FormatterTool() {
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Split Resizing
+  const { size: splitSize, containerRef, handleMouseDown, isDragging } = useResizable({
+    direction: "horizontal",
+    initialSize: 50,
+    storageKey: "formatter-split-size",
+    minSize: 20,
+    maxSize: 80
+  });
 
   const currentInput = formatterInputs[type];
 
@@ -276,13 +286,19 @@ export function FormatterTool() {
         </div>
       </div>
 
-      <div className={cn(
-        "json-formatter-content",
-        isPreviewFullscreen && "fullscreen-preview"
-      )}>
+      <div 
+        ref={containerRef}
+        className={cn(
+          "json-formatter-content",
+          isPreviewFullscreen && "fullscreen-preview"
+        )}
+      >
         {/* Input Section */}
         {!isPreviewFullscreen && (
-          <div className="json-input-section">
+          <div 
+            className="json-input-section"
+            style={{ width: `${splitSize}%`, flex: "none" }}
+          >
             <div className="section-header-row">
               <div className="section-label">Input ({type.toUpperCase()})</div>
             </div>
@@ -296,8 +312,22 @@ export function FormatterTool() {
           </div>
         )}
 
+        {/* Resize Handle */}
+        {!isPreviewFullscreen && (
+          <div 
+            className="comparator-resize-handle-h"
+            onMouseDown={handleMouseDown}
+            data-resize-handle-state={isDragging ? "drag" : "idle"}
+          >
+            <div className="resize-handle-indicator" />
+          </div>
+        )}
+
         {/* Output Section */}
-        <div className="json-output-section">
+        <div 
+          className="json-output-section"
+          style={{ width: isPreviewFullscreen ? "100%" : `${100 - splitSize}%`, flex: isPreviewFullscreen ? 1 : "none" }}
+        >
           <div className="section-header-row">
             <div className="section-label">Preview</div>
             <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
