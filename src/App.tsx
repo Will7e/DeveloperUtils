@@ -76,19 +76,18 @@ function App() {
           {/* Editor section */}
           <div
             className="app-editor-section"
-            style={{ width: outputPanelOpen ? `${editorSize}%` : "100%" }}
+            style={{ width: (outputPanelOpen || isHtml) ? `${editorSize}%` : "100%" }}
           >
             <EditorTabs />
             <div className="app-editor-content">
-              <div className={isHtml ? "editor-split" : "editor-full"}>
+              <div className="editor-full">
                 <CodeEditor />
               </div>
-              {isHtml && <HtmlPreview />}
             </div>
           </div>
 
           {/* Resize handle */}
-          {outputPanelOpen && (
+          {(outputPanelOpen || isHtml) && (
             <div
               className="resize-handle resize-handle-horizontal"
               onMouseDown={resizable.handleMouseDown}
@@ -97,14 +96,23 @@ function App() {
             </div>
           )}
 
-          {/* Output panel — right side */}
-          {outputPanelOpen && (
+          {/* Right panel — HTML Preview or Console */}
+          {isHtml ? (
             <div
               className="app-output-section"
               style={{ width: `${100 - editorSize}%` }}
             >
-              <OutputPanel />
+              <HtmlPreview />
             </div>
+          ) : (
+            outputPanelOpen && (
+              <div
+                className="app-output-section"
+                style={{ width: `${100 - editorSize}%` }}
+              >
+                <OutputPanel />
+              </div>
+            )
           )}
         </div>
 

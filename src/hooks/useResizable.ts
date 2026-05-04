@@ -12,7 +12,7 @@ export function useResizable({
   direction,
   initialSize,
   minSize = 15,
-  maxSize = 70,
+  maxSize = 85,
   storageKey,
 }: UseResizableOptions) {
   const [size, setSize] = useState(() => {
@@ -23,43 +23,59 @@ export function useResizable({
     return initialSize;
   });
 
-  const isDragging = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      isDragging.current = true;
-      document.body.style.cursor = direction === "horizontal" ? "col-resize" : "row-resize";
-      document.body.style.userSelect = "none";
-
-      const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging.current || !containerRef.current) return;
-        const rect = containerRef.current.getBoundingClientRect();
-        let pct: number;
-        if (direction === "horizontal") {
-          pct = ((e.clientX - rect.left) / rect.width) * 100;
-        } else {
-          pct = ((e.clientY - rect.top) / rect.height) * 100;
-        }
-        pct = Math.max(minSize, Math.min(maxSize, pct));
-        setSize(pct);
-      };
-
-      const handleMouseUp = () => {
-        isDragging.current = false;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
+      e.stopPropagation();
+      setIsDragging(true);
     },
-    [direction, minSize, maxSize]
+    []
   );
 
+  useEffect(() => {
+    if (!isDragging) return;
+
+    // Add a full-screen overlay to prevent iframes from stealing events
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 9999;
+      cursor: ${direction === "horizontal" ? "col-resize" : "row-resize"};
+    `;
+    document.body.appendChild(overlay);
+    document.body.style.userSelect = "none";
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      let pct: number;
+      if (direction === "horizontal") {
+        pct = ((e.clientX - rect.left) / rect.width) * 100;
+      } else {
+        pct = ((e.clientY - rect.top) / rect.height) * 100;
+      }
+      pct = Math.max(minSize, Math.min(maxSize, pct));
+      setSize(pct);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.body.removeChild(overlay);
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, direction, minSize, maxSize]);
+
+  // Persist to localStorage
   useEffect(() => {
     if (storageKey) {
       localStorage.setItem(storageKey, String(size));

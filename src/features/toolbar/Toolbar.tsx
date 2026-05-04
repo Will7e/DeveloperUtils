@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useCallback } from "react";
-import { Play, Square, Settings, Terminal, Zap } from "lucide-react";
+import { Play, Square, Settings, Terminal, Zap, Eye } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -139,33 +139,36 @@ export function Toolbar() {
       </div>
 
       <div className="toolbar-right">
-        {/* Run */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className="run-btn"
-              onClick={handleRun}
-              disabled={isRunning || !activeFile || activeFile.language === "html"}
-            >
-              {isRunning ? (
-                <>
-                  <Square style={{ fill: "currentColor" }} />
-                  <span>Running…</span>
-                </>
-              ) : (
-                <>
-                  <Play style={{ fill: "currentColor" }} />
-                  <span>Run</span>
-                </>
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {activeFile?.language === "html"
-              ? "HTML is previewed live"
-              : "Run Code (⌘↵)"}
-          </TooltipContent>
-        </Tooltip>
+        {/* Run / Preview */}
+        {activeFile?.language === "html" ? (
+          <div className="preview-indicator">
+            <Eye style={{ width: 14, height: 14 }} />
+            <span>Preview</span>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="run-btn"
+                onClick={handleRun}
+                disabled={isRunning || !activeFile}
+              >
+                {isRunning ? (
+                  <>
+                    <Square style={{ fill: "currentColor" }} />
+                    <span>Running…</span>
+                  </>
+                ) : (
+                  <>
+                    <Play style={{ fill: "currentColor" }} />
+                    <span>Run</span>
+                  </>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Run Code (⌘↵)</TooltipContent>
+          </Tooltip>
+        )}
 
         <div className="toolbar-sep" />
 
