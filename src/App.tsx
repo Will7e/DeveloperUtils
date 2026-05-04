@@ -76,7 +76,11 @@ function App() {
           {/* Editor section */}
           <div
             className="app-editor-section"
-            style={{ width: (outputPanelOpen || isHtml) ? `${editorSize}%` : "100%" }}
+            style={{ 
+              flex: (outputPanelOpen || isHtml) ? `0 0 ${editorSize}%` : "1 1 0%",
+              minWidth: 0,
+              overflow: "hidden"
+            }}
           >
             <EditorTabs />
             <div className="app-editor-content">
@@ -100,7 +104,7 @@ function App() {
           {isHtml ? (
             <div
               className="app-output-section"
-              style={{ width: `${100 - editorSize}%` }}
+              style={{ flex: 1, minWidth: 0, overflow: "hidden" }}
             >
               <HtmlPreview />
             </div>
@@ -108,7 +112,7 @@ function App() {
             outputPanelOpen && (
               <div
                 className="app-output-section"
-                style={{ width: `${100 - editorSize}%` }}
+                style={{ flex: 1, minWidth: 0, overflow: "hidden" }}
               >
                 <OutputPanel />
               </div>

@@ -2,7 +2,7 @@
 // Code Editor — Monaco Editor wrapper
 // ============================================================
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { FileCode2 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
@@ -10,6 +10,7 @@ import type { editor } from "monaco-editor";
 
 export function CodeEditor() {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const activeFileId = useAppStore((s) => s.activeFileId);
   const files = useAppStore((s) => s.files);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
@@ -88,6 +89,22 @@ export function CodeEditor() {
     []
   );
 
+  // Manually trigger layout on container resize with explicit dimensions
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry && editorRef.current) {
+        const { width, height } = entry.contentRect;
+        editorRef.current.layout({ width, height });
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   const handleChange = useCallback(
     (value: string | undefined) => {
       if (activeFileId && value !== undefined) {
@@ -120,7 +137,10 @@ export function CodeEditor() {
   };
 
   return (
-    <div className="flex-1 relative">
+    <div 
+      className="flex-1 relative w-full h-full min-w-0 min-h-0" 
+      ref={containerRef}
+    >
       <Editor
         height="100%"
         language={languageMap[activeFile.language] || "plaintext"}
