@@ -12,6 +12,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   FileCode,
+  Columns,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -126,6 +127,14 @@ export function MainLayout() {
             icon={<FileCode className="h-[18px] w-[18px]" />}
             label="Formatters"
             active={location.pathname === "/formatters"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/comparators"
+            icon={<Columns className="h-[18px] w-[18px]" />}
+            label="Comparators"
+            active={location.pathname === "/comparators"}
             collapsed={sidebarCollapsed}
           />
 

@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;
@@ -109,6 +109,15 @@ export function DashboardPage() {
               glowColor="rgba(163, 230, 53, 0.12)"
               title="Formatters"
               description="Production-grade JSON and XML formatting with interactive tree visualization."
+              available
+            />
+            <ToolCard
+              to="/comparators"
+              icon={<Columns className="h-5 w-5" />}
+              iconColor="#38bdf8"
+              glowColor="rgba(56, 189, 248, 0.12)"
+              title="List Comparator"
+              description="High-performance string list comparison. Find differences and intersections instantly."
               available
             />
           </div>
