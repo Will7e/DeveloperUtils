@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Globe, ArrowRight } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;

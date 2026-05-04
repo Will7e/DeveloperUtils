@@ -38,19 +38,20 @@ export function playSound(type: SoundType) {
   config.freq.forEach((freq, i) => {
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
+    const duration = config.dur[i] ?? 0.1;
 
     oscillator.type = config.type;
     oscillator.frequency.setValueAtTime(freq, time);
 
     gainNode.gain.setValueAtTime(0.08, time);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, time + config.dur[i]);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, time + duration);
 
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
 
     oscillator.start(time);
-    oscillator.stop(time + config.dur[i]);
+    oscillator.stop(time + duration);
 
-    time += config.dur[i];
+    time += duration;
   });
 }
