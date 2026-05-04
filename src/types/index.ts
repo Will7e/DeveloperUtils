@@ -100,6 +100,8 @@ export interface AppState {
   editorSettings: EditorSettings;
   toasts: Toast[];
   outputFlash: "success" | "error" | null;
+  formatterInputs: { json: string; xml: string };
+  formatterType: "json" | "xml";
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -125,6 +127,8 @@ export interface AppState {
   addToast: (toast: Omit<Toast, "id">) => void;
   removeToast: (id: string) => void;
   setOutputFlash: (flash: "success" | "error" | null) => void;
+  setFormatterInput: (type: "json" | "xml", input: string) => void;
+  setFormatterType: (type: "json" | "xml") => void;
 }
 
 // ============================================================

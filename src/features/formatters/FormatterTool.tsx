@@ -1,0 +1,315 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { JsonTreeView } from "./JsonTreeView";
+import { XmlTreeView } from "./XmlTreeView";
+import { formatXml, minifyXml, xmlToTreeData } from "./xmlUtils";
+import { 
+  FileJson, 
+  FileCode,
+  Copy, 
+  Trash2, 
+  Check, 
+  AlertCircle,
+  Minimize2,
+  Maximize2,
+  Code2,
+  ChevronDown,
+  Braces,
+  Expand,
+  Shrink,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useAppStore } from "@/stores/app.store";
+
+export function FormatterTool() {
+  const type = useAppStore((s) => s.formatterType);
+  const setType = useAppStore((s) => s.setFormatterType);
+  const formatterInputs = useAppStore((s) => s.formatterInputs);
+  const setFormatterInput = useAppStore((s) => s.setFormatterInput);
+  const addToast = useAppStore((s) => s.addToast);
+  
+  const [copied, setCopied] = useState(false);
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  const currentInput = formatterInputs[type];
+
+  // Derive data and error from current input
+  const { data, error } = useMemo(() => {
+    if (!currentInput.trim()) return { data: null, error: null };
+    try {
+      if (type === "json") {
+        return { data: JSON.parse(currentInput), error: null };
+      } else {
+        return { data: xmlToTreeData(currentInput), error: null };
+      }
+    } catch (e: any) {
+      return { data: null, error: e.message };
+    }
+  }, [currentInput, type]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowTypeDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleCopy = () => {
+    if (!currentInput) return;
+    navigator.clipboard.writeText(currentInput);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    addToast({
+      message: `${type.toUpperCase()} copied to clipboard`,
+      type: "success"
+    });
+  };
+
+  const handleMinify = () => {
+    if (!currentInput || error) return;
+    try {
+      if (type === "json") {
+        setFormatterInput("json", JSON.stringify(JSON.parse(currentInput)));
+      } else {
+        setFormatterInput("xml", minifyXml(currentInput));
+      }
+    } catch (e: any) {
+      // Error handled by useMemo
+    }
+  };
+
+  const handleFormat = () => {
+    if (!currentInput || error) return;
+    try {
+      if (type === "json") {
+        setFormatterInput("json", JSON.stringify(JSON.parse(currentInput), null, 2));
+      } else {
+        setFormatterInput("xml", formatXml(currentInput));
+      }
+    } catch (e: any) {
+      // Error handled by useMemo
+    }
+  };
+
+  const handleClear = () => {
+    setFormatterInput(type, "");
+  };
+
+  const handleSample = () => {
+    if (type === "json") {
+      const sample = {
+        id: "dev-utils-001",
+        name: "Developer Utilities",
+        version: "1.0.0",
+        features: [
+          { name: "Formatter", types: ["JSON", "XML"] },
+          { name: "Compiler", status: "stable" }
+        ],
+        config: { theme: "obsidian", active: true }
+      };
+      setFormatterInput("json", JSON.stringify(sample, null, 2));
+    } else {
+      const sample = `<?xml version="1.0" encoding="UTF-8"?>
+<root id="dev-utils-001">
+  <name>Developer Utilities</name>
+  <version>1.0.0</version>
+  <features>
+    <feature name="Formatter">
+      <type>JSON</type>
+      <type>XML</type>
+    </feature>
+    <feature name="Compiler" status="stable" />
+  </features>
+  <config theme="obsidian" active="true" />
+</root>`;
+      setFormatterInput("xml", sample);
+    }
+  };
+
+  return (
+    <div className="json-formatter-container">
+      {/* Header / Toolbar */}
+      <div className="json-formatter-toolbar">
+        <div className="toolbar-left">
+          {type === "json" ? (
+            <FileJson className="h-4 w-4 text-accent" />
+          ) : (
+            <FileCode className="h-4 w-4 text-accent" />
+          )}
+          <h2 className="text-sm font-semibold">
+            {type.toUpperCase()} Formatter
+          </h2>
+          
+          <div className="toolbar-sep mx-2" />
+          
+          {/* Type Dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button 
+              className={cn(
+                "formatter-type-btn",
+                showTypeDropdown && "formatter-type-btn-active"
+              )}
+              onClick={() => setShowTypeDropdown(!showTypeDropdown)}
+            >
+              {type === "json" ? (
+                <Braces className="h-3.5 w-3.5 text-accent" />
+              ) : (
+                <FileCode className="h-3.5 w-3.5 text-accent" />
+              )}
+              <span className="text-[11px] font-semibold uppercase tracking-wider">
+                {type}
+              </span>
+              <ChevronDown className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                showTypeDropdown && "rotate-180"
+              )} />
+            </button>
+
+            {showTypeDropdown && (
+              <div className="formatter-dropdown">
+                <div className="formatter-dropdown-title">Select Format</div>
+                <button 
+                  className={cn("formatter-dropdown-item", type === "json" && "active")}
+                  onClick={() => { 
+                    setType("json"); 
+                    setShowTypeDropdown(false);
+                  }}
+                >
+                  <Braces className="h-4 w-4" />
+                  <span>JSON Formatter</span>
+                  {type === "json" && <div className="active-dot" />}
+                </button>
+                <button 
+                  className={cn("formatter-dropdown-item", type === "xml" && "active")}
+                  onClick={() => { 
+                    setType("xml"); 
+                    setShowTypeDropdown(false);
+                  }}
+                >
+                  <FileCode className="h-4 w-4" />
+                  <span>XML Formatter</span>
+                  {type === "xml" && <div className="active-dot" />}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="toolbar-right">
+          <button 
+            className="toolbar-btn" 
+            onClick={handleSample}
+            title={`Load sample ${type.toUpperCase()}`}
+          >
+            Sample
+          </button>
+          <div className="toolbar-sep" />
+          <button 
+            className="toolbar-btn" 
+            onClick={handleFormat}
+            disabled={!currentInput || !!error}
+            title={`Prettify ${type.toUpperCase()}`}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            Format
+          </button>
+          <button 
+            className="toolbar-btn" 
+            onClick={handleMinify}
+            disabled={!currentInput || !!error}
+            title={`Minify ${type.toUpperCase()}`}
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+            Minify
+          </button>
+          <button 
+            className="toolbar-btn" 
+            onClick={handleCopy}
+            disabled={!currentInput}
+            title="Copy to clipboard"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
+            Copy
+          </button>
+          <button 
+            className="toolbar-btn text-red hover:bg-red-dim" 
+            onClick={handleClear}
+            title="Clear current"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div className={cn(
+        "json-formatter-content",
+        isPreviewFullscreen && "fullscreen-preview"
+      )}>
+        {/* Input Section */}
+        {!isPreviewFullscreen && (
+          <div className="json-input-section">
+            <div className="section-header-row">
+              <div className="section-label">Input ({type.toUpperCase()})</div>
+            </div>
+            <textarea
+              className="json-textarea"
+              placeholder={`Paste your ${type.toUpperCase()} here...`}
+              value={currentInput}
+              onChange={(e) => setFormatterInput(type, e.target.value)}
+              spellCheck={false}
+            />
+          </div>
+        )}
+
+        {/* Output Section */}
+        <div className="json-output-section">
+          <div className="section-header-row">
+            <div className="section-label">Preview</div>
+            <button 
+              className="preview-fullscreen-btn"
+              onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
+              title={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"}
+            >
+              {isPreviewFullscreen ? (
+                <Shrink className="h-3.5 w-3.5" />
+              ) : (
+                <Expand className="h-3.5 w-3.5" />
+              )}
+            </button>
+          </div>
+          
+          <div className="json-tree-container">
+            {error ? (
+              <div className="json-error-state">
+                <AlertCircle className="h-5 w-5 text-red" />
+                <div className="json-error-message">
+                  <div className="font-semibold mb-1">Invalid {type.toUpperCase()}</div>
+                  <div className="text-xs opacity-70">{error}</div>
+                </div>
+              </div>
+            ) : data ? (
+              <div className="json-tree-scroll">
+                {type === "json" ? (
+                  <JsonTreeView data={data} />
+                ) : (
+                  <XmlTreeView data={data as any} />
+                )}
+              </div>
+            ) : (
+              <div className="json-empty-state">
+                <Code2 className="h-10 w-10 opacity-10 mb-3" />
+                <p>Paste {type.toUpperCase()} on the left to begin formatting</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

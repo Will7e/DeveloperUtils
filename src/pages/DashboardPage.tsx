@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;
@@ -119,6 +119,16 @@ export function DashboardPage() {
             glowColor="rgba(14, 165, 233, 0.12)"
             title="System Monitor"
             description="Real-time visualization of resource allocation and performance metrics."
+          />
+          
+          <ToolCard
+            to="/formatters"
+            icon={<FileCode className="h-5 w-5" />}
+            iconColor="#a3e635"
+            glowColor="rgba(163, 230, 53, 0.12)"
+            title="Formatters"
+            description="Production-grade JSON and XML formatting with interactive tree visualization."
+            available
           />
         </div>
       </div>

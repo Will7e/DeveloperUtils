@@ -2983,3 +2983,229 @@ body {
   flex-direction: column;
   overflow: hidden;
 }
+
+/* XML Tree View */
+.xml-text-node {
+  color: var(--text-1);
+}
+
+.xml-tag-bracket {
+  color: var(--text-3);
+}
+
+.xml-tag-name {
+  color: var(--red);
+  font-weight: 500;
+}
+
+.xml-attribute {
+  margin-left: 4px;
+}
+
+.xml-attr-name {
+  color: var(--yellow);
+}
+
+.xml-attr-equal {
+  color: var(--text-3);
+}
+
+.xml-attr-value {
+  color: var(--green);
+}
+
+.xml-tree-node {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.xml-tree-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.xml-tree-clickable {
+  cursor: pointer;
+}
+
+.xml-tree-clickable:hover {
+  background: var(--bg-hover);
+}
+
+.xml-tree-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  color: var(--text-3);
+}
+
+.xml-tree-children {
+  border-left: 1px solid var(--border-1);
+  margin-left: 7px;
+}
+
+.xml-tree-footer {
+  padding: 2px 4px;
+}
+
+/* Formatter Dropdown & Type Button */
+.formatter-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.formatter-type-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+
+.formatter-type-btn-active {
+  background: var(--bg-3);
+  border-color: var(--accent);
+  box-shadow: 
+    0 0 15px var(--accent-glow),
+    inset 0 0 8px rgba(14, 165, 233, 0.05);
+  color: var(--text-1);
+  transform: translateY(-1px);
+}
+
+.formatter-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 180px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  z-index: 1000;
+  animation: dropdown-pop 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(8px);
+}
+
+@keyframes dropdown-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.formatter-dropdown-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 8px 10px 4px;
+}
+
+.formatter-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.formatter-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  transform: translateX(2px);
+}
+
+.formatter-dropdown-item.active {
+  color: var(--text-1);
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.12) 0%, transparent 100%);
+}
+
+.formatter-dropdown-item.active svg {
+  color: var(--text-1);
+}
+
+.formatter-dropdown-item .active-dot {
+  position: absolute;
+  left: 0;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.relative {
+  position: relative;
+}
+
+.fullscreen-preview {
+  display: block !important;
+}
+
+.fullscreen-preview .json-output-section {
+  width: 100% !important;
+  border-left: none !important;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.section-header-row .section-label {
+  padding: 0;
+  border-bottom: none;
+  background: transparent;
+}
+
+.preview-fullscreen-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.preview-fullscreen-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}

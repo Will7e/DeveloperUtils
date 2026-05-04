@@ -11,7 +11,7 @@ import {
   Zap,
   ChevronsLeft,
   ChevronsRight,
-  FileJson,
+  FileCode,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -122,10 +122,10 @@ export function MainLayout() {
           />
           
           <NavItem
-            to="/json-formatter"
-            icon={<FileJson className="h-[18px] w-[18px]" />}
-            label="JSON Formatter"
-            active={location.pathname === "/json-formatter"}
+            to="/formatters"
+            icon={<FileCode className="h-[18px] w-[18px]" />}
+            label="Formatters"
+            active={location.pathname === "/formatters"}
             collapsed={sidebarCollapsed}
           />
 

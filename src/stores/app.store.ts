@@ -47,6 +47,8 @@ export const useAppStore = create<AppState>()(
       editorSettings: DEFAULT_EDITOR_SETTINGS,
       toasts: [],
       outputFlash: null,
+      formatterInputs: { json: "", xml: "" },
+      formatterType: "json",
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -200,6 +202,16 @@ export const useAppStore = create<AppState>()(
           }, 800);
         }
       },
+      
+      setFormatterInput: (type, input) => {
+        set((state) => ({
+          formatterInputs: { ...state.formatterInputs, [type]: input }
+        }));
+      },
+      
+      setFormatterType: (type) => {
+        set({ formatterType: type });
+      },
     }),
     {
       name: "devutils-app-state",
@@ -210,6 +222,8 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         outputPanelOpen: state.outputPanelOpen,
         editorSettings: state.editorSettings,
+        formatterInputs: state.formatterInputs,
+        formatterType: state.formatterType,
       }),
     }
   )
