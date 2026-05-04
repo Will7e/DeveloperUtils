@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
-import { Terminal, Trash2, X, Clock, ChevronDown, ChevronRight } from "lucide-react";
+import { Terminal, Trash2, X, Clock, ChevronDown } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,

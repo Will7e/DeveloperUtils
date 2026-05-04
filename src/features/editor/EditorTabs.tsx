@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Plus, Terminal, Play, Square, Loader2, Eye } from "lucide-react";
+import { X, Plus, Terminal, Play, Square, Eye } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import {
   Tooltip,

@@ -128,13 +128,6 @@ export function CodeEditor() {
   }
 
   // Get Monaco language mapping
-  const languageMap: Record<string, string> = {
-    javascript: "javascript",
-    typescript: "typescript",
-    python: "python",
-    html: "html",
-    json: "json",
-  };
 
   return (
     <div 
@@ -143,7 +136,7 @@ export function CodeEditor() {
     >
       <Editor
         height="100%"
-        language={languageMap[activeFile.language] || "plaintext"}
+        language={activeFile.language}
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorMount}

@@ -4,10 +4,8 @@
 
 import { useState } from "react";
 import {
-  FileCode,
   FileType,
   FilePlus,
-  Trash2,
   X,
   Code2,
   ChevronsLeft,
