@@ -63,7 +63,7 @@
   --secondary-foreground: var(--text-1);
   --muted: var(--bg-1);
   --muted-foreground: var(--text-3);
-  --accent: var(--bg-2);
+  --accent-ui: var(--bg-2);
   --accent-foreground: var(--text-1);
   --destructive: var(--red);
   --destructive-foreground: #ffffff;
@@ -1229,7 +1229,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #818cf8;
+  background: var(--accent);
   animation: blink 1s ease-in-out infinite;
   box-shadow: 0 0 8px rgba(129, 140, 248, 0.4);
 }
@@ -1551,9 +1551,9 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #818cf8;
+  background: var(--accent);
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(129, 140, 248, 0.3);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .settings-select {
@@ -1570,7 +1570,7 @@ body {
 }
 
 .settings-select:focus {
-  border-color: #818cf8;
+  border-color: var(--accent);
 }
 
 .settings-toggle {
@@ -1659,7 +1659,7 @@ body {
   width: 18px;
   height: 18px;
   border: 2px solid var(--border-1);
-  border-top-color: #818cf8;
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -2364,7 +2364,7 @@ body {
   top: 6px;
   bottom: 6px;
   width: 2px;
-  background: #818cf8;
+  background: var(--accent);
   border-radius: 0 2px 2px 0;
   box-shadow: 0 0 6px rgba(129, 140, 248, 0.4);
 }
@@ -2401,7 +2401,7 @@ body {
   top: 6px;
   bottom: 6px;
   width: 2px;
-  background: #818cf8;
+  background: var(--accent);
   border-radius: 0 2px 2px 0;
   box-shadow: 0 0 8px rgba(129, 140, 248, 0.3);
 }
@@ -2762,7 +2762,7 @@ body {
 }
 
 .dash-card-active:hover .dash-card-arrow {
-  color: #818cf8;
+  color: var(--accent);
   transform: translateX(3px);
 }
 
@@ -2967,7 +2967,7 @@ body {
 
 .json-value-string { color: #a3e635; }
 .json-value-number { color: #fbbf24; }
-.json-value-boolean { color: #818cf8; }
+.json-value-boolean { color: var(--accent); }
 .json-value-null { color: #94a3b8; font-style: italic; }
 
 .json-tree-bracket {
