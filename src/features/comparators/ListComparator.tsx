@@ -9,13 +9,19 @@ import {
   Download,
   Info,
   Play,
-  Settings2
+  Settings2,
+  AlignLeft
 } from "lucide-react";
 import { 
   Panel, 
   Group as PanelGroup, 
   Separator as PanelResizeHandle 
 } from "react-resizable-panels";
+import { 
+  Tooltip, 
+  TooltipTrigger, 
+  TooltipContent 
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 
@@ -26,6 +32,23 @@ interface ComparisonResults {
   bOnly: string[];
   both: string[];
 }
+
+interface ActionTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  side?: "top" | "bottom" | "left" | "right";
+}
+
+const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      {children}
+    </TooltipTrigger>
+    <TooltipContent side={side}>
+      <p>{content}</p>
+    </TooltipContent>
+  </Tooltip>
+);
 
 export function ListComparator() {
   const [inputA, setInputA] = useState("");
@@ -44,24 +67,23 @@ export function ListComparator() {
   // Helper to process list
   const processList = useCallback((input: string) => {
     if (!input) return [];
-    
-    // Support common separators: newline, comma, semicolon, or vertical pipe
-    // We use a regex that matches any of these separators
     let lines = input.split(/[\n\r,;|]+/).map(l => trimWhitespace ? l.trim() : l);
-    
-    // Remove empty strings resulting from trailing separators or double separators
     lines = lines.filter(l => l.length > 0);
-    
-    // Deduplicate to ensure set math is clean
     return Array.from(new Set(lines));
   }, [trimWhitespace]);
+
+  // Format input into newlines
+  const formatInput = useCallback((input: string, setter: (val: string) => void) => {
+    const processed = processList(input);
+    if (processed.length === 0) return;
+    setter(processed.join("\n"));
+    addToast({ message: "List formatted", type: "success", duration: 1000 });
+  }, [processList, addToast]);
 
   const handleCompare = useCallback(() => {
     const listA = processList(inputA);
     const listB = processList(inputB);
 
-    // Create sets for O(1) lookup
-    // If case insensitive, we use lowercase versions for the SET but keep original for the RESULT
     const setA = new Set(caseSensitive ? listA : listA.map(s => s.toLowerCase()));
     const setB = new Set(caseSensitive ? listB : listB.map(s => s.toLowerCase()));
 
@@ -69,7 +91,6 @@ export function ListComparator() {
     let bOnly: string[] = [];
     let both: string[] = [];
 
-    // Find A only and Both
     listA.forEach(item => {
       const checkItem = caseSensitive ? item : item.toLowerCase();
       if (setB.has(checkItem)) {
@@ -79,7 +100,6 @@ export function ListComparator() {
       }
     });
 
-    // Find B only
     listB.forEach(item => {
       const checkItem = caseSensitive ? item : item.toLowerCase();
       if (!setA.has(checkItem)) {
@@ -87,7 +107,6 @@ export function ListComparator() {
       }
     });
 
-    // Sort results if enabled
     if (sortAlpha) {
       const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
       aOnly.sort(collator.compare);
@@ -137,43 +156,53 @@ export function ListComparator() {
           <div className="toolbar-sep mx-2" />
           
           <div className="comparator-options">
-            <label className="comparator-option-label">
-              <input 
-                type="checkbox" 
-                checked={caseSensitive} 
-                onChange={(e) => setCaseSensitive(e.target.checked)}
-              />
-              <span>Case Sensitive</span>
-            </label>
-            <label className="comparator-option-label">
-              <input 
-                type="checkbox" 
-                checked={trimWhitespace} 
-                onChange={(e) => setTrimWhitespace(e.target.checked)}
-              />
-              <span>Trim</span>
-            </label>
-            <label className="comparator-option-label">
-              <input 
-                type="checkbox" 
-                checked={sortAlpha} 
-                onChange={(e) => setSortAlpha(e.target.checked)}
-              />
-              <span>Sort (Natural)</span>
-            </label>
+            <ActionTooltip content="Differentiates between upper and lowercase">
+              <label className="comparator-option-label">
+                <input 
+                  type="checkbox" 
+                  checked={caseSensitive} 
+                  onChange={(e) => setCaseSensitive(e.target.checked)}
+                />
+                <span>Case Sensitive</span>
+              </label>
+            </ActionTooltip>
+            <ActionTooltip content="Removes leading and trailing spaces">
+              <label className="comparator-option-label">
+                <input 
+                  type="checkbox" 
+                  checked={trimWhitespace} 
+                  onChange={(e) => setTrimWhitespace(e.target.checked)}
+                />
+                <span>Trim</span>
+              </label>
+            </ActionTooltip>
+            <ActionTooltip content="Sorts results numerically and alphabetically">
+              <label className="comparator-option-label">
+                <input 
+                  type="checkbox" 
+                  checked={sortAlpha} 
+                  onChange={(e) => setSortAlpha(e.target.checked)}
+                />
+                <span>Sort (Natural)</span>
+              </label>
+            </ActionTooltip>
           </div>
         </div>
         
         <div className="toolbar-right">
-          <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { setInputA(""); setInputB(""); setHasCompared(false); }}>
-            <Trash2 className="h-3.5 w-3.5" />
-            Clear
-          </button>
+          <ActionTooltip content="Reset both input lists">
+            <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { setInputA(""); setInputB(""); setHasCompared(false); }}>
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear
+            </button>
+          </ActionTooltip>
           <div className="toolbar-sep" />
-          <button className="toolbar-btn-primary" onClick={handleCompare}>
-            <Play className="h-3.5 w-3.5 fill-current" />
-            Compare Now
-          </button>
+          <ActionTooltip content="Analyze differences between List A and B">
+            <button className="toolbar-btn-primary" onClick={handleCompare}>
+              <Play className="h-3.5 w-3.5 fill-current" />
+              Compare Now
+            </button>
+          </ActionTooltip>
         </div>
       </div>
 
@@ -186,13 +215,22 @@ export function ListComparator() {
                 <div className="comparator-input-panel h-full">
                   <div className="section-header-row">
                     <div className="section-label">List A ({processList(inputA).length} items)</div>
-                    <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputA), "list-a")}>
-                      {copied === "list-a" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <ActionTooltip content="Convert commas/separators to newlines">
+                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputA, setInputA)}>
+                          <AlignLeft className="h-3.5 w-3.5" />
+                        </button>
+                      </ActionTooltip>
+                      <ActionTooltip content="Copy List A to clipboard">
+                        <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputA), "list-a")}>
+                          {copied === "list-a" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </ActionTooltip>
+                    </div>
                   </div>
                   <textarea
                     className="comparator-textarea"
-                    placeholder="Paste List A here (supports newlines, commas, etc)..."
+                    placeholder="Paste List A here..."
                     value={inputA}
                     onChange={(e) => setInputA(e.target.value)}
                     spellCheck={false}
@@ -207,9 +245,18 @@ export function ListComparator() {
                 <div className="comparator-input-panel h-full">
                   <div className="section-header-row">
                     <div className="section-label">List B ({processList(inputB).length} items)</div>
-                    <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputB), "list-b")}>
-                      {copied === "list-b" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <ActionTooltip content="Convert commas/separators to newlines">
+                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputB, setInputB)}>
+                          <AlignLeft className="h-3.5 w-3.5" />
+                        </button>
+                      </ActionTooltip>
+                      <ActionTooltip content="Copy List B to clipboard">
+                        <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputB), "list-b")}>
+                          {copied === "list-b" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </ActionTooltip>
+                    </div>
                   </div>
                   <textarea
                     className="comparator-textarea"
@@ -262,9 +309,11 @@ export function ListComparator() {
                       onChange={(e) => setQuery(e.target.value)}
                     />
                   </div>
-                  <button className="toolbar-icon-btn" onClick={handleExport} title="Download results">
-                    <Download className="h-3.5 w-3.5" />
-                  </button>
+                  <ActionTooltip content="Download results as .txt">
+                    <button className="toolbar-icon-btn" onClick={handleExport}>
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                  </ActionTooltip>
                 </div>
               </div>
 
