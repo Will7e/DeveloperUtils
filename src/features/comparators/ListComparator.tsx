@@ -91,6 +91,12 @@ export function ListComparator() {
     return Array.from(new Set(lines));
   }, [trimWhitespace]);
 
+  const formatInput = useCallback((input: string, key: "a" | "b") => {
+    const list = processList(input);
+    setComparatorInput(key, list.join("\n"));
+    addToast({ message: "List formatted with newlines", type: "info" });
+  }, [processList, setComparatorInput, addToast]);
+
   const handleCompare = useCallback(() => {
     const listA = processList(inputA);
     const listB = processList(inputB);

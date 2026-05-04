@@ -14,11 +14,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
