@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { 
   Columns, 
   ArrowRight, 
@@ -51,18 +51,22 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
 );
 
 export function ListComparator() {
-  const [inputA, setInputA] = useState("");
-  const [inputB, setInputB] = useState("");
+  // Store persistence
+  const comparatorInputs = useAppStore((s) => s.comparatorInputs);
+  const comparatorSettings = useAppStore((s) => s.comparatorSettings);
+  const setComparatorInput = useAppStore((s) => s.setComparatorInput);
+  const updateComparatorSettings = useAppStore((s) => s.updateComparatorSettings);
+  const addToast = useAppStore((s) => s.addToast);
+
+  // Local runtime state
   const [query, setQuery] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [trimWhitespace, setTrimWhitespace] = useState(true);
-  const [sortAlpha, setSortAlpha] = useState(true);
   const [activeTab, setActiveTab] = useState<ComparisonType>("aOnly");
   const [copied, setCopied] = useState<string | null>(null);
   const [lastResults, setLastResults] = useState<ComparisonResults>({ aOnly: [], bOnly: [], both: [] });
   const [hasCompared, setHasCompared] = useState(false);
-  
-  const addToast = useAppStore((s) => s.addToast);
+
+  const { a: inputA, b: inputB } = comparatorInputs;
+  const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
   // Helper to process list
   const processList = useCallback((input: string) => {
@@ -73,12 +77,12 @@ export function ListComparator() {
   }, [trimWhitespace]);
 
   // Format input into newlines
-  const formatInput = useCallback((input: string, setter: (val: string) => void) => {
+  const formatInput = useCallback((input: string, side: "a" | "b") => {
     const processed = processList(input);
     if (processed.length === 0) return;
-    setter(processed.join("\n"));
+    setComparatorInput(side, processed.join("\n"));
     addToast({ message: "List formatted", type: "success", duration: 1000 });
-  }, [processList, addToast]);
+  }, [processList, setComparatorInput, addToast]);
 
   const handleCompare = useCallback(() => {
     const listA = processList(inputA);
@@ -118,6 +122,13 @@ export function ListComparator() {
     setHasCompared(true);
     addToast({ message: "Comparison complete", type: "success", duration: 1500 });
   }, [inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, processList, addToast]);
+
+  // Auto-compare on mount if there is content
+  useEffect(() => {
+    if (inputA || inputB) {
+      handleCompare();
+    }
+  }, []);
 
   const filteredResults = useMemo(() => {
     const current = lastResults[activeTab];
@@ -161,7 +172,7 @@ export function ListComparator() {
                 <input 
                   type="checkbox" 
                   checked={caseSensitive} 
-                  onChange={(e) => setCaseSensitive(e.target.checked)}
+                  onChange={(e) => updateComparatorSettings({ caseSensitive: e.target.checked })}
                 />
                 <span>Case Sensitive</span>
               </label>
@@ -171,7 +182,7 @@ export function ListComparator() {
                 <input 
                   type="checkbox" 
                   checked={trimWhitespace} 
-                  onChange={(e) => setTrimWhitespace(e.target.checked)}
+                  onChange={(e) => updateComparatorSettings({ trimWhitespace: e.target.checked })}
                 />
                 <span>Trim</span>
               </label>
@@ -181,7 +192,7 @@ export function ListComparator() {
                 <input 
                   type="checkbox" 
                   checked={sortAlpha} 
-                  onChange={(e) => setSortAlpha(e.target.checked)}
+                  onChange={(e) => updateComparatorSettings({ sortAlpha: e.target.checked })}
                 />
                 <span>Sort (Natural)</span>
               </label>
@@ -191,7 +202,12 @@ export function ListComparator() {
         
         <div className="toolbar-right">
           <ActionTooltip content="Reset both input lists">
-            <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { setInputA(""); setInputB(""); setHasCompared(false); }}>
+            <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
+              setComparatorInput("a", ""); 
+              setComparatorInput("b", ""); 
+              setHasCompared(false); 
+              setLastResults({ aOnly: [], bOnly: [], both: [] });
+            }}>
               <Trash2 className="h-3.5 w-3.5" />
               Clear
             </button>
@@ -217,7 +233,7 @@ export function ListComparator() {
                     <div className="section-label">List A ({processList(inputA).length} items)</div>
                     <div className="flex items-center gap-1">
                       <ActionTooltip content="Convert commas/separators to newlines">
-                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputA, setInputA)}>
+                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputA, "a")}>
                           <AlignLeft className="h-3.5 w-3.5" />
                         </button>
                       </ActionTooltip>
@@ -232,7 +248,7 @@ export function ListComparator() {
                     className="comparator-textarea"
                     placeholder="Paste List A here..."
                     value={inputA}
-                    onChange={(e) => setInputA(e.target.value)}
+                    onChange={(e) => setComparatorInput("a", e.target.value)}
                     spellCheck={false}
                   />
                 </div>
@@ -247,7 +263,7 @@ export function ListComparator() {
                     <div className="section-label">List B ({processList(inputB).length} items)</div>
                     <div className="flex items-center gap-1">
                       <ActionTooltip content="Convert commas/separators to newlines">
-                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputB, setInputB)}>
+                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputB, "b")}>
                           <AlignLeft className="h-3.5 w-3.5" />
                         </button>
                       </ActionTooltip>
@@ -262,7 +278,7 @@ export function ListComparator() {
                     className="comparator-textarea"
                     placeholder="Paste List B here..."
                     value={inputB}
-                    onChange={(e) => setInputB(e.target.value)}
+                    onChange={(e) => setComparatorInput("b", e.target.value)}
                     spellCheck={false}
                   />
                 </div>
@@ -318,7 +334,7 @@ export function ListComparator() {
               </div>
 
               <div className="results-list-container">
-                {!hasCompared ? (
+                {!hasCompared && !inputA && !inputB ? (
                   <div className="results-empty">
                     <Settings2 className="h-8 w-8 opacity-10 mb-2" />
                     <p>Paste your lists and click "Compare Now"</p>
@@ -326,7 +342,7 @@ export function ListComparator() {
                 ) : filteredResults.length === 0 ? (
                   <div className="results-empty">
                     <Info className="h-8 w-8 opacity-10 mb-2" />
-                    <p>No items found for this category</p>
+                    <p>{hasCompared ? "No items found for this category" : "Click 'Compare Now' to analyze"}</p>
                   </div>
                 ) : (
                   <div className="results-scroll">

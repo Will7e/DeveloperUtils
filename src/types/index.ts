@@ -102,6 +102,8 @@ export interface AppState {
   outputFlash: "success" | "error" | null;
   formatterInputs: { json: string; xml: string };
   formatterType: "json" | "xml";
+  comparatorInputs: { a: string; b: string };
+  comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -129,6 +131,8 @@ export interface AppState {
   setOutputFlash: (flash: "success" | "error" | null) => void;
   setFormatterInput: (type: "json" | "xml", input: string) => void;
   setFormatterType: (type: "json" | "xml") => void;
+  setComparatorInput: (side: "a" | "b", input: string) => void;
+  updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
 }
 
 // ============================================================

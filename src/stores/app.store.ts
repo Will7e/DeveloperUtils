@@ -49,6 +49,8 @@ export const useAppStore = create<AppState>()(
       outputFlash: null,
       formatterInputs: { json: "", xml: "" },
       formatterType: "json",
+      comparatorInputs: { a: "", b: "" },
+      comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -212,6 +214,18 @@ export const useAppStore = create<AppState>()(
       setFormatterType: (type) => {
         set({ formatterType: type });
       },
+
+      setComparatorInput: (side, input) => {
+        set((state) => ({
+          comparatorInputs: { ...state.comparatorInputs, [side]: input }
+        }));
+      },
+
+      updateComparatorSettings: (settings) => {
+        set((state) => ({
+          comparatorSettings: { ...state.comparatorSettings, ...settings }
+        }));
+      },
     }),
     {
       name: "devutils-app-state",
@@ -224,6 +238,8 @@ export const useAppStore = create<AppState>()(
         editorSettings: state.editorSettings,
         formatterInputs: state.formatterInputs,
         formatterType: state.formatterType,
+        comparatorInputs: state.comparatorInputs,
+        comparatorSettings: state.comparatorSettings,
       }),
     }
   )
