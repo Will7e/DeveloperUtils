@@ -114,13 +114,107 @@ body {
    APP LAYOUT
    ============================================================ */
 
-.app-root {
+/* ============================================================
+   MAIN LAYOUT & ACTIVITY BAR
+   ============================================================ */
+
+.main-layout {
   display: flex;
-  flex-direction: column;
   height: 100vh;
   width: 100vw;
   background: var(--bg-0);
   overflow: hidden;
+}
+
+.activity-bar {
+  width: 52px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.activity-bar-top,
+.activity-bar-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.activity-logo {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.nav-item {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.nav-item:hover {
+  color: var(--text-2);
+  background: var(--bg-hover);
+}
+
+.nav-item-active {
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.nav-item-indicator {
+  position: absolute;
+  left: -12px;
+  width: 2px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.main-content {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compiler-view {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Update app-root to be just a flex container if needed, 
+   but routing uses main-content now */
+.app-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
 }
 
 .app-main {
@@ -554,6 +648,18 @@ body {
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tab-rename-input {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 11px;
+  padding: 1px 6px;
+  width: 120px;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .tab-dirty {
@@ -1794,4 +1900,233 @@ body {
     opacity: 0;
     transform: scale(0.97);
   }
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+.sidebar {
+  width: 260px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  animation: sidebar-slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes sidebar-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  height: 46px;
+}
+
+.sidebar-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+}
+
+.sidebar-files {
+  padding: 8px 0;
+}
+
+.sidebar-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  height: 32px;
+}
+
+.sidebar-file:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-file-active {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.sidebar-file-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.sidebar-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-file-name {
+  font-size: 13px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-file-active .sidebar-file-name {
+  color: var(--text-1);
+}
+
+.sidebar-file-rename-input {
+  background: var(--bg-4);
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 12px;
+  padding: 2px 8px;
+  width: 100%;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.sidebar-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.sidebar-file:hover .sidebar-file-actions {
+  opacity: 1;
+}
+
+.sidebar-file-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.sidebar-file-action-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.sidebar-file-delete:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.sidebar-footer {
+  padding: 16px;
+}
+
+.sidebar-lang-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+.sidebar-lang-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.sidebar-lang-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sidebar-lang-chip:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  transform: translateY(-1px);
+}
+
+.lang-icon {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.lang-js {
+  background: rgba(247, 223, 30, 0.1);
+  color: #f7df1e;
+}
+
+.lang-ts {
+  background: rgba(49, 120, 198, 0.1);
+  color: #3178c6;
+}
+
+.lang-py {
+  background: rgba(55, 118, 171, 0.1);
+  color: #ffd43b;
+}
+
+.lang-html {
+  background: rgba(227, 79, 38, 0.1);
+  color: #e34f26;
+}
+
+.lang-json {
+  background: rgba(163, 230, 53, 0.1);
+  color: #a3e635;
+}
+
+.new-file-menu {
+  padding: 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.new-file-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
 }

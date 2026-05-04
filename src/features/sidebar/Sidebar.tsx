@@ -30,6 +30,7 @@ const languageIcons: Record<Language, React.ReactNode> = {
   typescript: <span className="lang-icon lang-ts">TS</span>,
   python: <span className="lang-icon lang-py">PY</span>,
   html: <span className="lang-icon lang-html">{"<>"}</span>,
+  json: <span className="lang-icon lang-json">{"{}"}</span>,
 };
 
 export function Sidebar() {
@@ -39,7 +40,11 @@ export function Sidebar() {
   const setActiveFile = useAppStore((s) => s.setActiveFile);
   const createFile = useAppStore((s) => s.createFile);
   const deleteFile = useAppStore((s) => s.deleteFile);
+  const renameFile = useAppStore((s) => s.renameFile);
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   if (!sidebarOpen) return null;
 
@@ -102,27 +107,69 @@ export function Sidebar() {
                 file.id === activeFileId && "sidebar-file-active"
               )}
               onClick={() => setActiveFile(file.id)}
+              onDoubleClick={() => {
+                setRenamingId(file.id);
+                setRenameValue(file.name);
+              }}
             >
               <div className="sidebar-file-info">
                 {languageIcons[file.language]}
-                <span className="sidebar-file-name">
-                  {file.name}
-                  {file.isDirty && <span className="dirty-dot" />}
-                </span>
+                {renamingId === file.id ? (
+                  <input
+                    autoFocus
+                    className="sidebar-file-rename-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={() => {
+                      if (renameValue.trim() && renameValue !== file.name) {
+                        renameFile(file.id, renameValue.trim());
+                      }
+                      setRenamingId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (renameValue.trim() && renameValue !== file.name) {
+                          renameFile(file.id, renameValue.trim());
+                        }
+                        setRenamingId(null);
+                      } else if (e.key === "Escape") {
+                        setRenamingId(null);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="sidebar-file-name">
+                    {file.name}
+                    {file.isDirty && <span className="dirty-dot" />}
+                  </span>
+                )}
               </div>
-              {files.length > 1 && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="sidebar-file-delete"
+              <div className="sidebar-file-actions">
+                <button
+                  className="sidebar-file-action-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    deleteFile(file.id);
+                    setRenamingId(file.id);
+                    setRenameValue(file.name);
                   }}
+                  title="Rename"
                 >
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
+                  <FileType className="h-3 w-3" />
+                </button>
+                {files.length > 1 && (
+                  <button
+                    className="sidebar-file-action-btn sidebar-file-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteFile(file.id);
+                    }}
+                    title="Delete"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

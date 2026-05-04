@@ -14,6 +14,7 @@ const tabIcons: Record<Language, string> = {
   typescript: "TS",
   python: "PY",
   html: "<>",
+  json: "{}",
 };
 
 const langBadges: Record<Language, { cls: string; label: string }> = {
@@ -21,6 +22,7 @@ const langBadges: Record<Language, { cls: string; label: string }> = {
   typescript: { cls: "lang-badge-ts", label: "TypeScript" },
   python: { cls: "lang-badge-py", label: "Python" },
   html: { cls: "lang-badge-html", label: "HTML" },
+  json: { cls: "lang-badge-json", label: "JSON" },
 };
 
 export function EditorTabs() {
@@ -32,7 +34,11 @@ export function EditorTabs() {
   const activeFileId = useAppStore((s) => s.activeFileId);
   const setActiveFile = useAppStore((s) => s.setActiveFile);
   const deleteFile = useAppStore((s) => s.deleteFile);
+  const renameFile = useAppStore((s) => s.renameFile);
   const createFile = useAppStore((s) => s.createFile);
+
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // Close menu on outside click
   useEffect(() => {
@@ -72,12 +78,44 @@ export function EditorTabs() {
               key={file.id}
               className={cn("tab", file.id === activeFileId && "tab-active")}
               onClick={() => setActiveFile(file.id)}
+              onDoubleClick={() => {
+                setRenamingId(file.id);
+                setRenameValue(file.name);
+              }}
             >
               <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
                 {tabIcons[file.language]}
               </span>
-              <span className="tab-name">{file.name}</span>
-              {file.isDirty && <span className="tab-dirty" />}
+              {renamingId === file.id ? (
+                <input
+                  autoFocus
+                  className="tab-rename-input"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => {
+                    if (renameValue.trim() && renameValue !== file.name) {
+                      renameFile(file.id, renameValue.trim());
+                    }
+                    setRenamingId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (renameValue.trim() && renameValue !== file.name) {
+                        renameFile(file.id, renameValue.trim());
+                      }
+                      setRenamingId(null);
+                    } else if (e.key === "Escape") {
+                      setRenamingId(null);
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  <span className="tab-name">{file.name}</span>
+                  {file.isDirty && <span className="tab-dirty" />}
+                </>
+              )}
               {files.length > 1 && (
                 <span
                   className="tab-close"
