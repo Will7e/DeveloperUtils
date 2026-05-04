@@ -7,7 +7,7 @@
 
 import type { EditorFile, IStorageService } from "@/types";
 
-const STORAGE_KEY = "codeforge_files";
+const STORAGE_KEY = "devutils_files";
 
 export class LocalStorageService implements IStorageService {
   async saveFile(file: EditorFile): Promise<void> {

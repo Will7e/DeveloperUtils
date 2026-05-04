@@ -1,5 +1,5 @@
 // ============================================================
-// Core Type Definitions — CodeForge
+// Core Type Definitions — DevUtils
 // ============================================================
 
 /** Supported programming languages */
@@ -22,6 +22,8 @@ export interface ExecutionResult {
   exitCode: number;
   duration: number;
   timestamp: number;
+  language?: Language;
+  fileName?: string;
 }
 
 /** A single file/tab in the editor */
@@ -48,6 +50,7 @@ export interface EditorSettings {
   bracketPairColorization: boolean;
   formatOnPaste: boolean;
   formatOnType: boolean;
+  soundEffects: boolean;
 }
 
 /** Output panel entry */
@@ -56,6 +59,23 @@ export interface OutputEntry {
   type: "stdout" | "stderr" | "info" | "success" | "error";
   content: string;
   timestamp: number;
+}
+
+/** Toast notification */
+export interface Toast {
+  id: string;
+  message: string;
+  type: "info" | "success" | "error";
+  duration?: number;
+}
+
+/** Command palette action */
+export interface CommandAction {
+  id: string;
+  label: string;
+  shortcut?: string;
+  category: string;
+  action: () => void;
 }
 
 /** Application state for the store */
@@ -68,12 +88,16 @@ export interface AppState {
   isRunning: boolean;
   executionResults: ExecutionResult[];
   outputEntries: OutputEntry[];
+  executionStartTime: number | null;
 
   // UI
   sidebarOpen: boolean;
   outputPanelOpen: boolean;
   settingsOpen: boolean;
+  commandPaletteOpen: boolean;
   editorSettings: EditorSettings;
+  toasts: Toast[];
+  outputFlash: "success" | "error" | null;
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -86,11 +110,17 @@ export interface AppState {
   clearOutput: () => void;
   setIsRunning: (running: boolean) => void;
   addExecutionResult: (result: ExecutionResult) => void;
+  setExecutionStartTime: (time: number | null) => void;
 
   toggleSidebar: () => void;
   toggleOutputPanel: () => void;
   toggleSettings: () => void;
+  toggleCommandPalette: () => void;
   updateEditorSettings: (settings: Partial<EditorSettings>) => void;
+
+  addToast: (toast: Omit<Toast, "id">) => void;
+  removeToast: (id: string) => void;
+  setOutputFlash: (flash: "success" | "error" | null) => void;
 }
 
 // ============================================================

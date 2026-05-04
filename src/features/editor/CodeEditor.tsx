@@ -4,6 +4,7 @@
 
 import { useCallback, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import { FileCode2 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import type { editor } from "monaco-editor";
 
@@ -37,48 +38,49 @@ export function CodeEditor() {
       });
 
       // Set custom theme
-      monaco.editor.defineTheme("codeforge-dark", {
+      monaco.editor.defineTheme("devutils-dark", {
         base: "vs-dark",
         inherit: true,
         rules: [
-          { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+          { token: "comment", foreground: "5c6378", fontStyle: "italic" },
           { token: "keyword", foreground: "c084fc" },
-          { token: "string", foreground: "34d399" },
-          { token: "number", foreground: "f59e0b" },
-          { token: "type", foreground: "60a5fa" },
-          { token: "function", foreground: "818cf8" },
-          { token: "variable", foreground: "e2e8f0" },
-          { token: "operator", foreground: "94a3b8" },
+          { token: "string", foreground: "22c55e" },
+          { token: "number", foreground: "eab308" },
+          { token: "type", foreground: "3b82f6" },
+          { token: "function", foreground: "a5b4fc" },
+          { token: "variable", foreground: "e8eaed" },
+          { token: "operator", foreground: "9aa0b4" },
+          { token: "regexp", foreground: "f97316" },
         ],
         colors: {
-          "editor.background": "#0a0a1a",
-          "editor.foreground": "#e2e8f0",
-          "editor.lineHighlightBackground": "#1e1b4b20",
-          "editor.selectionBackground": "#6366f140",
-          "editor.inactiveSelectionBackground": "#6366f120",
-          "editorCursor.foreground": "#818cf8",
-          "editorLineNumber.foreground": "#374151",
+          "editor.background": "#0c0e14",
+          "editor.foreground": "#e8eaed",
+          "editor.lineHighlightBackground": "#1e223010",
+          "editor.selectionBackground": "#6366f135",
+          "editor.inactiveSelectionBackground": "#6366f115",
+          "editorCursor.foreground": "#a5b4fc",
+          "editorLineNumber.foreground": "#2a2f42",
           "editorLineNumber.activeForeground": "#6366f1",
-          "editor.selectionHighlightBackground": "#6366f115",
-          "editorIndentGuide.background": "#1e293b",
-          "editorIndentGuide.activeBackground": "#334155",
-          "editorBracketMatch.background": "#6366f130",
-          "editorBracketMatch.border": "#6366f150",
-          "editorWidget.background": "#0f0f23",
-          "editorWidget.border": "#1e293b",
-          "editorSuggestWidget.background": "#0f0f23",
-          "editorSuggestWidget.border": "#1e293b",
-          "editorSuggestWidget.selectedBackground": "#1e1b4b",
-          "editorHoverWidget.background": "#0f0f23",
-          "editorHoverWidget.border": "#1e293b",
-          "minimap.background": "#0a0a1a",
-          "scrollbarSlider.background": "#6366f120",
-          "scrollbarSlider.hoverBackground": "#6366f140",
-          "scrollbarSlider.activeBackground": "#6366f160",
+          "editor.selectionHighlightBackground": "#6366f110",
+          "editorIndentGuide.background": "#1a1e2e",
+          "editorIndentGuide.activeBackground": "#2a2f42",
+          "editorBracketMatch.background": "#6366f125",
+          "editorBracketMatch.border": "#6366f140",
+          "editorWidget.background": "#12141d",
+          "editorWidget.border": "#1e2235",
+          "editorSuggestWidget.background": "#12141d",
+          "editorSuggestWidget.border": "#1e2235",
+          "editorSuggestWidget.selectedBackground": "#1e2235",
+          "editorHoverWidget.background": "#12141d",
+          "editorHoverWidget.border": "#1e2235",
+          "minimap.background": "#0c0e14",
+          "scrollbarSlider.background": "#ffffff08",
+          "scrollbarSlider.hoverBackground": "#ffffff14",
+          "scrollbarSlider.activeBackground": "#ffffff20",
         },
       });
 
-      monaco.editor.setTheme("codeforge-dark");
+      monaco.editor.setTheme("devutils-dark");
 
       // Focus editor
       editor.focus();
@@ -99,7 +101,7 @@ export function CodeEditor() {
     return (
       <div className="flex-1 flex items-center justify-center bg-editor">
         <div className="text-center space-y-4">
-          <div className="text-6xl opacity-20">⚡</div>
+          <FileCode2 className="empty-editor-icon" />
           <p className="text-muted-foreground text-lg">
             No file open. Create a new file to get started.
           </p>
@@ -124,7 +126,7 @@ export function CodeEditor() {
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorMount}
-        theme="codeforge-dark"
+        theme="devutils-dark"
         options={{
           fontSize: editorSettings.fontSize,
           fontFamily: editorSettings.fontFamily,

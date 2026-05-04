@@ -33,12 +33,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   isRunning: false,
   executionResults: [],
   outputEntries: [],
+  executionStartTime: null,
 
   // UI
   sidebarOpen: true,
   outputPanelOpen: true,
   settingsOpen: false,
+  commandPaletteOpen: false,
   editorSettings: DEFAULT_EDITOR_SETTINGS,
+  toasts: [],
+  outputFlash: null,
 
   // File actions
   createFile: (name: string, language: Language) => {
@@ -125,6 +129,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
   },
 
+  setExecutionStartTime: (time: number | null) => {
+    set({ executionStartTime: time });
+  },
+
   // UI actions
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -138,9 +146,43 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({ settingsOpen: !state.settingsOpen }));
   },
 
+  toggleCommandPalette: () => {
+    set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen }));
+  },
+
   updateEditorSettings: (settings) => {
     set((state) => ({
       editorSettings: { ...state.editorSettings, ...settings },
     }));
+  },
+
+  // Toast actions
+  addToast: (toast) => {
+    const id = generateId();
+    set((state) => ({
+      toasts: [...state.toasts, { ...toast, id }],
+    }));
+    // Auto-remove after duration
+    const duration = toast.duration ?? 3000;
+    setTimeout(() => {
+      set((state) => ({
+        toasts: state.toasts.filter((t) => t.id !== id),
+      }));
+    }, duration);
+  },
+
+  removeToast: (id: string) => {
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    }));
+  },
+
+  setOutputFlash: (flash) => {
+    set({ outputFlash: flash });
+    if (flash) {
+      setTimeout(() => {
+        set({ outputFlash: null });
+      }, 800);
+    }
   },
 }));

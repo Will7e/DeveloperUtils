@@ -2,9 +2,7 @@
 // Settings Panel — Editor configuration overlay
 // ============================================================
 
-import { X, Monitor } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { X, Settings, Volume2, VolumeX } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 
 export function SettingsPanel() {
@@ -20,17 +18,18 @@ export function SettingsPanel() {
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <div className="settings-header-title">
-            <Monitor className="h-4 w-4 text-primary" />
-            <span>Editor Settings</span>
+            <Settings style={{ width: 15, height: 15, color: "#818cf8" }} />
+            <span>Settings</span>
           </div>
-          <Button variant="ghost" size="icon-sm" onClick={toggleSettings}>
-            <X className="h-4 w-4" />
-          </Button>
+          <button className="toolbar-icon-btn" onClick={toggleSettings}>
+            <X style={{ width: 15, height: 15 }} />
+          </button>
         </div>
 
-        <Separator className="opacity-30" />
-
         <div className="settings-body">
+          {/* Section: Editor */}
+          <div className="settings-section-title">Editor</div>
+
           {/* Font Size */}
           <div className="settings-row">
             <label className="settings-label">Font Size</label>
@@ -135,6 +134,62 @@ export function SettingsPanel() {
               </button>
             </div>
           </div>
+
+          {/* Section: Experience */}
+          <div className="settings-section-title" style={{ marginTop: 8 }}>
+            Experience
+          </div>
+
+          {/* Sound Effects */}
+          <div className="settings-row">
+            <label className="settings-label">
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {editorSettings.soundEffects ? (
+                  <Volume2 style={{ width: 13, height: 13, color: "#818cf8" }} />
+                ) : (
+                  <VolumeX style={{ width: 13, height: 13, opacity: 0.4 }} />
+                )}
+                Sound Effects
+              </span>
+            </label>
+            <div className="settings-control">
+              <button
+                className={`settings-toggle ${editorSettings.soundEffects ? "active" : ""}`}
+                onClick={() =>
+                  updateEditorSettings({
+                    soundEffects: !editorSettings.soundEffects,
+                  })
+                }
+              >
+                <span className="toggle-thumb" />
+              </button>
+            </div>
+          </div>
+
+          {/* Cursor Style */}
+          <div className="settings-row">
+            <label className="settings-label">Cursor Style</label>
+            <div className="settings-control">
+              <select
+                value={editorSettings.cursorStyle}
+                onChange={(e) =>
+                  updateEditorSettings({
+                    cursorStyle: e.target.value as "line" | "block" | "underline",
+                  })
+                }
+                className="settings-select"
+              >
+                <option value="line">Line</option>
+                <option value="block">Block</option>
+                <option value="underline">Underline</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="settings-footer">
+          <span className="settings-footer-hint">⌘K for Command Palette</span>
         </div>
       </div>
     </div>

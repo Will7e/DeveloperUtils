@@ -1,27 +1,27 @@
 // ============================================================
-// Output Panel — Console output display
+// Output Panel — Console output display (right side)
 // ============================================================
 
-import { useEffect, useRef } from "react";
-import { Terminal, Trash2, ChevronRight, ChevronLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useEffect, useRef, useState } from "react";
+import { Terminal, Trash2, X, Clock, ChevronDown, ChevronRight } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
-import { formatTime } from "@/lib/utils";
+import { formatTime, formatDuration } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 export function OutputPanel() {
   const outputRef = useRef<HTMLDivElement>(null);
   const outputEntries = useAppStore((s) => s.outputEntries);
+  const executionResults = useAppStore((s) => s.executionResults);
   const clearOutput = useAppStore((s) => s.clearOutput);
-  const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const isRunning = useAppStore((s) => s.isRunning);
+  const outputFlash = useAppStore((s) => s.outputFlash);
+  const [showHistory, setShowHistory] = useState(false);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -31,12 +31,18 @@ export function OutputPanel() {
   }, [outputEntries]);
 
   return (
-    <div className={cn("output-panel", !outputPanelOpen && "output-collapsed")}>
+    <div
+      className={cn(
+        "output-panel",
+        outputFlash === "success" && "output-flash-success",
+        outputFlash === "error" && "output-flash-error"
+      )}
+    >
       {/* Header */}
       <div className="output-header">
         <div className="output-header-left">
-          <Terminal className="h-3.5 w-3.5 text-primary" />
-          <span className="output-title">Output</span>
+          <Terminal style={{ width: 14, height: 14, color: "#818cf8" }} />
+          <span className="output-title">Console</span>
           {isRunning && (
             <div className="running-indicator">
               <div className="running-dot" />
@@ -44,63 +50,121 @@ export function OutputPanel() {
             </div>
           )}
           {outputEntries.length > 0 && (
-            <span className="output-count">{outputEntries.length}</span>
+            <span className={cn("output-count", outputEntries.length > 0 && "output-count-pulse")}>
+              {outputEntries.length}
+            </span>
           )}
         </div>
         <div className="output-header-right">
+          {/* Execution history toggle */}
+          {executionResults.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className="toolbar-icon-btn"
+                  onClick={() => setShowHistory(!showHistory)}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    color: showHistory ? "#818cf8" : undefined,
+                  }}
+                >
+                  <Clock style={{ width: 12, height: 12 }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Execution History</TooltipContent>
+            </Tooltip>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
+              <button
+                className="toolbar-icon-btn"
                 onClick={clearOutput}
-                className="h-6 w-6 btn-clear"
+                style={{ width: 24, height: 24 }}
               >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+                <Trash2 style={{ width: 12, height: 12 }} />
+              </button>
             </TooltipTrigger>
-            <TooltipContent>Clear Output</TooltipContent>
+            <TooltipContent>Clear</TooltipContent>
           </Tooltip>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={toggleOutputPanel}
-            className="h-6 w-6"
-          >
-            {outputPanelOpen ? (
-              <ChevronRight className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronLeft className="h-3.5 w-3.5" />
-            )}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="toolbar-icon-btn"
+                onClick={toggleOutputPanel}
+                style={{ width: 24, height: 24 }}
+              >
+                <X style={{ width: 13, height: 13 }} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Close Panel (⌘J)</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
-      {/* Output content */}
-      {outputPanelOpen && (
-        <div className="output-content" ref={outputRef}>
-          {outputEntries.length === 0 ? (
-            <div className="output-empty">
-              <Terminal className="h-8 w-8 opacity-20" />
-              <p>Run your code to see output here</p>
-            </div>
-          ) : (
-            <div className="output-entries">
-              {outputEntries.map((entry) => (
+      {/* Execution history panel */}
+      {showHistory && executionResults.length > 0 && (
+        <div className="execution-history">
+          <div className="execution-history-title">
+            <ChevronDown style={{ width: 12, height: 12, opacity: 0.5 }} />
+            <span>Recent Runs</span>
+          </div>
+          <div className="execution-history-list">
+            {executionResults
+              .slice(-10)
+              .reverse()
+              .map((result, i) => (
                 <div
-                  key={entry.id}
-                  className={cn("output-entry", `output-${entry.type}`)}
+                  key={i}
+                  className={cn(
+                    "execution-history-item",
+                    result.exitCode === 0
+                      ? "execution-history-success"
+                      : "execution-history-error"
+                  )}
                 >
-                  <span className="output-timestamp">
-                    {formatTime(entry.timestamp)}
+                  <span className="execution-history-status">
+                    {result.exitCode === 0 ? "✓" : "✗"}
                   </span>
-                  <pre className="output-text">{entry.content}</pre>
+                  <span className="execution-history-time">
+                    {formatTime(result.timestamp)}
+                  </span>
+                  <span className="execution-history-duration">
+                    {formatDuration(result.duration)}
+                  </span>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
         </div>
       )}
+
+      {/* Output content */}
+      <div className="output-content" ref={outputRef}>
+        {outputEntries.length === 0 ? (
+          <div className="output-empty">
+            <div className="output-empty-icon">
+              <Terminal style={{ width: 36, height: 36 }} />
+            </div>
+            <p className="output-empty-title">No output yet</p>
+            <p className="output-empty-hint">Run your code to see output here</p>
+          </div>
+        ) : (
+          <div className="output-entries">
+            {outputEntries.map((entry) => (
+              <div
+                key={entry.id}
+                className={cn("output-entry", `output-${entry.type}`)}
+              >
+                <span className="output-timestamp">
+                  {formatTime(entry.timestamp)}
+                </span>
+                <pre className="output-text">{entry.content}</pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
