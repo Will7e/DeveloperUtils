@@ -104,6 +104,7 @@ export interface AppState {
   formatterType: "json" | "xml";
   comparatorInputs: { a: string; b: string };
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
+  librarySelectedItemId: string | null;
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -133,6 +134,28 @@ export interface AppState {
   setFormatterType: (type: "json" | "xml") => void;
   setComparatorInput: (side: "a" | "b", input: string) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
+  setLibrarySelectedItemId: (id: string | null) => void;
+}
+
+export interface ServiceNowMethod {
+  name: string;
+  description: string;
+  parameters: string[];
+  example: string;
+}
+
+export interface ServiceNowAPI {
+  name: string;
+  type: string;
+  description: string;
+  methods: ServiceNowMethod[];
+}
+
+export interface ServiceNowLibrary {
+  version: string;
+  last_updated: string;
+  source: string;
+  apis: ServiceNowAPI[];
 }
 
 // ============================================================

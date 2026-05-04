@@ -51,6 +51,7 @@ export const useAppStore = create<AppState>()(
       formatterType: "json",
       comparatorInputs: { a: "", b: "" },
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
+      librarySelectedItemId: null,
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -226,6 +227,10 @@ export const useAppStore = create<AppState>()(
           comparatorSettings: { ...state.comparatorSettings, ...settings }
         }));
       },
+
+      setLibrarySelectedItemId: (id) => {
+        set({ librarySelectedItemId: id });
+      },
     }),
     {
       name: "devutils-app-state",
@@ -240,6 +245,7 @@ export const useAppStore = create<AppState>()(
         formatterType: state.formatterType,
         comparatorInputs: state.comparatorInputs,
         comparatorSettings: state.comparatorSettings,
+        librarySelectedItemId: state.librarySelectedItemId,
       }),
     }
   )

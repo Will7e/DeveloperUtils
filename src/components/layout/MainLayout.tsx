@@ -13,6 +13,7 @@ import {
   ChevronsRight,
   FileCode,
   Columns,
+  Library,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -135,6 +136,14 @@ export function MainLayout() {
             icon={<Columns className="h-[18px] w-[18px]" />}
             label="Comparators"
             active={location.pathname === "/comparators"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/library"
+            icon={<Library className="h-[18px] w-[18px]" />}
+            label="Library"
+            active={location.pathname === "/library"}
             collapsed={sidebarCollapsed}
           />
 
