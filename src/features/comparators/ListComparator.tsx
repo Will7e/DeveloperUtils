@@ -10,7 +10,8 @@ import {
   Info,
   Play,
   Settings2,
-  AlignLeft
+  AlignLeft,
+  ChevronDown
 } from "lucide-react";
 import { 
   Panel, 
@@ -22,6 +23,14 @@ import {
   TooltipTrigger, 
   TooltipContent 
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 
@@ -64,9 +73,15 @@ export function ListComparator() {
   const [copied, setCopied] = useState<string | null>(null);
   const [lastResults, setLastResults] = useState<ComparisonResults>({ aOnly: [], bOnly: [], both: [] });
   const [hasCompared, setHasCompared] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const { a: inputA, b: inputB } = comparatorInputs;
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
+
+  // Hydration check to ensure we use persisted state
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   // Helper to process list
   const processList = useCallback((input: string) => {
@@ -75,14 +90,6 @@ export function ListComparator() {
     lines = lines.filter(l => l.length > 0);
     return Array.from(new Set(lines));
   }, [trimWhitespace]);
-
-  // Format input into newlines
-  const formatInput = useCallback((input: string, side: "a" | "b") => {
-    const processed = processList(input);
-    if (processed.length === 0) return;
-    setComparatorInput(side, processed.join("\n"));
-    addToast({ message: "List formatted", type: "success", duration: 1000 });
-  }, [processList, setComparatorInput, addToast]);
 
   const handleCompare = useCallback(() => {
     const listA = processList(inputA);
@@ -120,15 +127,14 @@ export function ListComparator() {
 
     setLastResults({ aOnly, bOnly, both });
     setHasCompared(true);
-    addToast({ message: "Comparison complete", type: "success", duration: 1500 });
-  }, [inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, processList, addToast]);
+  }, [inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, processList]);
 
-  // Auto-compare on mount if there is content
+  // Auto-compare when hydrated or when settings/inputs change if already compared
   useEffect(() => {
-    if (inputA || inputB) {
+    if (isHydrated && (inputA || inputB)) {
       handleCompare();
     }
-  }, []);
+  }, [isHydrated, inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, handleCompare]);
 
   const filteredResults = useMemo(() => {
     const current = lastResults[activeTab];
@@ -157,6 +163,9 @@ export function ListComparator() {
     URL.revokeObjectURL(url);
   };
 
+  // Only render once hydrated to avoid mismatch and ensure persistence is loaded
+  if (!isHydrated) return null;
+
   return (
     <div className="list-comparator-container">
       {/* Header / Toolbar */}
@@ -166,38 +175,41 @@ export function ListComparator() {
           <h2 className="text-sm font-semibold">List Comparator</h2>
           <div className="toolbar-sep mx-2" />
           
-          <div className="comparator-options">
-            <ActionTooltip content="Differentiates between upper and lowercase">
-              <label className="comparator-option-label">
-                <input 
-                  type="checkbox" 
-                  checked={caseSensitive} 
-                  onChange={(e) => updateComparatorSettings({ caseSensitive: e.target.checked })}
-                />
-                <span>Case Sensitive</span>
-              </label>
-            </ActionTooltip>
-            <ActionTooltip content="Removes leading and trailing spaces">
-              <label className="comparator-option-label">
-                <input 
-                  type="checkbox" 
-                  checked={trimWhitespace} 
-                  onChange={(e) => updateComparatorSettings({ trimWhitespace: e.target.checked })}
-                />
-                <span>Trim</span>
-              </label>
-            </ActionTooltip>
-            <ActionTooltip content="Sorts results numerically and alphabetically">
-              <label className="comparator-option-label">
-                <input 
-                  type="checkbox" 
-                  checked={sortAlpha} 
-                  onChange={(e) => updateComparatorSettings({ sortAlpha: e.target.checked })}
-                />
-                <span>Sort (Natural)</span>
-              </label>
-            </ActionTooltip>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="toolbar-btn">
+                <Settings2 className="h-3.5 w-3.5" />
+                Comparison Settings
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Analysis Rules</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={caseSensitive}
+                onCheckedChange={(checked) => updateComparatorSettings({ caseSensitive: checked })}
+                onSelect={(e) => e.preventDefault()}
+              >
+                Case Sensitive
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuCheckboxItem
+                checked={trimWhitespace}
+                onCheckedChange={(checked) => updateComparatorSettings({ trimWhitespace: checked })}
+                onSelect={(e) => e.preventDefault()}
+              >
+                Trim Whitespace
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Display</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={sortAlpha}
+                onCheckedChange={(checked) => updateComparatorSettings({ sortAlpha: checked })}
+                onSelect={(e) => e.preventDefault()}
+              >
+                Natural Sort Order
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         
         <div className="toolbar-right">
