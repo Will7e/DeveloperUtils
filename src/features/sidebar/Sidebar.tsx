@@ -1,5 +1,5 @@
 // ============================================================
-// Sidebar — File explorer & language selection
+// Sidebar — Collapsible file explorer & language selection
 // ============================================================
 
 import { useState } from "react";
@@ -10,7 +10,8 @@ import {
   Trash2,
   X,
   Code2,
-  Braces,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -42,11 +43,12 @@ export function Sidebar() {
   const deleteFile = useAppStore((s) => s.deleteFile);
   const renameFile = useAppStore((s) => s.renameFile);
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  if (!sidebarOpen) return null;
+  const isCollapsed = !sidebarOpen;
 
   const handleCreateFile = (language: Language) => {
     const config = LANGUAGE_CONFIGS[language];
@@ -55,30 +57,64 @@ export function Sidebar() {
   };
 
   return (
-    <div className="sidebar">
+    <div className={cn("sidebar", isCollapsed && "sidebar-collapsed")}>
       {/* Header */}
       <div className="sidebar-header">
-        <div className="sidebar-header-title">
-          <Code2 className="h-4 w-4 text-primary" />
-          <span>Explorer</span>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setShowNewFile(!showNewFile)}
-              className="h-6 w-6"
-            >
-              <FilePlus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">New File</TooltipContent>
-        </Tooltip>
+        {!isCollapsed && (
+          <>
+            <div className="sidebar-header-title">
+              <Code2 className="h-4 w-4 text-primary" />
+              <span>Explorer</span>
+            </div>
+            <div className="sidebar-header-actions">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setShowNewFile(!showNewFile)}
+                    className="h-6 w-6"
+                  >
+                    <FilePlus className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">New File</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={toggleSidebar}
+                    className="h-6 w-6"
+                  >
+                    <ChevronsLeft className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Collapse Explorer</TooltipContent>
+              </Tooltip>
+            </div>
+          </>
+        )}
+
+        {isCollapsed && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="sidebar-expand-btn"
+                onClick={toggleSidebar}
+                type="button"
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Expand Explorer</TooltipContent>
+          </Tooltip>
+        )}
       </div>
 
-      {/* New file dropdown */}
-      {showNewFile && (
+      {/* New file dropdown — only when expanded */}
+      {!isCollapsed && showNewFile && (
         <div className="new-file-menu">
           <div className="new-file-title">Select language:</div>
           {(Object.keys(LANGUAGE_CONFIGS) as Language[]).map((lang) => (
@@ -94,111 +130,111 @@ export function Sidebar() {
         </div>
       )}
 
-      <Separator className="opacity-50" />
+      {!isCollapsed && <Separator className="opacity-50" />}
 
-      {/* File list */}
-      <ScrollArea className="flex-1">
-        <div className="sidebar-files">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className={cn(
-                "sidebar-file",
-                file.id === activeFileId && "sidebar-file-active"
-              )}
-              onClick={() => setActiveFile(file.id)}
-              onDoubleClick={() => {
-                setRenamingId(file.id);
-                setRenameValue(file.name);
-              }}
-            >
-              <div className="sidebar-file-info">
-                {languageIcons[file.language]}
-                {renamingId === file.id ? (
-                  <input
-                    autoFocus
-                    className="sidebar-file-rename-input"
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={() => {
-                      if (renameValue.trim() && renameValue !== file.name) {
-                        renameFile(file.id, renameValue.trim());
-                      }
-                      setRenamingId(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+      {/* File list — expanded view */}
+      {!isCollapsed && (
+        <ScrollArea className="flex-1">
+          <div className="sidebar-files">
+            {files.map((file) => (
+              <div
+                key={file.id}
+                className={cn(
+                  "sidebar-file",
+                  file.id === activeFileId && "sidebar-file-active"
+                )}
+                onClick={() => setActiveFile(file.id)}
+                onDoubleClick={() => {
+                  setRenamingId(file.id);
+                  setRenameValue(file.name);
+                }}
+              >
+                <div className="sidebar-file-info">
+                  {languageIcons[file.language]}
+                  {renamingId === file.id ? (
+                    <input
+                      autoFocus
+                      className="sidebar-file-rename-input"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => {
                         if (renameValue.trim() && renameValue !== file.name) {
                           renameFile(file.id, renameValue.trim());
                         }
                         setRenamingId(null);
-                      } else if (e.key === "Escape") {
-                        setRenamingId(null);
-                      }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="sidebar-file-name">
-                    {file.name}
-                    {file.isDirty && <span className="dirty-dot" />}
-                  </span>
-                )}
-              </div>
-              <div className="sidebar-file-actions">
-                <button
-                  className="sidebar-file-action-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRenamingId(file.id);
-                    setRenameValue(file.name);
-                  }}
-                  title="Rename"
-                >
-                  <FileType className="h-3 w-3" />
-                </button>
-                {files.length > 1 && (
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          if (renameValue.trim() && renameValue !== file.name) {
+                            renameFile(file.id, renameValue.trim());
+                          }
+                          setRenamingId(null);
+                        } else if (e.key === "Escape") {
+                          setRenamingId(null);
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="sidebar-file-name">
+                      {file.name}
+                      {file.isDirty && <span className="dirty-dot" />}
+                    </span>
+                  )}
+                </div>
+                <div className="sidebar-file-actions">
                   <button
-                    className="sidebar-file-action-btn sidebar-file-delete"
+                    className="sidebar-file-action-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteFile(file.id);
+                      setRenamingId(file.id);
+                      setRenameValue(file.name);
                     }}
-                    title="Delete"
+                    title="Rename"
                   >
-                    <X className="h-3 w-3" />
+                    <FileType className="h-3 w-3" />
                   </button>
-                )}
+                  {files.length > 1 && (
+                    <button
+                      className="sidebar-file-action-btn sidebar-file-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteFile(file.id);
+                      }}
+                      title="Delete"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
-
-      {/* Language info */}
-      <div className="sidebar-footer">
-        <Separator className="opacity-50" />
-        <div className="sidebar-languages">
-          <div className="sidebar-lang-title">Supported</div>
-          <div className="sidebar-lang-grid">
-            {(Object.keys(LANGUAGE_CONFIGS) as Language[]).map((lang) => (
-              <Tooltip key={lang}>
-                <TooltipTrigger asChild>
-                  <button
-                    className="sidebar-lang-chip"
-                    onClick={() => handleCreateFile(lang)}
-                  >
-                    {languageIcons[lang]}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  New {LANGUAGE_CONFIGS[lang].label} file
-                </TooltipContent>
-              </Tooltip>
             ))}
           </div>
+        </ScrollArea>
+      )}
+
+      {/* Collapsed file icons — icon-only view */}
+      {isCollapsed && (
+        <div className="sidebar-collapsed-files">
+          {files.map((file) => (
+            <Tooltip key={file.id}>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    "sidebar-collapsed-file",
+                    file.id === activeFileId && "sidebar-collapsed-file-active"
+                  )}
+                  onClick={() => setActiveFile(file.id)}
+                  type="button"
+                >
+                  {languageIcons[file.language]}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{file.name}</TooltipContent>
+            </Tooltip>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }

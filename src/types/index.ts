@@ -93,6 +93,7 @@ export interface AppState {
 
   // UI
   sidebarOpen: boolean;
+  sidebarCollapsed: boolean;
   outputPanelOpen: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
@@ -115,6 +116,7 @@ export interface AppState {
   cancelExecution: () => void;
 
   toggleSidebar: () => void;
+  toggleSidebarCollapse: () => void;
   toggleOutputPanel: () => void;
   toggleSettings: () => void;
   toggleCommandPalette: () => void;

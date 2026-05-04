@@ -40,6 +40,7 @@ export const useAppStore = create<AppState>()(
 
       // UI
       sidebarOpen: true,
+      sidebarCollapsed: false,
       outputPanelOpen: true,
       settingsOpen: false,
       commandPaletteOpen: false,
@@ -148,6 +149,10 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ sidebarOpen: !state.sidebarOpen }));
       },
 
+      toggleSidebarCollapse: () => {
+        set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed }));
+      },
+
       toggleOutputPanel: () => {
         set((state) => ({ outputPanelOpen: !state.outputPanelOpen }));
       },
@@ -202,6 +207,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         files: state.files,
         activeFileId: state.activeFileId,
+        sidebarCollapsed: state.sidebarCollapsed,
         outputPanelOpen: state.outputPanelOpen,
         editorSettings: state.editorSettings,
       }),
