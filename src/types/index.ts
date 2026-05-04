@@ -3,7 +3,7 @@
 // ============================================================
 
 /** Supported programming languages */
-export type Language = "javascript" | "typescript" | "python" | "html";
+export type Language = "javascript" | "typescript" | "python" | "html" | "json";
 
 /** Language metadata for UI and engine selection */
 export interface LanguageConfig {
@@ -51,6 +51,7 @@ export interface EditorSettings {
   formatOnPaste: boolean;
   formatOnType: boolean;
   soundEffects: boolean;
+  executionTimeout: number; // milliseconds, default 10000
 }
 
 /** Output panel entry */
@@ -111,6 +112,7 @@ export interface AppState {
   setIsRunning: (running: boolean) => void;
   addExecutionResult: (result: ExecutionResult) => void;
   setExecutionStartTime: (time: number | null) => void;
+  cancelExecution: () => void;
 
   toggleSidebar: () => void;
   toggleOutputPanel: () => void;
@@ -127,9 +129,16 @@ export interface AppState {
 // Service Interfaces — designed for future backend swap
 // ============================================================
 
+/** Options for code execution */
+export interface ExecutionOptions {
+  timeout?: number; // ms, default 10000
+  onStdout?: (chunk: string) => void; // streaming output callback
+}
+
 /** Compiler service interface */
 export interface ICompilerService {
-  execute(code: string, language: Language): Promise<ExecutionResult>;
+  execute(code: string, language: Language, options?: ExecutionOptions): Promise<ExecutionResult>;
+  cancel(): Promise<void>;
   isReady(language: Language): Promise<boolean>;
   initialize(language: Language): Promise<void>;
 }

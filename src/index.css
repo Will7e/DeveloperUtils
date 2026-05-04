@@ -271,6 +271,7 @@ body {
 .lang-dot-typescript { background: #3178c6; box-shadow: 0 0 6px rgba(49, 120, 198, 0.3); }
 .lang-dot-python { background: #3776ab; box-shadow: 0 0 6px rgba(55, 118, 171, 0.3); }
 .lang-dot-html { background: #e34f26; box-shadow: 0 0 6px rgba(227, 79, 38, 0.3); }
+.lang-dot-json { background: #a3e635; box-shadow: 0 0 6px rgba(163, 230, 53, 0.3); }
 
 /* Run button */
 .run-btn {
@@ -307,6 +308,28 @@ body {
 }
 
 .run-btn svg { width: 13px; height: 13px; }
+
+/* Cancel/Stop button variant */
+.run-btn-cancel {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.30);
+  animation: cancel-pulse 1.5s ease-in-out infinite;
+}
+
+.run-btn-cancel:hover {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  box-shadow: 0 0 22px rgba(239, 68, 68, 0.50);
+}
+
+.run-btn-cancel svg {
+  width: 10px;
+  height: 10px;
+}
+
+@keyframes cancel-pulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(239, 68, 68, 0.30); }
+  50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.50); }
+}
 
 /* Preview indicator (HTML mode) */
 .preview-indicator {
@@ -427,6 +450,7 @@ body {
 .tab-icon-typescript { background: rgba(49, 120, 198, 0.10); color: #3178c6; }
 .tab-icon-python { background: rgba(55, 118, 171, 0.10); color: #ffd43b; }
 .tab-icon-html { background: rgba(227, 79, 38, 0.10); color: #e34f26; }
+.tab-icon-json { background: rgba(163, 230, 53, 0.10); color: #a3e635; }
 
 .tab-name {
   max-width: 120px;
@@ -544,6 +568,7 @@ body {
 .lang-badge-ts { background: rgba(49, 120, 198, 0.10); color: #3178c6; border: 1px solid rgba(49, 120, 198, 0.15); }
 .lang-badge-py { background: rgba(55, 118, 171, 0.10); color: #ffd43b; border: 1px solid rgba(55, 118, 171, 0.15); }
 .lang-badge-html { background: rgba(227, 79, 38, 0.10); color: #e34f26; border: 1px solid rgba(227, 79, 38, 0.15); font-size: 8px; }
+.lang-badge-json { background: rgba(163, 230, 53, 0.10); color: #a3e635; border: 1px solid rgba(163, 230, 53, 0.15); font-size: 8px; }
 
 /* ============================================================
    OUTPUT PANEL

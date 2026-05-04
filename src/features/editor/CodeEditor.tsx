@@ -116,6 +116,7 @@ export function CodeEditor() {
     typescript: "typescript",
     python: "python",
     html: "html",
+    json: "json",
   };
 
   return (

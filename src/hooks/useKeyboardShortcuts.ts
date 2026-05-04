@@ -5,6 +5,7 @@
 import { useEffect, useCallback } from "react";
 import { useAppStore } from "@/stores/app.store";
 import { compilerService } from "@/services/compiler.service";
+import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { formatDuration } from "@/lib/utils";
 import { playSound } from "@/lib/sounds";
 
@@ -15,6 +16,7 @@ export function useKeyboardShortcuts() {
   const setIsRunning = useAppStore((s) => s.setIsRunning);
   const clearOutput = useAppStore((s) => s.clearOutput);
   const addOutputEntry = useAppStore((s) => s.addOutputEntry);
+  const updateFileContent = useAppStore((s) => s.updateFileContent);
   const addExecutionResult = useAppStore((s) => s.addExecutionResult);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
@@ -24,6 +26,8 @@ export function useKeyboardShortcuts() {
   const addToast = useAppStore((s) => s.addToast);
   const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
   const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
+  const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
+  const cancelExecution = useAppStore((s) => s.cancelExecution);
 
   const activeFile = files.find((f) => f.id === activeFileId);
 
@@ -35,6 +39,23 @@ export function useKeyboardShortcuts() {
       if (mod && e.key === "k") {
         e.preventDefault();
         toggleCommandPalette();
+        return;
+      }
+
+      // Ctrl/Cmd + Shift + C = Cancel execution
+      if (mod && e.shiftKey && e.key === "c") {
+        e.preventDefault();
+        if (isRunning) {
+          await compilerService.cancel();
+          cancelExecution();
+          addOutputEntry({
+            type: "error",
+            content: "⛔ Execution cancelled by user",
+          });
+          setOutputFlash("error");
+          if (soundEffects) playSound("error");
+          addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+        }
         return;
       }
 
@@ -67,7 +88,22 @@ export function useKeyboardShortcuts() {
             }
           }
 
-          const result = await compilerService.execute(activeFile.content, activeFile.language);
+          if (activeFile.language === "typescript") {
+            const ready = await compilerService.isReady("typescript");
+            if (!ready) {
+              addOutputEntry({
+                type: "info",
+                content: "Loading TypeScript compiler...",
+              });
+              await compilerService.initialize("typescript");
+            }
+          }
+
+          const result = await compilerService.execute(
+            activeFile.content,
+            activeFile.language,
+            { timeout: executionTimeout }
+          );
           addExecutionResult(result);
           if (result.stdout) addOutputEntry({ type: "stdout", content: result.stdout });
           if (result.stderr) addOutputEntry({ type: "stderr", content: result.stderr });
@@ -96,6 +132,25 @@ export function useKeyboardShortcuts() {
         }
       }
 
+      // Ctrl/Cmd + S = Format & Save
+      if (mod && e.key === "s") {
+        e.preventDefault();
+        if (!activeFile) return;
+
+        if (supportsFormatting(activeFile.language)) {
+          try {
+            const formatted = await formatCode(activeFile.content, activeFile.language);
+            updateFileContent(activeFile.id, formatted);
+            addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
+          } catch {
+            addToast({ message: "Saved (formatting not available)", type: "info", duration: 1500 });
+          }
+        } else {
+          addToast({ message: "Saved", type: "info", duration: 1500 });
+        }
+        return;
+      }
+
       // Ctrl/Cmd + J = Toggle output panel
       if (mod && e.key === "j") {
         e.preventDefault();
@@ -108,7 +163,7 @@ export function useKeyboardShortcuts() {
         toggleSettings();
       }
     },
-    [activeFile, isRunning, outputPanelOpen, soundEffects, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast]
+    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent]
   );
 
   useEffect(() => {

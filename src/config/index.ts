@@ -14,6 +14,7 @@ export const DEFAULT_EDITOR_SETTINGS = {
   formatOnPaste: true,
   formatOnType: false,
   soundEffects: false,
+  executionTimeout: 10000,
 };
 
 /** Language configurations */
@@ -191,6 +192,33 @@ print(f"\\nCharacter count in '{word}': {char_count}")
   </div>
 </body>
 </html>`,
+  },
+  json: {
+    id: "json",
+    label: "JSON",
+    icon: "{ }",
+    monacoLanguage: "json",
+    extension: ".json",
+    defaultCode: `{
+  "name": "my-project",
+  "version": "1.0.0",
+  "description": "A sample JSON file — press ⌘S to format",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vite": "^6.0.0"
+  },
+  "keywords": ["devutils", "compiler", "editor"],
+  "license": "MIT"
+}`,
   },
 };
 

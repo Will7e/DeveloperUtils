@@ -30,6 +30,8 @@ export function Toolbar() {
   const setOutputFlash = useAppStore((s) => s.setOutputFlash);
   const addToast = useAppStore((s) => s.addToast);
   const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
+  const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
+  const cancelExecution = useAppStore((s) => s.cancelExecution);
 
   const activeFile = files.find((f) => f.id === activeFileId);
 
@@ -66,9 +68,21 @@ export function Toolbar() {
         }
       }
 
+      if (activeFile.language === "typescript") {
+        const ready = await compilerService.isReady("typescript");
+        if (!ready) {
+          addOutputEntry({
+            type: "info",
+            content: "Loading TypeScript compiler...",
+          });
+          await compilerService.initialize("typescript");
+        }
+      }
+
       const result = await compilerService.execute(
         activeFile.content,
-        activeFile.language
+        activeFile.language,
+        { timeout: executionTimeout }
       );
 
       addExecutionResult(result);
@@ -115,7 +129,25 @@ export function Toolbar() {
     setOutputFlash,
     addToast,
     soundEffects,
+    executionTimeout,
   ]);
+
+  const handleCancel = useCallback(async () => {
+    if (!isRunning) return;
+
+    await compilerService.cancel();
+    cancelExecution();
+
+    addOutputEntry({
+      type: "error",
+      content: "⛔ Execution cancelled by user",
+    });
+
+    setOutputFlash("error");
+    if (soundEffects) playSound("error");
+
+    addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+  }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, soundEffects, addToast]);
 
   return (
     <div className="toolbar">
@@ -139,31 +171,35 @@ export function Toolbar() {
       </div>
 
       <div className="toolbar-right">
-        {/* Run / Preview */}
+        {/* Run / Stop / Preview */}
         {activeFile?.language === "html" ? (
           <div className="preview-indicator">
             <Eye style={{ width: 14, height: 14 }} />
             <span>Preview</span>
           </div>
+        ) : isRunning ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="run-btn run-btn-cancel"
+                onClick={handleCancel}
+              >
+                <Square style={{ fill: "currentColor" }} />
+                <span>Stop</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Cancel Execution <kbd>⌘⇧C</kbd></TooltipContent>
+          </Tooltip>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 className="run-btn"
                 onClick={handleRun}
-                disabled={isRunning || !activeFile}
+                disabled={!activeFile}
               >
-                {isRunning ? (
-                  <>
-                    <Square style={{ fill: "currentColor" }} />
-                    <span>Running…</span>
-                  </>
-                ) : (
-                  <>
-                    <Play style={{ fill: "currentColor" }} />
-                    <span>Run</span>
-                  </>
-                )}
+                <Play style={{ fill: "currentColor" }} />
+                <span>Run</span>
               </button>
             </TooltipTrigger>
             <TooltipContent>Run Code <kbd>⌘↵</kbd></TooltipContent>

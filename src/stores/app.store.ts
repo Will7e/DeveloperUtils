@@ -136,6 +136,13 @@ export const useAppStore = create<AppState>()(
         set({ executionStartTime: time });
       },
 
+      cancelExecution: () => {
+        set({
+          isRunning: false,
+          executionStartTime: null,
+        });
+      },
+
       // UI actions
       toggleSidebar: () => {
         set((state) => ({ sidebarOpen: !state.sidebarOpen }));

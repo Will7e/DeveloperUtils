@@ -185,6 +185,34 @@ export function SettingsPanel() {
               </select>
             </div>
           </div>
+
+          {/* Section: Execution */}
+          <div className="settings-section-title" style={{ marginTop: 8 }}>
+            Execution
+          </div>
+
+          {/* Execution Timeout */}
+          <div className="settings-row">
+            <label className="settings-label">
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                ⏱ Timeout
+              </span>
+            </label>
+            <div className="settings-control">
+              <input
+                type="range"
+                min="5000"
+                max="60000"
+                step="5000"
+                value={editorSettings.executionTimeout}
+                onChange={(e) =>
+                  updateEditorSettings({ executionTimeout: Number(e.target.value) })
+                }
+                className="settings-slider"
+              />
+              <span className="settings-value">{editorSettings.executionTimeout / 1000}s</span>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}

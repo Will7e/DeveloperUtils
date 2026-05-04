@@ -16,7 +16,11 @@ import {
   Volume2,
   VolumeX,
   X,
+  StopCircle,
+  Wand2,
 } from "lucide-react";
+import { compilerService } from "@/services/compiler.service";
+import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
@@ -42,6 +46,11 @@ export function CommandPalette() {
   const editorSettings = useAppStore((s) => s.editorSettings);
   const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
   const addToast = useAppStore((s) => s.addToast);
+  const isRunning = useAppStore((s) => s.isRunning);
+  const cancelExecution = useAppStore((s) => s.cancelExecution);
+  const setOutputFlash = useAppStore((s) => s.setOutputFlash);
+  const addOutputEntry = useAppStore((s) => s.addOutputEntry);
+  const updateFileContent = useAppStore((s) => s.updateFileContent);
 
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -51,7 +60,27 @@ export function CommandPalette() {
   const activeFile = files.find((f) => f.id === activeFileId);
 
   const actions = useMemo<PaletteAction[]>(() => {
-    const list: PaletteAction[] = [
+    const list: PaletteAction[] = [];
+
+    // Cancel execution (only show when running)
+    if (isRunning) {
+      list.push({
+        id: "cancel-execution",
+        label: "Cancel Execution",
+        shortcut: "⌘⇧C",
+        category: "Actions",
+        icon: <StopCircle style={{ width: 14, height: 14, color: "#f87171" }} />,
+        action: async () => {
+          await compilerService.cancel();
+          cancelExecution();
+          addOutputEntry({ type: "error", content: "⛔ Execution cancelled by user" });
+          setOutputFlash("error");
+          addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+        },
+      });
+    }
+
+    list.push(
       {
         id: "toggle-console",
         label: "Toggle Console",
@@ -87,6 +116,27 @@ export function CommandPalette() {
           if (activeFile) {
             navigator.clipboard.writeText(activeFile.content);
             addToast({ message: "Code copied to clipboard", type: "success", duration: 2000 });
+          }
+        },
+      },
+      {
+        id: "format-document",
+        label: "Format Document",
+        shortcut: "⌘S",
+        category: "Actions",
+        icon: <Wand2 style={{ width: 14, height: 14 }} />,
+        action: async () => {
+          if (!activeFile) return;
+          if (supportsFormatting(activeFile.language)) {
+            try {
+              const formatted = await formatCode(activeFile.content, activeFile.language);
+              updateFileContent(activeFile.id, formatted);
+              addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
+            } catch {
+              addToast({ message: "Format failed", type: "error", duration: 2000 });
+            }
+          } else {
+            addToast({ message: `Formatting not supported for ${activeFile.language}`, type: "info", duration: 2000 });
           }
         },
       },
@@ -142,7 +192,7 @@ export function CommandPalette() {
           updateEditorSettings({ wordWrap: editorSettings.wordWrap === "on" ? "off" : "on" });
         },
       },
-    ];
+    );
 
     // Add "New [Language] File" actions
     (Object.keys(LANGUAGE_CONFIGS) as Language[]).forEach((lang) => {
@@ -157,7 +207,7 @@ export function CommandPalette() {
     });
 
     return list;
-  }, [activeFile, editorSettings, toggleOutputPanel, toggleSettings, clearOutput, createFile, updateEditorSettings, addToast]);
+  }, [activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, clearOutput, createFile, updateEditorSettings, addToast, cancelExecution, setOutputFlash, addOutputEntry, updateFileContent]);
 
   // Filter actions by query
   const filtered = useMemo(() => {

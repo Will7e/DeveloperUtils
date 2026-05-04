@@ -156,7 +156,13 @@ function App() {
                 <span className="status-dot">·</span>
               </>
             )}
-            <span className="status-item status-shortcut">⌘↵ Run</span>
+            {isRunning ? (
+              <span className="status-item status-shortcut" style={{ color: "var(--red)" }}>⌘⇧C Stop</span>
+            ) : (
+              <span className="status-item status-shortcut">⌘↵ Run</span>
+            )}
+            <span className="status-dot">·</span>
+            <span className="status-item status-shortcut">⌘S Format</span>
             <span className="status-dot">·</span>
             <span className="status-item status-shortcut">⌘K Commands</span>
             <span className="status-dot">·</span>
