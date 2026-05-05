@@ -5562,6 +5562,8 @@ body {
   justify-content: center;
   width: 28px;
   height: 28px;
+  min-width: 28px;
+  flex-shrink: 0;
   border-radius: 50%;
 }
 
@@ -5580,6 +5582,9 @@ body {
   font-weight: 600;
   color: var(--text-1);
   letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- Standard Nodes (Process, Data, Integration) ---- */
