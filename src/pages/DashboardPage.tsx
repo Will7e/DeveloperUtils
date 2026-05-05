@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;
@@ -98,7 +98,7 @@ export function DashboardPage() {
               iconColor="#0ea5e9"
               glowColor="rgba(14, 165, 233, 0.12)"
               title="Cloud Compiler"
-              description="Multi-language execution engine with live preview and deep Monaco integration."
+              description="Write and run code in 5+ languages directly in the browser with Monaco editor and live HTML preview."
               available
             />
 
@@ -108,7 +108,7 @@ export function DashboardPage() {
               iconColor="#a3e635"
               glowColor="rgba(163, 230, 53, 0.12)"
               title="Formatters"
-              description="Production-grade JSON and XML formatting with interactive tree visualization."
+              description="Instantly beautify or minify JSON and XML with syntax highlighting and interactive tree views."
               available
             />
             <ToolCard
@@ -117,7 +117,16 @@ export function DashboardPage() {
               iconColor="#38bdf8"
               glowColor="rgba(56, 189, 248, 0.12)"
               title="List Comparator"
-              description="High-performance string list comparison. Find differences and intersections instantly."
+              description="Compare two text lists side by side. Instantly spot unique items, common entries, and differences."
+              available
+            />
+            <ToolCard
+              to="/library"
+              icon={<BookOpen className="h-5 w-5" />}
+              iconColor="#c084fc"
+              glowColor="rgba(192, 132, 252, 0.12)"
+              title="API Library"
+              description="Searchable ServiceNow API reference — 99 classes, 645 methods with real-world code examples."
               available
             />
           </div>
