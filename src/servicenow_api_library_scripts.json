@@ -5547,6 +5547,478 @@
           "example": "ScriptLoader.getScripts(\n  ['script1.jsdbx', 'script2.jsdbx'],\n  function() {\n    // Both scripts loaded\n    initializeApp();\n  }\n);"
         }
       ]
+    },
+    {
+      "name": "Record Utilities",
+      "type": "Utils",
+      "description": "Common patterns for copying, cloning, comparing, and bulk-managing GlideRecords efficiently.",
+      "methods": [
+        {
+          "name": "Deep Clone Record",
+          "description": "Copy all field values from one record to a new record on the same or different table.",
+          "parameters": [],
+          "example": "function cloneRecord(sourceGR, targetTable) {\n  var target = new GlideRecord(targetTable || sourceGR.getTableName());\n  target.initialize();\n  var fields = sourceGR.getFields();\n  for (var i = 0; i < fields.size(); i++) {\n    var field = fields.get(i);\n    var name = field.getName();\n    if (name == 'sys_id' || name.startsWith('sys_')) continue;\n    target.setValue(name, sourceGR.getValue(name));\n  }\n  return target.insert();\n}\n\n// Usage:\nvar gr = new GlideRecord('incident');\ngr.get(sysId);\nvar newId = cloneRecord(gr);"
+        },
+        {
+          "name": "Bulk Update (Safe)",
+          "description": "Mass update records with workflow/business rule control to avoid cascading side effects.",
+          "parameters": [],
+          "example": "function bulkUpdate(table, query, fieldValues, options) {\n  options = options || {};\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  gr.query();\n  var count = 0;\n  while (gr.next()) {\n    for (var field in fieldValues) {\n      gr.setValue(field, fieldValues[field]);\n    }\n    if (options.skipWorkflow) gr.setWorkflow(false);\n    if (options.skipAudit) gr.autoSysFields(false);\n    gr.update();\n    count++;\n  }\n  return count;\n}\n\n// Usage:\nvar updated = bulkUpdate('incident',\n  'active=true^priority=5',\n  { priority: 4, urgency: 3 },\n  { skipWorkflow: true }\n);\ngs.info('Updated ' + updated + ' records');"
+        },
+        {
+          "name": "Record to JSON",
+          "description": "Convert a GlideRecord to a plain JSON object. Useful for REST responses and logging.",
+          "parameters": [],
+          "example": "function grToJSON(gr, fields) {\n  var obj = { sys_id: gr.getUniqueValue() };\n  if (fields) {\n    fields.forEach(function(f) {\n      obj[f] = gr.getValue(f);\n      obj[f + '_display'] = gr.getDisplayValue(f);\n    });\n  } else {\n    var flds = gr.getFields();\n    for (var i = 0; i < flds.size(); i++) {\n      var name = flds.get(i).getName();\n      if (!name.startsWith('sys_') || name == 'sys_id') {\n        obj[name] = gr.getValue(name);\n      }\n    }\n  }\n  return obj;\n}\n\n// Usage:\nvar gr = new GlideRecord('incident');\ngr.get(sysId);\nvar json = grToJSON(gr, ['number', 'state', 'assigned_to']);\ngs.info(JSON.stringify(json));"
+        },
+        {
+          "name": "Check Field Changed",
+          "description": "Detect if specific fields changed in a Business Rule (before update).",
+          "parameters": [],
+          "example": "// In a Before Update Business Rule:\nvar watchFields = ['state', 'priority', 'assigned_to', 'assignment_group'];\nvar changes = [];\nwatchFields.forEach(function(field) {\n  if (current[field].changes()) {\n    changes.push({\n      field: field,\n      from: previous.getDisplayValue(field),\n      to: current.getDisplayValue(field)\n    });\n  }\n});\nif (changes.length > 0) {\n  gs.info('Changes: ' + JSON.stringify(changes));\n}"
+        },
+        {
+          "name": "Safe getValue",
+          "description": "Get a record value with a fallback default, avoiding null/empty issues.",
+          "parameters": [],
+          "example": "function safeGet(gr, field, defaultVal) {\n  var val = gr.getValue(field);\n  return (val !== null && val !== '') ? val : (defaultVal || '');\n}\n\n// Usage:\nvar priority = safeGet(current, 'priority', '4');\nvar desc = safeGet(current, 'description', 'No description provided');"
+        }
+      ]
+    },
+    {
+      "name": "Query Helpers",
+      "type": "Utils",
+      "description": "Utility functions for building, debugging, and optimizing GlideRecord queries dynamically.",
+      "methods": [
+        {
+          "name": "Dynamic Query Builder",
+          "description": "Build encoded queries programmatically from a filter object.",
+          "parameters": [],
+          "example": "function buildQuery(filters) {\n  var parts = [];\n  for (var field in filters) {\n    var val = filters[field];\n    if (Array.isArray(val)) {\n      parts.push(field + 'IN' + val.join(','));\n    } else if (val === null) {\n      parts.push(field + 'ISEMPTY');\n    } else if (typeof val === 'object' && val.op) {\n      parts.push(field + val.op + val.value);\n    } else {\n      parts.push(field + '=' + val);\n    }\n  }\n  return parts.join('^');\n}\n\n// Usage:\nvar query = buildQuery({\n  active: true,\n  priority: [1, 2],\n  assigned_to: {op: '!=', value: 'NULL'},\n  category: 'network'\n});\n// Result: active=true^priorityIN1,2^assigned_to!=NULL^category=network\nvar gr = new GlideRecord('incident');\ngr.addEncodedQuery(query);\ngr.query();"
+        },
+        {
+          "name": "Query Timer",
+          "description": "Measure query execution time for performance debugging.",
+          "parameters": [],
+          "example": "function timedQuery(table, encodedQuery) {\n  var start = new GlideDateTime();\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(encodedQuery);\n  gr.query();\n  var end = new GlideDateTime();\n  var duration = GlideDateTime.subtract(start, end);\n  var count = gr.getRowCount();\n  gs.info('[PERF] ' + table + ': ' + count + ' rows in ' + duration.getDisplayValue());\n  return gr;\n}\n\n// Usage:\nvar gr = timedQuery('incident', 'active=true^priority=1');"
+        },
+        {
+          "name": "Record Exists Check",
+          "description": "Quick existence check without loading all fields.",
+          "parameters": [],
+          "example": "function recordExists(table, field, value) {\n  var gr = new GlideRecord(table);\n  gr.addQuery(field, value);\n  gr.setLimit(1);\n  gr.query();\n  return gr.hasNext();\n}\n\n// Usage:\nif (recordExists('sys_user', 'email', 'john@example.com')) {\n  gs.info('User exists');\n}"
+        },
+        {
+          "name": "Get Single Value",
+          "description": "Fetch a single field value without iterating — one-liner query.",
+          "parameters": [],
+          "example": "function getSingleValue(table, query, field) {\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  gr.setLimit(1);\n  gr.query();\n  if (gr.next()) return gr.getValue(field);\n  return null;\n}\n\n// Usage:\nvar email = getSingleValue('sys_user', 'user_name=admin', 'email');\nvar count = getSingleValue('incident', 'active=true', 'sys_id'); // just to check existence"
+        }
+      ]
+    },
+    {
+      "name": "Date & Time Helpers",
+      "type": "Utils",
+      "description": "Utility functions for date math, business day calculations, and timezone handling beyond the built-in GlideDateTime API.",
+      "methods": [
+        {
+          "name": "Business Days Between",
+          "description": "Calculate the number of business days (Mon–Fri) between two dates.",
+          "parameters": [],
+          "example": "function businessDaysBetween(startStr, endStr) {\n  var start = new GlideDateTime(startStr);\n  var end = new GlideDateTime(endStr);\n  var count = 0;\n  var current = new GlideDateTime(start);\n  while (current.before(end)) {\n    var dow = current.getDayOfWeekLocalTime();\n    if (dow >= 2 && dow <= 6) count++; // Mon=2, Fri=6\n    current.addDaysLocalTime(1);\n  }\n  return count;\n}\n\n// Usage:\nvar days = businessDaysBetween('2024-01-01', '2024-01-15');\ngs.info('Business days: ' + days);"
+        },
+        {
+          "name": "Format Date for Display",
+          "description": "Format a GlideDateTime into a human-readable string.",
+          "parameters": [],
+          "example": "function formatDate(gdtStr, format) {\n  var gdt = new GlideDateTime(gdtStr);\n  switch (format) {\n    case 'short': return gdt.getDate().getByFormat('MM/dd/yyyy');\n    case 'long': return gdt.getDate().getByFormat('MMMM dd, yyyy');\n    case 'relative': return getRelativeTime(gdt);\n    default: return gdt.getDisplayValue();\n  }\n}\n\nfunction getRelativeTime(gdt) {\n  var diff = GlideDateTime.subtract(gdt, new GlideDateTime());\n  var days = diff.getDayPart();\n  if (days == 0) return 'Today';\n  if (days == 1) return 'Yesterday';\n  if (days < 7) return days + ' days ago';\n  if (days < 30) return Math.floor(days / 7) + ' weeks ago';\n  return Math.floor(days / 30) + ' months ago';\n}"
+        },
+        {
+          "name": "Is Within Business Hours",
+          "description": "Check if the current time falls within standard business hours using a schedule.",
+          "parameters": [],
+          "example": "function isBusinessHours(scheduleId) {\n  var sched = new GlideSchedule(scheduleId);\n  if (!sched.isValid()) return true; // Default to true if no schedule\n  return sched.isInSchedule(new GlideDateTime());\n}\n\n// Usage: pass your schedule sys_id\nif (isBusinessHours('08fcd0830a0a0b2600079f56b1adb9ae')) {\n  gs.info('Within business hours');\n}"
+        },
+        {
+          "name": "Add Business Days",
+          "description": "Add N business days to a date, skipping weekends.",
+          "parameters": [],
+          "example": "function addBusinessDays(startStr, numDays) {\n  var dt = new GlideDateTime(startStr);\n  var added = 0;\n  while (added < numDays) {\n    dt.addDaysLocalTime(1);\n    var dow = dt.getDayOfWeekLocalTime();\n    if (dow >= 2 && dow <= 6) added++;\n  }\n  return dt;\n}\n\n// Usage:\nvar deadline = addBusinessDays(gs.nowDateTime(), 5);\ncurrent.setValue('due_date', deadline);"
+        }
+      ]
+    },
+    {
+      "name": "Integration Helpers",
+      "type": "Utils",
+      "description": "Reusable patterns for REST integrations — retry logic, error handling, pagination, and response parsing.",
+      "methods": [
+        {
+          "name": "REST Call with Retry",
+          "description": "Make a REST call with automatic retry on failure.",
+          "parameters": [],
+          "example": "function restCallWithRetry(endpoint, method, body, maxRetries) {\n  maxRetries = maxRetries || 3;\n  var lastError = '';\n  for (var attempt = 1; attempt <= maxRetries; attempt++) {\n    try {\n      var rm = new sn_ws.RESTMessageV2();\n      rm.setEndpoint(endpoint);\n      rm.setHttpMethod(method);\n      rm.setRequestHeader('Content-Type', 'application/json');\n      rm.setRequestHeader('Accept', 'application/json');\n      if (body) rm.setRequestBody(JSON.stringify(body));\n      var resp = rm.execute();\n      var status = resp.getStatusCode();\n      if (status >= 200 && status < 300) {\n        return { success: true, data: JSON.parse(resp.getBody()), status: status };\n      }\n      if (status < 500) {\n        return { success: false, error: resp.getBody(), status: status };\n      }\n      lastError = 'HTTP ' + status;\n    } catch (e) {\n      lastError = e.getMessage();\n    }\n    if (attempt < maxRetries) gs.sleep(1000 * attempt);\n  }\n  return { success: false, error: 'Max retries exceeded: ' + lastError };\n}\n\n// Usage:\nvar result = restCallWithRetry('https://api.example.com/data', 'GET');\nif (result.success) gs.info(JSON.stringify(result.data));"
+        },
+        {
+          "name": "Paginated REST Fetch",
+          "description": "Fetch all records from a paginated REST API.",
+          "parameters": [],
+          "example": "function fetchAllPages(baseUrl, headers) {\n  var allResults = [];\n  var offset = 0;\n  var limit = 100;\n  var hasMore = true;\n  while (hasMore) {\n    var rm = new sn_ws.RESTMessageV2();\n    rm.setEndpoint(baseUrl + '?sysparm_limit=' + limit + '&sysparm_offset=' + offset);\n    rm.setHttpMethod('GET');\n    for (var h in headers) rm.setRequestHeader(h, headers[h]);\n    var resp = rm.execute();\n    var data = JSON.parse(resp.getBody());\n    allResults = allResults.concat(data.result);\n    offset += limit;\n    hasMore = data.result.length === limit;\n  }\n  return allResults;\n}\n\n// Usage:\nvar allIncidents = fetchAllPages(\n  'https://instance.service-now.com/api/now/table/incident',\n  { Authorization: 'Bearer ' + token }\n);"
+        },
+        {
+          "name": "Safe JSON Parse",
+          "description": "Parse JSON with error handling — avoids script crashes on malformed responses.",
+          "parameters": [],
+          "example": "function safeParseJSON(str, fallback) {\n  try {\n    return JSON.parse(str);\n  } catch (e) {\n    gs.warn('JSON parse failed: ' + e.getMessage());\n    return fallback || null;\n  }\n}\n\n// Usage:\nvar resp = rm.execute();\nvar data = safeParseJSON(resp.getBody(), { result: [] });\ngs.info('Records: ' + data.result.length);"
+        }
+      ]
+    },
+    {
+      "name": "Debug & Performance",
+      "type": "Utils",
+      "description": "Debugging utilities, profiling tools, and performance optimization patterns for ServiceNow development.",
+      "methods": [
+        {
+          "name": "Script Timer",
+          "description": "Measure execution time of any code block.",
+          "parameters": [],
+          "example": "function Timer(label) {\n  this.label = label;\n  this.start = new Date().getTime();\n}\nTimer.prototype.stop = function() {\n  var elapsed = new Date().getTime() - this.start;\n  gs.info('[TIMER] ' + this.label + ': ' + elapsed + 'ms');\n  return elapsed;\n};\n\n// Usage:\nvar t = new Timer('Incident query');\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();\nwhile (gr.next()) { /* process */ }\nt.stop(); // Logs: [TIMER] Incident query: 142ms"
+        },
+        {
+          "name": "Debug Logger",
+          "description": "Conditional logging that only outputs when a system property is enabled.",
+          "parameters": [],
+          "example": "var Debug = {\n  enabled: gs.getProperty('x_myapp.debug.enabled', 'false') == 'true',\n  log: function(source, msg, obj) {\n    if (!this.enabled) return;\n    var output = '[DEBUG][' + source + '] ' + msg;\n    if (obj) output += ' | ' + JSON.stringify(obj);\n    gs.info(output);\n  }\n};\n\n// Usage:\nDebug.log('BizRule', 'Processing', { number: current.number, state: current.state });\n// Only outputs if x_myapp.debug.enabled = true"
+        },
+        {
+          "name": "Query Optimization Tips",
+          "description": "Common GlideRecord performance best practices.",
+          "parameters": [],
+          "example": "// 1. ALWAYS use setLimit when you only need a few records\ngr.setLimit(1); // Don't fetch 10,000 when you need 1\n\n// 2. Use chooseWindow for pagination instead of setLimit\ngr.chooseWindow(0, 50); // First 50 records\ngr.chooseWindow(50, 100); // Next 50\n\n// 3. Avoid getRowCount() — it scans all records\n// BAD: gr.query(); var count = gr.getRowCount();\n// GOOD: Use GlideAggregate\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nif (ga.next()) gs.info('Count: ' + ga.getAggregate('COUNT'));\n\n// 4. Use sys_id queries when possible (indexed)\ngr.addQuery('sys_id', sysId); // Fastest possible query\n\n// 5. Avoid dot-walking in queries when you have the sys_id\n// SLOW: gr.addQuery('caller_id.email', 'a@b.com');\n// FAST: find user first, then query by sys_id"
+        },
+        {
+          "name": "Memory-Safe Batch Loop",
+          "description": "Process large record sets without hitting memory limits.",
+          "parameters": [],
+          "example": "// Process in windows to avoid memory issues\nvar windowSize = 200;\nvar start = 0;\nvar hasMore = true;\nwhile (hasMore) {\n  var gr = new GlideRecord('incident');\n  gr.addEncodedQuery('active=true');\n  gr.chooseWindow(start, start + windowSize);\n  gr.query();\n  if (!gr.hasNext()) { hasMore = false; break; }\n  while (gr.next()) {\n    // Process each record\n  }\n  start += windowSize;\n  gs.info('Processed window: ' + start);\n}"
+        }
+      ]
+    },
+    {
+      "name": "String & Data Utilities",
+      "type": "Utils",
+      "description": "Helper functions for string manipulation, data transformation, and common parsing tasks in ServiceNow scripts.",
+      "methods": [
+        {
+          "name": "Parse CSV String",
+          "description": "Parse a CSV-formatted string into an array of objects.",
+          "parameters": [],
+          "example": "function parseCSV(csvString) {\n  var lines = csvString.split('\\n');\n  var headers = lines[0].split(',').map(function(h) {\n    return h.trim().replace(/\"/g, '');\n  });\n  var results = [];\n  for (var i = 1; i < lines.length; i++) {\n    if (!lines[i].trim()) continue;\n    var values = lines[i].split(',');\n    var obj = {};\n    headers.forEach(function(h, idx) {\n      obj[h] = (values[idx] || '').trim().replace(/\"/g, '');\n    });\n    results.push(obj);\n  }\n  return results;\n}\n\n// Usage:\nvar data = parseCSV('name,email\\nJohn,john@co.com\\nJane,jane@co.com');\ndata.forEach(function(row) { gs.info(row.name + ': ' + row.email); });"
+        },
+        {
+          "name": "Truncate String",
+          "description": "Safely truncate a string to a maximum length with ellipsis.",
+          "parameters": [],
+          "example": "function truncate(str, maxLen) {\n  if (!str || str.length <= maxLen) return str || '';\n  return str.substring(0, maxLen - 3) + '...';\n}\n\n// Usage:\nvar desc = truncate(current.description.toString(), 100);"
+        },
+        {
+          "name": "Comma-Separated to Array",
+          "description": "Convert a comma-separated string to a trimmed array (handles ServiceNow list fields).",
+          "parameters": [],
+          "example": "function toArray(commaSeparated) {\n  if (!commaSeparated) return [];\n  return commaSeparated.toString().split(',').map(function(s) {\n    return s.trim();\n  }).filter(function(s) { return s !== ''; });\n}\n\n// Usage — works great with Watch List, group members, etc.\nvar watchList = toArray(current.getValue('watch_list'));\nwatchList.forEach(function(userId) {\n  gs.info('Watcher: ' + userId);\n});"
+        },
+        {
+          "name": "Template String",
+          "description": "Simple string template replacement (like mini mail merge).",
+          "parameters": [],
+          "example": "function template(str, data) {\n  return str.replace(/\\{\\{(\\w+)\\}\\}/g, function(match, key) {\n    return data.hasOwnProperty(key) ? data[key] : match;\n  });\n}\n\n// Usage:\nvar msg = template(\n  'Hello {{name}}, your ticket {{number}} is now {{state}}.',\n  {\n    name: current.caller_id.getDisplayValue(),\n    number: current.getValue('number'),\n    state: current.getDisplayValue('state')\n  }\n);\ngs.info(msg);"
+        },
+        {
+          "name": "Deduplicate Array",
+          "description": "Remove duplicates from an array.",
+          "parameters": [],
+          "example": "function unique(arr) {\n  var seen = {};\n  return arr.filter(function(item) {\n    if (seen[item]) return false;\n    seen[item] = true;\n    return true;\n  });\n}\n\n// Usage:\nvar roles = unique(['itil', 'admin', 'itil', 'catalog']);\ngs.info(roles); // ['itil', 'admin', 'catalog']"
+        }
+      ]
+    },
+    {
+      "name": "Security & Access Patterns",
+      "type": "Utils",
+      "description": "Common patterns for role checking, permission validation, and secure scripting in ServiceNow.",
+      "methods": [
+        {
+          "name": "Multi-Role Check",
+          "description": "Check if a user has ANY or ALL roles from a list.",
+          "parameters": [],
+          "example": "function hasAnyRole(roles) {\n  for (var i = 0; i < roles.length; i++) {\n    if (gs.hasRole(roles[i])) return true;\n  }\n  return false;\n}\n\nfunction hasAllRoles(roles) {\n  for (var i = 0; i < roles.length; i++) {\n    if (!gs.hasRole(roles[i])) return false;\n  }\n  return true;\n}\n\n// Usage:\nif (hasAnyRole(['admin', 'security_admin', 'itil_admin'])) {\n  // Allow action\n}\nif (hasAllRoles(['itil', 'approver_user'])) {\n  // User has both roles\n}"
+        },
+        {
+          "name": "Get User Groups",
+          "description": "Get all group names for a user as an array.",
+          "parameters": [],
+          "example": "function getUserGroups(userId) {\n  var groups = [];\n  var gr = new GlideRecord('sys_user_grmember');\n  gr.addQuery('user', userId || gs.getUserID());\n  gr.query();\n  while (gr.next()) {\n    groups.push({\n      sys_id: gr.group.toString(),\n      name: gr.group.getDisplayValue()\n    });\n  }\n  return groups;\n}\n\n// Usage:\nvar myGroups = getUserGroups();\nmyGroups.forEach(function(g) { gs.info('Group: ' + g.name); });"
+        },
+        {
+          "name": "Safe Impersonation",
+          "description": "Safely impersonate a user with guaranteed revert.",
+          "parameters": [],
+          "example": "function withImpersonation(userSysId, callback) {\n  var imp = new GlideImpersonate();\n  var original = imp.impersonate(userSysId);\n  try {\n    return callback();\n  } finally {\n    imp.impersonate(original); // ALWAYS revert\n  }\n}\n\n// Usage:\nvar result = withImpersonation(targetUser, function() {\n  var gr = new GlideRecord('incident');\n  gr.addActiveQuery();\n  gr.query();\n  return gr.getRowCount(); // Count from target user's perspective\n});"
+        }
+      ]
+    },
+    {
+      "name": "Client Script Utilities",
+      "type": "Utils",
+      "description": "Reusable patterns for client-side ServiceNow development — form manipulation, user interaction, and UI enhancements.",
+      "methods": [
+        {
+          "name": "Field Dependency Manager",
+          "description": "Show/hide/mandatory fields based on another field value.",
+          "parameters": [],
+          "example": "// Client Script: onChange on 'category'\nfunction onChange(control, oldValue, newValue, isLoading) {\n  if (isLoading) return;\n  \n  var fieldMap = {\n    'network': ['u_switch_name', 'u_port_number', 'u_vlan'],\n    'hardware': ['u_asset_tag', 'u_serial_number'],\n    'software': ['u_application_name', 'u_version']\n  };\n  \n  // Hide all optional fields first\n  for (var cat in fieldMap) {\n    fieldMap[cat].forEach(function(f) {\n      g_form.setDisplay(f, false);\n      g_form.setMandatory(f, false);\n    });\n  }\n  \n  // Show fields for selected category\n  if (fieldMap[newValue]) {\n    fieldMap[newValue].forEach(function(f) {\n      g_form.setDisplay(f, true);\n      g_form.setMandatory(f, true);\n    });\n  }\n}"
+        },
+        {
+          "name": "Async Form Validation",
+          "description": "Validate a field value against the server before allowing submit.",
+          "parameters": [],
+          "example": "// Client Script: onChange on 'u_employee_id'\nfunction onChange(control, oldValue, newValue, isLoading) {\n  if (isLoading || !newValue) return;\n  \n  g_form.showFieldMsg('u_employee_id', 'Validating...', 'info');\n  \n  var ga = new GlideAjax('EmployeeValidator');\n  ga.addParam('sysparm_name', 'validate');\n  ga.addParam('sysparm_emp_id', newValue);\n  ga.getXMLAnswer(function(answer) {\n    g_form.hideFieldMsg('u_employee_id');\n    var result = JSON.parse(answer);\n    if (result.valid) {\n      g_form.setValue('u_employee_name', result.name);\n    } else {\n      g_form.showFieldMsg('u_employee_id', 'Employee not found', 'error');\n      g_form.setValue('u_employee_name', '');\n    }\n  });\n}"
+        },
+        {
+          "name": "Form Read-Only Toggle",
+          "description": "Make multiple fields read-only based on a condition.",
+          "parameters": [],
+          "example": "// Make all fields read-only when incident is resolved\nfunction onLoad() {\n  var state = g_form.getValue('state');\n  var readOnlyStates = ['6', '7', '8']; // Resolved, Closed, Cancelled\n  \n  if (readOnlyStates.indexOf(state) >= 0) {\n    var fields = ['short_description', 'description', 'priority',\n                  'urgency', 'impact', 'category', 'subcategory'];\n    fields.forEach(function(f) {\n      g_form.setReadOnly(f, true);\n    });\n    g_form.addInfoMessage('This record is closed and cannot be edited');\n  }\n}"
+        },
+        {
+          "name": "Confirmation Dialog",
+          "description": "Wrap UI Actions with proper confirmation before execution.",
+          "parameters": [],
+          "example": "// Client-side UI Action with confirmation\nfunction closeIncident() {\n  // Pre-validate\n  if (!g_form.getValue('close_notes')) {\n    g_form.showFieldMsg('close_notes', 'Required to close', 'error');\n    return false;\n  }\n  if (!g_form.getValue('close_code')) {\n    g_form.showFieldMsg('close_code', 'Select a close code', 'error');\n    return false;\n  }\n  \n  // Confirm with user\n  var msg = 'Close incident ' + g_form.getValue('number') + '?';\n  if (confirm(msg)) {\n    g_form.setValue('state', 7);\n    g_form.submit();\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Catalog & RITM Helpers",
+      "type": "Utils",
+      "description": "Patterns for working with Service Catalog requested items (RITMs), catalog variables, and order workflows.",
+      "methods": [
+        {
+          "name": "Get RITM Variables",
+          "description": "Retrieve all catalog variables from a Requested Item as a key-value map.",
+          "parameters": [],
+          "example": "function getRITMVariables(ritmSysId) {\n  var vars = {};\n  var gr = new GlideRecord('sc_item_option_mtom');\n  gr.addQuery('request_item', ritmSysId);\n  gr.query();\n  while (gr.next()) {\n    var question = gr.sc_item_option.item_option_new;\n    var name = question.name.toString();\n    var value = gr.sc_item_option.value.toString();\n    var displayValue = gr.sc_item_option.getDisplayValue('value');\n    vars[name] = { value: value, display: displayValue };\n  }\n  return vars;\n}\n\n// Usage:\nvar vars = getRITMVariables(current.getUniqueValue());\ngs.info('Requested for: ' + vars.requested_for.display);"
+        },
+        {
+          "name": "Set RITM Variable",
+          "description": "Programmatically set a catalog variable value on a RITM.",
+          "parameters": [],
+          "example": "function setRITMVariable(ritmSysId, varName, value) {\n  var gr = new GlideRecord('sc_item_option_mtom');\n  gr.addQuery('request_item', ritmSysId);\n  gr.addQuery('sc_item_option.item_option_new.name', varName);\n  gr.query();\n  if (gr.next()) {\n    gr.sc_item_option.value = value;\n    gr.sc_item_option.update();\n    return true;\n  }\n  return false;\n}\n\n// Usage:\nsetRITMVariable(current.getUniqueValue(), 'u_department', 'IT');"
+        },
+        {
+          "name": "Create RITM from Script",
+          "description": "Programmatically order a catalog item with variables.",
+          "parameters": [],
+          "example": "var cart = new sn_sc.CartJS();\ncart.setVariable(catItemSysId, 'u_name', 'John Smith');\ncart.setVariable(catItemSysId, 'u_department', 'Engineering');\nvar request = cart.orderNow(catItemSysId);\ngs.info('Request: ' + request.number);"
+        },
+        {
+          "name": "Close All RITMs on Request",
+          "description": "Close all requested items when the parent request is closed.",
+          "parameters": [],
+          "example": "// Business Rule on sc_request (after update)\nif (current.request_state == 'closed') {\n  var ritm = new GlideRecord('sc_req_item');\n  ritm.addQuery('request', current.getUniqueValue());\n  ritm.addQuery('stage', '!=', 'closed_complete');\n  ritm.query();\n  while (ritm.next()) {\n    ritm.stage = 'closed_complete';\n    ritm.active = false;\n    ritm.update();\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Approval Patterns",
+      "type": "Utils",
+      "description": "Common patterns for managing approvals programmatically — creating, querying, and auto-approving approval records.",
+      "methods": [
+        {
+          "name": "Create Group Approval",
+          "description": "Generate an approval record for a group.",
+          "parameters": [],
+          "example": "function createGroupApproval(record, groupSysId, approvalType) {\n  var appr = new GlideRecord('sysapproval_approver');\n  appr.initialize();\n  appr.sysapproval = record.getUniqueValue();\n  appr.approver = ''; // empty for group\n  appr.source_table = record.getTableName();\n  appr.state = 'requested';\n  appr.setValue('group', groupSysId);\n  appr.insert();\n  return appr.getUniqueValue();\n}\n\n// Usage:\ncreateGroupApproval(current, cabGroupSysId);"
+        },
+        {
+          "name": "Check All Approved",
+          "description": "Check if all approval records for a task are approved.",
+          "parameters": [],
+          "example": "function allApproved(recordSysId) {\n  var gr = new GlideRecord('sysapproval_approver');\n  gr.addQuery('sysapproval', recordSysId);\n  gr.addQuery('state', '!=', 'approved');\n  gr.addQuery('state', '!=', 'not requested');\n  gr.setLimit(1);\n  gr.query();\n  return !gr.hasNext(); // true if no pending/rejected\n}\n\n// Usage:\nif (allApproved(current.getUniqueValue())) {\n  current.approval = 'approved';\n  current.update();\n}"
+        },
+        {
+          "name": "Auto-Approve Pattern",
+          "description": "Automatically approve under specific conditions.",
+          "parameters": [],
+          "example": "// Business Rule: Before insert on sysapproval_approver\n// Condition: current.source_table == 'change_request'\n\nvar changeGR = new GlideRecord('change_request');\nif (changeGR.get(current.sysapproval)) {\n  // Auto-approve standard changes\n  if (changeGR.type == 'standard') {\n    current.state = 'approved';\n    current.comments = 'Auto-approved: Standard change';\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Attachment Utilities",
+      "type": "Utils",
+      "description": "Helper functions for working with file attachments — uploading, downloading, copying between records, and content extraction.",
+      "methods": [
+        {
+          "name": "Copy Attachments",
+          "description": "Copy all attachments from one record to another.",
+          "parameters": [],
+          "example": "function copyAttachments(sourceTable, sourceSysId, targetTable, targetSysId) {\n  var sa = new GlideSysAttachment();\n  var attachments = sa.getAttachments(sourceTable, sourceSysId);\n  var count = 0;\n  while (attachments.next()) {\n    var content = sa.getContentBase64(attachments);\n    sa.writeBase64(\n      targetTable + ':' + targetSysId,\n      attachments.getValue('file_name'),\n      attachments.getValue('content_type'),\n      content\n    );\n    count++;\n  }\n  return count;\n}\n\n// Usage: Copy incident attachments to a problem\nvar copied = copyAttachments('incident', incSysId, 'problem', probSysId);\ngs.info('Copied ' + copied + ' attachments');"
+        },
+        {
+          "name": "Create Text Attachment",
+          "description": "Create a text file attachment on a record.",
+          "parameters": [],
+          "example": "function attachTextFile(table, sysId, fileName, content) {\n  var sa = new GlideSysAttachment();\n  sa.write(\n    table + ':' + sysId,\n    fileName,\n    'text/plain',\n    content\n  );\n}\n\n// Usage:\nvar report = 'Incident Report\\n' + current.number + '\\n' + current.description;\nattachTextFile('incident', current.getUniqueValue(), 'report.txt', report);"
+        },
+        {
+          "name": "Get Attachment Count",
+          "description": "Quick check for how many attachments a record has.",
+          "parameters": [],
+          "example": "function getAttachmentCount(table, sysId) {\n  var ga = new GlideAggregate('sys_attachment');\n  ga.addQuery('table_name', table);\n  ga.addQuery('table_sys_id', sysId);\n  ga.addAggregate('COUNT');\n  ga.query();\n  if (ga.next()) return parseInt(ga.getAggregate('COUNT'));\n  return 0;\n}\n\n// Usage:\nvar count = getAttachmentCount('incident', current.getUniqueValue());\nif (count == 0) gs.addInfoMessage('No attachments on this record');"
+        }
+      ]
+    },
+    {
+      "name": "User & Group Management",
+      "type": "Utils",
+      "description": "Utility functions for user provisioning, group membership management, and role assignment.",
+      "methods": [
+        {
+          "name": "Add User to Group",
+          "description": "Programmatically add a user to a group.",
+          "parameters": [],
+          "example": "function addToGroup(userId, groupId) {\n  // Check if already a member\n  var existing = new GlideRecord('sys_user_grmember');\n  existing.addQuery('user', userId);\n  existing.addQuery('group', groupId);\n  existing.query();\n  if (existing.hasNext()) return false; // Already a member\n  \n  var member = new GlideRecord('sys_user_grmember');\n  member.initialize();\n  member.user = userId;\n  member.group = groupId;\n  member.insert();\n  return true;\n}\n\n// Usage:\nif (addToGroup(gs.getUserID(), 'network_support_sys_id')) {\n  gs.info('Added to group');\n}"
+        },
+        {
+          "name": "Assign Role to User",
+          "description": "Grant a role to a user programmatically.",
+          "parameters": [],
+          "example": "function assignRole(userId, roleName) {\n  // Check if already has role\n  var existing = new GlideRecord('sys_user_has_role');\n  existing.addQuery('user', userId);\n  existing.addQuery('role.name', roleName);\n  existing.query();\n  if (existing.hasNext()) return false;\n  \n  var roleGR = new GlideRecord('sys_user_role');\n  if (!roleGR.get('name', roleName)) return false;\n  \n  var userRole = new GlideRecord('sys_user_has_role');\n  userRole.initialize();\n  userRole.user = userId;\n  userRole.role = roleGR.getUniqueValue();\n  userRole.insert();\n  return true;\n}\n\n// Usage:\nassignRole(newUserSysId, 'itil');"
+        },
+        {
+          "name": "Find Manager Chain",
+          "description": "Walk up the management chain for a user.",
+          "parameters": [],
+          "example": "function getManagerChain(userId, maxDepth) {\n  var chain = [];\n  var currentId = userId;\n  var depth = 0;\n  maxDepth = maxDepth || 5;\n  \n  while (currentId && depth < maxDepth) {\n    var user = new GlideRecord('sys_user');\n    if (!user.get(currentId)) break;\n    var managerId = user.getValue('manager');\n    if (!managerId || managerId == currentId) break;\n    chain.push({\n      sys_id: managerId,\n      name: user.manager.getDisplayValue()\n    });\n    currentId = managerId;\n    depth++;\n  }\n  return chain;\n}\n\n// Usage:\nvar managers = getManagerChain(gs.getUserID());\nmanagers.forEach(function(m) { gs.info('Manager: ' + m.name); });"
+        },
+        {
+          "name": "Lookup User by Email/Name",
+          "description": "Find a user by various identifiers.",
+          "parameters": [],
+          "example": "function findUser(identifier) {\n  var gr = new GlideRecord('sys_user');\n  // Try sys_id first\n  if (identifier.length == 32 && gr.get(identifier)) return gr;\n  // Try user_name\n  if (gr.get('user_name', identifier)) return gr;\n  // Try email\n  if (gr.get('email', identifier)) return gr;\n  // Try employee number\n  if (gr.get('employee_number', identifier)) return gr;\n  return null;\n}\n\n// Usage:\nvar user = findUser('john.doe@company.com');\nif (user) gs.info('Found: ' + user.getDisplayValue('name'));"
+        }
+      ]
+    },
+    {
+      "name": "Background Script Patterns",
+      "type": "Utils",
+      "description": "Safe patterns for running fix scripts, data migrations, and one-time updates in background scripts. Always test in sub-prod first.",
+      "methods": [
+        {
+          "name": "Dry Run Pattern",
+          "description": "Preview what a script will change before actually updating records.",
+          "parameters": [],
+          "example": "// Toggle to false to actually make changes\nvar DRY_RUN = true;\nvar count = 0;\n\nvar gr = new GlideRecord('incident');\ngr.addEncodedQuery('active=true^priority=5^assigned_toISEMPTY');\ngr.query();\n\ngs.info('Found ' + gr.getRowCount() + ' records to update');\n\nwhile (gr.next()) {\n  count++;\n  gs.info('[' + (DRY_RUN ? 'DRY RUN' : 'UPDATE') + '] ' + \n    gr.number + ': Would set priority to 4');\n  \n  if (!DRY_RUN) {\n    gr.priority = 4;\n    gr.setWorkflow(false);\n    gr.autoSysFields(false); // Don't update sys_updated_on\n    gr.update();\n  }\n}\n\ngs.info('Done. ' + (DRY_RUN ? 'Would update' : 'Updated') + ' ' + count + ' records');"
+        },
+        {
+          "name": "Data Migration",
+          "description": "Safely migrate data from one field or table to another.",
+          "parameters": [],
+          "example": "// Migrate data from old field to new field\nvar updated = 0;\nvar errors = 0;\n\nvar gr = new GlideRecord('incident');\ngr.addQuery('u_old_field', '!=', '');\ngr.addQuery('u_new_field', '');\ngr.query();\n\ngs.info('Migrating ' + gr.getRowCount() + ' records...');\n\nwhile (gr.next()) {\n  try {\n    gr.setValue('u_new_field', gr.getValue('u_old_field'));\n    gr.setWorkflow(false);\n    gr.autoSysFields(false);\n    gr.update();\n    updated++;\n  } catch (e) {\n    errors++;\n    gs.error('Error on ' + gr.number + ': ' + e.getMessage());\n  }\n  \n  // Progress log every 500 records\n  if (updated % 500 == 0) gs.info('Progress: ' + updated + ' updated');\n}\n\ngs.info('Migration complete. Updated: ' + updated + ', Errors: ' + errors);"
+        },
+        {
+          "name": "Cleanup Script",
+          "description": "Delete or deactivate records with safety checks.",
+          "parameters": [],
+          "example": "// Cleanup orphaned records\nvar deleted = 0;\nvar BATCH_SIZE = 200;\n\nvar gr = new GlideRecord('u_temp_staging');\ngr.addQuery('sys_created_on', '<', gs.daysAgoStart(90));\ngr.setLimit(BATCH_SIZE);\ngr.query();\n\nwhile (gr.next()) {\n  gr.deleteRecord();\n  deleted++;\n}\n\ngs.info('Cleaned up ' + deleted + ' records older than 90 days');\n\n// NOTE: Run this multiple times if more than BATCH_SIZE records exist\n// This prevents timeout on large datasets"
+        },
+        {
+          "name": "Fix Script Template",
+          "description": "Standard template for safe fix scripts with logging.",
+          "parameters": [],
+          "example": "(function fixScript() {\n  var TABLE = 'incident';\n  var QUERY = 'active=true^stateIN6,7^resolved_atISEMPTY';\n  var DRY_RUN = true;\n  \n  var gr = new GlideRecord(TABLE);\n  gr.addEncodedQuery(QUERY);\n  gr.query();\n  \n  var total = gr.getRowCount();\n  var fixed = 0;\n  var skipped = 0;\n  \n  gs.info('=== FIX SCRIPT START ===');\n  gs.info('Mode: ' + (DRY_RUN ? 'DRY RUN' : 'LIVE'));\n  gs.info('Records found: ' + total);\n  \n  while (gr.next()) {\n    // Your fix logic here\n    if (!DRY_RUN) {\n      gr.resolved_at = gr.sys_updated_on;\n      gr.setWorkflow(false);\n      gr.autoSysFields(false);\n      gr.update();\n      fixed++;\n    } else {\n      gs.info('  [DRY] ' + gr.number + ': resolved_at would be set');\n      fixed++;\n    }\n  }\n  \n  gs.info('=== FIX SCRIPT END ===');\n  gs.info('Fixed: ' + fixed + ', Skipped: ' + skipped + ', Total: ' + total);\n})();"
+        }
+      ]
+    },
+    {
+      "name": "Table & Schema Utilities",
+      "type": "Utils",
+      "description": "Functions for inspecting table schemas, field metadata, and dictionary entries programmatically.",
+      "methods": [
+        {
+          "name": "Get Field Type",
+          "description": "Get the type and metadata of a field from the dictionary.",
+          "parameters": [],
+          "example": "function getFieldInfo(table, fieldName) {\n  var gr = new GlideRecord('sys_dictionary');\n  gr.addQuery('name', table);\n  gr.addQuery('element', fieldName);\n  gr.query();\n  if (gr.next()) {\n    return {\n      type: gr.getValue('internal_type'),\n      label: gr.getValue('column_label'),\n      maxLength: gr.getValue('max_length'),\n      mandatory: gr.getValue('mandatory') == 'true',\n      readOnly: gr.getValue('read_only') == 'true',\n      reference: gr.getValue('reference'),\n      defaultValue: gr.getValue('default_value')\n    };\n  }\n  return null;\n}\n\n// Usage:\nvar info = getFieldInfo('incident', 'assigned_to');\ngs.info(JSON.stringify(info));\n// {type:'reference', label:'Assigned to', reference:'sys_user', ...}"
+        },
+        {
+          "name": "List All Fields",
+          "description": "Get all field names and types for a table.",
+          "parameters": [],
+          "example": "function listFields(table) {\n  var fields = [];\n  var gr = new GlideRecord('sys_dictionary');\n  gr.addQuery('name', table);\n  gr.addQuery('element', '!=', '');\n  gr.addQuery('internal_type', '!=', 'collection');\n  gr.orderBy('element');\n  gr.query();\n  while (gr.next()) {\n    fields.push({\n      name: gr.getValue('element'),\n      type: gr.getValue('internal_type'),\n      label: gr.getValue('column_label')\n    });\n  }\n  return fields;\n}\n\n// Usage:\nvar fields = listFields('incident');\nfields.forEach(function(f) {\n  gs.info(f.name + ' (' + f.type + '): ' + f.label);\n});"
+        },
+        {
+          "name": "Check Choice Values",
+          "description": "Get all valid choices for a choice field.",
+          "parameters": [],
+          "example": "function getChoices(table, field) {\n  var choices = [];\n  var gr = new GlideRecord('sys_choice');\n  gr.addQuery('name', table);\n  gr.addQuery('element', field);\n  gr.addQuery('inactive', false);\n  gr.orderBy('sequence');\n  gr.query();\n  while (gr.next()) {\n    choices.push({\n      value: gr.getValue('value'),\n      label: gr.getValue('label'),\n      sequence: gr.getValue('sequence')\n    });\n  }\n  return choices;\n}\n\n// Usage:\nvar states = getChoices('incident', 'state');\nstates.forEach(function(s) { gs.info(s.value + ': ' + s.label); });"
+        }
+      ]
+    },
+    {
+      "name": "Email Helpers",
+      "type": "Utils",
+      "description": "Utility functions for sending formatted emails, building HTML email bodies, and managing email recipients.",
+      "methods": [
+        {
+          "name": "Send HTML Email",
+          "description": "Send a well-formatted HTML email with a template.",
+          "parameters": [],
+          "example": "function sendEmail(to, subject, bodyHtml, cc) {\n  var email = new GlideEmailOutbound();\n  email.addAddress('to', to);\n  if (cc) email.addAddress('cc', cc);\n  email.setSubject(subject);\n  email.setBody(\n    '<html><body style=\"font-family:Arial,sans-serif;font-size:14px;\">' +\n    bodyHtml +\n    '</body></html>'\n  );\n  email.save();\n}\n\n// Usage:\nsendEmail(\n  'admin@company.com',\n  'P1 Alert: ' + current.number,\n  '<h2 style=\"color:#d32f2f;\">Critical Incident</h2>' +\n  '<p><b>Number:</b> ' + current.number + '</p>' +\n  '<p><b>Description:</b> ' + current.short_description + '</p>' +\n  '<p><a href=\"' + gs.getProperty('glide.servlet.uri') + current.getLink() + '\">View Incident</a></p>',\n  'manager@company.com'\n);"
+        },
+        {
+          "name": "Build HTML Table",
+          "description": "Generate an HTML table from an array of records — useful for email reports.",
+          "parameters": [],
+          "example": "function buildHTMLTable(headers, rows) {\n  var html = '<table style=\"border-collapse:collapse;width:100%;\">';\n  html += '<tr>';\n  headers.forEach(function(h) {\n    html += '<th style=\"border:1px solid #ddd;padding:8px;background:#f5f5f5;text-align:left;\">' + h + '</th>';\n  });\n  html += '</tr>';\n  rows.forEach(function(row) {\n    html += '<tr>';\n    row.forEach(function(cell) {\n      html += '<td style=\"border:1px solid #ddd;padding:8px;\">' + cell + '</td>';\n    });\n    html += '</tr>';\n  });\n  html += '</table>';\n  return html;\n}\n\n// Usage: Build a daily incident report\nvar rows = [];\nvar gr = new GlideRecord('incident');\ngr.addQuery('opened_at', '>=', gs.daysAgoStart(1));\ngr.query();\nwhile (gr.next()) {\n  rows.push([gr.number, gr.short_description, gr.getDisplayValue('priority')]);\n}\nvar table = buildHTMLTable(['Number', 'Description', 'Priority'], rows);"
+        }
+      ]
+    },
+    {
+      "name": "GlideRecord Anti-Patterns",
+      "type": "Utils",
+      "description": "Common mistakes and their correct alternatives. Avoid these patterns for better performance and reliability.",
+      "methods": [
+        {
+          "name": "Avoid getRowCount()",
+          "description": "getRowCount() queries ALL records just to count them. Use GlideAggregate instead.",
+          "parameters": [],
+          "example": "// BAD — scans entire table\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();\nvar count = gr.getRowCount(); // Slow! Loads all records\n\n// GOOD — database-level count\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nvar count = 0;\nif (ga.next()) count = parseInt(ga.getAggregate('COUNT'));"
+        },
+        {
+          "name": "Avoid Dot-Walking in Loops",
+          "description": "Dot-walking inside a while loop causes N+1 queries. Resolve references outside the loop or use a join.",
+          "parameters": [],
+          "example": "// BAD — N+1 query problem\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  // Each dot-walk = separate DB query!\n  var email = gr.assigned_to.email; // BAD inside loop\n}\n\n// GOOD — use getDisplayValue or pre-fetch\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  var assignedName = gr.getDisplayValue('assigned_to'); // No extra query\n  var assignedId = gr.getValue('assigned_to'); // Just the sys_id\n}"
+        },
+        {
+          "name": "Avoid Synchronous GlideAjax",
+          "description": "getXMLWait() blocks the browser thread. Always use the async callback pattern.",
+          "parameters": [],
+          "example": "// BAD — blocks the entire browser\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLWait(); // FREEZES the UI!\nvar answer = ga.getAnswer();\n\n// GOOD — async with callback\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLAnswer(function(answer) {\n  // UI stays responsive\n  console.log(answer);\n});"
+        },
+        {
+          "name": "Avoid setValue with Display Values",
+          "description": "setValue expects internal values, not display values. Use setDisplayValue for display values.",
+          "parameters": [],
+          "example": "// BAD — sets the literal string, not the reference\ncurrent.assigned_to = 'John Smith'; // Stores 'John Smith' as text!\n\n// GOOD — use sys_id for reference fields\ncurrent.setValue('assigned_to', userSysId);\n\n// GOOD — if you only have the name\ncurrent.assigned_to.setDisplayValue('John Smith');\n\n// Client-side — third param is the display value\ng_form.setValue('assigned_to', userSysId, 'John Smith');"
+        },
+        {
+          "name": "Always Use setWorkflow Safely",
+          "description": "setWorkflow(false) skips ALL business rules. Use with extreme caution and always re-enable.",
+          "parameters": [],
+          "example": "// WARNING: setWorkflow(false) skips:\n// - Business Rules\n// - Workflows\n// - Notifications\n// - Audit history updates\n\n// Only use for bulk operations or data fixes:\nvar gr = new GlideRecord('incident');\ngr.addEncodedQuery(query);\ngr.query();\nwhile (gr.next()) {\n  gr.setValue('u_migrated', true);\n  gr.setWorkflow(false);   // Skip rules\n  gr.autoSysFields(false); // Don't update sys_updated_on\n  gr.update();\n}\n// Note: setWorkflow only affects the current GlideRecord instance\n// Other scripts creating new GlideRecords are NOT affected"
+        }
+      ]
     }
   ]
 }
