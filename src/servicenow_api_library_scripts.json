@@ -4469,6 +4469,541 @@
           "example": "// Query via GlideRecord on pa_indicators\nvar gr = new GlideRecord('pa_indicators');\ngr.addActiveQuery();\ngr.query();\nwhile (gr.next()) {\n  gs.info(gr.getValue('name') + ': ' + gr.getValue('value'));\n}"
         }
       ]
+    },
+    {
+      "name": "AbstractAjaxProcessor",
+      "type": "Server-side",
+      "description": "Base class for Script Includes called via GlideAjax. Extend this class to expose server-side methods to client scripts. Methods must return a value or use getParameter/setAnswer for data exchange.",
+      "methods": [
+        {
+          "name": "getParameter",
+          "description": "Gets a parameter passed from the client-side GlideAjax call.",
+          "parameters": [
+            "paramName"
+          ],
+          "example": "// In your Script Include extending AbstractAjaxProcessor\nvar userId = this.getParameter('sysparm_user_id');\nvar action = this.getParameter('sysparm_action');"
+        },
+        {
+          "name": "newItem",
+          "description": "Creates a new result element in the XML response. Used when returning multiple values.",
+          "parameters": [
+            "name"
+          ],
+          "example": "// Return multiple values\nvar item = this.newItem('user_info');\nitem.setAttribute('name', gr.getValue('name'));\nitem.setAttribute('email', gr.getValue('email'));\nitem.setAttribute('phone', gr.getValue('phone'));"
+        },
+        {
+          "name": "getDocument",
+          "description": "Returns the XML document of the response.",
+          "parameters": [],
+          "example": "var doc = this.getDocument();"
+        },
+        {
+          "name": "setAnswer",
+          "description": "Sets the answer attribute in the XML response. Client receives this via getXMLAnswer callback.",
+          "parameters": [
+            "value"
+          ],
+          "example": "// Simple string response\nthis.setAnswer('Success');\n\n// JSON response\nvar result = {status: 'ok', count: 42};\nthis.setAnswer(JSON.stringify(result));"
+        },
+        {
+          "name": "setError",
+          "description": "Sets an error message in the response.",
+          "parameters": [
+            "error"
+          ],
+          "example": "if (!userId) {\n  this.setError('User ID is required');\n  return;\n}"
+        },
+        {
+          "name": "Full Pattern",
+          "description": "Complete GlideAjax Script Include pattern with client and server code.",
+          "parameters": [],
+          "example": "// === Script Include ===\nvar UserLookupAjax = Class.create();\nUserLookupAjax.prototype = Object.extendsObject(AbstractAjaxProcessor, {\n  getUser: function() {\n    var userId = this.getParameter('sysparm_user_id');\n    var gr = new GlideRecord('sys_user');\n    if (gr.get(userId)) {\n      return JSON.stringify({\n        name: gr.getDisplayValue('name'),\n        email: gr.getValue('email'),\n        dept: gr.getDisplayValue('department')\n      });\n    }\n    return JSON.stringify({error: 'Not found'});\n  },\n  type: 'UserLookupAjax'\n});\n\n// === Client Script ===\nvar ga = new GlideAjax('UserLookupAjax');\nga.addParam('sysparm_name', 'getUser');\nga.addParam('sysparm_user_id', g_form.getValue('caller_id'));\nga.getXMLAnswer(function(answer) {\n  var user = JSON.parse(answer);\n  console.log(user.name);\n});"
+        }
+      ]
+    },
+    {
+      "name": "GlideDBFunctionBuilder",
+      "type": "Server-side",
+      "description": "Builds database functions for use in GlideRecord queries. Enables advanced query operations like DAYOFWEEK, UPPER, CONCAT, and date functions.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a new GlideDBFunctionBuilder.",
+          "parameters": [],
+          "example": "var builder = new GlideDBFunctionBuilder();"
+        },
+        {
+          "name": "dayofweek",
+          "description": "Builds a DAYOFWEEK function for date field queries.",
+          "parameters": [],
+          "example": "var builder = new GlideDBFunctionBuilder();\nvar myFunc = builder.dayofweek();\nmyFunc = builder.field('opened_at');\nmyFunc = builder.build();\n\n// Use in a GlideRecord query\nvar gr = new GlideRecord('incident');\ngr.addQuery(myFunc, '=', 1); // Sunday\ngr.query();"
+        },
+        {
+          "name": "field",
+          "description": "Specifies the field to apply the function to.",
+          "parameters": [
+            "fieldName"
+          ],
+          "example": "builder.field('sys_created_on');"
+        },
+        {
+          "name": "build",
+          "description": "Builds and returns the database function string.",
+          "parameters": [],
+          "example": "var func = builder.build();"
+        },
+        {
+          "name": "length",
+          "description": "Builds a LENGTH function.",
+          "parameters": [],
+          "example": "var builder = new GlideDBFunctionBuilder();\nvar lenFunc = builder.length();\nbuilder.field('short_description');\nvar func = builder.build();\nvar gr = new GlideRecord('incident');\ngr.addQuery(func, '>', 100); // Descriptions longer than 100 chars\ngr.query();"
+        },
+        {
+          "name": "upper",
+          "description": "Builds an UPPER function for case-insensitive comparisons.",
+          "parameters": [],
+          "example": "var builder = new GlideDBFunctionBuilder();\nbuilder.upper();\nbuilder.field('short_description');\nvar func = builder.build();"
+        },
+        {
+          "name": "position",
+          "description": "Builds a POSITION (find substring) function.",
+          "parameters": [],
+          "example": "var builder = new GlideDBFunctionBuilder();\nbuilder.position();\nbuilder.field('short_description');\nbuilder.constant('ERROR');\nvar func = builder.build();"
+        },
+        {
+          "name": "constant",
+          "description": "Adds a constant value to the function.",
+          "parameters": [
+            "value"
+          ],
+          "example": "builder.constant('some_value');"
+        }
+      ]
+    },
+    {
+      "name": "sn_ws_err.ServiceError",
+      "type": "Server-side",
+      "description": "Builds standardized error responses for Scripted REST APIs. Provides consistent error formatting with status codes, messages, and detail fields.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a new ServiceError.",
+          "parameters": [],
+          "example": "var error = new sn_ws_err.ServiceError();"
+        },
+        {
+          "name": "setStatus",
+          "description": "Sets the HTTP status code for the error.",
+          "parameters": [
+            "statusCode"
+          ],
+          "example": "var error = new sn_ws_err.ServiceError();\nerror.setStatus(403);\nerror.setMessage(\"Access denied\");\nresponse.setError(error);"
+        },
+        {
+          "name": "setMessage",
+          "description": "Sets the error message.",
+          "parameters": [
+            "message"
+          ],
+          "example": "error.setMessage('Resource not found');"
+        },
+        {
+          "name": "setDetail",
+          "description": "Sets additional error detail text.",
+          "parameters": [
+            "detail"
+          ],
+          "example": "error.setDetail('No incident found with number: ' + incNumber);"
+        },
+        {
+          "name": "Full Pattern",
+          "description": "Complete error handling pattern in a Scripted REST Resource.",
+          "parameters": [],
+          "example": "// In a Scripted REST Resource script\n(function process(request, response) {\n  var id = request.pathParams.id;\n  var gr = new GlideRecord('incident');\n  if (!gr.get(id)) {\n    var err = new sn_ws_err.ServiceError();\n    err.setStatus(404);\n    err.setMessage('Incident not found');\n    err.setDetail('No record with sys_id: ' + id);\n    response.setError(err);\n    return;\n  }\n  response.setStatus(200);\n  response.setBody({\n    number: gr.getValue('number'),\n    state: gr.getDisplayValue('state')\n  });\n})(request, response);"
+        }
+      ]
+    },
+    {
+      "name": "sn_clotho.DataBuilder",
+      "type": "Server-side",
+      "description": "MetricBase time-series API for recording and querying metric data. Used with Performance Analytics and custom metrics for real-time monitoring dashboards.",
+      "methods": [
+        {
+          "name": "add",
+          "description": "Adds a metric value at a specific time.",
+          "parameters": [
+            "table",
+            "metricName",
+            "glideRecord",
+            "value"
+          ],
+          "example": "var mb = new sn_clotho.DataBuilder();\nmb.add('incident', 'response_time', current, responseTimeMs);\nmb.save();"
+        },
+        {
+          "name": "save",
+          "description": "Saves all queued metric data points.",
+          "parameters": [],
+          "example": "var mb = new sn_clotho.DataBuilder();\nmb.add(\"incident\", \"response_time\", current, 45);\nmb.add(\"incident\", \"resolution_time\", current, 120);\nmb.save(); // Persist all queued metrics"
+        },
+        {
+          "name": "Query Pattern",
+          "description": "Query metric data using sn_clotho.Datum.",
+          "parameters": [],
+          "example": "// Record a metric\nvar mb = new sn_clotho.DataBuilder();\nmb.add('incident', 'resolution_time', current, diffInMinutes);\nmb.save();\n\n// Query metrics via GlideRecord on metric_instance\nvar gr = new GlideRecord('metric_instance');\ngr.addQuery('id', current.getUniqueValue());\ngr.addQuery('definition.name', 'resolution_time');\ngr.query();"
+        }
+      ]
+    },
+    {
+      "name": "GlideHTTPRequest",
+      "type": "Server-side",
+      "description": "Lightweight HTTP client for simple outbound requests. Less feature-rich than RESTMessageV2 but simpler for basic HTTP calls. No MID Server support.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a new HTTP request to the specified URL.",
+          "parameters": [
+            "url"
+          ],
+          "example": "var req = new GlideHTTPRequest('https://api.example.com/status');"
+        },
+        {
+          "name": "addHeader",
+          "description": "Adds an HTTP header to the request.",
+          "parameters": [
+            "name",
+            "value"
+          ],
+          "example": "req.addHeader('Authorization', 'Bearer ' + token);\nreq.addHeader('Content-Type', 'application/json');"
+        },
+        {
+          "name": "addParameter",
+          "description": "Adds a query parameter.",
+          "parameters": [
+            "name",
+            "value"
+          ],
+          "example": "req.addParameter('limit', '10');\nreq.addParameter('offset', '0');"
+        },
+        {
+          "name": "get",
+          "description": "Sends an HTTP GET request.",
+          "parameters": [],
+          "example": "var resp = req.get();\nvar status = resp.getStatusCode();\nvar body = resp.getBody();\ngs.info('Status: ' + status);\ngs.info('Body: ' + body);"
+        },
+        {
+          "name": "post",
+          "description": "Sends an HTTP POST request.",
+          "parameters": [
+            "body"
+          ],
+          "example": "var req = new GlideHTTPRequest('https://api.example.com/data');\nreq.addHeader('Content-Type', 'application/json');\nvar payload = JSON.stringify({key: 'value'});\nvar resp = req.post(payload);\ngs.info('Response: ' + resp.getBody());"
+        }
+      ]
+    },
+    {
+      "name": "GlideURI",
+      "type": "Server-side",
+      "description": "Server-side URI builder and parser. Provides methods for constructing and manipulating URIs with proper encoding.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a new GlideURI.",
+          "parameters": [],
+          "example": "var uri = new GlideURI();"
+        },
+        {
+          "name": "set",
+          "description": "Sets the URI path for the request. Typically a ServiceNow page like incident.do or sys_user_list.do.",
+          "parameters": [
+            "path"
+          ],
+          "example": "var uri = new GlideURI();\nuri.set('incident.do');"
+        },
+        {
+          "name": "get",
+          "description": "Parses the current request URI.",
+          "parameters": [
+            "request"
+          ],
+          "example": "var uri = new GlideURI();\nvar path = uri.get('table'); // Gets the table parameter"
+        },
+        {
+          "name": "getFileFromPath",
+          "description": "Returns the file name from a URI path.",
+          "parameters": [],
+          "example": "var uri = new GlideURI();\nvar file = uri.getFileFromPath();\ngs.info('File: ' + file); // 'incident.do'"
+        },
+        {
+          "name": "toString",
+          "description": "Returns the full URI as a string.",
+          "parameters": [],
+          "example": "var uri = new GlideURI();\nuri.set(\"incident.do\");\nvar fullUri = uri.toString();\ngs.info(\"URI: \" + fullUri);"
+        }
+      ]
+    },
+    {
+      "name": "GlideTextReader",
+      "type": "Server-side",
+      "description": "Reads text content from attachments or input streams line by line. Useful for processing CSV, log, or text file attachments.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a GlideTextReader from an input stream.",
+          "parameters": [
+            "inputStream"
+          ],
+          "example": "var sa = new GlideSysAttachment();\nvar stream = sa.getContentStream(attachSysId);\nvar reader = new GlideTextReader(stream);"
+        },
+        {
+          "name": "readLine",
+          "description": "Reads the next line from the stream. Returns null when no more lines.",
+          "parameters": [],
+          "example": "var sa = new GlideSysAttachment();\nvar stream = sa.getContentStream(attachSysId);\nvar reader = new GlideTextReader(stream);\nvar line = reader.readLine();\nvar lineNum = 0;\nwhile (line != null) {\n  lineNum++;\n  gs.info('Line ' + lineNum + ': ' + line);\n  // Parse CSV: var cols = line.split(',');\n  line = reader.readLine();\n}"
+        }
+      ]
+    },
+    {
+      "name": "CatalogClientScriptUtils",
+      "type": "Client-side",
+      "description": "Utility patterns for Service Catalog Client Scripts. Catalog Client Scripts run on catalog items and record producers and have access to g_form, but with catalog-specific behavior.",
+      "methods": [
+        {
+          "name": "onChange Pattern",
+          "description": "Runs when a catalog variable value changes. The newValue parameter contains the updated value.",
+          "parameters": [
+            "control",
+            "oldValue",
+            "newValue",
+            "isLoading",
+            "isTemplate"
+          ],
+          "example": "// Catalog Client Script: onChange\n// Variable: u_department\nfunction onChange(control, oldValue, newValue, isLoading, isTemplate) {\n  if (isLoading || newValue == '') return;\n\n  // Show/hide variables based on department\n  if (newValue == 'IT') {\n    g_form.setDisplay('u_it_subcategory', true);\n    g_form.setMandatory('u_it_subcategory', true);\n  } else {\n    g_form.setDisplay('u_it_subcategory', false);\n    g_form.setMandatory('u_it_subcategory', false);\n  }\n}"
+        },
+        {
+          "name": "onLoad Pattern",
+          "description": "Runs when the catalog form first loads.",
+          "parameters": [],
+          "example": "function onLoad() {\n  // Set default values\n  g_form.setValue('u_requested_for', g_user.userID);\n  \n  // Hide optional sections\n  g_form.setDisplay('u_additional_info', false);\n  \n  // Add info message\n  g_form.addInfoMessage('Please fill out all required fields');\n}"
+        },
+        {
+          "name": "onSubmit Pattern",
+          "description": "Runs when the catalog form is submitted. Return false to prevent submission.",
+          "parameters": [],
+          "example": "function onSubmit() {\n  var qty = g_form.getValue('u_quantity');\n  if (parseInt(qty) > 10) {\n    g_form.addErrorMessage('Maximum quantity is 10');\n    return false; // Prevent submit\n  }\n  \n  if (!g_form.getValue('u_justification')) {\n    g_form.showFieldMsg('u_justification', 'Please provide a justification', 'error');\n    return false;\n  }\n  return true;\n}"
+        },
+        {
+          "name": "GlideAjax in Catalog",
+          "description": "Calling server-side code from a catalog client script.",
+          "parameters": [],
+          "example": "// Validate employee ID via server lookup\nfunction onChange(control, oldValue, newValue, isLoading) {\n  if (isLoading || newValue == '') return;\n  \n  var ga = new GlideAjax('EmployeeLookup');\n  ga.addParam('sysparm_name', 'validateEmployee');\n  ga.addParam('sysparm_emp_id', newValue);\n  ga.getXMLAnswer(function(answer) {\n    var result = JSON.parse(answer);\n    if (result.valid) {\n      g_form.setValue('u_employee_name', result.name);\n      g_form.setValue('u_department', result.department);\n    } else {\n      g_form.showFieldMsg('u_employee_id', 'Employee not found', 'error');\n      g_form.setValue('u_employee_name', '');\n    }\n  });\n}"
+        }
+      ]
+    },
+    {
+      "name": "Business Rule Patterns",
+      "type": "Server-side",
+      "description": "Common patterns for Business Rules — server-side scripts that run when records are queried, inserted, updated, or deleted. The \"current\" and \"previous\" objects are available.",
+      "methods": [
+        {
+          "name": "Before Insert",
+          "description": "Runs before a new record is saved. Used to set default values, validate, or abort the operation.",
+          "parameters": [],
+          "example": "// Before Insert Business Rule on incident\n(function executeRule(current, previous) {\n  // Auto-assign based on category\n  if (current.category == 'network') {\n    current.assignment_group.setDisplayValue('Network Support');\n  }\n  \n  // Set priority based on urgency + impact\n  if (current.urgency == 1 && current.impact == 1) {\n    current.priority = 1;\n  }\n  \n  // Validate\n  if (current.short_description.nil()) {\n    current.setAbortAction(true);\n    gs.addErrorMessage('Short description is required');\n  }\n})(current, previous);"
+        },
+        {
+          "name": "Before Update",
+          "description": "Runs before an existing record is updated. Has access to both current (new) and previous (old) values.",
+          "parameters": [],
+          "example": "// Before Update: Detect state changes\n(function executeRule(current, previous) {\n  // Prevent reopening resolved incidents\n  if (previous.state == 6 && current.state == 1) {\n    if (!gs.hasRole('itil_admin')) {\n      current.setAbortAction(true);\n      gs.addErrorMessage('Only ITIL admins can reopen resolved incidents');\n    }\n  }\n  \n  // Track reassignment\n  if (current.assigned_to.changes()) {\n    current.reassignment_count = parseInt(current.reassignment_count) + 1;\n  }\n})(current, previous);"
+        },
+        {
+          "name": "After Insert/Update",
+          "description": "Runs after the record is saved. Used for notifications, related record creation, or cascading updates.",
+          "parameters": [],
+          "example": "// After Insert: Create related tasks\n(function executeRule(current, previous) {\n  if (current.priority == 1) {\n    // Create a P1 coordination task\n    var task = new GlideRecord('task');\n    task.initialize();\n    task.short_description = 'P1 Coordination: ' + current.number;\n    task.parent = current.getUniqueValue();\n    task.assignment_group.setDisplayValue('Major Incident Management');\n    task.insert();\n    \n    // Send event for notifications\n    gs.eventQueue('incident.p1.created', current, gs.getUserID(), gs.getUserName());\n  }\n})(current, previous);"
+        },
+        {
+          "name": "Display Business Rule",
+          "description": "Runs when a form is loaded (display=true). Used to pass data to client scripts via g_scratchpad.",
+          "parameters": [],
+          "example": "// Display Business Rule on incident\n(function executeRule(current, previous) {\n  // Pass data to client via g_scratchpad\n  g_scratchpad.is_vip = current.caller_id.vip.toString();\n  g_scratchpad.caller_location = current.caller_id.location.getDisplayValue();\n  \n  // Check if user can resolve\n  g_scratchpad.can_resolve = (gs.hasRole('itil') && \n    current.assigned_to == gs.getUserID()).toString();\n  \n  // Get count of related incidents\n  var ga = new GlideAggregate('incident');\n  ga.addQuery('cmdb_ci', current.cmdb_ci);\n  ga.addQuery('active', true);\n  ga.addAggregate('COUNT');\n  ga.query();\n  if (ga.next()) {\n    g_scratchpad.related_count = ga.getAggregate('COUNT');\n  }\n})(current, previous);"
+        },
+        {
+          "name": "Async Business Rule",
+          "description": "Runs asynchronously after the transaction completes. Does not block the user. Access current but NOT previous.",
+          "parameters": [],
+          "example": "// Async: Heavy processing without blocking\n(function executeRule(current, previous) {\n  // Recalculate metrics (heavy operation)\n  var ga = new GlideAggregate('incident');\n  ga.addQuery('assignment_group', current.assignment_group);\n  ga.addQuery('active', true);\n  ga.addAggregate('COUNT');\n  ga.addAggregate('AVG', 'reassignment_count');\n  ga.query();\n  if (ga.next()) {\n    var grp = new GlideRecord('sys_user_group');\n    if (grp.get(current.assignment_group)) {\n      grp.u_open_count = ga.getAggregate('COUNT');\n      grp.u_avg_reassign = ga.getAggregate('AVG', 'reassignment_count');\n      grp.update();\n    }\n  }\n})(current, previous);"
+        }
+      ]
+    },
+    {
+      "name": "Scheduled Job Patterns",
+      "type": "Server-side",
+      "description": "Server-side patterns for Scheduled Script Executions. These run on a schedule (daily, weekly, etc.) and have no user context by default.",
+      "methods": [
+        {
+          "name": "Basic Pattern",
+          "description": "Standard scheduled job pattern with logging and error handling.",
+          "parameters": [],
+          "example": "// Scheduled Job: Close stale resolved incidents\nvar gr = new GlideRecord('incident');\ngr.addQuery('state', 6); // Resolved\ngr.addQuery('resolved_at', '<', gs.daysAgoStart(7));\ngr.query();\n\nvar count = 0;\nwhile (gr.next()) {\n  gr.state = 7; // Closed\n  gr.close_notes = 'Auto-closed after 7 days in resolved state';\n  gr.setWorkflow(false);\n  gr.autoSysFields(false);\n  gr.update();\n  count++;\n}\ngs.info('Auto-closed ' + count + ' stale incidents');"
+        },
+        {
+          "name": "Batch Processing",
+          "description": "Process records in batches to avoid timeouts on large datasets.",
+          "parameters": [],
+          "example": "// Process in batches of 500\nvar batchSize = 500;\nvar processed = 0;\nvar hasMore = true;\n\nwhile (hasMore) {\n  var gr = new GlideRecord('u_temp_records');\n  gr.addQuery('processed', false);\n  gr.setLimit(batchSize);\n  gr.query();\n  \n  if (!gr.hasNext()) {\n    hasMore = false;\n    break;\n  }\n  \n  while (gr.next()) {\n    // Process record\n    gr.setValue('processed', true);\n    gr.setWorkflow(false);\n    gr.update();\n    processed++;\n  }\n  gs.info('Processed batch, total: ' + processed);\n}\ngs.info('Job complete. Total processed: ' + processed);"
+        }
+      ]
+    },
+    {
+      "name": "UI Action Patterns",
+      "type": "Client/Server Interaction",
+      "description": "UI Actions add buttons to forms and lists. They can run client-side, server-side, or both. Client-side UI Actions have access to g_form, g_user, and can call GlideAjax.",
+      "methods": [
+        {
+          "name": "Client-side UI Action",
+          "description": "Runs in the browser when a button is clicked. Set Client=true in the UI Action record.",
+          "parameters": [],
+          "example": "// Client-side UI Action on incident\n// Name: Escalate, Client: true\nfunction escalateIncident() {\n  var priority = g_form.getValue('priority');\n  if (priority <= 2) {\n    alert('Already high priority');\n    return;\n  }\n  if (confirm('Escalate this incident to P2?')) {\n    g_form.setValue('priority', 2);\n    g_form.setValue('urgency', 1);\n    gsftSubmit(null, g_form.getFormElement(), 'sysverb_update');\n  }\n}"
+        },
+        {
+          "name": "Server-side UI Action",
+          "description": "Runs on the server. Has access to current, previous, and action objects.",
+          "parameters": [],
+          "example": "// Server-side UI Action\n// Name: Create Problem, Client: false\ncurrent.update();\n\nvar problem = new GlideRecord('problem');\nproblem.initialize();\nproblem.short_description = 'Problem from ' + current.number;\nproblem.description = current.description;\nproblem.category = current.category;\nvar probId = problem.insert();\n\ncurrent.problem_id = probId;\ncurrent.update();\n\naction.setRedirectURL(problem);\ngs.addInfoMessage('Problem created: ' + problem.number);"
+        },
+        {
+          "name": "Client + Server UI Action",
+          "description": "Runs client-side first, then server-side. Use gsftSubmit to trigger server execution.",
+          "parameters": [],
+          "example": "// UI Action: Client=true, also runs server-side\n// Client script (runs first):\nfunction confirmAndClose() {\n  var notes = g_form.getValue('close_notes');\n  if (!notes) {\n    g_form.showFieldMsg('close_notes', 'Required for closure', 'error');\n    return false;\n  }\n  if (confirm('Close this incident?')) {\n    g_form.setValue('state', 7);\n    gsftSubmit(null, g_form.getFormElement(), 'close_incident');\n  }\n}\n\n// Server script (runs after client submits):\ncurrent.update();\ngs.addInfoMessage('Incident ' + current.number + ' closed');"
+        },
+        {
+          "name": "List UI Action",
+          "description": "Runs on selected records in a list view. Access checked records via action or g_list.",
+          "parameters": [],
+          "example": "// List UI Action (server-side)\n// Show on: List\nvar checkedIds = action.getGRList();\nwhile (checkedIds.next()) {\n  checkedIds.setValue('assignment_group', newGroupSysId);\n  checkedIds.update();\n}\ngs.addInfoMessage('Reassigned ' + checkedIds.getRowCount() + ' records');\n\n// Client-side list action:\n// var ids = g_list.getChecked();\n// if (!ids) { alert('Select records first'); return; }"
+        }
+      ]
+    },
+    {
+      "name": "Scripted REST API Patterns",
+      "type": "Server-side",
+      "description": "Patterns for building custom REST APIs in ServiceNow using Scripted REST API resources. APIs are defined under System Web Services > Scripted REST APIs.",
+      "methods": [
+        {
+          "name": "GET Resource",
+          "description": "Handle GET requests to retrieve data.",
+          "parameters": [],
+          "example": "// Scripted REST Resource: GET /api/x_app/myapi/incidents/{id}\n(function process(request, response) {\n  var id = request.pathParams.id;\n  var gr = new GlideRecord('incident');\n  \n  if (!gr.get(id)) {\n    response.setStatus(404);\n    response.setBody({error: 'Incident not found'});\n    return;\n  }\n  \n  response.setStatus(200);\n  response.setBody({\n    sys_id: gr.getUniqueValue(),\n    number: gr.getValue('number'),\n    short_description: gr.getValue('short_description'),\n    state: gr.getDisplayValue('state'),\n    assigned_to: gr.getDisplayValue('assigned_to'),\n    priority: gr.getValue('priority')\n  });\n})(request, response);"
+        },
+        {
+          "name": "POST Resource",
+          "description": "Handle POST requests to create data.",
+          "parameters": [],
+          "example": "// POST /api/x_app/myapi/incidents\n(function process(request, response) {\n  var body = request.body.data;\n  \n  // Validate required fields\n  if (!body.short_description) {\n    response.setStatus(400);\n    response.setBody({error: 'short_description is required'});\n    return;\n  }\n  \n  var gr = new GlideRecord('incident');\n  gr.initialize();\n  gr.setValue('short_description', body.short_description);\n  gr.setValue('description', body.description || '');\n  gr.setValue('urgency', body.urgency || 3);\n  gr.setValue('impact', body.impact || 3);\n  gr.setValue('caller_id', gs.getUserID());\n  \n  var sysId = gr.insert();\n  if (sysId) {\n    response.setStatus(201);\n    response.setHeader('Location', '/api/x_app/myapi/incidents/' + sysId);\n    response.setBody({sys_id: sysId, number: gr.getValue('number')});\n  } else {\n    response.setStatus(500);\n    response.setBody({error: 'Failed to create incident'});\n  }\n})(request, response);"
+        },
+        {
+          "name": "Query Resource",
+          "description": "Handle GET with query parameters for listing records.",
+          "parameters": [],
+          "example": "// GET /api/x_app/myapi/incidents?active=true&limit=10\n(function process(request, response) {\n  var active = request.queryParams.active ? request.queryParams.active[0] : 'true';\n  var limit = request.queryParams.limit ? parseInt(request.queryParams.limit[0]) : 20;\n  var offset = request.queryParams.offset ? parseInt(request.queryParams.offset[0]) : 0;\n  \n  var gr = new GlideRecord('incident');\n  gr.addQuery('active', active);\n  gr.orderByDesc('sys_created_on');\n  gr.chooseWindow(offset, offset + limit);\n  gr.query();\n  \n  var results = [];\n  while (gr.next()) {\n    results.push({\n      sys_id: gr.getUniqueValue(),\n      number: gr.getValue('number'),\n      short_description: gr.getValue('short_description'),\n      state: gr.getDisplayValue('state')\n    });\n  }\n  \n  response.setStatus(200);\n  response.setHeader('X-Total-Count', String(gr.getRowCount()));\n  response.setBody({result: results, count: results.length});\n})(request, response);"
+        }
+      ]
+    },
+    {
+      "name": "Transform Map Scripts",
+      "type": "Server-side",
+      "description": "Scripts that run during Import Set transforms. Transform maps convert staging table data into target table records. Scripts run at various points in the transform lifecycle.",
+      "methods": [
+        {
+          "name": "onBefore",
+          "description": "Runs before each source row is transformed. Use to skip rows, set defaults, or modify source data. Set action to \"skip\" to skip the row.",
+          "parameters": [],
+          "example": "// onBefore Transform Script\n// Skip rows with empty name\nif (!source.u_name) {\n  ignore = true; // Skip this row\n  log('Skipping row with empty name');\n  return;\n}\n\n// Clean up data before transform\nsource.u_email = source.u_email.toString().toLowerCase().trim();"
+        },
+        {
+          "name": "onAfter",
+          "description": "Runs after each row is transformed. The target record is available. Use for related record creation or validation.",
+          "parameters": [],
+          "example": "// onAfter Transform Script\n// Create related records after import\nif (target.sys_id) {\n  var roleGR = new GlideRecord('sys_user_has_role');\n  roleGR.initialize();\n  roleGR.user = target.sys_id;\n  roleGR.role.setDisplayValue('itil');\n  roleGR.insert();\n  \n  log('Created role assignment for: ' + target.user_name);\n}"
+        },
+        {
+          "name": "onComplete",
+          "description": "Runs once after all rows have been processed.",
+          "parameters": [],
+          "example": "// onComplete Transform Script\nvar importLog = 'Transform complete. ';\nimportLog += 'Inserted: ' + import_set_run.records_inserted + ', ';\nimportLog += 'Updated: ' + import_set_run.records_updated + ', ';\nimportLog += 'Errors: ' + import_set_run.records_failed;\ngs.info(importLog);\n\n// Send notification\ngs.eventQueue('import.complete', null, import_set_run.sys_id, importLog);"
+        }
+      ]
+    },
+    {
+      "name": "Script Action Patterns",
+      "type": "Server-side",
+      "description": "Script Actions respond to events fired by gs.eventQueue(). They decouple triggers from handlers. The event object provides access to event parameters.",
+      "methods": [
+        {
+          "name": "Event Handler",
+          "description": "Handles a custom event. Access event.parm1 and event.parm2 for parameters passed by gs.eventQueue().",
+          "parameters": [],
+          "example": "// Script Action for event: incident.escalated\nvar incidentGR = event.GlideRecord; // The record that fired the event\nvar escalatedBy = event.parm1;\nvar reason = event.parm2;\n\n// Create an escalation task\nvar task = new GlideRecord('task');\ntask.initialize();\ntask.short_description = 'Escalation: ' + incidentGR.number;\ntask.description = 'Escalated by ' + escalatedBy + '. Reason: ' + reason;\ntask.assignment_group.setDisplayValue('Major Incident Management');\ntask.parent = incidentGR.getUniqueValue();\ntask.insert();\n\ngs.info('Escalation task created for ' + incidentGR.number);"
+        },
+        {
+          "name": "Firing Events",
+          "description": "Fire events from Business Rules, Script Includes, or other server scripts.",
+          "parameters": [],
+          "example": "// Register event first in sys_event_registry table\n// Then fire from a Business Rule:\ngs.eventQueue(\n  'incident.escalated',  // Event name\n  current,               // GlideRecord (available as event.GlideRecord)\n  gs.getUserName(),      // parm1\n  'Customer requested'   // parm2\n);"
+        }
+      ]
+    },
+    {
+      "name": "ACL Script Patterns",
+      "type": "Server-side",
+      "description": "Access Control List scripts determine record and field-level security. Scripts return true to grant access, false to deny. Available objects: current (record), source (calling context).",
+      "methods": [
+        {
+          "name": "Record ACL",
+          "description": "Controls read/write/delete access to entire records.",
+          "parameters": [],
+          "example": "// ACL Rule: incident - write\n// Only allow assigned user or group members to write\nvar isAssignee = current.assigned_to == gs.getUserID();\nvar isGroupMember = gs.getUser().isMemberOf(current.getValue('assignment_group'));\nvar isAdmin = gs.hasRole('admin');\n\nanswer = isAssignee || isGroupMember || isAdmin;"
+        },
+        {
+          "name": "Field ACL",
+          "description": "Controls read/write access to specific fields.",
+          "parameters": [],
+          "example": "// ACL Rule: incident.priority - write\n// Only managers can change priority\nvar isManager = gs.hasRole('itil_admin');\nvar isP1Handler = gs.getUser().isMemberOf('P1 Management');\n\nanswer = isManager || isP1Handler;"
+        },
+        {
+          "name": "Row-level ACL",
+          "description": "Controls which records appear in queries. Uses GlideRecordSecure implicitly.",
+          "parameters": [],
+          "example": "// ACL: incident - read\n// Users can only see incidents from their company\nvar userCompany = gs.getUser().getCompanyID();\nif (gs.hasRole('admin')) {\n  answer = true;\n} else {\n  answer = current.company == userCompany;\n}"
+        }
+      ]
+    },
+    {
+      "name": "Service Portal Widget Patterns",
+      "type": "Client/Server Interaction",
+      "description": "Service Portal widgets have a server script and a client controller. Data flows from server to client via the data object, and back via c.server.update().",
+      "methods": [
+        {
+          "name": "Server Script",
+          "description": "Runs on the server. Populate the data object to pass data to the client.",
+          "parameters": [],
+          "example": "// Widget Server Script\n(function() {\n  // Handle client updates\n  if (input && input.action == 'save') {\n    var gr = new GlideRecord('incident');\n    if (gr.get(input.sys_id)) {\n      gr.setValue('comments', input.comment);\n      gr.update();\n      data.message = 'Comment saved';\n    }\n  }\n  \n  // Load initial data\n  data.incidents = [];\n  var gr = new GlideRecord('incident');\n  gr.addQuery('caller_id', gs.getUserID());\n  gr.addActiveQuery();\n  gr.orderByDesc('sys_created_on');\n  gr.setLimit(10);\n  gr.query();\n  while (gr.next()) {\n    data.incidents.push({\n      sys_id: gr.getUniqueValue(),\n      number: gr.getValue('number'),\n      short_description: gr.getValue('short_description'),\n      state: gr.getDisplayValue('state')\n    });\n  }\n})();"
+        },
+        {
+          "name": "Client Controller",
+          "description": "AngularJS controller. Access server data via c.data. Call server via c.server.update().",
+          "parameters": [],
+          "example": "// Widget Client Controller\nfunction() {\n  var c = this;\n  \n  c.addComment = function(incident) {\n    c.data.action = 'save';\n    c.data.sys_id = incident.sys_id;\n    c.data.comment = c.newComment;\n    c.server.update().then(function() {\n      spUtil.addInfoMessage(c.data.message);\n      c.newComment = '';\n    });\n  };\n  \n  c.openIncident = function(sysId) {\n    .url('/ticket?sys_id=' + sysId);\n  };\n}"
+        },
+        {
+          "name": "HTML Template",
+          "description": "AngularJS HTML template with access to the controller via c.",
+          "parameters": [],
+          "example": "<!-- Widget HTML Template -->\n<div class=\"panel panel-default\">\n  <div class=\"panel-heading\">\n    <h3>My Incidents ({{c.data.incidents.length}})</h3>\n  </div>\n  <div class=\"panel-body\">\n    <div ng-repeat=\"inc in c.data.incidents\" class=\"list-group-item\">\n      <h4>\n        <a href ng-click=\"c.openIncident(inc.sys_id)\">{{inc.number}}</a>\n        <span class=\"badge\">{{inc.state}}</span>\n      </h4>\n      <p>{{inc.short_description}}</p>\n    </div>\n    <p ng-if=\"c.data.incidents.length == 0\">No open incidents</p>\n  </div>\n</div>"
+        }
+      ]
     }
   ]
 }
