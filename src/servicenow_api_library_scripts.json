@@ -245,12 +245,6 @@
           "example": "var gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();"
         },
         {
-          "name": "doit",
-          "description": "Function defined in GlideRecord.js",
-          "parameters": [],
-          "example": "/* No code sample available for this method */"
-        },
-        {
           "name": "getEncodedQuery",
           "description": "Returns the encoded query string for the current GlideRecord query. Useful for debugging or passing queries between components.",
           "parameters": [],
@@ -517,6 +511,120 @@
           "description": "Returns the display name of the current user.",
           "parameters": [],
           "example": "var displayName = gs.getUserDisplayName();\ngs.info('Current user: ' + displayName);"
+        },
+        {
+          "name": "sleep",
+          "description": "Pauses the script for the specified number of milliseconds. Only use in background scripts or scheduled jobs — never in Business Rules.",
+          "parameters": [
+            "milliseconds"
+          ],
+          "example": "// In a scheduled job or background script\ngs.sleep(2000); // Wait 2 seconds"
+        },
+        {
+          "name": "generateGUID",
+          "description": "Generates a globally unique identifier (GUID/UUID).",
+          "parameters": [],
+          "example": "var guid = gs.generateGUID();\ngs.info('New GUID: ' + guid);"
+        },
+        {
+          "name": "getDisplayColumn",
+          "description": "Returns the display column name for a table.",
+          "parameters": [
+            "tableName"
+          ],
+          "example": "var displayCol = gs.getDisplayColumn('incident');\ngs.info(displayCol); // 'number'"
+        },
+        {
+          "name": "include",
+          "description": "Includes a Script Include for use in the current script context.",
+          "parameters": [
+            "scriptIncludeName"
+          ],
+          "example": "gs.include('PrototypeServer');\n// Now functions from PrototypeServer are available"
+        },
+        {
+          "name": "daysAgo",
+          "description": "Returns a date/time value for N days ago. Useful for query filters.",
+          "parameters": [
+            "days"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('sys_created_on', '>=', gs.daysAgo(7));\ngr.query();\ngs.info('Incidents in last 7 days: ' + gr.getRowCount());"
+        },
+        {
+          "name": "daysAgoStart",
+          "description": "Returns midnight at the start of N days ago.",
+          "parameters": [
+            "days"
+          ],
+          "example": "var cutoff = gs.daysAgoStart(30);\nvar gr = new GlideRecord('incident');\ngr.addQuery('closed_at', '>=', cutoff);\ngr.query();"
+        },
+        {
+          "name": "hoursAgo",
+          "description": "Returns a date/time value for N hours ago.",
+          "parameters": [
+            "hours"
+          ],
+          "example": "var gr = new GlideRecord('syslog');\ngr.addQuery('sys_created_on', '>=', gs.hoursAgo(1));\ngr.query();\ngs.info('Log entries in last hour: ' + gr.getRowCount());"
+        },
+        {
+          "name": "minutesAgo",
+          "description": "Returns a date/time value for N minutes ago.",
+          "parameters": [
+            "minutes"
+          ],
+          "example": "// Check for recent errors\nvar gr = new GlideRecord('syslog');\ngr.addQuery('level', 2); // Error\ngr.addQuery('sys_created_on', '>=', gs.minutesAgo(15));\ngr.query();"
+        },
+        {
+          "name": "beginningOfThisMonth",
+          "description": "Returns midnight on the first day of the current month.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('opened_at', '>=', gs.beginningOfThisMonth());\ngr.query();\ngs.info('Incidents this month: ' + gr.getRowCount());"
+        },
+        {
+          "name": "endOfLastMonth",
+          "description": "Returns the end of the last day of the previous month.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('closed_at', '>=', gs.beginningOfLastMonth());\ngr.addQuery('closed_at', '<=', gs.endOfLastMonth());\ngr.query();"
+        },
+        {
+          "name": "urlEncode",
+          "description": "URL-encodes a string.",
+          "parameters": [
+            "value"
+          ],
+          "example": "var encoded = gs.urlEncode('hello world & more');\n// 'hello+world+%26+more'"
+        },
+        {
+          "name": "urlDecode",
+          "description": "URL-decodes a string.",
+          "parameters": [
+            "value"
+          ],
+          "example": "var decoded = gs.urlDecode('hello+world+%26+more');\n// 'hello world & more'"
+        },
+        {
+          "name": "xmlToJSON",
+          "description": "Converts an XML string to a JSON object.",
+          "parameters": [
+            "xmlString"
+          ],
+          "example": "var json = gs.xmlToJSON('<root><item>value</item></root>');\ngs.info(JSON.stringify(json));"
+        },
+        {
+          "name": "base64Encode",
+          "description": "Encodes a string to base64.",
+          "parameters": [
+            "value"
+          ],
+          "example": "var encoded = gs.base64Encode('Hello World');"
+        },
+        {
+          "name": "base64Decode",
+          "description": "Decodes a base64-encoded string.",
+          "parameters": [
+            "value"
+          ],
+          "example": "var decoded = gs.base64Decode(encoded);"
         }
       ]
     },
@@ -886,6 +994,23 @@
           "description": "Returns true if the user has any roles.",
           "parameters": [],
           "example": "if (g_user.hasRoles()) { ... }"
+        },
+        {
+          "name": "getClientData",
+          "description": "Returns a session client data value set by putClientData on the server.",
+          "parameters": [
+            "key"
+          ],
+          "example": "var val = g_user.getClientData('my_custom_key');\nif (val) {\n  console.log('Server sent: ' + val);\n}"
+        },
+        {
+          "name": "hasRoleFromList",
+          "description": "Returns true if the user has at least one role from a comma-separated list.",
+          "parameters": [
+            "roleList",
+            "includeDefaults"
+          ],
+          "example": "if (g_user.hasRoleFromList('admin,itil,catalog_admin')) {\n  // Show admin controls\n}"
         }
       ],
       "properties": [
@@ -948,12 +1073,6 @@
             "callback"
           ],
           "example": "var ga = new GlideAjax('OffboardingRecordProducerAjax');\nga.addParam('sysparm_name', 'getSupervisorInfo');\nga.addParam('sysparm_supervisor', g_form.getValue('supervisor'));\nga.getXMLAnswer(function(answer) {\n  var info = JSON.parse(answer);\n  g_form.setValue('email', info.email);\n});"
-        },
-        {
-          "name": "GlideAjaxForm",
-          "description": "This class extends GlideAjax to help request a Glide template form and receive the corresponding XML/text for direct manipulation.",
-          "parameters": [],
-          "example": "/* No code sample available for this method */"
         }
       ]
     },
@@ -1443,7 +1562,7 @@
         },
         {
           "name": "save",
-          "description": "Sends the email.",
+          "description": "Queues the email for delivery by the ServiceNow email sender job. The email is not sent immediately but placed in the outbox.",
           "parameters": [],
           "example": "var email = new GlideEmailOutbound();\nemail.addAddress('to', 'admin@example.com');\nemail.addAddress('cc', 'manager@example.com');\nemail.setSubject('P1 Incident Created: ' + current.number);\nemail.setBody('<h2>Critical Incident</h2><p>' + current.short_description + '</p>');\nemail.setFrom('noreply@company.com');\nemail.setReplyTo('support@company.com');\nemail.save();"
         },
@@ -1558,7 +1677,7 @@
             "groupBy",
             "min"
           ],
-          "example": "/* No code sample available for this method */"
+          "example": "// Internal grouping method used by GlideQuery\nvar results = new GlideQuery('incident')\n  .where('active', true)\n  .aggregate('COUNT')\n  .groupBy('priority')\n  .select()\n  .toArray(10);\nresults.forEach(function(r) {\n  gs.info('Priority ' + r.group.priority + ': ' + r.count);\n});"
         },
         {
           "name": "orWhere",
@@ -1698,9 +1817,26 @@
         },
         {
           "name": "render",
-          "description": "Displays the modal.",
+          "description": "Renders and displays the modal dialog on screen. Must be called after setting all preferences, title, and body content.",
           "parameters": [],
           "example": "gm.render();"
+        },
+        {
+          "name": "setWidth",
+          "description": "Sets the width of the modal dialog.",
+          "parameters": [
+            "width"
+          ],
+          "example": "var modal = new GlideModal('my_ui_page');\nmodal.setWidth(600);\nmodal.render();"
+        },
+        {
+          "name": "get",
+          "description": "Loads the modal content from a UI page.",
+          "parameters": [
+            "uiPageName",
+            "callback"
+          ],
+          "example": "var modal = new GlideModal();\nmodal.get('my_custom_page', function() {\n  // Modal content loaded\n  modal.render();\n});"
         }
       ]
     },
@@ -1720,7 +1856,7 @@
         },
         {
           "name": "open",
-          "description": "Redirects to a URL.",
+          "description": "Navigates the main content frame to the specified URL. Equivalent to clicking a module link in the navigator.",
           "parameters": [
             "url",
             "target (optional)"
@@ -1738,6 +1874,17 @@
           "description": "Refreshes the application navigator (left sidebar).",
           "parameters": [],
           "example": "g_navigation.refreshNavigator();"
+        },
+        {
+          "name": "openPopup",
+          "description": "Opens a URL in a popup window.",
+          "parameters": [
+            "url",
+            "name",
+            "features",
+            "noStack"
+          ],
+          "example": "g_navigation.openPopup('report.do?sys_id=abc', 'report', 'width=800,height=600', false);"
         }
       ]
     },
@@ -1769,6 +1916,20 @@
           "description": "Submits the cart and creates a request.",
           "parameters": [],
           "example": "var request = cart.placeOrder();"
+        },
+        {
+          "name": "getCartItems",
+          "description": "Returns the items currently in the cart.",
+          "parameters": [],
+          "example": "var cart = new Cart();\nvar items = cart.getCartItems();\nwhile (items.next()) {\n  gs.info('Item: ' + items.getValue('cat_item'));\n}"
+        },
+        {
+          "name": "addToCart",
+          "description": "Adds a catalog item to the cart.",
+          "parameters": [
+            "request"
+          ],
+          "example": "var cart = new Cart();\nvar item = cart.addToCart({\n  sysparm_id: catalogItemSysId,\n  sysparm_quantity: 1,\n  variables: { u_reason: 'New employee setup' }\n});"
         }
       ]
     },
@@ -1787,7 +1948,7 @@
         },
         {
           "name": "checkoutCart",
-          "description": "Submits the cart.",
+          "description": "Submits the cart for processing, creating the requested items and triggering any associated workflows and approvals.",
           "parameters": [],
           "example": "var request = cart.checkoutCart();"
         }
@@ -1937,7 +2098,7 @@
     {
       "name": "GwtPollDialog",
       "type": "Client-side",
-      "description": "Used to display a progress dialog for long-running operations like exports.",
+      "description": "Displays a progress dialog for long-running server operations like exports, imports, and report generation. Shows a progress bar that updates automatically.",
       "methods": [
         {
           "name": "Constructor",
@@ -2296,7 +2457,7 @@
     {
       "name": "CMDB (sn_cmdb)",
       "type": "Server-side",
-      "description": "APIs to interact with the Configuration Management Database.",
+      "description": "CMDB APIs for programmatically creating, updating, and identifying Configuration Items. Part of the sn_cmdb namespace.",
       "methods": [
         {
           "name": "IdentificationEngine",
@@ -2305,6 +2466,15 @@
             "payload"
           ],
           "example": "var payload = {\n  'items': [{\n    'className': 'cmdb_ci_server',\n    'values': {'name': 'server123'}\n  }]\n};\nvar ie = new sn_cmdb.IdentificationEngine.createOrUpdateCI('ServiceNow', JSON.stringify(payload));"
+        },
+        {
+          "name": "createOrUpdateCI",
+          "description": "Creates or updates a CI using the Identification and Reconciliation engine.",
+          "parameters": [
+            "source",
+            "input"
+          ],
+          "example": "var payload = {\n  items: [{\n    className: 'cmdb_ci_linux_server',\n    values: {\n      name: 'web-server-01',\n      ip_address: '10.0.1.100',\n      os: 'Ubuntu 22.04'\n    },\n    lookup: [{ column: 'name' }]\n  }]\n};\nvar output = sn_cmdb.IdentificationEngine.createOrUpdateCI(\n  'MyDiscovery',\n  JSON.stringify(payload)\n);\ngs.info('Result: ' + output);"
         }
       ],
       "properties": []
@@ -2598,7 +2768,7 @@
         },
         {
           "name": "getNode",
-          "description": "Gets an XMLNode.",
+          "description": "Returns an XMLNode matching the specified XPath expression. Returns null if no match is found.",
           "parameters": [
             "xpath"
           ],
@@ -2656,6 +2826,32 @@
             "name"
           ],
           "example": "var attr = node.getAttribute('id');"
+        },
+        {
+          "name": "getChildNodeIterator",
+          "description": "Returns an iterator over child nodes.",
+          "parameters": [],
+          "example": "var iter = node.getChildNodeIterator();\nwhile (iter.hasNext()) {\n  var child = iter.next();\n  gs.info(child.getTextContent());\n}"
+        },
+        {
+          "name": "getNodeName",
+          "description": "Returns the name of the node.",
+          "parameters": [],
+          "example": "gs.info(node.getNodeName()); // 'item'"
+        },
+        {
+          "name": "getNodeValue",
+          "description": "Returns the value of the node.",
+          "parameters": [],
+          "example": "gs.info(node.getNodeValue());"
+        },
+        {
+          "name": "hasAttribute",
+          "description": "Returns true if the node has the specified attribute.",
+          "parameters": [
+            "name"
+          ],
+          "example": "if (node.hasAttribute('id')) {\n  gs.info('ID: ' + node.getAttribute('id'));\n}"
         }
       ],
       "properties": []
@@ -2713,6 +2909,35 @@
             "value"
           ],
           "example": "sm.setRequestHeader('SOAPAction', 'http://example.com/GetData');"
+        },
+        {
+          "name": "setBasicAuth",
+          "description": "Sets basic authentication on the SOAP request.",
+          "parameters": [
+            "username",
+            "password"
+          ],
+          "example": "sm.setBasicAuth('integration_user', 'password123');"
+        },
+        {
+          "name": "setMIDServer",
+          "description": "Routes the SOAP request through a MID Server.",
+          "parameters": [
+            "midServerName"
+          ],
+          "example": "sm.setMIDServer('MY_MID_SERVER');"
+        },
+        {
+          "name": "getStatusCode",
+          "description": "Returns the HTTP status code from the response (called on SOAPResponseV2).",
+          "parameters": [],
+          "example": "var response = sm.execute();\nvar status = response.getStatusCode();\nif (status != 200) {\n  gs.error('SOAP call failed: ' + status);\n}"
+        },
+        {
+          "name": "getBody",
+          "description": "Returns the response body (called on SOAPResponseV2).",
+          "parameters": [],
+          "example": "var response = sm.execute();\nvar body = response.getBody();\ngs.info('Response: ' + body);"
         }
       ],
       "properties": []
@@ -2754,7 +2979,7 @@
     {
       "name": "GlideScriptedProcessor (g_processor)",
       "type": "Server-side",
-      "description": "Equivalent to Java servlets for custom HTTP handlers.",
+      "description": "Server-side API available in Scripted Processor scripts. Functions similarly to Java servlets, allowing custom HTTP request handling with direct control over the response output.",
       "methods": [
         {
           "name": "writeOutput",
@@ -2780,6 +3005,18 @@
             "url"
           ],
           "example": "g_processor.redirect('/navpage.do');"
+        },
+        {
+          "name": "getRequest",
+          "description": "Returns the HttpServletRequest object.",
+          "parameters": [],
+          "example": "var request = g_processor.getRequest();\nvar param = request.getParameter('action');\ngs.info('Action: ' + param);"
+        },
+        {
+          "name": "getResponse",
+          "description": "Returns the HttpServletResponse object.",
+          "parameters": [],
+          "example": "var response = g_processor.getResponse();\nresponse.setContentType('application/json');\nresponse.setCharacterEncoding('UTF-8');"
         }
       ],
       "properties": []
@@ -2801,11 +3038,11 @@
     {
       "name": "GlideDialogWindow",
       "type": "Client-side",
-      "description": "Legacy modal dialog class. Replaced by GlideModal in newer releases.",
+      "description": "Legacy modal dialog API for displaying UI Pages in a popup window. Use GlideModal instead for newer implementations. Still commonly found in older customizations.",
       "methods": [
         {
           "name": "Constructor",
-          "description": "Creates a dialog.",
+          "description": "Creates a new GlideDialogWindow instance that loads the specified UI page. The dialog is not displayed until render() is called.",
           "parameters": [
             "id"
           ],
@@ -2824,6 +3061,30 @@
           "description": "Displays the dialog.",
           "parameters": [],
           "example": "dialog.render();"
+        },
+        {
+          "name": "setSize",
+          "description": "Sets the width and height of the dialog.",
+          "parameters": [
+            "width",
+            "height"
+          ],
+          "example": "var dialog = new GlideDialogWindow('my_ui_page');\ndialog.setSize(600, 400);\ndialog.render();"
+        },
+        {
+          "name": "setPreference",
+          "description": "Passes a parameter to the UI page.",
+          "parameters": [
+            "name",
+            "value"
+          ],
+          "example": "var dialog = new GlideDialogWindow('approval_dialog');\ndialog.setPreference('sysparm_record', g_form.getUniqueValue());\ndialog.setTitle('Approve Record');\ndialog.render();"
+        },
+        {
+          "name": "destroy",
+          "description": "Closes and removes the dialog from the DOM.",
+          "parameters": [],
+          "example": "dialog.destroy();"
         }
       ],
       "properties": []
@@ -2966,7 +3227,7 @@
       "methods": [
         {
           "name": "encrypt",
-          "description": "Encrypts a string.",
+          "description": "Encrypts a plaintext string using the platform's encryption key (Triple DES by default). The encrypted value can be stored and later decrypted with decrypt().",
           "parameters": [
             "value"
           ],
