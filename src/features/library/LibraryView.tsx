@@ -173,7 +173,7 @@ export function LibraryView() {
                   index={idx} 
                   addToast={addToast} 
                   badgeColor={badge.color} 
-                  isHighlighted={isMatch}
+                  isHighlighted={!!isMatch}
                   searchQuery={q}
                 />
               );

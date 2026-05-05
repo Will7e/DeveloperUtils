@@ -47,7 +47,7 @@ export function LibrarySidebar() {
   const searchRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
 
-  // Group APIs by type
+  // Group APIs by type and sort them
   const grouped = useMemo(() => {
     const groups: Record<string, typeof libraryData.apis> = {};
     for (const api of libraryData.apis) {
@@ -55,8 +55,27 @@ export function LibrarySidebar() {
       if (!groups[key]) groups[key] = [];
       groups[key].push(api);
     }
+
+    // Sort APIs within each group: Glide classes first, then alphabetical
+    for (const type in groups) {
+      const apis = groups[type];
+      if (apis) {
+        apis.sort((a, b) => {
+          const aIsGlide = a.name.startsWith("Glide");
+          const bIsGlide = b.name.startsWith("Glide");
+
+          if (aIsGlide && !bIsGlide) return -1;
+          if (!aIsGlide && bIsGlide) return 1;
+          return a.name.localeCompare(b.name);
+        });
+      }
+    }
+
     return groups;
   }, []);
+
+  // Defined order for categories
+  const categoryOrder = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"];
 
   // Filter
   const filteredGrouped = useMemo(() => {
@@ -66,7 +85,6 @@ export function LibrarySidebar() {
     const q = searchQuery.toLowerCase().trim().replace(/\(\)$/, "");
     
     const result: Record<string, typeof libraryData.apis> = {};
-    const matches: Set<string> = new Set();
 
     for (const [type, apis] of Object.entries(grouped)) {
       const filtered = apis.filter((api) => {
@@ -75,7 +93,7 @@ export function LibrarySidebar() {
         
         // Extract shorthand: "GlideSystem (gs)" -> "gs"
         const shorthandMatch = apiName.match(/\((.*?)\)/);
-        const shorthand = shorthandMatch ? shorthandMatch[1].toLowerCase() : "";
+        const shorthand = shorthandMatch?.[1]?.toLowerCase() || "";
         
         // Match API name, description or shorthand
         if (apiName.includes(q) || apiDesc.includes(q) || (shorthand && shorthand.includes(q))) return true;
@@ -95,8 +113,6 @@ export function LibrarySidebar() {
 
       if (filtered.length > 0) {
         result[type] = filtered;
-        // Auto-expand this group since it has matches
-        matches.add(type);
       }
     }
 
@@ -153,6 +169,17 @@ export function LibrarySidebar() {
     }
   }, [selectedId]);
 
+  // Determine which categories to show based on order
+  const displayedCategories = useMemo(() => {
+    const existing = Object.keys(filteredGrouped);
+    const sorted = categoryOrder.filter(c => existing.includes(c));
+    // Add any categories not in categoryOrder at the end
+    existing.forEach(c => {
+      if (!sorted.includes(c)) sorted.push(c);
+    });
+    return sorted;
+  }, [filteredGrouped]);
+
   return (
     <div className="lib-sidebar">
       {/* Header */}
@@ -196,7 +223,8 @@ export function LibrarySidebar() {
 
       {/* API Groups */}
       <div className="lib-sidebar-content">
-        {Object.entries(filteredGrouped).map(([type, apis]) => {
+        {displayedCategories.map((type) => {
+          const apis = filteredGrouped[type];
           const config = getTypeConfig(type);
           const isCollapsed = collapsedGroups.has(type) && !searchQuery.trim();
 
@@ -213,12 +241,12 @@ export function LibrarySidebar() {
                   {config.icon}
                 </span>
                 <span className="lib-group-label">{config.label}</span>
-                <span className="lib-group-count">{apis.length}</span>
+                <span className="lib-group-count">{apis?.length || 0}</span>
               </button>
 
               {!isCollapsed && (
                 <div className="lib-group-items">
-                  {apis.map((api) => {
+                  {apis && apis.map((api) => {
                     const isActive = selectedId === api.name;
                     const typeConfig = getTypeConfig(api.type);
                     return (
