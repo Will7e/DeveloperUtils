@@ -13,6 +13,7 @@ import {
   Maximize2,
   Map,
   MapPinOff,
+  Wand2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -26,6 +27,7 @@ interface WorkflowToolbarProps {
   onZoomOut: () => void;
   onFitView: () => void;
   onClearCanvas: () => void;
+  onBeautify: () => void;
   showMinimap: boolean;
   onToggleMinimap: () => void;
 }
@@ -35,6 +37,7 @@ export function WorkflowToolbar({
   onZoomOut,
   onFitView,
   onClearCanvas,
+  onBeautify,
   showMinimap,
   onToggleMinimap,
 }: WorkflowToolbarProps) {
@@ -199,6 +202,19 @@ export function WorkflowToolbar({
           </TooltipTrigger>
           <TooltipContent>Fit View</TooltipContent>
         </Tooltip>
+
+        <div className="wf-toolbar-sep" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button className="wf-toolbar-btn" onClick={onBeautify}>
+              <Wand2 className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Beautify Nodes</TooltipContent>
+        </Tooltip>
+
+        <div className="wf-toolbar-sep" />
 
         <Tooltip>
           <TooltipTrigger asChild>

@@ -211,6 +211,9 @@ export interface WorkflowNodeData {
     properties?: Record<string, string>;
   };
   measured?: { width: number; height: number };
+  style?: Record<string, any>;
+  width?: number;
+  height?: number;
 }
 
 export interface WorkflowEdgeData {

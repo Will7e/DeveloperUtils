@@ -20,6 +20,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import dagre from "dagre";
 
 import { useAppStore } from "@/stores/app.store";
 import { generateId } from "@/lib/utils";
@@ -50,6 +51,58 @@ const edgeTypes = {
 const defaultEdgeOptions = {
   type: "animated",
   animated: true,
+};
+
+const dagreGraph = new dagre.graphlib.Graph();
+dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+  dagreGraph.setGraph({ rankdir: direction, nodesep: 70, ranksep: 100 });
+
+  nodes.forEach((node) => {
+    const nodeData = node.data as Record<string, any>;
+    const type = node.type || nodeData?.nodeType;
+    const isTerminal = type === "startNode" || type === "endNode" || type === "start" || type === "end";
+    const isDecision = type === "decisionNode" || type === "decision";
+    const hasDescription = !!nodeData?.description;
+
+    const defaultWidth = isTerminal ? 160 : isDecision ? 160 : 180;
+    const defaultHeight = isTerminal ? 48 : isDecision ? 60 : (hasDescription ? 90 : 60);
+
+    dagreGraph.setNode(node.id, { width: defaultWidth, height: defaultHeight });
+  });
+
+  edges.forEach((edge) => {
+    dagreGraph.setEdge(edge.source, edge.target);
+  });
+
+  dagre.layout(dagreGraph);
+
+  const newNodes = nodes.map((node) => {
+    const nodeWithPosition = dagreGraph.node(node.id);
+
+    const nodeData = node.data as Record<string, any>;
+    const type = node.type || nodeData?.nodeType;
+    const isTerminal = type === "startNode" || type === "endNode" || type === "start" || type === "end";
+    const isDecision = type === "decisionNode" || type === "decision";
+    const hasDescription = !!nodeData?.description;
+
+    const defaultWidth = isTerminal ? 160 : isDecision ? 160 : 180;
+    const defaultHeight = isTerminal ? 48 : isDecision ? 60 : (hasDescription ? 90 : 60);
+
+    const x = nodeWithPosition.x - defaultWidth / 2;
+    const y = nodeWithPosition.y - defaultHeight / 2;
+
+    return {
+      ...node,
+      position: { x, y },
+      width: undefined,
+      height: undefined,
+      style: undefined
+    };
+  });
+
+  return { nodes: newNodes, edges };
 };
 
 function WorkflowCanvas() {
@@ -136,6 +189,9 @@ function WorkflowCanvas() {
               position: n.position,
               data: n.data as { label: string; nodeType: "start" | "end" | "process" | "decision" | "data" | "integration"; description?: string; color?: string; icon?: string; properties?: Record<string, string> },
               measured: n.measured as { width: number; height: number } | undefined,
+              style: n.style,
+              width: n.width,
+              height: n.height,
             }))
           );
         }
@@ -295,6 +351,25 @@ function WorkflowCanvas() {
     addToast({ message: "Canvas cleared", type: "info" });
   }, [setNodes, setEdges, activeWorkflowId, updateWorkflowNodes, updateWorkflowEdges, addToast]);
 
+  // Beautify canvas
+  const handleBeautify = useCallback(() => {
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      nodes,
+      edges,
+      'TB'
+    );
+
+    setNodes([...layoutedNodes]);
+    setEdges([...layoutedEdges]);
+    persistNodes(layoutedNodes);
+
+    window.requestAnimationFrame(() => {
+      fitView({ padding: 0.3, maxZoom: 1 });
+    });
+
+    addToast({ message: "Nodes beautified", type: "success" });
+  }, [nodes, edges, setNodes, setEdges, persistNodes, fitView, addToast]);
+
   // Delete selected nodes/edges with keyboard
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -339,6 +414,7 @@ function WorkflowCanvas() {
         onZoomOut={() => zoomOut()}
         onFitView={() => fitView({ padding: 0.3, maxZoom: 1 })}
         onClearCanvas={handleClearCanvas}
+        onBeautify={handleBeautify}
         showMinimap={showMinimap}
         onToggleMinimap={toggleMinimap}
       />
