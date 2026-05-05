@@ -6182,6 +6182,157 @@
           "example": "// Requires Notify plugin (com.snc.notify)\nif (new GlidePluginManager().isActive('com.snc.notify')) {\n  var notify = new SNC.Notify();\n  notify.sendSMS(\n    gs.getProperty('x_myapp.alert_phone'),\n    'P1 ALERT: ' + current.number + ' - ' + current.short_description\n  );\n}"
         }
       ]
+    },
+    {
+      "name": "Error Handling Patterns",
+      "type": "Utils",
+      "description": "Production-grade error handling, try/catch wrappers, and error reporting patterns for robust ServiceNow scripts.",
+      "methods": [
+        {
+          "name": "Safe Execute Wrapper",
+          "description": "Wrap any function in error handling with automatic logging and optional fallback.",
+          "parameters": [],
+          "example": "function safeExecute(fn, context, fallback) {\n  try {\n    return fn.call(context);\n  } catch (e) {\n    gs.error('[SafeExecute] ' + e.getMessage() + '\\nStack: ' + e.stack);\n    // Log to custom error table for monitoring\n    var err = new GlideRecord('u_script_errors');\n    err.initialize();\n    err.u_message = e.getMessage();\n    err.u_stack = e.stack ? e.stack.toString() : '';\n    err.u_source = context || 'Unknown';\n    err.u_user = gs.getUserID();\n    err.insert();\n    return fallback !== undefined ? fallback : null;\n  }\n}\n\n// Usage:\nvar result = safeExecute(function() {\n  var rm = new sn_ws.RESTMessageV2();\n  rm.setEndpoint(endpoint);\n  rm.setHttpMethod('GET');\n  return JSON.parse(rm.execute().getBody());\n}, 'MyIntegration', { error: true });"
+        },
+        {
+          "name": "Retry with Backoff",
+          "description": "Retry a function with exponential backoff for transient failures.",
+          "parameters": [],
+          "example": "function retryWithBackoff(fn, maxRetries, initialDelay) {\n  var retries = maxRetries || 3;\n  var delay = initialDelay || 1000;\n  var lastError;\n  \n  for (var i = 0; i < retries; i++) {\n    try {\n      return fn();\n    } catch (e) {\n      lastError = e;\n      gs.warn('Attempt ' + (i + 1) + '/' + retries + ' failed: ' + e.getMessage());\n      if (i < retries - 1) {\n        gs.sleep(delay * Math.pow(2, i)); // 1s, 2s, 4s...\n      }\n    }\n  }\n  throw lastError;\n}\n\n// Usage:\nvar data = retryWithBackoff(function() {\n  var rm = new sn_ws.RESTMessageV2();\n  rm.setEndpoint('https://api.example.com/data');\n  rm.setHttpMethod('GET');\n  var resp = rm.execute();\n  if (resp.getStatusCode() >= 500) throw new Error('Server error: ' + resp.getStatusCode());\n  return JSON.parse(resp.getBody());\n}, 3, 2000);"
+        },
+        {
+          "name": "Validation Framework",
+          "description": "Validate record data before insert/update with structured error messages.",
+          "parameters": [],
+          "example": "function validateRecord(gr) {\n  var errors = [];\n  \n  if (gr.short_description.nil()) {\n    errors.push({ field: 'short_description', message: 'Short description is required' });\n  }\n  if (gr.short_description.toString().length > 160) {\n    errors.push({ field: 'short_description', message: 'Must be under 160 characters' });\n  }\n  if (gr.urgency == 1 && gr.impact == 1 && gr.assignment_group.nil()) {\n    errors.push({ field: 'assignment_group', message: 'P1 incidents require an assignment group' });\n  }\n  \n  return { valid: errors.length === 0, errors: errors };\n}\n\n// Usage in a Before Insert/Update BR:\nvar result = validateRecord(current);\nif (!result.valid) {\n  result.errors.forEach(function(e) {\n    gs.addErrorMessage(e.field + ': ' + e.message);\n  });\n  current.setAbortAction(true);\n}"
+        }
+      ]
+    },
+    {
+      "name": "Caching Patterns",
+      "type": "Utils",
+      "description": "Techniques for caching data to avoid redundant database queries and improve script performance.",
+      "methods": [
+        {
+          "name": "Session Cache",
+          "description": "Cache values in the user session to avoid repeated queries within the same session.",
+          "parameters": [],
+          "example": "function getCachedValue(key, fetchFn) {\n  var session = gs.getSession();\n  var cached = session.getClientData(key);\n  if (cached) return cached;\n  \n  var value = fetchFn();\n  session.putClientData(key, value);\n  return value;\n}\n\n// Usage: Cache user's company name for the session\nvar company = getCachedValue('user_company', function() {\n  var user = new GlideRecord('sys_user');\n  if (user.get(gs.getUserID())) {\n    return user.company.getDisplayValue();\n  }\n  return '';\n});"
+        },
+        {
+          "name": "Property Cache",
+          "description": "Read system properties once and cache them. Useful when a script reads the same property multiple times.",
+          "parameters": [],
+          "example": "var Config = (function() {\n  var cache = {};\n  return {\n    get: function(propName, defaultVal) {\n      if (!(propName in cache)) {\n        cache[propName] = gs.getProperty(propName, defaultVal || '');\n      }\n      return cache[propName];\n    },\n    getBool: function(propName, defaultVal) {\n      return this.get(propName, String(defaultVal || false)) === 'true';\n    },\n    getInt: function(propName, defaultVal) {\n      return parseInt(this.get(propName, String(defaultVal || 0)), 10);\n    },\n    clear: function() { cache = {}; }\n  };\n})();\n\n// Usage:\nvar maxRetries = Config.getInt('x_myapp.max_retries', 3);\nvar debugMode = Config.getBool('x_myapp.debug', false);\nvar endpoint = Config.get('x_myapp.api.endpoint');"
+        },
+        {
+          "name": "Memoize Function",
+          "description": "Cache function results based on arguments to avoid recalculating.",
+          "parameters": [],
+          "example": "function memoize(fn) {\n  var cache = {};\n  return function() {\n    var key = JSON.stringify(Array.prototype.slice.call(arguments));\n    if (!(key in cache)) {\n      cache[key] = fn.apply(this, arguments);\n    }\n    return cache[key];\n  };\n}\n\n// Usage:\nvar getUserName = memoize(function(userId) {\n  var gr = new GlideRecord('sys_user');\n  if (gr.get(userId)) return gr.getDisplayValue('name');\n  return 'Unknown';\n});\n\n// First call queries DB, subsequent calls return cached value\ngs.info(getUserName(sysId)); // DB query\ngs.info(getUserName(sysId)); // From cache (no query)"
+        }
+      ]
+    },
+    {
+      "name": "Concurrency & Mutex",
+      "type": "Utils",
+      "description": "Patterns to prevent duplicate processing, race conditions, and infinite loops in ServiceNow.",
+      "methods": [
+        {
+          "name": "Prevent Duplicate Processing",
+          "description": "Use a mutex/lock pattern to ensure a record is only processed once at a time.",
+          "parameters": [],
+          "example": "function acquireLock(key, timeoutSeconds) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.addQuery('u_expires', '>', new GlideDateTime());\n  lock.query();\n  if (lock.hasNext()) return false; // Already locked\n  \n  // Clean expired locks\n  var old = new GlideRecord('u_script_locks');\n  old.addQuery('u_key', key);\n  old.query();\n  old.deleteMultiple();\n  \n  // Create new lock\n  var newLock = new GlideRecord('u_script_locks');\n  newLock.initialize();\n  newLock.u_key = key;\n  var expires = new GlideDateTime();\n  expires.addSeconds(timeoutSeconds || 300);\n  newLock.u_expires = expires;\n  newLock.insert();\n  return true;\n}\n\nfunction releaseLock(key) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.deleteMultiple();\n}\n\n// Usage:\nvar lockKey = 'process_' + current.getUniqueValue();\nif (acquireLock(lockKey, 120)) {\n  try {\n    // Safe to process — no other script is handling this record\n    processRecord(current);\n  } finally {\n    releaseLock(lockKey);\n  }\n}"
+        },
+        {
+          "name": "Prevent Recursive BR",
+          "description": "Stop Business Rules from triggering themselves in infinite loops.",
+          "parameters": [],
+          "example": "// In a Business Rule that updates the same table:\nif (gs.getSession().getClientData('br_' + current.getUniqueValue())) {\n  return; // Already processing this record — skip to prevent loop\n}\ngs.getSession().putClientData('br_' + current.getUniqueValue(), 'true');\n\ntry {\n  // Your update logic here\n  var related = new GlideRecord('incident');\n  related.get(current.parent);\n  related.state = current.state;\n  related.update(); // Won't trigger this BR again\n} finally {\n  gs.getSession().putClientData('br_' + current.getUniqueValue(), '');\n}"
+        }
+      ]
+    },
+    {
+      "name": "Script Include Design Patterns",
+      "type": "Utils",
+      "description": "Production-grade Script Include patterns — proper OOP, reusable classes, and clean architecture.",
+      "methods": [
+        {
+          "name": "Standard Class Pattern",
+          "description": "The standard ServiceNow Script Include class pattern with prototype inheritance.",
+          "parameters": [],
+          "example": "var IncidentUtils = Class.create();\nIncidentUtils.prototype = {\n  initialize: function() {\n    this.log = new global.GSLog('x_myapp.debug', 'IncidentUtils');\n  },\n  \n  escalate: function(incidentGR) {\n    if (incidentGR.priority > 2) {\n      incidentGR.priority = parseInt(incidentGR.priority) - 1;\n      incidentGR.update();\n      this.log.info('Escalated ' + incidentGR.number + ' to P' + incidentGR.priority);\n      return true;\n    }\n    return false;\n  },\n  \n  getOpenCount: function(userId) {\n    var ga = new GlideAggregate('incident');\n    ga.addQuery('assigned_to', userId);\n    ga.addActiveQuery();\n    ga.addAggregate('COUNT');\n    ga.query();\n    if (ga.next()) return parseInt(ga.getAggregate('COUNT'));\n    return 0;\n  },\n  \n  type: 'IncidentUtils'\n};\n\n// Usage from a Business Rule:\nvar utils = new IncidentUtils();\nutils.escalate(current);"
+        },
+        {
+          "name": "Ajax-Ready Pattern",
+          "description": "Script Include callable from both server scripts and client-side GlideAjax.",
+          "parameters": [],
+          "example": "var DataService = Class.create();\nDataService.prototype = Object.extendsObject(AbstractAjaxProcessor, {\n  // Called from client via GlideAjax\n  getIncidentSummary: function() {\n    var sysId = this.getParameter('sysparm_sys_id');\n    return JSON.stringify(this._getDetails(sysId));\n  },\n  \n  // Called from other server scripts\n  getSummary: function(sysId) {\n    return this._getDetails(sysId);\n  },\n  \n  // Private method (convention: prefix with _)\n  _getDetails: function(sysId) {\n    var gr = new GlideRecord('incident');\n    if (!gr.get(sysId)) return { error: 'Not found' };\n    return {\n      number: gr.getValue('number'),\n      state: gr.getDisplayValue('state'),\n      priority: gr.getValue('priority'),\n      age_days: gs.dateDiff(gr.getValue('opened_at'), gs.nowDateTime(), true)\n    };\n  },\n  \n  type: 'DataService'\n});\n\n// Client usage:\nvar ga = new GlideAjax('DataService');\nga.addParam('sysparm_name', 'getIncidentSummary');\nga.addParam('sysparm_sys_id', sysId);\nga.getXMLAnswer(function(answer) { console.log(JSON.parse(answer)); });\n\n// Server usage:\nvar svc = new DataService();\nvar details = svc.getSummary(sysId);"
+        },
+        {
+          "name": "Configuration Object",
+          "description": "Centralized configuration Script Include for managing app settings.",
+          "parameters": [],
+          "example": "var AppConfig = Class.create();\nAppConfig.prototype = {\n  PROPS: {\n    DEBUG: 'x_myapp.debug.enabled',\n    MAX_RETRIES: 'x_myapp.integration.max_retries',\n    API_ENDPOINT: 'x_myapp.integration.endpoint',\n    BATCH_SIZE: 'x_myapp.batch_size',\n    ENABLED: 'x_myapp.feature.enabled'\n  },\n  \n  initialize: function() {},\n  \n  isDebug: function() {\n    return gs.getProperty(this.PROPS.DEBUG, 'false') === 'true';\n  },\n  getMaxRetries: function() {\n    return parseInt(gs.getProperty(this.PROPS.MAX_RETRIES, '3'));\n  },\n  getEndpoint: function() {\n    return gs.getProperty(this.PROPS.API_ENDPOINT, '');\n  },\n  getBatchSize: function() {\n    return parseInt(gs.getProperty(this.PROPS.BATCH_SIZE, '200'));\n  },\n  isEnabled: function() {\n    return gs.getProperty(this.PROPS.ENABLED, 'true') === 'true';\n  },\n  \n  type: 'AppConfig'\n};\n\n// Usage:\nvar config = new AppConfig();\nif (config.isEnabled()) {\n  var endpoint = config.getEndpoint();\n  // ...\n}"
+        }
+      ]
+    },
+    {
+      "name": "Data Export Utilities",
+      "type": "Utils",
+      "description": "Patterns for exporting data to CSV, JSON, and creating downloadable reports from server scripts.",
+      "methods": [
+        {
+          "name": "Generate CSV",
+          "description": "Convert query results to a CSV string for attachment or download.",
+          "parameters": [],
+          "example": "function generateCSV(table, query, fields, labels) {\n  var csv = (labels || fields).join(',') + '\\n';\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  gr.query();\n  while (gr.next()) {\n    var row = fields.map(function(f) {\n      var val = gr.getDisplayValue(f) || '';\n      // Escape commas and quotes\n      if (val.indexOf(',') >= 0 || val.indexOf('\"') >= 0) {\n        val = '\"' + val.replace(/\"/g, '\"\"') + '\"';\n      }\n      return val;\n    });\n    csv += row.join(',') + '\\n';\n  }\n  return csv;\n}\n\n// Usage: Generate and attach CSV report\nvar csv = generateCSV(\n  'incident',\n  'active=true^priority<=2',\n  ['number', 'short_description', 'priority', 'assigned_to', 'state'],\n  ['Number', 'Description', 'Priority', 'Assigned To', 'State']\n);\n\n// Attach to a record\nvar sa = new GlideSysAttachment();\nsa.write(current, 'incident_report.csv', 'text/csv', csv);"
+        },
+        {
+          "name": "JSON Export",
+          "description": "Export records as a JSON array.",
+          "parameters": [],
+          "example": "function exportToJSON(table, query, fields) {\n  var results = [];\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  gr.query();\n  while (gr.next()) {\n    var record = {};\n    fields.forEach(function(f) {\n      record[f] = gr.getValue(f);\n      record[f + '_display'] = gr.getDisplayValue(f);\n    });\n    results.push(record);\n  }\n  return JSON.stringify(results, null, 2);\n}\n\n// Usage:\nvar json = exportToJSON('sys_user', 'active=true^department!=NULL',\n  ['user_name', 'name', 'email', 'department']);\ngs.info(json);"
+        }
+      ]
+    },
+    {
+      "name": "Feature Flag Pattern",
+      "type": "Utils",
+      "description": "Toggle features on/off via system properties without deploying code changes. Essential for safe rollouts.",
+      "methods": [
+        {
+          "name": "Feature Flag Manager",
+          "description": "Check feature flags stored as system properties.",
+          "parameters": [],
+          "example": "var Feature = {\n  isEnabled: function(featureName) {\n    return gs.getProperty('x_myapp.feature.' + featureName, 'false') === 'true';\n  },\n  \n  execute: function(featureName, enabledFn, disabledFn) {\n    if (this.isEnabled(featureName)) {\n      return enabledFn();\n    } else if (disabledFn) {\n      return disabledFn();\n    }\n  }\n};\n\n// Usage:\nFeature.execute('new_escalation_logic',\n  function() {\n    // New behavior\n    current.priority = calculateDynamicPriority(current);\n  },\n  function() {\n    // Old behavior (fallback)\n    current.priority = 2;\n  }\n);\n\n// Simple check:\nif (Feature.isEnabled('auto_assignment')) {\n  assignToAvailableAgent(current);\n}\n\n// Properties to create in sys_properties:\n// x_myapp.feature.new_escalation_logic = false\n// x_myapp.feature.auto_assignment = true"
+        },
+        {
+          "name": "Percentage Rollout",
+          "description": "Gradually roll out a feature to a percentage of users.",
+          "parameters": [],
+          "example": "function isInRollout(featureName, userId) {\n  var percentage = parseInt(gs.getProperty(\n    'x_myapp.rollout.' + featureName, '0'\n  ));\n  if (percentage >= 100) return true;\n  if (percentage <= 0) return false;\n  \n  // Consistent hash: same user always gets same result\n  var hash = new GlideDigest().getMD5Hex(featureName + userId);\n  var hashInt = parseInt(hash.substring(0, 8), 16);\n  var userPercentile = hashInt % 100;\n  return userPercentile < percentage;\n}\n\n// Usage:\n// Property: x_myapp.rollout.new_ui = 25 (25% of users)\nif (isInRollout('new_ui', gs.getUserID())) {\n  // Show new UI\n} else {\n  // Show old UI\n}"
+        }
+      ]
+    },
+    {
+      "name": "Pagination Helpers",
+      "type": "Utils",
+      "description": "Server-side and client-side pagination patterns for large datasets.",
+      "methods": [
+        {
+          "name": "Server Pagination",
+          "description": "Paginate GlideRecord queries with offset and limit.",
+          "parameters": [],
+          "example": "function getPage(table, query, page, pageSize, fields, orderBy) {\n  pageSize = pageSize || 20;\n  page = page || 1;\n  var offset = (page - 1) * pageSize;\n  \n  // Get total count\n  var ga = new GlideAggregate(table);\n  ga.addEncodedQuery(query);\n  ga.addAggregate('COUNT');\n  ga.query();\n  var total = 0;\n  if (ga.next()) total = parseInt(ga.getAggregate('COUNT'));\n  \n  // Get page data\n  var results = [];\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  if (orderBy) gr.orderBy(orderBy);\n  gr.chooseWindow(offset, offset + pageSize);\n  gr.query();\n  while (gr.next()) {\n    var record = { sys_id: gr.getUniqueValue() };\n    (fields || ['sys_id']).forEach(function(f) {\n      record[f] = gr.getDisplayValue(f);\n    });\n    results.push(record);\n  }\n  \n  return {\n    data: results,\n    page: page,\n    pageSize: pageSize,\n    total: total,\n    totalPages: Math.ceil(total / pageSize),\n    hasNext: page * pageSize < total,\n    hasPrev: page > 1\n  };\n}\n\n// Usage:\nvar result = getPage('incident', 'active=true', 2, 25,\n  ['number', 'short_description', 'state'], 'sys_created_on');\ngs.info('Page ' + result.page + '/' + result.totalPages);\ngs.info('Records: ' + result.data.length + ' of ' + result.total);"
+        },
+        {
+          "name": "REST API Pagination",
+          "description": "Return paginated results from a Scripted REST API with proper headers.",
+          "parameters": [],
+          "example": "// In a Scripted REST Resource (GET)\nvar page = parseInt(request.queryParams.page) || 1;\nvar limit = Math.min(parseInt(request.queryParams.limit) || 20, 100);\nvar offset = (page - 1) * limit;\n\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.orderByDesc('sys_created_on');\ngr.chooseWindow(offset, offset + limit);\ngr.query();\n\nvar results = [];\nwhile (gr.next()) {\n  results.push({\n    sys_id: gr.getUniqueValue(),\n    number: gr.getValue('number'),\n    description: gr.getValue('short_description')\n  });\n}\n\n// Get total for headers\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nvar total = ga.next() ? parseInt(ga.getAggregate('COUNT')) : 0;\n\nresponse.setStatus(200);\nresponse.setHeader('X-Total-Count', String(total));\nresponse.setHeader('X-Page', String(page));\nresponse.setHeader('X-Page-Size', String(limit));\nresponse.setBody({ result: results, meta: { page: page, total: total } });"
+        }
+      ]
     }
   ]
 }

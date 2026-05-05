@@ -126,7 +126,7 @@ export function DashboardPage() {
               iconColor="#c084fc"
               glowColor="rgba(192, 132, 252, 0.12)"
               title="API Library"
-              description="Searchable ServiceNow API reference — 122 classes, 724 methods with real-world code examples."
+              description="Searchable ServiceNow API reference — 129 classes, 741 methods with real-world code examples."
               available
             />
           </div>
