@@ -109,6 +109,14 @@ export function WorkflowToolbar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
+  const handleAddWorkflow = useCallback(() => {
+    createWorkflow();
+    // Zustand updates are synchronous, so we can grab the new ID immediately
+    const newId = useAppStore.getState().activeWorkflowId;
+    setRenamingId(newId);
+    setRenameValue("Untitled Workflow");
+  }, [createWorkflow]);
+
   return (
     <div className="wf-toolbar">
       <div className="wf-toolbar-left">
@@ -127,6 +135,7 @@ export function WorkflowToolbar({
               {renamingId === w.id ? (
                 <input
                   autoFocus
+                  onFocus={(e) => e.target.select()}
                   className="wf-tab-rename-input"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
@@ -166,7 +175,7 @@ export function WorkflowToolbar({
           ))}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="wf-toolbar-tab-add" onClick={() => createWorkflow()}>
+              <button className="wf-toolbar-tab-add" onClick={handleAddWorkflow}>
                 <Plus className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>

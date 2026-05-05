@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -8,6 +8,8 @@ interface JsonTreeViewProps {
   isLast?: boolean;
   depth?: number;
   initialExpanded?: boolean;
+  expandVersion?: number;
+  expandTarget?: boolean;
 }
 
 export function JsonTreeView({
@@ -16,8 +18,16 @@ export function JsonTreeView({
   isLast = true,
   depth = 0,
   initialExpanded = true,
+  expandVersion,
+  expandTarget,
 }: JsonTreeViewProps) {
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
+
+  useEffect(() => {
+    if (expandVersion !== undefined) {
+      setIsExpanded(!!expandTarget);
+    }
+  }, [expandVersion, expandTarget]);
 
   const isObject = typeof data === "object" && data !== null;
   const isArray = Array.isArray(data);
@@ -97,6 +107,8 @@ export function JsonTreeView({
                 isLast={index === data.length - 1}
                 depth={depth + 1}
                 initialExpanded={depth < 2} // Auto-expand first few levels
+                expandVersion={expandVersion}
+                expandTarget={expandTarget}
               />
             ))
           ) : (
@@ -108,6 +120,8 @@ export function JsonTreeView({
                 isLast={index === entries.length - 1}
                 depth={depth + 1}
                 initialExpanded={depth < 2}
+                expandVersion={expandVersion}
+                expandTarget={expandTarget}
               />
             ))
           )}

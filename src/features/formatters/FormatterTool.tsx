@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData } from "./xmlUtils";
+import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtils";
 import { 
   FileJson, 
   FileCode,
@@ -17,8 +18,11 @@ import {
   Expand,
   Shrink,
   Plus,
+  Minus,
   X,
-  FileText
+  FileText,
+  Settings2,
+  AlignLeft
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -74,6 +78,16 @@ export function FormatterTool() {
     maxSize: 80
   });
 
+  const [jsonSettings, setJsonSettings] = useState<JsonFormatOptions>({
+    tabSize: 2,
+    sortKeys: false
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = React.useRef<HTMLDivElement>(null);
+  
+  const [expandVersion, setExpandVersion] = useState(0);
+  const [expandTarget, setExpandTarget] = useState(true);
+
   const files = formatterFiles[type];
   const activeFile = files.find(f => f.id === activeFileId) || files[0]!;
   const currentInput = activeFile.content;
@@ -83,7 +97,7 @@ export function FormatterTool() {
     if (!currentInput.trim()) return { data: null, error: null };
     try {
       if (type === "json") {
-        return { data: JSON.parse(currentInput), error: null };
+        return parseJsonRobust(currentInput);
       } else {
         return { data: xmlToTreeData(currentInput), error: null };
       }
@@ -92,11 +106,14 @@ export function FormatterTool() {
     }
   }, [currentInput, type]);
 
-  // Close dropdown on click outside
+  // Close dropdowns on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowTypeDropdown(false);
+      }
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
+        setShowSettings(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -118,7 +135,7 @@ export function FormatterTool() {
     if (!currentInput || error) return;
     try {
       if (type === "json") {
-        updateContent("json", activeFile.id, JSON.stringify(JSON.parse(currentInput)));
+        updateContent("json", activeFile.id, formatJsonRobust(currentInput, { tabSize: 0, sortKeys: jsonSettings.sortKeys }));
       } else {
         updateContent("xml", activeFile.id, minifyXml(currentInput));
       }
@@ -131,7 +148,7 @@ export function FormatterTool() {
     if (!currentInput || error) return;
     try {
       if (type === "json") {
-        updateContent("json", activeFile.id, JSON.stringify(JSON.parse(currentInput), null, 2));
+        updateContent("json", activeFile.id, formatJsonRobust(currentInput, jsonSettings));
       } else {
         updateContent("xml", activeFile.id, formatXml(currentInput));
       }
@@ -142,6 +159,16 @@ export function FormatterTool() {
 
   const handleClear = () => {
     updateContent(type, activeFile.id, "");
+  };
+
+  const handleExpandAll = () => {
+    setExpandTarget(true);
+    setExpandVersion(v => v + 1);
+  };
+
+  const handleCollapseAll = () => {
+    setExpandTarget(false);
+    setExpandVersion(v => v + 1);
   };
 
   const handleSample = () => {
@@ -256,16 +283,80 @@ export function FormatterTool() {
             </button>
           </ActionTooltip>
           <div className="toolbar-sep" />
-          <ActionTooltip content={`Prettify ${type.toUpperCase()}`} side="bottom">
-            <button 
-              className="toolbar-btn" 
-              onClick={handleFormat}
-              disabled={!currentInput || !!error}
-            >
-              <Maximize2 className="h-3.5 w-3.5" />
-              Format
-            </button>
-          </ActionTooltip>
+          <div className="flex items-center gap-1.5">
+            <ActionTooltip content={`Prettify ${type.toUpperCase()}`} side="bottom">
+              <button 
+                className="toolbar-btn" 
+                onClick={handleFormat}
+                disabled={!currentInput || !!error}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                Format
+              </button>
+            </ActionTooltip>
+            
+            {type === "json" && (
+              <div className="relative" ref={settingsRef}>
+                <ActionTooltip content="Format Settings" side="bottom">
+                  <button 
+                    className={cn(
+                      "toolbar-btn px-2 flex items-center justify-center transition-all",
+                      showSettings ? "bg-bg-3 text-text-1 border-accent" : "text-text-3"
+                    )}
+                    onClick={() => setShowSettings(!showSettings)}
+                    disabled={!currentInput || !!error}
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                  </button>
+                </ActionTooltip>
+                
+                {showSettings && (
+                  <div className="formatter-settings-popover">
+                    <div className="formatter-settings-header">
+                      <Settings2 className="h-3.5 w-3.5 text-accent" />
+                      <span>Format Settings</span>
+                    </div>
+                    
+                    <div className="formatter-settings-body">
+                      <div className="formatter-setting-row">
+                        <div className="formatter-setting-label">
+                          <span className="title">Tab Size</span>
+                          <span className="desc">Indentation spaces</span>
+                        </div>
+                        <div className="formatter-setting-control relative">
+                          <select 
+                            className="formatter-setting-select"
+                            value={jsonSettings.tabSize}
+                            onChange={(e) => setJsonSettings({ ...jsonSettings, tabSize: parseInt(e.target.value) })}
+                          >
+                            <option value={2}>2 Spaces</option>
+                            <option value={4}>4 Spaces</option>
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--text-3)] pointer-events-none" />
+                        </div>
+                      </div>
+                      
+                      <div className="formatter-setting-row">
+                        <div className="formatter-setting-label">
+                          <span className="title">Sort Keys</span>
+                          <span className="desc">Alphabetical order</span>
+                        </div>
+                        <button 
+                          className={cn(
+                            "formatter-setting-toggle",
+                            jsonSettings.sortKeys && "active"
+                          )}
+                          onClick={() => setJsonSettings({ ...jsonSettings, sortKeys: !jsonSettings.sortKeys })}
+                        >
+                          <div className="formatter-setting-toggle-knob" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <ActionTooltip content={`Minify ${type.toUpperCase()}`} side="bottom">
             <button 
               className="toolbar-btn" 
@@ -401,19 +492,42 @@ export function FormatterTool() {
           style={{ width: isPreviewFullscreen ? "100%" : `${100 - splitSize}%`, flex: isPreviewFullscreen ? 1 : "none" }}
         >
           <div className="section-header-row">
-            <div className="section-label">Preview</div>
-            <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
-              <button 
-                className="preview-fullscreen-btn"
-                onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
-              >
-                {isPreviewFullscreen ? (
-                  <Shrink className="h-3.5 w-3.5" />
-                ) : (
-                  <Expand className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </ActionTooltip>
+            <div className="section-label flex items-center">
+              Preview
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {type === "json" && !error && data && (
+                <div className="flex items-center bg-[var(--bg-1)] border border-[var(--border-1)] rounded-[6px] p-0.5 shadow-sm">
+                  <ActionTooltip content="Expand All" side="top">
+                    <button className="preview-action-btn" onClick={handleExpandAll}>
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </ActionTooltip>
+                  <div className="w-[1px] h-3.5 bg-[var(--border-2)] mx-0.5" />
+                  <ActionTooltip content="Collapse All" side="top">
+                    <button className="preview-action-btn" onClick={handleCollapseAll}>
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                  </ActionTooltip>
+                </div>
+              )}
+
+              <div className="w-[1px] h-4 bg-[var(--border-1)] mx-1" />
+
+              <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
+                <button 
+                  className="preview-fullscreen-btn"
+                  onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
+                >
+                  {isPreviewFullscreen ? (
+                    <Shrink className="h-3.5 w-3.5" />
+                  ) : (
+                    <Expand className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </ActionTooltip>
+            </div>
           </div>
           
           <div className="json-tree-container">
@@ -428,7 +542,11 @@ export function FormatterTool() {
             ) : data ? (
               <div className="json-tree-scroll">
                 {type === "json" ? (
-                  <JsonTreeView data={data} />
+                  <JsonTreeView 
+                    data={data} 
+                    expandVersion={expandVersion} 
+                    expandTarget={expandTarget} 
+                  />
                 ) : (
                   <XmlTreeView data={data as any} />
                 )}
