@@ -13,6 +13,7 @@ import {
   useReactFlow,
   ReactFlowProvider,
   BackgroundVariant,
+  SelectionMode,
   type Connection,
   type Node,
   type Edge,
@@ -379,6 +380,7 @@ function WorkflowCanvas() {
             maxZoom={4}
             panOnDrag={[1, 2]}
             selectionOnDrag
+            selectionMode={SelectionMode.Partial}
             panOnScroll
             onPaneContextMenu={(e) => e.preventDefault()}
             className="wf-canvas"
