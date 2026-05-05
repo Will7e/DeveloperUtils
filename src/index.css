@@ -993,6 +993,11 @@ body {
   color: #a3e635;
 }
 
+.tab-icon-xml {
+  background: rgba(249, 115, 22, 0.10);
+  color: #f97316;
+}
+
 .tab-name {
   max-width: 120px;
   overflow: hidden;
