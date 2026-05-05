@@ -111,15 +111,15 @@
         },
         {
           "name": "initialize",
-          "description": "Creates an empty record and sets default values.",
+          "description": "Creates an empty record and populates it with default field values from the dictionary. Use before setting values and calling insert().",
           "parameters": [],
-          "example": "gr.initialize();"
+          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\n// Default values from dictionary are now set\ngs.info('Default priority: ' + gr.getValue('priority'));\ngr.setValue('short_description', 'New incident from script');\ngr.setValue('caller_id', gs.getUserID());\nvar sysId = gr.insert();"
         },
         {
           "name": "newRecord",
-          "description": "Creates a new record, sets default values, and assigns a new sys_id immediately.",
+          "description": "Creates a new record with default values and immediately assigns a sys_id. Unlike initialize(), the sys_id is available before insert.",
           "parameters": [],
-          "example": "gr.newRecord();"
+          "example": "var gr = new GlideRecord('incident');\ngr.newRecord();\nvar sysId = gr.getUniqueValue(); // sys_id available immediately\ngs.info('Pre-assigned sys_id: ' + sysId);\ngr.setValue('short_description', 'Pre-staged incident');\ngr.insert();"
         },
         {
           "name": "getValue",
@@ -136,7 +136,7 @@
             "fieldName",
             "value"
           ],
-          "example": "gr.setValue('state', 2);"
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\n// Set simple fields\ngr.setValue('state', 2);\ngr.setValue('short_description', 'Updated via script');\n// Set reference field by sys_id\ngr.setValue('assigned_to', assigneeSysId);\n// Set date field\ngr.setValue('due_date', new GlideDateTime());\ngr.update();"
         },
         {
           "name": "getDisplayValue",
@@ -158,7 +158,7 @@
           "parameters": [
             "limit"
           ],
-          "example": "gr.setLimit(10);\ngr.query();"
+          "example": "var gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.orderByDesc('sys_created_on');\ngr.setLimit(10); // Only retrieve first 10\ngr.query();\ngs.info('Retrieved ' + gr.getRowCount() + ' of total records');"
         },
         {
           "name": "orderBy",
@@ -166,7 +166,7 @@
           "parameters": [
             "fieldName"
           ],
-          "example": "gr.orderBy('number');"
+          "example": "var gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.orderBy('priority'); // Ascending: 1, 2, 3...\ngr.orderBy('sys_created_on'); // Secondary sort\ngr.setLimit(20);\ngr.query();\nwhile (gr.next()) {\n  gs.info(gr.priority + ' | ' + gr.number);\n}"
         },
         {
           "name": "orderByDesc",
@@ -186,7 +186,7 @@
           "name": "canRead",
           "description": "Checks if the current user has permission to read this record/table.",
           "parameters": [],
-          "example": "if (gr.canRead()) { ... }"
+          "example": "var gr = new GlideRecord('hr_case');\ngr.get(sysId);\nif (gr.canRead()) {\n  // Display record details\n  gs.info('Subject: ' + gr.getValue('subject'));\n} else {\n  gs.addErrorMessage('You do not have permission to view this record');\n}"
         },
         {
           "name": "setWorkflow",
@@ -214,7 +214,7 @@
           "name": "getTableName",
           "description": "Returns the name of the table.",
           "parameters": [],
-          "example": "gs.info(gr.getTableName());"
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\ngs.info(gr.getTableName()); // 'incident'\n\n// Useful for generic scripts\nvar table = current.getTableName();\ngs.info('Business rule running on: ' + table);"
         },
         {
           "name": "isValidField",
@@ -230,7 +230,7 @@
           "parameters": [
             "noStack (optional)"
           ],
-          "example": "gs.info(gr.getLink(true));"
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\nvar link = gr.getLink(true); // true = no stack\ngs.info('Direct URL: ' + link);\n\n// Use in email body\nvar body = 'View incident: ' + gs.getProperty('glide.servlet.uri') + gr.getLink();"
         },
         {
           "name": "hasNext",
@@ -421,11 +421,11 @@
         },
         {
           "name": "debug",
-          "description": "Logs a debug message if debugging is enabled.",
+          "description": "Logs a debug-level message to the system log. Only visible when session debugging is enabled (Debug Business Rules, Debug Security, etc.).",
           "parameters": [
             "message"
           ],
-          "example": "gs.debug('Debug info');"
+          "example": "// Debug messages only appear when debugging is enabled\ngs.debug('Processing record: ' + current.number);\ngs.debug('Query returned {0} records', rowCount);\n\n// Enable debugging: System Diagnostics > Debug Business Rules"
         },
         {
           "name": "addInfoMessage",
@@ -464,21 +464,21 @@
         },
         {
           "name": "getUser",
-          "description": "Returns a reference to the GlideUser object for the current user.",
+          "description": "Returns a GlideUser object for the currently logged-in user. Provides access to user details, roles, groups, and preferences.",
           "parameters": [],
-          "example": "var user = gs.getUser();"
+          "example": "var user = gs.getUser();\ngs.info('Name: ' + user.getFullName());\ngs.info('Email: ' + user.getEmail());\ngs.info('Is admin: ' + user.hasRole('admin'));\ngs.info('Groups: ' + user.getMyGroups());\ngs.info('Company: ' + user.getCompanyID());"
         },
         {
           "name": "getUserID",
           "description": "Returns the sys_id of the current user.",
           "parameters": [],
-          "example": "var userId = gs.getUserID();"
+          "example": "var userId = gs.getUserID();\ngs.info('Current user sys_id: ' + userId);\n\n// Common: assign to current user\ncurrent.setValue('assigned_to', gs.getUserID());\ncurrent.update();"
         },
         {
           "name": "getUserName",
           "description": "Returns the username (user_name) of the current user.",
           "parameters": [],
-          "example": "var name = gs.getUserName();"
+          "example": "var username = gs.getUserName();\ngs.info('Logged in as: ' + username);\n\n// Use in audit logging\ngs.info('Action performed by: ' + gs.getUserName() + ' at ' + gs.nowDateTime());"
         },
         {
           "name": "hasRole",
@@ -498,7 +498,7 @@
           "name": "nowDateTime",
           "description": "Returns the current date and time in the user's display format.",
           "parameters": [],
-          "example": "var now = gs.nowDateTime();"
+          "example": "var now = gs.nowDateTime();\ngs.info('Current time: ' + now);\n\n// Use as a timestamp\ncurrent.setValue('u_last_checked', gs.nowDateTime());\ncurrent.update();"
         },
         {
           "name": "beginningOfLastMonth",
@@ -528,7 +528,7 @@
           "name": "isLoggedIn",
           "description": "Checks if a user is logged in.",
           "parameters": [],
-          "example": "if (gs.isLoggedIn()) { ... }"
+          "example": "if (gs.isLoggedIn()) {\n  gs.info('User is authenticated: ' + gs.getUserName());\n} else {\n  gs.info('Guest/anonymous session');\n  // Redirect to login\n}"
         },
         {
           "name": "getMessage",
@@ -648,19 +648,19 @@
         },
         {
           "name": "urlEncode",
-          "description": "URL-encodes a string.",
+          "description": "URL-encodes a string, replacing special characters with percent-encoded equivalents. Essential when building URLs with dynamic parameters.",
           "parameters": [
             "value"
           ],
-          "example": "var encoded = gs.urlEncode('hello world & more');\n// 'hello+world+%26+more'"
+          "example": "var query = 'active=true^short_descriptionLIKEserver down';\nvar encoded = gs.urlEncode(query);\ngs.info(encoded); // 'active%3Dtrue%5Eshort_descriptionLIKEserver+down'\n\n// Build a URL safely\nvar url = '/incident_list.do?sysparm_query=' + gs.urlEncode(query);"
         },
         {
           "name": "urlDecode",
-          "description": "URL-decodes a string.",
+          "description": "Decodes a URL-encoded string back to its original form. Reverses the encoding applied by urlEncode().",
           "parameters": [
             "value"
           ],
-          "example": "var decoded = gs.urlDecode('hello+world+%26+more');\n// 'hello world & more'"
+          "example": "var encoded = 'active%3Dtrue%5Epriority%3D1';\nvar decoded = gs.urlDecode(encoded);\ngs.info(decoded); // 'active=true^priority=1'\n\n// Use decoded query in GlideRecord\nvar gr = new GlideRecord('incident');\ngr.addEncodedQuery(decoded);\ngr.query();"
         },
         {
           "name": "xmlToJSON",
@@ -688,9 +688,9 @@
         },
         {
           "name": "flushMessages",
-          "description": "Clears all queued info/error messages for the session.",
+          "description": "Clears all pending info/error messages that have been queued with addInfoMessage() or addErrorMessage(). Messages already displayed are not affected.",
           "parameters": [],
-          "example": "gs.flushMessages();"
+          "example": "// Clear stale messages before adding new ones\ngs.flushMessages();\ngs.addInfoMessage('Operation completed: ' + current.number);"
         },
         {
           "name": "getCurrentScopeName",
@@ -819,7 +819,7 @@
             "value",
             "displayValue (optional)"
           ],
-          "example": "g_form.setValue('state', 2);"
+          "example": "// Set a simple field\ng_form.setValue('priority', 1);\n\n// Set a reference field with display value\ng_form.setValue('assigned_to', userSysId, 'John Smith');\n\n// Set multiple fields\ng_form.setValue('state', 2);\ng_form.setValue('urgency', 1);\ng_form.setValue('impact', 1);"
         },
         {
           "name": "clearValue",
@@ -894,9 +894,9 @@
         },
         {
           "name": "clearMessages",
-          "description": "Removes all info/error messages from the top of the form.",
+          "description": "Removes all informational and error messages displayed at the top of the form. Does not clear field-level messages (use hideFieldMsg for those).",
           "parameters": [],
-          "example": "g_form.clearMessages();"
+          "example": "// Clear previous messages before showing new ones\ng_form.clearMessages();\n\n// Validate and show fresh messages\nif (!g_form.getValue('short_description')) {\n  g_form.addErrorMessage('Please fill in the short description');\n}"
         },
         {
           "name": "hideFieldMsg",
@@ -955,15 +955,15 @@
         },
         {
           "name": "save",
-          "description": "Saves the record (equivalent to clicking Save).",
+          "description": "Saves the current form without navigating away. Equivalent to clicking the Save button. The form stays open after saving.",
           "parameters": [],
-          "example": "g_form.save();"
+          "example": "// Save the form and stay on the record\ng_form.save();\n\n// Common pattern: set values then save\ng_form.setValue('state', 2);\ng_form.setValue('assigned_to', g_user.userID);\ng_form.save();"
         },
         {
           "name": "submit",
-          "description": "Submits the record (equivalent to clicking Submit/Update).",
+          "description": "Submits the form, saving the record and navigating away (back to the list or previous page). Equivalent to clicking the Submit/Update button.",
           "parameters": [],
-          "example": "g_form.submit();"
+          "example": "// Validate before submitting\nvar desc = g_form.getValue('short_description');\nif (!desc) {\n  g_form.showFieldMsg('short_description', 'Required before submit', 'error');\n  return false;\n}\ng_form.submit();"
         },
         {
           "name": "flash",
@@ -1034,19 +1034,19 @@
         },
         {
           "name": "showRelatedList",
-          "description": "Shows a related list.",
+          "description": "Shows a specific related list on the form by its table name. The related list must be configured on the form.",
           "parameters": [
             "listTableName"
           ],
-          "example": "g_form.showRelatedList('incident');"
+          "example": "// Show the child incidents related list\ng_form.showRelatedList('incident.parent_incident');"
         },
         {
           "name": "hideRelatedList",
-          "description": "Hides a related list.",
+          "description": "Hides a specific related list on the form. The space is reclaimed and the list is no longer visible.",
           "parameters": [
             "listTableName"
           ],
-          "example": "g_form.hideRelatedList('incident');"
+          "example": "// Hide the approval related list for non-managers\nif (!g_user.hasRole('approver_user')) {\n  g_form.hideRelatedList('sysapproval_approver.sysapproval');\n}"
         },
         {
           "name": "getRelatedListNames",
@@ -1128,19 +1128,19 @@
           "name": "showRelatedLists",
           "description": "Shows all related lists on the form.",
           "parameters": [],
-          "example": "g_form.showRelatedLists();"
+          "example": "// Show all related lists (e.g., after hiding them conditionally)\ng_form.showRelatedLists();\n\n// Common pattern: toggle based on record type\nif (g_form.getValue('u_show_details') == 'true') {\n  g_form.showRelatedLists();\n}"
         },
         {
           "name": "disableAttachments",
           "description": "Disables the attachment button on the form.",
           "parameters": [],
-          "example": "g_form.disableAttachments();"
+          "example": "// Disable attachments on closed records\nif (g_form.getValue('state') == '7') {\n  g_form.disableAttachments();\n  g_form.addInfoMessage('Attachments disabled for closed records');\n}"
         },
         {
           "name": "enableAttachments",
           "description": "Enables the attachment button on the form.",
           "parameters": [],
-          "example": "g_form.enableAttachments();"
+          "example": "// Re-enable attachments after they were disabled\nif (g_form.getValue('state') != '7') { // Not closed\n  g_form.enableAttachments();\n}"
         },
         {
           "name": "getFormElement",
@@ -1482,17 +1482,17 @@
         },
         {
           "name": "setGroup",
-          "description": "Determines whether to group the results by the fields used in orderBy.",
+          "description": "Enables grouping of aggregate results. When true, results are grouped by the fields specified in orderBy(), similar to SQL GROUP BY.",
           "parameters": [
             "enable"
           ],
-          "example": "ga.setGroup(true);"
+          "example": "var ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.setGroup(true);\nga.orderBy('category');\nga.query();\nwhile (ga.next()) {\n  gs.info(ga.getValue('category') + ': ' + ga.getAggregate('COUNT'));\n}"
         },
         {
           "name": "next",
           "description": "Moves to the next aggregate record.",
           "parameters": [],
-          "example": "while (ga.next()) { ... }"
+          "example": "var ga = new GlideAggregate('incident');\nga.addAggregate('COUNT');\nga.addAggregate('AVG', 'reassignment_count');\nga.groupBy('priority');\nga.query();\nwhile (ga.next()) {\n  var priority = ga.getValue('priority');\n  var count = ga.getAggregate('COUNT');\n  var avg = ga.getAggregate('AVG', 'reassignment_count');\n  gs.info('P' + priority + ': ' + count + ' incidents, avg ' + avg + ' reassignments');\n}"
         },
         {
           "name": "groupBy",
@@ -1548,7 +1548,7 @@
           "name": "getValue",
           "description": "Gets the internal value in UTC format.",
           "parameters": [],
-          "example": "var utc = gdt.getValue();"
+          "example": "var gdt = new GlideDateTime();\nvar utcValue = gdt.getValue();\ngs.info('UTC: ' + utcValue); // '2024-06-15 14:30:00'\n\n// Get value from a record field\nvar openedAt = current.getValue('opened_at');\nvar gdt2 = new GlideDateTime(openedAt);"
         },
         {
           "name": "getDisplayValue",
@@ -1558,11 +1558,11 @@
         },
         {
           "name": "addDaysUTC",
-          "description": "Adds a number of days to the UTC time.",
+          "description": "Adds the specified number of days to the date/time in UTC. Negative values subtract days. Does not account for user timezone.",
           "parameters": [
             "days"
           ],
-          "example": "gdt.addDaysUTC(5);"
+          "example": "var gdt = new GlideDateTime();\ngs.info('Now: ' + gdt.getDisplayValue());\ngdt.addDaysUTC(5);\ngs.info('5 days later: ' + gdt.getDisplayValue());\n\n// Set an SLA deadline 3 business days out\nvar deadline = new GlideDateTime();\ndeadline.addDaysUTC(3);\ncurrent.setValue('u_deadline', deadline);"
         },
         {
           "name": "addWeeksLocalTime",
@@ -1570,7 +1570,7 @@
           "parameters": [
             "weeks"
           ],
-          "example": "gdt.addWeeksLocalTime(1);"
+          "example": "var gdt = new GlideDateTime();\ngdt.addWeeksLocalTime(2); // Two weeks from now\ngs.info('Two weeks out: ' + gdt.getDisplayValue());\ncurrent.setValue('follow_up_date', gdt);"
         },
         {
           "name": "getNumericValue",
@@ -1766,7 +1766,7 @@
         },
         {
           "name": "setRequestHeader",
-          "description": "Sets an HTTP header.",
+          "description": "Sets an HTTP request header. Common headers include Content-Type, Accept, Authorization, and custom API headers.",
           "parameters": [
             "name",
             "value"
@@ -1989,7 +1989,7 @@
           "parameters": [
             "fields..."
           ],
-          "example": ".selectOne('number').get();"
+          "example": "// Get a single incident - returns an Optional\nvar result = new GlideQuery('incident')\n  .where('number', 'INC0010001')\n  .selectOne('number', 'short_description', 'state');\n\nif (result.isPresent()) {\n  var inc = result.get();\n  gs.info(inc.number + ': ' + inc.short_description);\n} else {\n  gs.info('Incident not found');\n}"
         },
         {
           "name": "forEach",
@@ -2021,7 +2021,7 @@
           "parameters": [
             "object"
           ],
-          "example": ".update({ state: 6 });"
+          "example": "// Update a single record\nnew GlideQuery('incident')\n  .where('sys_id', sysId)\n  .update({\n    state: 6,\n    close_code: 'Solved (Permanently)',\n    close_notes: 'Applied fix from KB0012345'\n  });\n\n// Bulk update\nnew GlideQuery('incident')\n  .where('active', true)\n  .where('priority', 5)\n  .update({ priority: 4 });"
         },
         {
           "name": "updateMultiple",
@@ -2033,9 +2033,9 @@
         },
         {
           "name": "del",
-          "description": "Deletes records matching the conditions.",
+          "description": "Deletes a single record by sys_id.",
           "parameters": [],
-          "example": ".del();"
+          "example": "new GlideQuery('incident')\n  .where('sys_id', sysId)\n  .deleteMultiple();\n\n// Or to delete a specific record:\nvar gr = new GlideRecord('u_temp');\ngr.get(sysId);\ngr.deleteRecord();"
         },
         {
           "name": "getGroupCountGQ",
@@ -2124,7 +2124,7 @@
           "parameters": [
             "value (optional)"
           ],
-          "example": "var gd = new GlideDate();"
+          "example": "// Current date\nvar today = new GlideDate();\ngs.info('Today: ' + today.getDisplayValue());\n\n// From a specific value\nvar specific = new GlideDate();\nspecific.setValue('2024-12-25');\ngs.info('Christmas: ' + specific.getDisplayValue());"
         },
         {
           "name": "getByFormat",
@@ -2132,15 +2132,15 @@
           "parameters": [
             "format"
           ],
-          "example": "gd.getByFormat('dd-MM-yyyy');"
+          "example": "var gd = new GlideDate();\ngs.info(gd.getByFormat('dd-MM-yyyy')); // '15-06-2024'\ngs.info(gd.getByFormat('MMMM dd, yyyy')); // 'June 15, 2024'\ngs.info(gd.getByFormat('yyyy/MM/dd')); // '2024/06/15'"
         },
         {
           "name": "addDays",
-          "description": "Adds a number of days.",
+          "description": "Adds the specified number of days to the date. Negative values subtract days.",
           "parameters": [
             "days"
           ],
-          "example": "gd.addDays(5);"
+          "example": "var gd = new GlideDate();\ngd.addDays(7); // One week from today\ngs.info('Due date: ' + gd.getDisplayValue());\n\n// Set a due date 30 days out\nvar due = new GlideDate();\ndue.addDays(30);\ncurrent.setValue('due_date', due);"
         },
         {
           "name": "setDisplayValue",
@@ -2196,15 +2196,15 @@
           "parameters": [
             "title"
           ],
-          "example": "gm.setTitle('My Dialog');"
+          "example": "var modal = new GlideModal('confirm_page');\nmodal.setTitle('Confirm Approval');\nmodal.setPreference('sysparm_action', 'approve');\nmodal.render();"
         },
         {
           "name": "setSize",
-          "description": "Sets the width of the modal.",
+          "description": "Sets the size of the modal dialog. Accepts Bootstrap modal size classes: modal-sm, modal-md, modal-lg, or a pixel width.",
           "parameters": [
             "size ('modal-sm', 'modal-lg', etc.)"
           ],
-          "example": "gm.setSize('modal-lg');"
+          "example": "var modal = new GlideModal('my_page');\nmodal.setTitle('Details');\nmodal.setSize('modal-lg'); // Large modal\nmodal.render();\n\n// Also accepts pixel width\nvar small = new GlideModal('confirm_dialog');\nsmall.setSize(400);\nsmall.render();"
         },
         {
           "name": "setPreference",
@@ -2217,9 +2217,9 @@
         },
         {
           "name": "render",
-          "description": "Renders and displays the modal dialog on screen. Must be called after setting all preferences, title, and body content.",
+          "description": "Renders and displays the modal dialog on screen. Call after configuring the modal with setTitle, setBody, and setPreference.",
           "parameters": [],
-          "example": "gm.render();"
+          "example": "var modal = new GlideModal('my_ui_page');\nmodal.setTitle('Confirm Action');\nmodal.setSize('modal-sm');\nmodal.setPreference('sysparm_record', g_form.getUniqueValue());\nmodal.render(); // Shows the modal"
         },
         {
           "name": "setWidth",
@@ -2267,7 +2267,7 @@
           "name": "reloadWindow",
           "description": "Reloads the current frame.",
           "parameters": [],
-          "example": "g_navigation.reloadWindow();"
+          "example": "// Refresh the page after an action\ng_navigation.reloadWindow();\n\n// Common in UI Actions after server-side changes\ng_form.save();\ng_navigation.reloadWindow();"
         },
         {
           "name": "refreshNavigator",
@@ -2373,7 +2373,7 @@
           "parameters": [
             "boolean"
           ],
-          "example": "action.setNoPopulate(true);"
+          "example": "// Prevent auto-population when redirecting to a new record\naction.setNoPopulate(true);\naction.setRedirectURL(newRecordGR);\n\n// Without setNoPopulate, fields might inherit values from current record"
         },
         {
           "name": "setReturnURL",
@@ -2455,7 +2455,7 @@
           "name": "refresh",
           "description": "Refreshes the list with the current query.",
           "parameters": [],
-          "example": "g_list.refresh();"
+          "example": "// Refresh the list after performing an action\nvar list = GlideList2.get('incident_list');\nlist.refresh();\n\n// In a List UI Action context\ng_list.refresh();"
         },
         {
           "name": "setFilter",
@@ -2485,13 +2485,13 @@
           "parameters": [
             "fieldName"
           ],
-          "example": "g_list.sort('priority');"
+          "example": "// Sort the list by priority in a UI Action\ng_list.sort('priority');\n\n// Sort by created date\ng_list.sort('sys_created_on');"
         },
         {
           "name": "toggleList",
-          "description": "Toggles the visibility of the list.",
+          "description": "Toggles the visibility of the list between shown and hidden states. Useful in UI Actions on lists.",
           "parameters": [],
-          "example": "g_list.toggleList();"
+          "example": "// Toggle list visibility from a UI Action\ng_list.toggleList();\n\n// Common pattern in list context menu\nif (typeof g_list !== 'undefined') {\n  g_list.toggleList();\n}"
         }
       ]
     },
@@ -2514,9 +2514,9 @@
         },
         {
           "name": "execute",
-          "description": "Runs the dialog and starts the operation.",
+          "description": "Starts the long-running operation and displays the progress dialog to the user. The dialog auto-updates with progress.",
           "parameters": [],
-          "example": "dialog.execute();"
+          "example": "// Export incidents to PDF\nvar dialog = new GwtPollDialog('incident', 'active=true^priority=1', 100, 'default', 'unload_pdf');\ndialog.execute();\n\n// The dialog shows progress automatically\n// and provides a download link when complete"
         }
       ]
     },
@@ -2744,7 +2744,7 @@
         },
         {
           "name": "concat",
-          "description": "Concatenates two arrays.",
+          "description": "Concatenates two arrays into a single array, preserving the order of elements from both inputs.",
           "parameters": [
             "array1",
             "array2"
@@ -2788,12 +2788,12 @@
         },
         {
           "name": "get",
-          "description": "Fetches a widget model.",
+          "description": "Embeds a widget by ID and returns its model. Used to dynamically load widgets inside other widgets in Service Portal.",
           "parameters": [
             "widgetId",
             "data"
           ],
-          "example": "spUtil.get('my-custom-widget', {}).then(function(response) {\n  c.widgetToCreate = response;\n});"
+          "example": "// Load a widget dynamically\nspUtil.get('widget-cool-clock', {timezone: 'US/Eastern'}).then(function(response) {\n  c.embeddedWidget = response;\n  // Use in HTML: <sp-widget widget=\"c.embeddedWidget\"></sp-widget>\n});"
         },
         {
           "name": "update",
@@ -2906,7 +2906,7 @@
           "parameters": [
             "status"
           ],
-          "example": "response.setStatus(200);"
+          "example": "// In a Scripted REST Resource script\nresponse.setStatus(201); // Created\nresponse.setBody({sys_id: newSysId, message: 'Record created'});\n\n// Error response\nresponse.setStatus(404);\nresponse.setBody({error: 'Record not found'});"
         },
         {
           "name": "setHeader",
@@ -3060,7 +3060,7 @@
       "methods": [
         {
           "name": "alert",
-          "description": "Displays an alert modal.",
+          "description": "Displays a simple alert modal with a message and an OK button. Returns a promise that resolves when dismissed.",
           "parameters": [
             "message"
           ],
@@ -3160,11 +3160,11 @@
       "methods": [
         {
           "name": "parseXML",
-          "description": "Parses an XML string.",
+          "description": "Parses an XML string and builds the internal DOM tree. Must be called before any node query operations.",
           "parameters": [
             "xmlString"
           ],
-          "example": "var xmlDoc = new XMLDocument2();\nxmlDoc.parseXML('<xml><node>Value</node></xml>');"
+          "example": "var xmlDoc = new XMLDocument2();\nxmlDoc.parseXML('<response><status>success</status><count>42</count></response>');\nvar status = xmlDoc.getFirstNode('//status');\ngs.info(status.getTextContent()); // 'success'\nvar count = xmlDoc.getFirstNode('//count');\ngs.info(count.getTextContent()); // '42'"
         },
         {
           "name": "getNode",
@@ -3176,11 +3176,11 @@
         },
         {
           "name": "getFirstNode",
-          "description": "Gets the first node.",
+          "description": "Returns the first XMLNode matching the specified XPath expression. Useful when you only need one matching node.",
           "parameters": [
             "xpath"
           ],
-          "example": "var node = xmlDoc.getFirstNode('//node');"
+          "example": "var xmlDoc = new XMLDocument2();\nxmlDoc.parseXML('<users><user name=\"admin\"/><user name=\"guest\"/></users>');\nvar first = xmlDoc.getFirstNode('//user');\ngs.info('First user: ' + first.getAttribute('name')); // 'admin'"
         },
         {
           "name": "createElement",
@@ -3221,7 +3221,7 @@
         },
         {
           "name": "getAttribute",
-          "description": "Gets an attribute value.",
+          "description": "Returns the value of the specified attribute on the XML node. Returns null if the attribute does not exist.",
           "parameters": [
             "name"
           ],
@@ -3243,7 +3243,7 @@
           "name": "getNodeValue",
           "description": "Returns the value of the node.",
           "parameters": [],
-          "example": "gs.info(node.getNodeValue());"
+          "example": "var xmlDoc = new XMLDocument2();\nxmlDoc.parseXML('<config><timeout>30</timeout></config>');\nvar node = xmlDoc.getFirstNode('//timeout');\ngs.info('Timeout: ' + node.getNodeValue()); // or getTextContent()"
         },
         {
           "name": "hasAttribute",
@@ -3263,19 +3263,19 @@
       "methods": [
         {
           "name": "setEndpoint",
-          "description": "Sets the endpoint URL.",
+          "description": "Sets the target SOAP web service endpoint URL. Overrides the endpoint defined in the SOAP Message record.",
           "parameters": [
             "endpoint"
           ],
-          "example": "var sm = new sn_ws.SOAPMessageV2();\nsm.setEndpoint('http://example.com/soap');"
+          "example": "var sm = new sn_ws.SOAPMessageV2('StockQuote', 'GetQuote');\nsm.setEndpoint('https://api.example.com/soap/v2');\nsm.setStringParameter('symbol', 'NOW');\nvar response = sm.execute();\ngs.info('Status: ' + response.getStatusCode());"
         },
         {
           "name": "setRequestBody",
-          "description": "Sets the raw SOAP body.",
+          "description": "Sets the raw SOAP envelope body. Use when you need full control over the SOAP XML instead of using parameterized messages.",
           "parameters": [
             "body"
           ],
-          "example": "sm.setRequestBody('<soapenv:Envelope>...</soapenv:Envelope>');"
+          "example": "var sm = new sn_ws.SOAPMessageV2();\nsm.setEndpoint('https://api.example.com/service');\nsm.setRequestBody(\n  '<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\">' +\n  '<soapenv:Body>' +\n  '<GetUser><userId>12345</userId></GetUser>' +\n  '</soapenv:Body></soapenv:Envelope>'\n);\nsm.setRequestHeader('SOAPAction', 'GetUser');\nvar resp = sm.execute();"
         },
         {
           "name": "setStringParameter",
@@ -3288,9 +3288,9 @@
         },
         {
           "name": "execute",
-          "description": "Sends the SOAP message.",
+          "description": "Sends the SOAP message to the endpoint and returns a SOAPResponseV2 object containing the status code, headers, and response body.",
           "parameters": [],
-          "example": "var response = sm.execute();"
+          "example": "var sm = new sn_ws.SOAPMessageV2('StockQuote', 'GetQuote');\nsm.setStringParameter('symbol', 'NOW');\nvar response = sm.execute();\nvar status = response.getStatusCode();\nif (status == 200) {\n  var body = response.getBody();\n  gs.info('Response: ' + body);\n} else {\n  gs.error('SOAP call failed with status: ' + status);\n}"
         },
         {
           "name": "setWSSecurity",
@@ -3363,15 +3363,15 @@
         },
         {
           "name": "walkBackward",
-          "description": "Walks one update backward.",
+          "description": "Moves one step backward in the record audit history (to an earlier update). Returns false if already at the first update.",
           "parameters": [],
-          "example": "hw.walkBackward();"
+          "example": "var hw = new sn_hw.HistoryWalker('incident', current.getUniqueValue());\nhw.walkTo(current.sys_mod_count); // Start at current version\nwhile (hw.walkBackward()) {\n  var old = hw.getWalkedRecord();\n  gs.info('Update ' + old.sys_mod_count + ': state=' + old.getValue('state'));\n}"
         },
         {
           "name": "walkForward",
-          "description": "Walks one update forward.",
+          "description": "Moves one step forward in the record audit history (to a later update). Returns false if already at the latest update.",
           "parameters": [],
-          "example": "hw.walkForward();"
+          "example": "var hw = new sn_hw.HistoryWalker('incident', current.getUniqueValue());\nhw.walkTo(0); // Start at creation\nwhile (hw.walkForward()) {\n  var rec = hw.getWalkedRecord();\n  if (rec.getValue('state') != rec.getValue('state')) {\n    gs.info('State changed at update #' + rec.sys_mod_count);\n  }\n}"
         }
       ],
       "properties": []
@@ -3458,9 +3458,9 @@
         },
         {
           "name": "render",
-          "description": "Displays the dialog.",
+          "description": "Displays the configured dialog window on screen. The dialog content is loaded from the UI page specified in the constructor.",
           "parameters": [],
-          "example": "dialog.render();"
+          "example": "var dialog = new GlideDialogWindow('my_approval_page');\ndialog.setTitle('Approve Request');\ndialog.setSize(500, 400);\ndialog.setPreference('sysparm_sys_id', g_form.getUniqueValue());\ndialog.render();"
         },
         {
           "name": "setSize",
@@ -3484,7 +3484,7 @@
           "name": "destroy",
           "description": "Closes and removes the dialog from the DOM.",
           "parameters": [],
-          "example": "dialog.destroy();"
+          "example": "// Close the dialog programmatically\nvar dialog = new GlideDialogWindow('my_page');\ndialog.setTitle('Temporary Notice');\ndialog.render();\n// Later, when done:\ndialog.destroy(); // Removes dialog and backdrop"
         }
       ],
       "properties": []
@@ -3868,7 +3868,7 @@
         },
         {
           "name": "savePreference",
-          "description": "Saves a user preference.",
+          "description": "Saves a user preference value that persists across sessions. Preferences are stored in the sys_user_preference table.",
           "parameters": [
             "name",
             "value"
@@ -3922,13 +3922,13 @@
         },
         {
           "name": "revokeToken",
-          "description": "Revokes an OAuth token.",
+          "description": "Revokes an OAuth access token and optionally its associated refresh token. Used when deauthorizing an integration or cleaning up tokens.",
           "parameters": [
             "oauthProfileName",
             "accessToken",
             "refreshToken"
           ],
-          "example": "var client = new sn_auth.GlideOAuthClient();\nclient.revokeToken('my_oauth_profile', accessToken, refreshToken);"
+          "example": "var client = new sn_auth.GlideOAuthClient();\ntry {\n  client.revokeToken('my_oauth_profile', accessToken, refreshToken);\n  gs.info('Token revoked successfully');\n} catch (e) {\n  gs.error('Failed to revoke token: ' + e.getMessage());\n}"
         }
       ]
     },
@@ -3985,7 +3985,7 @@
           "parameters": [
             "count"
           ],
-          "example": "tp.space(4); // 4 spaces"
+          "example": "var tp = new TemplatePrinter();\ntp.print('Name:');\ntp.space(4);\ntp.print('John Smith');"
         }
       ]
     },
@@ -4004,13 +4004,13 @@
         },
         {
           "name": "addQuery",
-          "description": "Adds a query filter.",
+          "description": "Adds a query filter to the client-side GlideRecord. Supports the same operators as server-side (=, !=, <, >, CONTAINS, etc.).",
           "parameters": [
             "field",
             "operator (optional)",
             "value"
           ],
-          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('active', true);\ngr.addQuery('priority', '<=', 2);"
+          "example": "var gr = new GlideRecord('sys_user');\ngr.addQuery('active', true);\ngr.addQuery('department', departmentId);\ngr.setLimit(10);\ngr.query(function(result) {\n  var users = [];\n  while (result.next()) {\n    users.push(result.getValue('name'));\n  }\n  console.log('Users: ' + users.join(', '));\n});"
         },
         {
           "name": "query",
@@ -4035,15 +4035,15 @@
           "parameters": [
             "field"
           ],
-          "example": "gr.addOrderBy('number');"
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('active', true);\ngr.addOrderBy('priority');\ngr.setLimit(10);\ngr.query(function(result) {\n  while (result.next()) {\n    console.log(result.getValue('number'));\n  }\n});"
         },
         {
           "name": "setLimit",
-          "description": "Limits the number of records returned.",
+          "description": "Limits the number of records returned by the client-side query. Always set a reasonable limit to avoid performance issues.",
           "parameters": [
             "limit"
           ],
-          "example": "gr.setLimit(10);"
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('active', true);\ngr.setLimit(5); // Only get first 5\ngr.query(function(result) {\n  while (result.next()) {\n    console.log(result.getValue('number'));\n  }\n});"
         },
         {
           "name": "deleteRecord",
@@ -4349,7 +4349,7 @@
           "name": "getLabel",
           "description": "Returns the label/question text.",
           "parameters": [],
-          "example": "gs.info(question.getLabel());"
+          "example": "var vars = current.variable_pool.getFlatQuestions();\nfor (var i = 0; i < vars.length; i++) {\n  gs.info('Question: ' + vars[i].getLabel() + ' = ' + vars[i].getValue());\n}"
         },
         {
           "name": "getName",
