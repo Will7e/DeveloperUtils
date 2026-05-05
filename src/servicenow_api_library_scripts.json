@@ -6019,6 +6019,169 @@
           "example": "// WARNING: setWorkflow(false) skips:\n// - Business Rules\n// - Workflows\n// - Notifications\n// - Audit history updates\n\n// Only use for bulk operations or data fixes:\nvar gr = new GlideRecord('incident');\ngr.addEncodedQuery(query);\ngr.query();\nwhile (gr.next()) {\n  gr.setValue('u_migrated', true);\n  gr.setWorkflow(false);   // Skip rules\n  gr.autoSysFields(false); // Don't update sys_updated_on\n  gr.update();\n}\n// Note: setWorkflow only affects the current GlideRecord instance\n// Other scripts creating new GlideRecords are NOT affected"
         }
       ]
+    },
+    {
+      "name": "CMDB & CI Helpers",
+      "type": "Utils",
+      "description": "Patterns for working with Configuration Items, CI relationships, and the CMDB.",
+      "methods": [
+        {
+          "name": "Get Related CIs",
+          "description": "Find all CIs related to a given CI via the cmdb_rel_ci table.",
+          "parameters": [],
+          "example": "function getRelatedCIs(ciSysId, relType) {\n  var results = [];\n  var gr = new GlideRecord('cmdb_rel_ci');\n  var qc = gr.addQuery('parent', ciSysId);\n  qc.addOrCondition('child', ciSysId);\n  if (relType) gr.addQuery('type.name', relType);\n  gr.query();\n  while (gr.next()) {\n    var related = (gr.getValue('parent') == ciSysId) \n      ? gr.getValue('child') \n      : gr.getValue('parent');\n    results.push({\n      sys_id: related,\n      type: gr.type.getDisplayValue(),\n      direction: (gr.getValue('parent') == ciSysId) ? 'outbound' : 'inbound'\n    });\n  }\n  return results;\n}\n\n// Usage:\nvar related = getRelatedCIs(current.cmdb_ci, 'Depends on::Used by');\nrelated.forEach(function(ci) { gs.info(ci.sys_id + ' (' + ci.direction + ')'); });"
+        },
+        {
+          "name": "Find Affected Services",
+          "description": "Walk the CI relationship tree to find business services impacted by a CI.",
+          "parameters": [],
+          "example": "function getAffectedServices(ciSysId) {\n  var services = [];\n  var visited = {};\n  \n  function walk(id, depth) {\n    if (visited[id] || depth > 5) return;\n    visited[id] = true;\n    var gr = new GlideRecord('cmdb_rel_ci');\n    gr.addQuery('child', id);\n    gr.addQuery('type.name', 'Depends on::Used by');\n    gr.query();\n    while (gr.next()) {\n      var parentId = gr.getValue('parent');\n      var parentGR = new GlideRecord('cmdb_ci_service');\n      if (parentGR.get(parentId)) {\n        services.push({ sys_id: parentId, name: parentGR.getValue('name') });\n      }\n      walk(parentId, depth + 1);\n    }\n  }\n  \n  walk(ciSysId, 0);\n  return services;\n}\n\n// Usage:\nvar impacted = getAffectedServices(current.cmdb_ci);\ngs.info('Impacted services: ' + impacted.map(function(s){return s.name}).join(', '));"
+        },
+        {
+          "name": "CI Lookup by Various IDs",
+          "description": "Find a CI by name, IP, serial number, or asset tag.",
+          "parameters": [],
+          "example": "function findCI(identifier) {\n  var tables = ['cmdb_ci_server', 'cmdb_ci_computer', 'cmdb_ci_vm_instance', 'cmdb_ci'];\n  var fields = ['name', 'ip_address', 'serial_number', 'asset_tag'];\n  \n  for (var t = 0; t < tables.length; t++) {\n    for (var f = 0; f < fields.length; f++) {\n      var gr = new GlideRecord(tables[t]);\n      if (gr.isValidField(fields[f])) {\n        gr.addQuery(fields[f], identifier);\n        gr.setLimit(1);\n        gr.query();\n        if (gr.next()) return gr;\n      }\n    }\n  }\n  return null;\n}\n\n// Usage:\nvar ci = findCI('web-server-01');\nif (ci) gs.info('Found: ' + ci.getDisplayValue('name') + ' (' + ci.getTableName() + ')');"
+        }
+      ]
+    },
+    {
+      "name": "Knowledge Base Helpers",
+      "type": "Utils",
+      "description": "Patterns for programmatically managing Knowledge Base articles — creating, searching, and publishing.",
+      "methods": [
+        {
+          "name": "Create KB Article",
+          "description": "Create a Knowledge Base article from a resolved incident.",
+          "parameters": [],
+          "example": "function createKBArticle(incidentGR, kbSysId) {\n  var kb = new GlideRecord('kb_knowledge');\n  kb.initialize();\n  kb.short_description = 'Resolution: ' + incidentGR.short_description;\n  kb.text = '<h3>Problem</h3>' +\n    '<p>' + incidentGR.description + '</p>' +\n    '<h3>Resolution</h3>' +\n    '<p>' + incidentGR.close_notes + '</p>' +\n    '<h3>Environment</h3>' +\n    '<p>Category: ' + incidentGR.getDisplayValue('category') + '</p>';\n  kb.kb_knowledge_base = kbSysId;\n  kb.workflow_state = 'draft';\n  kb.source = incidentGR.getUniqueValue();\n  return kb.insert();\n}\n\n// Usage:\nvar articleId = createKBArticle(current, kbSysId);\ngs.addInfoMessage('KB article created');"
+        },
+        {
+          "name": "Search KB Articles",
+          "description": "Search knowledge base articles by keyword.",
+          "parameters": [],
+          "example": "function searchKB(query, limit) {\n  var results = [];\n  var gr = new GlideRecord('kb_knowledge');\n  gr.addQuery('workflow_state', 'published');\n  gr.addQuery('active', true);\n  var qc = gr.addQuery('short_description', 'CONTAINS', query);\n  qc.addOrCondition('text', 'CONTAINS', query);\n  gr.setLimit(limit || 10);\n  gr.orderByDesc('sys_view_count');\n  gr.query();\n  while (gr.next()) {\n    results.push({\n      sys_id: gr.getUniqueValue(),\n      number: gr.getValue('number'),\n      title: gr.getValue('short_description'),\n      views: gr.getValue('sys_view_count')\n    });\n  }\n  return results;\n}\n\n// Usage:\nvar articles = searchKB('password reset');\ngs.info('Found ' + articles.length + ' articles');"
+        }
+      ]
+    },
+    {
+      "name": "Logging & Audit Trail",
+      "type": "Utils",
+      "description": "Patterns for structured logging, audit trails, and activity tracking in ServiceNow scripts.",
+      "methods": [
+        {
+          "name": "Structured Logger",
+          "description": "A reusable logger class with source tagging and log levels.",
+          "parameters": [],
+          "example": "var Logger = function(source) {\n  this.source = source;\n  this.prefix = '[' + source + '] ';\n};\nLogger.prototype.info = function(msg) { gs.info(this.prefix + msg); };\nLogger.prototype.warn = function(msg) { gs.warn(this.prefix + msg); };\nLogger.prototype.error = function(msg) { gs.error(this.prefix + msg); };\nLogger.prototype.debug = function(msg) { gs.debug(this.prefix + msg); };\nLogger.prototype.startTimer = function(label) {\n  this._timers = this._timers || {};\n  this._timers[label] = new Date().getTime();\n};\nLogger.prototype.endTimer = function(label) {\n  if (this._timers && this._timers[label]) {\n    var ms = new Date().getTime() - this._timers[label];\n    this.info(label + ': ' + ms + 'ms');\n    return ms;\n  }\n};\n\n// Usage:\nvar log = new Logger('IncidentProcessor');\nlog.startTimer('query');\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();\nlog.endTimer('query');\nlog.info('Found ' + gr.getRowCount() + ' active incidents');"
+        },
+        {
+          "name": "Custom Audit Trail",
+          "description": "Log detailed changes to a custom audit table for compliance.",
+          "parameters": [],
+          "example": "function auditChange(record, action, details) {\n  var audit = new GlideRecord('u_custom_audit');\n  audit.initialize();\n  audit.u_table = record.getTableName();\n  audit.u_record_id = record.getUniqueValue();\n  audit.u_record_number = record.getValue('number') || '';\n  audit.u_action = action;\n  audit.u_details = typeof details === 'object' ? JSON.stringify(details) : details;\n  audit.u_user = gs.getUserID();\n  audit.u_timestamp = new GlideDateTime();\n  audit.insert();\n}\n\n// Usage in a Business Rule:\nauditChange(current, 'state_change', {\n  from: previous.getDisplayValue('state'),\n  to: current.getDisplayValue('state'),\n  reason: current.getValue('close_notes')\n});"
+        }
+      ]
+    },
+    {
+      "name": "Event Queue Patterns",
+      "type": "Utils",
+      "description": "Patterns for using the event queue to decouple and defer processing — events, script actions, and async execution.",
+      "methods": [
+        {
+          "name": "Fire Custom Event",
+          "description": "Queue a custom event for deferred processing. The event must be registered in sys_event_registry first.",
+          "parameters": [],
+          "example": "// 1. Register event in sys_event_registry:\n//    Name: x_myapp.onboarding_complete\n//    Table: sys_user\n\n// 2. Fire from a Business Rule:\ngs.eventQueue(\n  'x_myapp.onboarding_complete',\n  current,                    // Record\n  current.getValue('manager'),// parm1\n  current.getValue('department') // parm2\n);\n\n// 3. Handle in a Script Action:\n// Event name: x_myapp.onboarding_complete\n// Script:\nvar userGR = event.GlideRecord;\nvar manager = event.parm1;\nvar dept = event.parm2;\ngs.info('Onboarding complete for: ' + userGR.getDisplayValue('name'));"
+        },
+        {
+          "name": "Delayed Processing",
+          "description": "Use events to defer heavy processing to avoid blocking the current transaction.",
+          "parameters": [],
+          "example": "// In a Business Rule (runs fast):\nif (current.priority.changesTo(1)) {\n  // Don't do heavy work here — queue it\n  gs.eventQueue('x_myapp.p1_escalation', current, gs.getUserID(), '');\n}\n\n// In a Script Action (runs async, no user waiting):\nvar incident = event.GlideRecord;\n// Heavy operations are fine here:\n// - Send Slack notification\n// - Create multiple tasks\n// - Update CMDB relationships\n// - Generate reports"
+        }
+      ]
+    },
+    {
+      "name": "Encoding & Hashing",
+      "type": "Utils",
+      "description": "Common encoding, hashing, and data transformation patterns.",
+      "methods": [
+        {
+          "name": "Generate Token/Hash",
+          "description": "Create unique tokens for integrations, email verification, or security.",
+          "parameters": [],
+          "example": "function generateToken(length) {\n  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';\n  var token = '';\n  for (var i = 0; i < (length || 32); i++) {\n    token += chars.charAt(Math.floor(Math.random() * chars.length));\n  }\n  return token;\n}\n\n// Or use GlideDigest for cryptographic hashing:\nvar digest = new GlideDigest();\nvar hash = digest.getSHA256Hex(gs.generateGUID() + gs.nowDateTime());\ngs.info('Token: ' + hash);"
+        },
+        {
+          "name": "Base64 Encode/Decode",
+          "description": "Encode and decode base64 strings.",
+          "parameters": [],
+          "example": "// Encode\nvar encoded = gs.base64Encode('username:password');\ngs.info(encoded); // 'dXNlcm5hbWU6cGFzc3dvcmQ='\n\n// Decode\nvar decoded = gs.base64Decode(encoded);\ngs.info(decoded); // 'username:password'\n\n// Common use: Basic auth header\nvar authHeader = 'Basic ' + gs.base64Encode(username + ':' + password);"
+        },
+        {
+          "name": "URL-Safe Encoding",
+          "description": "Encode values for safe inclusion in URLs.",
+          "parameters": [],
+          "example": "// Encode query parameters\nvar query = 'active=true^short_descriptionLIKEserver crash';\nvar safeQuery = gs.urlEncode(query);\nvar url = '/incident_list.do?sysparm_query=' + safeQuery;\n\n// Decode received parameters\nvar decoded = gs.urlDecode(request.getParameter('filter'));"
+        }
+      ]
+    },
+    {
+      "name": "Regex Patterns for ServiceNow",
+      "type": "Utils",
+      "description": "Common regular expression patterns for validating and extracting data in ServiceNow scripts.",
+      "methods": [
+        {
+          "name": "Validate Email",
+          "description": "Check if a string is a valid email address format.",
+          "parameters": [],
+          "example": "function isValidEmail(email) {\n  var regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$/;\n  return regex.test(email);\n}\n\n// Usage:\nif (!isValidEmail(current.getValue('u_contact_email'))) {\n  gs.addErrorMessage('Invalid email format');\n  current.setAbortAction(true);\n}"
+        },
+        {
+          "name": "Extract Ticket Numbers",
+          "description": "Find ServiceNow ticket numbers in free text (emails, descriptions).",
+          "parameters": [],
+          "example": "function extractTickets(text) {\n  var patterns = {\n    incident: /INC\\d{7,}/g,\n    change: /CHG\\d{7,}/g,\n    problem: /PRB\\d{7,}/g,\n    request: /REQ\\d{7,}/g,\n    ritm: /RITM\\d{7,}/g,\n    task: /TASK\\d{7,}/g\n  };\n  var found = {};\n  for (var type in patterns) {\n    var matches = text.match(patterns[type]);\n    if (matches) found[type] = matches;\n  }\n  return found;\n}\n\n// Usage:\nvar tickets = extractTickets(email.body_text);\nif (tickets.incident) {\n  gs.info('Found incidents: ' + tickets.incident.join(', '));\n}"
+        },
+        {
+          "name": "Validate IP Address",
+          "description": "Check for valid IPv4 address format.",
+          "parameters": [],
+          "example": "function isValidIP(ip) {\n  var regex = /^(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.(25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$/;\n  return regex.test(ip);\n}\n\n// Usage:\nif (!isValidIP(current.getValue('u_ip_address'))) {\n  gs.addErrorMessage('Invalid IP address');\n}"
+        },
+        {
+          "name": "Sanitize HTML",
+          "description": "Strip HTML tags from a string to prevent XSS in server scripts.",
+          "parameters": [],
+          "example": "function stripHTML(html) {\n  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();\n}\n\n// Usage:\nvar plainText = stripHTML(current.description.toString());\ngs.info('Plain text: ' + plainText);\n\n// For proper security, use GlideSecurityUtils:\nvar safe = GlideSecurityUtils.escapeScript(userInput);"
+        }
+      ]
+    },
+    {
+      "name": "Notification Triggers",
+      "type": "Utils",
+      "description": "Patterns for triggering notifications from scripts outside the standard notification system.",
+      "methods": [
+        {
+          "name": "Trigger Event-Based Notification",
+          "description": "Fire an event that triggers a notification configured against that event.",
+          "parameters": [],
+          "example": "// 1. Create notification: System Notification > Email > Notifications\n//    When: Event is fired, Event name: x_myapp.alert\n// 2. Fire from script:\ngs.eventQueue('x_myapp.alert', current, \n  current.assigned_to.toString(),  // parm1 (who to notify)\n  'Custom alert message'           // parm2\n);"
+        },
+        {
+          "name": "Direct Email from Script",
+          "description": "Send a one-off email without creating a notification record.",
+          "parameters": [],
+          "example": "var email = new GlideEmailOutbound();\nemail.addAddress('to', 'ops-team@company.com');\nemail.setSubject('[ALERT] Integration Failure - ' + gs.nowDateTime());\nemail.setBody(\n  'The integration with ' + integrationName + ' has failed.\\n\\n' +\n  'Error: ' + errorMessage + '\\n' +\n  'Time: ' + gs.nowDateTime() + '\\n' +\n  'Instance: ' + gs.getProperty('instance_name')\n);\nemail.save();"
+        },
+        {
+          "name": "SMS via Notify",
+          "description": "Send an SMS notification using the Notify plugin (if installed).",
+          "parameters": [],
+          "example": "// Requires Notify plugin (com.snc.notify)\nif (new GlidePluginManager().isActive('com.snc.notify')) {\n  var notify = new SNC.Notify();\n  notify.sendSMS(\n    gs.getProperty('x_myapp.alert_phone'),\n    'P1 ALERT: ' + current.number + ' - ' + current.short_description\n  );\n}"
+        }
+      ]
     }
   ]
 }
