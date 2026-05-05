@@ -62,11 +62,13 @@ function WorkflowCanvas() {
   const updateWorkflowViewport = useAppStore((s) => s.updateWorkflowViewport);
   const setWorkflowSelectedNodeId = useAppStore((s) => s.setWorkflowSelectedNodeId);
   const setWorkflowSelectedEdgeId = useAppStore((s) => s.setWorkflowSelectedEdgeId);
+  const setWorkflowPropertiesCollapsed = useAppStore((s) => s.setWorkflowPropertiesCollapsed);
   const addToast = useAppStore((s) => s.addToast);
 
   // Persistent Minimap state from store
   const showMinimap = useAppStore((s) => s.workflowMinimapVisible);
   const toggleMinimap = useAppStore((s) => s.toggleWorkflowMinimap);
+  const propertiesCollapsed = useAppStore((s) => s.workflowPropertiesCollapsed);
 
   // Track right-click for cursor feedback
   const [isRightClicking, setIsRightClicking] = useState(false);
@@ -259,6 +261,14 @@ function WorkflowCanvas() {
     [setWorkflowSelectedNodeId]
   );
 
+  const onNodeDoubleClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      setWorkflowSelectedNodeId(node.id);
+      setWorkflowPropertiesCollapsed(!propertiesCollapsed);
+    },
+    [setWorkflowSelectedNodeId, setWorkflowPropertiesCollapsed, propertiesCollapsed]
+  );
+
   // Edge selection
   const onEdgeClick = useCallback(
     (_: React.MouseEvent, edge: Edge) => {
@@ -353,6 +363,7 @@ function WorkflowCanvas() {
             onDragOver={onDragOver}
             onDrop={onDrop}
             onNodeClick={onNodeClick}
+            onNodeDoubleClick={onNodeDoubleClick}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
             onViewportChange={onViewportChange}
