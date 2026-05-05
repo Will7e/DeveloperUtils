@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Book, Copy, Check, Code2, Server, Monitor, ArrowLeftRight, FileCode2, ChevronDown, ExternalLink, Sparkles, Hash, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -296,12 +296,7 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
                 {lines.map((line, i) => (
                   <div key={i} className="lib-code-line">
                     <span className="lib-code-ln">{i + 1}</span>
-                    <span className={cn(
-                      "lib-code-text",
-                      line.trim().startsWith('//') && "lib-code-comment"
-                    )}>
-                      {line}
-                    </span>
+                    <SyntaxLine line={line} />
                   </div>
                 ))}
               </code>
@@ -312,3 +307,162 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
     </div>
   );
 }
+
+/* ========================================
+   JavaScript Syntax Highlighter
+   ======================================== */
+
+const JS_KEYWORDS = new Set([
+  'var', 'let', 'const', 'function', 'return', 'if', 'else', 'for', 'while',
+  'do', 'switch', 'case', 'break', 'continue', 'new', 'this', 'typeof',
+  'instanceof', 'in', 'of', 'try', 'catch', 'finally', 'throw', 'class',
+  'extends', 'import', 'export', 'default', 'from', 'async', 'await', 'yield',
+  'delete', 'void', 'with',
+]);
+
+const JS_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+
+interface Token {
+  type: 'keyword' | 'string' | 'number' | 'comment' | 'function' | 'method' | 'operator' | 'punctuation' | 'literal' | 'property' | 'text';
+  value: string;
+}
+
+function tokenizeLine(line: string): Token[] {
+  const tokens: Token[] = [];
+  let i = 0;
+
+  // Check for full-line comment (with leading whitespace)
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith('//')) {
+    tokens.push({ type: 'comment', value: line });
+    return tokens;
+  }
+
+  while (i < line.length) {
+    const ch = line[i];
+    const rest = line.slice(i);
+
+    // Inline comment
+    if (ch === '/' && line[i + 1] === '/') {
+      tokens.push({ type: 'comment', value: line.slice(i) });
+      break;
+    }
+
+    // Strings (single or double quoted)
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      let j = i + 1;
+      while (j < line.length && line[j] !== quote) {
+        if (line[j] === '\\') j++; // skip escaped chars
+        j++;
+      }
+      j++; // include closing quote
+      tokens.push({ type: 'string', value: line.slice(i, j) });
+      i = j;
+      continue;
+    }
+
+    // Numbers
+    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;\[]/.test(line[i - 1]))) {
+      let j = i;
+      while (j < line.length && /[0-9._xXa-fA-F]/.test(line[j])) j++;
+      tokens.push({ type: 'number', value: line.slice(i, j) });
+      i = j;
+      continue;
+    }
+
+    // Operators
+    if (/[=!<>+\-*/%&|^~?:]/.test(ch)) {
+      let j = i;
+      while (j < line.length && /[=!<>+\-*/%&|^~?:]/.test(line[j])) j++;
+      tokens.push({ type: 'operator', value: line.slice(i, j) });
+      i = j;
+      continue;
+    }
+
+    // Punctuation
+    if (/[(){}\[\];,.]/.test(ch)) {
+      tokens.push({ type: 'punctuation', value: ch });
+      i++;
+      continue;
+    }
+
+    // Whitespace
+    if (/\s/.test(ch)) {
+      let j = i;
+      while (j < line.length && /\s/.test(line[j])) j++;
+      tokens.push({ type: 'text', value: line.slice(i, j) });
+      i = j;
+      continue;
+    }
+
+    // Words (identifiers, keywords)
+    if (/[a-zA-Z_$]/.test(ch)) {
+      let j = i;
+      while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+      const word = line.slice(i, j);
+
+      // Determine type
+      if (JS_KEYWORDS.has(word)) {
+        tokens.push({ type: 'keyword', value: word });
+      } else if (JS_LITERALS.has(word)) {
+        tokens.push({ type: 'literal', value: word });
+      } else {
+        // Look ahead: is this a function/method call? (word followed by '(')
+        let lookAhead = j;
+        while (lookAhead < line.length && line[lookAhead] === ' ') lookAhead++;
+        const isCall = lookAhead < line.length && line[lookAhead] === '(';
+
+        // Look behind: is this accessed via '.'?
+        const prevToken = tokens.length > 0 ? tokens[tokens.length - 1] : null;
+        const isDotAccess = prevToken && prevToken.type === 'punctuation' && prevToken.value === '.';
+
+        if (isCall && isDotAccess) {
+          tokens.push({ type: 'method', value: word });
+        } else if (isCall) {
+          tokens.push({ type: 'function', value: word });
+        } else if (isDotAccess) {
+          tokens.push({ type: 'property', value: word });
+        } else {
+          tokens.push({ type: 'text', value: word });
+        }
+      }
+      i = j;
+      continue;
+    }
+
+    // Fallback
+    tokens.push({ type: 'text', value: ch });
+    i++;
+  }
+
+  return tokens;
+}
+
+const TOKEN_CLASS_MAP: Record<Token['type'], string> = {
+  keyword: 'lib-syn-keyword',
+  string: 'lib-syn-string',
+  number: 'lib-syn-number',
+  comment: 'lib-syn-comment',
+  function: 'lib-syn-function',
+  method: 'lib-syn-method',
+  operator: 'lib-syn-operator',
+  punctuation: 'lib-syn-punctuation',
+  literal: 'lib-syn-literal',
+  property: 'lib-syn-property',
+  text: 'lib-syn-text',
+};
+
+const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
+  const tokens = useMemo(() => tokenizeLine(line), [line]);
+
+  return (
+    <span className="lib-code-text">
+      {tokens.map((token, i) => (
+        <span key={i} className={TOKEN_CLASS_MAP[token.type]}>
+          {token.value}
+        </span>
+      ))}
+    </span>
+  );
+});
