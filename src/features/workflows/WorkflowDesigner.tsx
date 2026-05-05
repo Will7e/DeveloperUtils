@@ -2,7 +2,7 @@
 // WorkflowDesigner — Main canvas with React Flow
 // ============================================================
 
-import { useCallback, useRef, useMemo, type DragEvent, useEffect } from "react";
+import { useCallback, useRef, useMemo, useState, type DragEvent, useEffect } from "react";
 import {
   ReactFlow,
   Background,
@@ -63,6 +63,9 @@ function WorkflowCanvas() {
   const setWorkflowSelectedNodeId = useAppStore((s) => s.setWorkflowSelectedNodeId);
   const setWorkflowSelectedEdgeId = useAppStore((s) => s.setWorkflowSelectedEdgeId);
   const addToast = useAppStore((s) => s.addToast);
+
+  // Minimap visibility toggle
+  const [showMinimap, setShowMinimap] = useState(true);
 
   const activeWorkflow = useMemo(
     () => workflows.find((w) => w.id === activeWorkflowId),
@@ -318,6 +321,8 @@ function WorkflowCanvas() {
         onZoomOut={() => zoomOut()}
         onFitView={() => fitView({ padding: 0.3, maxZoom: 1 })}
         onClearCanvas={handleClearCanvas}
+        showMinimap={showMinimap}
+        onToggleMinimap={() => setShowMinimap((v) => !v)}
       />
       <div className="wf-body">
         <NodePalette />
@@ -354,30 +359,40 @@ function WorkflowCanvas() {
           >
             <Background
               variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
-              color="rgba(255, 255, 255, 0.04)"
+              gap={24}
+              size={1.2}
+              color="rgba(148, 163, 184, 0.12)"
             />
-            <MiniMap
-              className="wf-minimap"
-              nodeColor={(node) => {
-                const nodeType = (node.data as Record<string, unknown>)?.nodeType as string;
-                switch (nodeType) {
-                  case "start": return "#22c55e";
-                  case "end": return "#ef4444";
-                  case "process": return "#0ea5e9";
-                  case "decision": return "#f59e0b";
-                  case "data": return "#a78bfa";
-                  case "integration": return "#2dd4bf";
-                  default: return "#475569";
-                }
-              }}
-              maskColor="rgba(2, 6, 23, 0.7)"
-              style={{ width: 140, height: 90 }}
-              position="bottom-right"
-              pannable
-              zoomable={false}
+            {/* Second layer — subtle cross pattern for depth */}
+            <Background
+              id="bg-grid"
+              variant={BackgroundVariant.Lines}
+              gap={120}
+              size={0.4}
+              color="rgba(148, 163, 184, 0.04)"
             />
+            {showMinimap && (
+              <MiniMap
+                className="wf-minimap"
+                nodeColor={(node) => {
+                  const nodeType = (node.data as Record<string, unknown>)?.nodeType as string;
+                  switch (nodeType) {
+                    case "start": return "#22c55e";
+                    case "end": return "#ef4444";
+                    case "process": return "#0ea5e9";
+                    case "decision": return "#f59e0b";
+                    case "data": return "#a78bfa";
+                    case "integration": return "#2dd4bf";
+                    default: return "#475569";
+                  }
+                }}
+                maskColor="rgba(2, 6, 23, 0.7)"
+                style={{ width: 140, height: 90 }}
+                position="bottom-right"
+                pannable
+                zoomable={false}
+              />
+            )}
           </ReactFlow>
         </div>
         <PropertiesPanel onNodeDataChange={handleNodeDataChange} />

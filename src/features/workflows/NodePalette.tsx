@@ -3,7 +3,12 @@
 // ============================================================
 
 import { useState, type DragEvent } from "react";
-import { Play, Square, Cog, GitBranch, Database, Globe, ChevronRight } from "lucide-react";
+import { Play, Square, Cog, GitBranch, Database, Globe, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import type { WorkflowNodeType } from "@/types";
 
 interface PaletteItem {
@@ -88,16 +93,36 @@ export function NodePalette() {
     e.dataTransfer.effectAllowed = "move";
   };
 
+  // Collapsed: show only draggable icons with tooltips (like the compiler sidebar)
   if (collapsed) {
     return (
       <div className="wf-palette wf-palette-collapsed">
         <button
-          className="wf-panel-collapse-btn"
+          className="wf-panel-collapse-btn wf-palette-expand-btn"
           onClick={() => setCollapsed(false)}
           title="Expand Nodes"
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </button>
+        <div className="wf-palette-icons">
+          {PALETTE_ITEMS.map((item) => (
+            <Tooltip key={item.type}>
+              <TooltipTrigger asChild>
+                <div
+                  className="wf-palette-icon-item"
+                  draggable
+                  onDragStart={(e) => onDragStart(e, item)}
+                  style={{ color: item.color }}
+                >
+                  {item.icon}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="right" className="bg-popover border-border shadow-xl">
+                {item.label}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
       </div>
     );
   }
@@ -113,7 +138,7 @@ export function NodePalette() {
             onClick={() => setCollapsed(true)}
             title="Collapse Nodes"
           >
-            <ChevronRight className="h-3.5 w-3.5" style={{ transform: "rotate(180deg)" }} />
+            <ChevronLeft className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
