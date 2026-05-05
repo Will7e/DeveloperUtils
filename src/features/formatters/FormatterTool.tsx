@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import Editor, { type OnMount } from "@monaco-editor/react";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData } from "./xmlUtils";
@@ -68,6 +69,28 @@ export function FormatterTool() {
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
+    monaco.editor.defineTheme("devutils-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "comment", foreground: "5c6378", fontStyle: "italic" },
+        { token: "keyword", foreground: "c084fc" },
+        { token: "string", foreground: "a3e635" },
+        { token: "number", foreground: "fbbf24" },
+        { token: "type", foreground: "3b82f6" },
+        { token: "variable", foreground: "e8eaed" },
+      ],
+      colors: {
+        "editor.background": "#00000000",
+        "editor.lineHighlightBackground": "#ffffff05",
+        "editorLineNumber.foreground": "#2a2f42",
+        "minimap.background": "#00000000",
+      },
+    });
+    monaco.editor.setTheme("devutils-dark");
+  }, []);
 
   // Split Resizing
   const { size: splitSize, containerRef, handleMouseDown, isDragging } = useResizable({
@@ -465,13 +488,33 @@ export function FormatterTool() {
                 </button>
               </div>
             </div>
-            <textarea
-              className="json-textarea"
-              placeholder={`Paste your ${type.toUpperCase()} here...`}
-              value={currentInput}
-              onChange={(e) => updateContent(type, activeFile.id, e.target.value)}
-              spellCheck={false}
-            />
+            <div className="flex-1 w-full relative">
+              <Editor
+                height="100%"
+                language={type}
+                value={currentInput}
+                onChange={(value) => updateContent(type, activeFile.id, value || "")}
+                onMount={handleEditorMount}
+                theme="devutils-dark"
+                options={{
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  wordWrap: "on",
+                  padding: { top: 16, bottom: 16 },
+                  formatOnPaste: false,
+                  fontSize: 13,
+                  fontFamily: "var(--font-mono)",
+                  lineNumbers: "on",
+                  renderLineHighlight: "all",
+                  scrollbar: {
+                    useShadows: false,
+                    verticalScrollbarSize: 10,
+                    horizontalScrollbarSize: 10,
+                  }
+                }}
+                loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading editor...</div>}
+              />
+            </div>
           </div>
         )}
 
