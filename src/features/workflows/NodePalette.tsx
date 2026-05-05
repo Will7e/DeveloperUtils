@@ -112,9 +112,14 @@ export function NodePalette() {
                   className="wf-palette-icon-item"
                   draggable
                   onDragStart={(e) => onDragStart(e, item)}
-                  style={{ color: item.color }}
+                  style={{ 
+                    "--item-color": item.color,
+                    "--item-glow": item.glow 
+                  } as React.CSSProperties}
                 >
-                  {item.icon}
+                  <div className="wf-palette-icon-wrapper">
+                    {item.icon}
+                  </div>
                 </div>
               </TooltipTrigger>
               <TooltipContent side="right" className="bg-popover border-border shadow-xl">
@@ -149,11 +154,12 @@ export function NodePalette() {
             className="wf-palette-item"
             draggable
             onDragStart={(e) => onDragStart(e, item)}
+            style={{ 
+              "--item-color": item.color,
+              "--item-glow": item.glow 
+            } as React.CSSProperties}
           >
-            <div
-              className="wf-palette-item-icon"
-              style={{ background: item.glow, color: item.color }}
-            >
+            <div className="wf-palette-item-icon">
               {item.icon}
             </div>
             <div className="wf-palette-item-info">

@@ -2,7 +2,7 @@
 // WorkflowToolbar — Top toolbar for workflow actions
 // ============================================================
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   Download,
   Upload,
@@ -103,6 +103,9 @@ export function WorkflowToolbar({
     input.click();
   }, [createWorkflow, updateWorkflowNodes, updateWorkflowEdges, addToast]);
 
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
   return (
     <div className="wf-toolbar">
       <div className="wf-toolbar-left">
@@ -114,11 +117,37 @@ export function WorkflowToolbar({
               className={`wf-toolbar-tab ${w.id === activeWorkflowId ? "wf-toolbar-tab-active" : ""}`}
               onClick={() => setActiveWorkflow(w.id)}
               onDoubleClick={() => {
-                const name = prompt("Rename workflow:", w.name);
-                if (name?.trim()) renameWorkflow(w.id, name.trim());
+                setRenamingId(w.id);
+                setRenameValue(w.name);
               }}
             >
-              <span className="wf-toolbar-tab-name">{w.name}</span>
+              {renamingId === w.id ? (
+                <input
+                  autoFocus
+                  className="wf-tab-rename-input"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={() => {
+                    if (renameValue.trim() && renameValue !== w.name) {
+                      renameWorkflow(w.id, renameValue.trim());
+                    }
+                    setRenamingId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      if (renameValue.trim() && renameValue !== w.name) {
+                        renameWorkflow(w.id, renameValue.trim());
+                      }
+                      setRenamingId(null);
+                    } else if (e.key === "Escape") {
+                      setRenamingId(null);
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="wf-toolbar-tab-name">{w.name}</span>
+              )}
               {workflows.length > 1 && (
                 <button
                   className="wf-toolbar-tab-close"
