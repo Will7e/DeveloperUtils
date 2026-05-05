@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Book, Copy, Check, Code2, Server, Monitor, ArrowLeftRight, FileCode2, ChevronDown, ExternalLink, Sparkles, Hash, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
-import libraryDataRaw from "../../servicenow_api_library.json";
+import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary, ServiceNowAPI, ServiceNowMethod } from "@/types";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

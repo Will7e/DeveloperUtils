@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import { Search, Database, ChevronDown, Server, Monitor, ArrowLeftRight, FileCode2, X, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
-import libraryDataRaw from "../../servicenow_api_library.json";
+import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary } from "@/types";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
