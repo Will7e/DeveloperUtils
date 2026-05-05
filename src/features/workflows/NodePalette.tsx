@@ -2,13 +2,14 @@
 // NodePalette — Draggable node sidebar with categorized types
 // ============================================================
 
-import { useState, type DragEvent } from "react";
+import { type DragEvent } from "react";
 import { Play, Square, Cog, GitBranch, Database, Globe, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
+import { useAppStore } from "@/stores/app.store";
 import type { WorkflowNodeType } from "@/types";
 
 interface PaletteItem {
@@ -79,7 +80,8 @@ const PALETTE_ITEMS: PaletteItem[] = [
 ];
 
 export function NodePalette() {
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useAppStore((s) => s.workflowPaletteCollapsed);
+  const setCollapsed = useAppStore((s) => s.setWorkflowPaletteCollapsed);
 
   const onDragStart = (e: DragEvent, item: PaletteItem) => {
     e.dataTransfer.setData(

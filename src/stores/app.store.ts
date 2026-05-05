@@ -80,6 +80,9 @@ export const useAppStore = create<AppState>()(
       activeWorkflowId: initialWorkflow.id,
       workflowSelectedNodeId: null,
       workflowSelectedEdgeId: null,
+      workflowMinimapVisible: true,
+      workflowPaletteCollapsed: false,
+      workflowPropertiesCollapsed: false,
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -454,6 +457,18 @@ export const useAppStore = create<AppState>()(
       setWorkflowSelectedEdgeId: (id) => {
         set({ workflowSelectedEdgeId: id, workflowSelectedNodeId: null });
       },
+
+      toggleWorkflowMinimap: () => {
+        set((state) => ({ workflowMinimapVisible: !state.workflowMinimapVisible }));
+      },
+
+      setWorkflowPaletteCollapsed: (collapsed) => {
+        set({ workflowPaletteCollapsed: collapsed });
+      },
+
+      setWorkflowPropertiesCollapsed: (collapsed) => {
+        set({ workflowPropertiesCollapsed: collapsed });
+      },
     }),
     {
       name: "devutils-app-state",
@@ -474,6 +489,9 @@ export const useAppStore = create<AppState>()(
         librarySearchQuery: state.librarySearchQuery,
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
+        workflowMinimapVisible: state.workflowMinimapVisible,
+        workflowPaletteCollapsed: state.workflowPaletteCollapsed,
+        workflowPropertiesCollapsed: state.workflowPropertiesCollapsed,
       }),
     }
   )

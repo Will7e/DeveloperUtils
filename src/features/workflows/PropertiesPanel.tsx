@@ -19,7 +19,8 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
   const updateWorkflowEdges = useAppStore((s) => s.updateWorkflowEdges);
   const setWorkflowSelectedNodeId = useAppStore((s) => s.setWorkflowSelectedNodeId);
 
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useAppStore((s) => s.workflowPropertiesCollapsed);
+  const setCollapsed = useAppStore((s) => s.setWorkflowPropertiesCollapsed);
 
   const workflow = workflows.find((w) => w.id === activeWorkflowId);
   const selectedNode = workflow?.nodes.find((n) => n.id === selectedNodeId);

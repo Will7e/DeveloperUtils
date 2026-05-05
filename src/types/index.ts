@@ -124,6 +124,11 @@ export interface AppState {
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
 
+  // Workflow UI
+  workflowMinimapVisible: boolean;
+  workflowPaletteCollapsed: boolean;
+  workflowPropertiesCollapsed: boolean;
+
   // Actions
   createFile: (name: string, language: Language) => void;
   deleteFile: (id: string) => void;
@@ -182,6 +187,9 @@ export interface AppState {
   updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => void;
   setWorkflowSelectedNodeId: (id: string | null) => void;
   setWorkflowSelectedEdgeId: (id: string | null) => void;
+  toggleWorkflowMinimap: () => void;
+  setWorkflowPaletteCollapsed: (collapsed: boolean) => void;
+  setWorkflowPropertiesCollapsed: (collapsed: boolean) => void;
 }
 
 // ============================================================

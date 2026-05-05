@@ -5466,6 +5466,41 @@ body {
   border-radius: var(--radius-md) !important;
 }
 
+/* ---- Workflow Cursor Overrides ---- */
+.wf-canvas,
+.react-flow__pane {
+  cursor: default !important;
+}
+
+.wf-canvas.grabbing,
+.react-flow__pane.grabbing,
+.wf-right-clicking .react-flow__pane {
+  cursor: grabbing !important;
+}
+
+/* Force grabbing cursor on nodes as well during panning */
+.wf-right-clicking .react-flow__node {
+  cursor: grabbing !important;
+}
+
+.react-flow__node {
+  cursor: grab !important;
+}
+
+.react-flow__node:active {
+  cursor: grabbing !important;
+}
+
+.wf-handle,
+.react-flow__handle {
+  cursor: crosshair !important;
+}
+
+.wf-edge,
+.react-flow__edge {
+  cursor: pointer !important;
+}
+
 /* ---- Custom Node Base ---- */
 .wf-node {
   border-radius: var(--radius-lg);

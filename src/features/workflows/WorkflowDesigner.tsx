@@ -64,8 +64,12 @@ function WorkflowCanvas() {
   const setWorkflowSelectedEdgeId = useAppStore((s) => s.setWorkflowSelectedEdgeId);
   const addToast = useAppStore((s) => s.addToast);
 
-  // Minimap visibility toggle
-  const [showMinimap, setShowMinimap] = useState(true);
+  // Persistent Minimap state from store
+  const showMinimap = useAppStore((s) => s.workflowMinimapVisible);
+  const toggleMinimap = useAppStore((s) => s.toggleWorkflowMinimap);
+
+  // Track right-click for cursor feedback
+  const [isRightClicking, setIsRightClicking] = useState(false);
 
   const activeWorkflow = useMemo(
     () => workflows.find((w) => w.id === activeWorkflowId),
@@ -79,17 +83,20 @@ function WorkflowCanvas() {
     (activeWorkflow?.edges || []) as Edge[]
   );
 
-  // Sync from store when workflow changes (tab switch)
+  // Sync from store when workflow changes (tab switch or initial load after hydration)
+  const lastSyncedId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (activeWorkflow) {
+    if (activeWorkflow && activeWorkflowId !== lastSyncedId.current) {
       setNodes(activeWorkflow.nodes as Node[]);
       setEdges(activeWorkflow.edges as Edge[]);
       // Restore persisted viewport for this workflow
       if (activeWorkflow.viewport) {
         setViewport(activeWorkflow.viewport);
       }
+      lastSyncedId.current = activeWorkflowId;
     }
-  }, [activeWorkflowId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeWorkflow, activeWorkflowId, setNodes, setEdges, setViewport]);
 
   // Persist nodes/edges changes to store (debounced)
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -322,14 +329,19 @@ function WorkflowCanvas() {
         onFitView={() => fitView({ padding: 0.3, maxZoom: 1 })}
         onClearCanvas={handleClearCanvas}
         showMinimap={showMinimap}
-        onToggleMinimap={() => setShowMinimap((v) => !v)}
+        onToggleMinimap={toggleMinimap}
       />
       <div className="wf-body">
         <NodePalette />
         <div
-          className="wf-canvas-wrapper"
+          className={`wf-canvas-wrapper ${isRightClicking ? 'wf-right-clicking' : ''}`}
           ref={reactFlowWrapper}
           onKeyDown={onKeyDown}
+          onMouseDown={(e) => {
+            if (e.button === 2 || e.button === 1) setIsRightClicking(true);
+          }}
+          onMouseUp={() => setIsRightClicking(false)}
+          onMouseLeave={() => setIsRightClicking(false)}
           tabIndex={0}
         >
           <ReactFlow
@@ -354,6 +366,10 @@ function WorkflowCanvas() {
             snapGrid={[16, 16]}
             minZoom={0.1}
             maxZoom={4}
+            panOnDrag={[1, 2]}
+            selectionOnDrag
+            panOnScroll
+            onPaneContextMenu={(e) => e.preventDefault()}
             className="wf-canvas"
             proOptions={{ hideAttribution: true }}
           >
