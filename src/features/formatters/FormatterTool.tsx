@@ -497,11 +497,15 @@ export function FormatterTool() {
                 onMount={handleEditorMount}
                 theme="devutils-dark"
                 options={{
-                  minimap: { enabled: false },
+                  minimap: { enabled: true },
                   scrollBeyondLastLine: false,
                   wordWrap: "on",
                   padding: { top: 16, bottom: 16 },
-                  formatOnPaste: false,
+                  formatOnPaste: true,
+                  formatOnType: true,
+                  folding: true,
+                  renderValidationDecorations: "on",
+                  bracketPairColorization: { enabled: true },
                   fontSize: 13,
                   fontFamily: "var(--font-mono)",
                   lineNumbers: "on",
@@ -512,7 +516,7 @@ export function FormatterTool() {
                     horizontalScrollbarSize: 10,
                   }
                 }}
-                loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading editor...</div>}
+                loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading advanced editor...</div>}
               />
             </div>
           </div>
