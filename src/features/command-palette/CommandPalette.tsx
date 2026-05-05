@@ -19,6 +19,7 @@ import {
   StopCircle,
   Wand2,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
@@ -73,6 +74,10 @@ export function CommandPalette() {
   const setOutputFlash = useAppStore((s) => s.setOutputFlash);
   const addOutputEntry = useAppStore((s) => s.addOutputEntry);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const createFormatterFile = useAppStore((s) => s.createFormatterFile);
+  const createComparatorSession = useAppStore((s) => s.createComparatorSession);
+  const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -214,6 +219,53 @@ export function CommandPalette() {
           updateEditorSettings({ wordWrap: editorSettings.wordWrap === "on" ? "off" : "on" });
         },
       },
+      {
+        id: "toggle-theme",
+        label: editorSettings.theme === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme",
+        category: "Settings",
+        icon: editorSettings.theme === "dark" ? <Sun style={{ width: 14, height: 14 }} /> : <Moon style={{ width: 14, height: 14 }} />,
+        action: () => {
+          updateEditorSettings({ theme: editorSettings.theme === "dark" ? "light" : "dark" });
+        },
+      },
+      {
+        id: "toggle-sidebar",
+        label: "Toggle Sidebar",
+        shortcut: "⌘B",
+        category: "View",
+        icon: <Settings style={{ width: 14, height: 14 }} />,
+        action: () => toggleSidebar(),
+      },
+      {
+        id: "new-json-formatter",
+        label: "New JSON Formatter File",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createFormatterFile("json");
+          navigate("/formatters");
+        },
+      },
+      {
+        id: "new-xml-formatter",
+        label: "New XML Formatter File",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createFormatterFile("xml");
+          navigate("/formatters");
+        },
+      },
+      {
+        id: "new-comparator-session",
+        label: "New Comparator Session",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createComparatorSession();
+          navigate("/comparators");
+        },
+      }
     );
 
     // Add "New [Language] File" actions
@@ -224,12 +276,20 @@ export function CommandPalette() {
         label: `New ${config.label} File`,
         category: "File",
         icon: <FilePlus style={{ width: 14, height: 14 }} />,
-        action: () => createFile(`untitled${config.extension}`, lang),
+        action: () => {
+          createFile(`untitled${config.extension}`, lang);
+          navigate("/compiler");
+        },
       });
     });
 
     return list;
-  }, [activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, clearOutput, createFile, updateEditorSettings, addToast, cancelExecution, setOutputFlash, addOutputEntry, updateFileContent]);
+  }, [
+    activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, 
+    clearOutput, createFile, updateEditorSettings, addToast, cancelExecution, 
+    setOutputFlash, addOutputEntry, updateFileContent, toggleSidebar, 
+    createFormatterFile, createComparatorSession, navigate
+  ]);
 
   // Filter actions by query
   const filtered = useMemo(() => {

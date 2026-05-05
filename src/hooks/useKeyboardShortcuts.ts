@@ -28,6 +28,7 @@ export function useKeyboardShortcuts() {
   const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
   const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
   const cancelExecution = useAppStore((s) => s.cancelExecution);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
 
   const activeFile = files.find((f) => f.id === activeFileId);
 
@@ -151,6 +152,12 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Ctrl/Cmd + B = Toggle sidebar
+      if (mod && e.key === "b") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+
       // Ctrl/Cmd + J = Toggle output panel
       if (mod && e.key === "j") {
         e.preventDefault();
@@ -163,7 +170,7 @@ export function useKeyboardShortcuts() {
         toggleSettings();
       }
     },
-    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent]
+    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar]
   );
 
   useEffect(() => {
