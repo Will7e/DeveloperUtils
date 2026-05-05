@@ -10,6 +10,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { FormattersPage } from "@/pages/FormattersPage";
 import { ComparatorsPage } from "@/pages/ComparatorsPage";
 import { LibraryPage } from "@/pages/LibraryPage";
+import { WorkflowPage } from "@/pages/WorkflowPage";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
@@ -32,6 +33,7 @@ function App() {
             <Route path="/formatters" element={<FormattersPage />} />
             <Route path="/comparators" element={<ComparatorsPage />} />
             <Route path="/library" element={<LibraryPage />} />
+            <Route path="/workflows" element={<WorkflowPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

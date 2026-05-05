@@ -14,6 +14,7 @@ import {
   FileCode,
   Columns,
   Library,
+  GitFork,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -144,6 +145,14 @@ export function MainLayout() {
             icon={<Library className="h-[18px] w-[18px]" />}
             label="Library"
             active={location.pathname === "/library"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/workflows"
+            icon={<GitFork className="h-[18px] w-[18px]" />}
+            label="Workflows"
+            active={location.pathname === "/workflows"}
             collapsed={sidebarCollapsed}
           />
 

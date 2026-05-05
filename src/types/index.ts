@@ -167,6 +167,64 @@ export interface AppState {
   
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
+
+  // Workflow actions
+  workflows: Workflow[];
+  activeWorkflowId: string;
+  workflowSelectedNodeId: string | null;
+  workflowSelectedEdgeId: string | null;
+  createWorkflow: (name?: string) => void;
+  deleteWorkflow: (id: string) => void;
+  setActiveWorkflow: (id: string) => void;
+  renameWorkflow: (id: string, name: string) => void;
+  updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => void;
+  updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => void;
+  updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => void;
+  setWorkflowSelectedNodeId: (id: string | null) => void;
+  setWorkflowSelectedEdgeId: (id: string | null) => void;
+}
+
+// ============================================================
+// Workflow Types
+// ============================================================
+
+export type WorkflowNodeType = 'start' | 'end' | 'process' | 'decision' | 'data' | 'integration';
+
+export interface WorkflowNodeData {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: {
+    label: string;
+    description?: string;
+    nodeType: WorkflowNodeType;
+    color?: string;
+    icon?: string;
+    properties?: Record<string, string>;
+  };
+  measured?: { width: number; height: number };
+}
+
+export interface WorkflowEdgeData {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  label?: string;
+  animated?: boolean;
+  type?: string;
+  data?: { color?: string };
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  nodes: WorkflowNodeData[];
+  edges: WorkflowEdgeData[];
+  viewport: { x: number; y: number; zoom: number };
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface ServiceNowMethod {

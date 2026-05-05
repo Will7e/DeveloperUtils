@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;
@@ -127,6 +127,15 @@ export function DashboardPage() {
               glowColor="rgba(192, 132, 252, 0.12)"
               title="API Library"
               description="Searchable ServiceNow API reference — 129 classes, 741 methods with real-world code examples."
+              available
+            />
+            <ToolCard
+              to="/workflows"
+              icon={<GitFork className="h-5 w-5" />}
+              iconColor="#2dd4bf"
+              glowColor="rgba(45, 212, 191, 0.12)"
+              title="Workflow Designer"
+              description="Visual drag-and-drop workflow diagram builder with custom nodes, animated edges, and JSON export."
               available
             />
           </div>

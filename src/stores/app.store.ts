@@ -4,7 +4,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, Language, EditorFile } from "@/types";
+import type { AppState, Language, EditorFile, Workflow, WorkflowNodeData, WorkflowEdgeData } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
@@ -28,6 +28,23 @@ const initialFile = createDefaultFile("javascript");
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
 const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+
+const initialWorkflow: Workflow = {
+  id: generateId(),
+  name: "My Workflow",
+  nodes: [
+    {
+      id: "start-1",
+      type: "startNode",
+      position: { x: 250, y: 50 },
+      data: { label: "Start", nodeType: "start", description: "Workflow begins here" },
+    },
+  ],
+  edges: [],
+  viewport: { x: 0, y: 0, zoom: 0.75 },
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+};
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -59,6 +76,10 @@ export const useAppStore = create<AppState>()(
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
       librarySelectedItemId: null,
       librarySearchQuery: "",
+      workflows: [initialWorkflow],
+      activeWorkflowId: initialWorkflow.id,
+      workflowSelectedNodeId: null,
+      workflowSelectedEdgeId: null,
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -336,6 +357,103 @@ export const useAppStore = create<AppState>()(
       setLibrarySearchQuery: (query) => {
         set({ librarySearchQuery: query });
       },
+
+      // Workflow actions
+      createWorkflow: (name) => {
+        const id = generateId();
+        const newWorkflow: Workflow = {
+          id,
+          name: name || "Untitled Workflow",
+          nodes: [
+            {
+              id: `start-${generateId()}`,
+              type: "startNode",
+              position: { x: 250, y: 50 },
+              data: { label: "Start", nodeType: "start" as const, description: "Workflow begins here" },
+            },
+          ],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 0.75 },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        set((state) => ({
+          workflows: [...state.workflows, newWorkflow],
+          activeWorkflowId: id,
+        }));
+      },
+
+      deleteWorkflow: (id) => {
+        set((state) => {
+          const remaining = state.workflows.filter((w) => w.id !== id);
+          if (remaining.length === 0) {
+            const newWorkflow: Workflow = {
+              id: generateId(),
+              name: "Untitled Workflow",
+              nodes: [],
+              edges: [],
+              viewport: { x: 0, y: 0, zoom: 0.75 },
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            };
+            return {
+              workflows: [newWorkflow],
+              activeWorkflowId: newWorkflow.id,
+            };
+          }
+          return {
+            workflows: remaining,
+            activeWorkflowId:
+              state.activeWorkflowId === id
+                ? remaining[remaining.length - 1]!.id
+                : state.activeWorkflowId,
+          };
+        });
+      },
+
+      setActiveWorkflow: (id) => {
+        set({ activeWorkflowId: id });
+      },
+
+      renameWorkflow: (id, name) => {
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === id ? { ...w, name, updatedAt: Date.now() } : w
+          ),
+        }));
+      },
+
+      updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => {
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === workflowId ? { ...w, nodes, updatedAt: Date.now() } : w
+          ),
+        }));
+      },
+
+      updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => {
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === workflowId ? { ...w, edges, updatedAt: Date.now() } : w
+          ),
+        }));
+      },
+
+      updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => {
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === workflowId ? { ...w, viewport } : w
+          ),
+        }));
+      },
+
+      setWorkflowSelectedNodeId: (id) => {
+        set({ workflowSelectedNodeId: id, workflowSelectedEdgeId: null });
+      },
+
+      setWorkflowSelectedEdgeId: (id) => {
+        set({ workflowSelectedEdgeId: id, workflowSelectedNodeId: null });
+      },
     }),
     {
       name: "devutils-app-state",
@@ -354,6 +472,8 @@ export const useAppStore = create<AppState>()(
         comparatorSettings: state.comparatorSettings,
         librarySelectedItemId: state.librarySelectedItemId,
         librarySearchQuery: state.librarySearchQuery,
+        workflows: state.workflows,
+        activeWorkflowId: state.activeWorkflowId,
       }),
     }
   )
