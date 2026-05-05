@@ -4008,24 +4008,28 @@ body {
   color: var(--text-3); white-space: nowrap;
   padding-top: 3px;
 }
-.lib-toc-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.lib-toc-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .lib-toc-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-family: var(--font-mono);
   font-size: 10px; font-weight: 500;
   color: var(--text-3);
-  padding: 2px 7px;
-  border-radius: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid transparent;
+  border: 1px solid var(--border-1);
   text-decoration: none;
   transition: all 0.15s;
   cursor: pointer;
   white-space: nowrap;
 }
 .lib-toc-item:hover {
-  color: var(--accent);
-  background: rgba(14,165,233,0.06);
-  border-color: rgba(14,165,233,0.12);
+  color: var(--text-1);
+  background: var(--bg-hover);
+  border-color: var(--border-2);
+  transform: translateY(-1px);
 }
 
 /* Method Cards */
@@ -4145,6 +4149,42 @@ body {
 }
 .lib-code-copy-btn:active { transform: scale(0.96); }
 .lib-code-copy-btn-copied { color: var(--green) !important; border-color: var(--green) !important; background: var(--green-dim) !important; }
+/* Search Highlighting */
+.lib-method-card-highlighted {
+  border-color: var(--accent) !important;
+  box-shadow: 0 8px 30px rgba(14, 165, 233, 0.08), 0 0 0 1px rgba(14, 165, 233, 0.1);
+  transform: translateY(-1px);
+}
+.lib-text-highlight {
+  background: rgba(14, 165, 233, 0.15);
+  color: var(--accent);
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 700;
+}
+.lib-toc-item-match {
+  color: var(--accent) !important;
+  background: rgba(14, 165, 233, 0.1) !important;
+  border-color: rgba(14, 165, 233, 0.3) !important;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.1);
+  font-weight: 700 !important;
+}
+.lib-match-sparkle {
+  margin-left: 4px;
+  color: var(--yellow);
+  opacity: 0.8;
+}
+.lib-highlight-sparkle {
+  color: var(--yellow);
+  margin-left: 2px;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0.4; transform: scale(0.9); }
+}
+
 .lib-code-pre {
   margin: 0; padding: 14px 0;
   overflow-x: auto; font-family: var(--font-mono);

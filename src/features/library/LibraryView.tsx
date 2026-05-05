@@ -57,10 +57,14 @@ function getTypeBadge(type: string) {
 
 export function LibraryView() {
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
+  const searchQuery = useAppStore((s) => s.librarySearchQuery);
   const addToast = useAppStore((s) => s.addToast);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const selectedApi = libraryData.apis.find((api) => api.name === selectedId);
+
+  // Normalize query
+  const q = useMemo(() => searchQuery.toLowerCase().trim().replace(/\(\)$/, ""), [searchQuery]);
 
   // Scroll to top when API changes
   useEffect(() => {
@@ -138,27 +142,42 @@ export function LibraryView() {
           <div className="lib-toc">
             <span className="lib-toc-label">Jump to</span>
             <div className="lib-toc-list">
-              {selectedApi.methods.map((method) => (
-                <a
-                  key={method.name}
-                  className="lib-toc-item"
-                  href={`#method-${method.name}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    document.getElementById(`method-${method.name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
-                >
-                  {method.name}()
-                </a>
-              ))}
+              {selectedApi.methods.map((method) => {
+                const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
+                return (
+                  <a
+                    key={method.name}
+                    className={cn("lib-toc-item", isMatch && "lib-toc-item-match")}
+                    href={`#method-${method.name}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById(`method-${method.name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    {method.name}()
+                    {isMatch && <Sparkles size={10} className="lib-match-sparkle" />}
+                  </a>
+                );
+              })}
             </div>
           </div>
 
           {/* Method Cards */}
           <div className="lib-method-list">
-            {selectedApi.methods.map((method, idx) => (
-              <MethodCard key={method.name} method={method} index={idx} addToast={addToast} badgeColor={badge.color} />
-            ))}
+            {selectedApi.methods.map((method, idx) => {
+              const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
+              return (
+                <MethodCard 
+                  key={method.name} 
+                  method={method} 
+                  index={idx} 
+                  addToast={addToast} 
+                  badgeColor={badge.color} 
+                  isHighlighted={isMatch}
+                  searchQuery={q}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -175,11 +194,13 @@ export function LibraryView() {
 }
 
 
-function MethodCard({ method, index, addToast, badgeColor }: {
+function MethodCard({ method, index, addToast, badgeColor, isHighlighted, searchQuery }: {
   method: ServiceNowMethod;
   index: number;
   addToast: any;
   badgeColor: string;
+  isHighlighted?: boolean;
+  searchQuery?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -191,12 +212,28 @@ function MethodCard({ method, index, addToast, badgeColor }: {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const highlightText = (text: string, query: string | undefined) => {
+    if (!query || !text) return text;
+    try {
+      // Escape special regex characters
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
+      return parts.map((part, i) => 
+        part.toLowerCase() === query.toLowerCase() 
+          ? <mark key={i} className="lib-text-highlight">{part}</mark> 
+          : part
+      );
+    } catch (e) {
+      return text;
+    }
+  };
+
   const lines = method.example.split('\n');
 
   return (
     <div
       id={`method-${method.name}`}
-      className="lib-method-card"
+      className={cn("lib-method-card", isHighlighted && "lib-method-card-highlighted")}
       style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
     >
       {/* Card Header */}
@@ -204,8 +241,9 @@ function MethodCard({ method, index, addToast, badgeColor }: {
         <div className="lib-method-header-left">
           <span className="lib-method-dot" style={{ background: badgeColor }} />
           <h3 className="lib-method-name">
-            {method.name}<span className="lib-method-parens">()</span>
+            {highlightText(method.name, searchQuery)}<span className="lib-method-parens">()</span>
           </h3>
+          {isHighlighted && <Sparkles size={14} className="lib-highlight-sparkle" />}
         </div>
         <ChevronDown className={cn("lib-method-chevron", !isExpanded && "lib-method-chevron-collapsed")} />
       </div>
@@ -213,7 +251,7 @@ function MethodCard({ method, index, addToast, badgeColor }: {
       {isExpanded && (
         <div className="lib-method-body">
           {/* Description */}
-          <p className="lib-method-desc">{method.description}</p>
+          <p className="lib-method-desc">{highlightText(method.description, searchQuery)}</p>
 
           {/* Parameters */}
           {method.parameters.length > 0 && (

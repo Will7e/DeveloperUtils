@@ -41,7 +41,8 @@ function getTypeConfig(type: string) {
 export function LibrarySidebar() {
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
   const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
-  const [searchQuery, setSearchQuery] = useState("");
+  const searchQuery = useAppStore((s) => s.librarySearchQuery);
+  const setSearchQuery = useAppStore((s) => s.setLibrarySearchQuery);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(libraryData.apis.map((a) => a.type)));
   const searchRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -60,19 +61,66 @@ export function LibrarySidebar() {
   // Filter
   const filteredGrouped = useMemo(() => {
     if (!searchQuery.trim()) return grouped;
-    const q = searchQuery.toLowerCase();
+    
+    // Normalize query: lowercase and remove trailing ()
+    const q = searchQuery.toLowerCase().trim().replace(/\(\)$/, "");
+    
     const result: Record<string, typeof libraryData.apis> = {};
+    const matches: Set<string> = new Set();
+
     for (const [type, apis] of Object.entries(grouped)) {
-      const filtered = apis.filter(
-        (api) =>
-          api.name.toLowerCase().includes(q) ||
-          api.description.toLowerCase().includes(q) ||
-          api.methods.some((m) => m.name.toLowerCase().includes(q))
-      );
-      if (filtered.length > 0) result[type] = filtered;
+      const filtered = apis.filter((api) => {
+        const apiName = api.name.toLowerCase();
+        const apiDesc = api.description.toLowerCase();
+        
+        // Extract shorthand: "GlideSystem (gs)" -> "gs"
+        const shorthandMatch = apiName.match(/\((.*?)\)/);
+        const shorthand = shorthandMatch ? shorthandMatch[1].toLowerCase() : "";
+        
+        // Match API name, description or shorthand
+        if (apiName.includes(q) || apiDesc.includes(q) || (shorthand && shorthand.includes(q))) return true;
+
+        // Match method names or descriptions
+        return api.methods.some((m) => {
+          const methodName = m.name.toLowerCase();
+          const methodDesc = m.description.toLowerCase();
+          
+          // Check for API.Method match (e.g., gs.getProperty)
+          const fullMatch = `${apiName}.${methodName}`.includes(q);
+          const shorthandMatchFull = shorthand ? `${shorthand}.${methodName}`.includes(q) : false;
+          
+          return methodName.includes(q) || methodDesc.includes(q) || fullMatch || shorthandMatchFull;
+        });
+      });
+
+      if (filtered.length > 0) {
+        result[type] = filtered;
+        // Auto-expand this group since it has matches
+        matches.add(type);
+      }
     }
+
     return result;
   }, [grouped, searchQuery]);
+
+  // Auto-expand matching groups when search changes
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    const matches = Object.keys(filteredGrouped);
+    if (matches.length > 0) {
+      setCollapsedGroups((prev) => {
+        const next = new Set(prev);
+        let changed = false;
+        matches.forEach((m) => {
+          if (next.has(m)) {
+            next.delete(m);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [searchQuery, filteredGrouped]);
 
   const totalResults = Object.values(filteredGrouped).reduce((sum, apis) => sum + apis.length, 0);
 

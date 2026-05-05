@@ -105,6 +105,7 @@ export interface AppState {
   comparatorInputs: { a: string; b: string };
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
   librarySelectedItemId: string | null;
+  librarySearchQuery: string;
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -135,6 +136,7 @@ export interface AppState {
   setComparatorInput: (side: "a" | "b", input: string) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
   setLibrarySelectedItemId: (id: string | null) => void;
+  setLibrarySearchQuery: (query: string) => void;
 }
 
 export interface ServiceNowMethod {

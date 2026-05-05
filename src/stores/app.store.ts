@@ -52,6 +52,7 @@ export const useAppStore = create<AppState>()(
       comparatorInputs: { a: "", b: "" },
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
       librarySelectedItemId: null,
+      librarySearchQuery: "",
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -231,6 +232,10 @@ export const useAppStore = create<AppState>()(
       setLibrarySelectedItemId: (id) => {
         set({ librarySelectedItemId: id });
       },
+      
+      setLibrarySearchQuery: (query) => {
+        set({ librarySearchQuery: query });
+      },
     }),
     {
       name: "devutils-app-state",
@@ -246,6 +251,7 @@ export const useAppStore = create<AppState>()(
         comparatorInputs: state.comparatorInputs,
         comparatorSettings: state.comparatorSettings,
         librarySelectedItemId: state.librarySelectedItemId,
+        librarySearchQuery: state.librarySearchQuery,
       }),
     }
   )
