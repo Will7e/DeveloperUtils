@@ -61,7 +61,7 @@ export function DashboardPage() {
             Welcome to <span className="dash-hero-accent">DevUtils</span>
           </h1>
           <p className="dash-hero-subtitle">
-            Your premium cloud-based development workspace. Write, compile, and preview code in the browser.
+            The elite workspace where your code runs fast, your bugs hide in fear, and "it works on my machine" becomes a universal truth.
           </p>
         </div>
 
