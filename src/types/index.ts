@@ -37,6 +37,13 @@ export interface EditorFile {
   updatedAt: number;
 }
 
+/** A single file in the formatter tool */
+export interface FormatterFile {
+  id: string;
+  name: string;
+  content: string;
+}
+
 /** Editor settings */
 export interface EditorSettings {
   theme: "dark" | "light";
@@ -100,7 +107,8 @@ export interface AppState {
   editorSettings: EditorSettings;
   toasts: Toast[];
   outputFlash: "success" | "error" | null;
-  formatterInputs: { json: string; xml: string };
+  formatterFiles: { json: FormatterFile[]; xml: FormatterFile[] };
+  activeFormatterFileId: { json: string; xml: string };
   formatterType: "json" | "xml";
   comparatorInputs: { a: string; b: string };
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
@@ -131,7 +139,14 @@ export interface AppState {
   addToast: (toast: Omit<Toast, "id">) => void;
   removeToast: (id: string) => void;
   setOutputFlash: (flash: "success" | "error" | null) => void;
-  setFormatterInput: (type: "json" | "xml", input: string) => void;
+  
+  // Formatter actions
+  createFormatterFile: (type: "json" | "xml", name?: string) => void;
+  deleteFormatterFile: (type: "json" | "xml", id: string) => void;
+  setActiveFormatterFile: (type: "json" | "xml", id: string) => void;
+  updateFormatterFileContent: (type: "json" | "xml", id: string, content: string) => void;
+  renameFormatterFile: (type: "json" | "xml", id: string, name: string) => void;
+  
   setFormatterType: (type: "json" | "xml") => void;
   setComparatorInput: (side: "a" | "b", input: string) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;

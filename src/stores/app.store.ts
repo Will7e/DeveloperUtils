@@ -25,6 +25,9 @@ function createDefaultFile(language: Language): EditorFile {
 // Create initial file
 const initialFile = createDefaultFile("javascript");
 
+const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
+const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -47,7 +50,8 @@ export const useAppStore = create<AppState>()(
       editorSettings: DEFAULT_EDITOR_SETTINGS,
       toasts: [],
       outputFlash: null,
-      formatterInputs: { json: "", xml: "" },
+      formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile] },
+      activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id },
       formatterType: "json",
       comparatorInputs: { a: "", b: "" },
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
@@ -197,7 +201,66 @@ export const useAppStore = create<AppState>()(
           toasts: state.toasts.filter((t) => t.id !== id),
         }));
       },
+      
+      createFormatterFile: (type, name) => {
+        const id = generateId();
+        const newFile = { id, name: name || `Untitled.${type}`, content: "" };
+        set((state) => ({
+          formatterFiles: {
+            ...state.formatterFiles,
+            [type]: [...state.formatterFiles[type], newFile]
+          },
+          activeFormatterFileId: {
+            ...state.activeFormatterFileId,
+            [type]: id
+          }
+        }));
+      },
 
+      deleteFormatterFile: (type, id) => {
+        set((state) => {
+          const remaining = state.formatterFiles[type].filter(f => f.id !== id);
+          if (remaining.length === 0) {
+            const newFile = { id: generateId(), name: `Untitled.${type}`, content: "" };
+            return {
+              formatterFiles: { ...state.formatterFiles, [type]: [newFile] },
+              activeFormatterFileId: { ...state.activeFormatterFileId, [type]: newFile.id }
+            };
+          }
+          return {
+            formatterFiles: { ...state.formatterFiles, [type]: remaining },
+            activeFormatterFileId: {
+              ...state.activeFormatterFileId,
+              [type]: state.activeFormatterFileId[type] === id ? remaining[remaining.length - 1]!.id : state.activeFormatterFileId[type]
+            }
+          };
+        });
+      },
+
+      setActiveFormatterFile: (type, id) => {
+        set((state) => ({
+          activeFormatterFileId: { ...state.activeFormatterFileId, [type]: id }
+        }));
+      },
+
+      updateFormatterFileContent: (type, id, content) => {
+        set((state) => ({
+          formatterFiles: {
+            ...state.formatterFiles,
+            [type]: state.formatterFiles[type].map(f => f.id === id ? { ...f, content } : f)
+          }
+        }));
+      },
+
+      renameFormatterFile: (type, id, name) => {
+        set((state) => ({
+          formatterFiles: {
+            ...state.formatterFiles,
+            [type]: state.formatterFiles[type].map(f => f.id === id ? { ...f, name } : f)
+          }
+        }));
+      },
+      
       setOutputFlash: (flash) => {
         set({ outputFlash: flash });
         if (flash) {
@@ -205,12 +268,6 @@ export const useAppStore = create<AppState>()(
             set({ outputFlash: null });
           }, 800);
         }
-      },
-      
-      setFormatterInput: (type, input) => {
-        set((state) => ({
-          formatterInputs: { ...state.formatterInputs, [type]: input }
-        }));
       },
       
       setFormatterType: (type) => {
@@ -246,7 +303,8 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         outputPanelOpen: state.outputPanelOpen,
         editorSettings: state.editorSettings,
-        formatterInputs: state.formatterInputs,
+        formatterFiles: state.formatterFiles,
+        activeFormatterFileId: state.activeFormatterFileId,
         formatterType: state.formatterType,
         comparatorInputs: state.comparatorInputs,
         comparatorSettings: state.comparatorSettings,

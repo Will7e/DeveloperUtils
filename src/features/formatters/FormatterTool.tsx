@@ -16,6 +16,9 @@ import {
   Braces,
   Expand,
   Shrink,
+  Plus,
+  X,
+  FileText
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -46,13 +49,20 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
 export function FormatterTool() {
   const type = useAppStore((s) => s.formatterType);
   const setType = useAppStore((s) => s.setFormatterType);
-  const formatterInputs = useAppStore((s) => s.formatterInputs);
-  const setFormatterInput = useAppStore((s) => s.setFormatterInput);
+  const formatterFiles = useAppStore((s) => s.formatterFiles);
+  const activeFileId = useAppStore((s) => s.activeFormatterFileId[type]);
+  const setActiveFile = useAppStore((s) => s.setActiveFormatterFile);
+  const createFile = useAppStore((s) => s.createFormatterFile);
+  const deleteFile = useAppStore((s) => s.deleteFormatterFile);
+  const updateContent = useAppStore((s) => s.updateFormatterFileContent);
+  const renameFile = useAppStore((s) => s.renameFormatterFile);
   const addToast = useAppStore((s) => s.addToast);
   
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
   const dropdownRef = React.useRef<HTMLDivElement>(null);
 
   // Split Resizing
@@ -64,7 +74,9 @@ export function FormatterTool() {
     maxSize: 80
   });
 
-  const currentInput = formatterInputs[type];
+  const files = formatterFiles[type];
+  const activeFile = files.find(f => f.id === activeFileId) || files[0]!;
+  const currentInput = activeFile.content;
 
   // Derive data and error from current input
   const { data, error } = useMemo(() => {
@@ -106,9 +118,9 @@ export function FormatterTool() {
     if (!currentInput || error) return;
     try {
       if (type === "json") {
-        setFormatterInput("json", JSON.stringify(JSON.parse(currentInput)));
+        updateContent("json", activeFile.id, JSON.stringify(JSON.parse(currentInput)));
       } else {
-        setFormatterInput("xml", minifyXml(currentInput));
+        updateContent("xml", activeFile.id, minifyXml(currentInput));
       }
     } catch (e: any) {
       // Error handled by useMemo
@@ -119,9 +131,9 @@ export function FormatterTool() {
     if (!currentInput || error) return;
     try {
       if (type === "json") {
-        setFormatterInput("json", JSON.stringify(JSON.parse(currentInput), null, 2));
+        updateContent("json", activeFile.id, JSON.stringify(JSON.parse(currentInput), null, 2));
       } else {
-        setFormatterInput("xml", formatXml(currentInput));
+        updateContent("xml", activeFile.id, formatXml(currentInput));
       }
     } catch (e: any) {
       // Error handled by useMemo
@@ -129,7 +141,7 @@ export function FormatterTool() {
   };
 
   const handleClear = () => {
-    setFormatterInput(type, "");
+    updateContent(type, activeFile.id, "");
   };
 
   const handleSample = () => {
@@ -144,7 +156,7 @@ export function FormatterTool() {
         ],
         config: { theme: "obsidian", active: true }
       };
-      setFormatterInput("json", JSON.stringify(sample, null, 2));
+      updateContent("json", activeFile.id, JSON.stringify(sample, null, 2));
     } else {
       const sample = `<?xml version="1.0" encoding="UTF-8"?>
 <root id="dev-utils-001">
@@ -159,7 +171,7 @@ export function FormatterTool() {
   </features>
   <config theme="obsidian" active="true" />
 </root>`;
-      setFormatterInput("xml", sample);
+      updateContent("xml", activeFile.id, sample);
     }
   };
 
@@ -299,14 +311,74 @@ export function FormatterTool() {
             className="json-input-section"
             style={{ width: `${splitSize}%`, flex: "none" }}
           >
-            <div className="section-header-row">
-              <div className="section-label">Input ({type.toUpperCase()})</div>
+            <div className="tabs-bar">
+              <div className="tabs-list">
+                {files.map(file => (
+                  <button 
+                    key={file.id}
+                    className={cn(
+                      "tab",
+                      activeFile.id === file.id && "tab-active"
+                    )}
+                    onClick={() => setActiveFile(type, file.id)}
+                    onDoubleClick={() => {
+                      setEditName(file.name);
+                      setEditingFileId(file.id);
+                    }}
+                  >
+                    <span className={cn("tab-icon", `tab-icon-${type}`)}>
+                      {type === "json" ? "{}" : "<>"}
+                    </span>
+                    {editingFileId === file.id ? (
+                      <input
+                        autoFocus
+                        className="tab-rename-input"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => {
+                          if (editName.trim() && editName !== file.name) {
+                            renameFile(type, file.id, editName.trim());
+                          }
+                          setEditingFileId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            setEditingFileId(null);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="tab-name">
+                        {file.name}
+                      </span>
+                    )}
+                    <span 
+                      className="tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteFile(type, file.id);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  </button>
+                ))}
+                <button 
+                  className="tab-new"
+                  onClick={() => createFile(type)}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <textarea
               className="json-textarea"
               placeholder={`Paste your ${type.toUpperCase()} here...`}
               value={currentInput}
-              onChange={(e) => setFormatterInput(type, e.target.value)}
+              onChange={(e) => updateContent(type, activeFile.id, e.target.value)}
               spellCheck={false}
             />
           </div>
