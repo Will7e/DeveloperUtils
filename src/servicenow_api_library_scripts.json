@@ -194,7 +194,7 @@
           "parameters": [
             "enable"
           ],
-          "example": "// Disable business rules, workflows, and notifications\nvar gr = new GlideRecord('incident');\ngr.get(sysId);\ngr.setWorkflow(false);  // No business rules\ngr.autoSysFields(false); // Keep original timestamps\ngr.setValue('state', 7);\ngr.update();\n// WARNING: Use sparingly — skipping rules can cause data inconsistencies"
+          "example": "// Disable business rules, workflows, and notifications\nvar gr = new GlideRecord('incident');\ngr.get(sysId);\ngr.setWorkflow(false);  // No business rules\ngr.autoSysFields(false); // Keep original timestamps\ngr.setValue('state', 7);\ngr.update();\n// WARNING: Use sparingly \u2014 skipping rules can cause data inconsistencies"
         },
         {
           "name": "autoSysFields",
@@ -574,7 +574,7 @@
         },
         {
           "name": "sleep",
-          "description": "Pauses the script for the specified number of milliseconds. Only use in background scripts or scheduled jobs — never in Business Rules.",
+          "description": "Pauses the script for the specified number of milliseconds. Only use in background scripts or scheduled jobs \u2014 never in Business Rules.",
           "parameters": [
             "milliseconds"
           ],
@@ -982,7 +982,7 @@
             "fieldName",
             "callback (optional)"
           ],
-          "example": "// Always use the callback pattern (async) — synchronous is deprecated\ng_form.getReference('caller_id', function(callerGR) {\n  if (callerGR.vip == 'true') {\n    g_form.showFieldMsg('caller_id', 'This is a VIP caller!', 'info');\n    g_form.setValue('urgency', 1);\n  }\n});"
+          "example": "// Always use the callback pattern (async) \u2014 synchronous is deprecated\ng_form.getReference('caller_id', function(callerGR) {\n  if (callerGR.vip == 'true') {\n    g_form.showFieldMsg('caller_id', 'This is a VIP caller!', 'info');\n    g_form.setValue('urgency', 1);\n  }\n});"
         },
         {
           "name": "getSections",
@@ -1094,7 +1094,7 @@
           "parameters": [
             "fieldName"
           ],
-          "example": "var priority = g_form.getIntValue('priority');\nif (priority <= 2) {\n  g_form.showFieldMsg('priority', 'High priority — manager approval required', 'info');\n}"
+          "example": "var priority = g_form.getIntValue('priority');\nif (priority <= 2) {\n  g_form.showFieldMsg('priority', 'High priority \u2014 manager approval required', 'info');\n}"
         },
         {
           "name": "addDecoration",
@@ -1290,9 +1290,9 @@
         },
         {
           "name": "getXMLWait",
-          "description": "Sends the AJAX request synchronously (blocks UI). DEPRECATED — use getXMLAnswer with callback instead. Only listed for legacy code reference.",
+          "description": "Sends the AJAX request synchronously (blocks UI). DEPRECATED \u2014 use getXMLAnswer with callback instead. Only listed for legacy code reference.",
           "parameters": [],
-          "example": "// DEPRECATED — blocks UI thread. Use async pattern instead.\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLWait();\nvar answer = ga.getAnswer();\n\n// PREFERRED async pattern:\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLAnswer(function(answer) {\n  console.log(answer);\n});"
+          "example": "// DEPRECATED \u2014 blocks UI thread. Use async pattern instead.\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLWait();\nvar answer = ga.getAnswer();\n\n// PREFERRED async pattern:\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLAnswer(function(answer) {\n  console.log(answer);\n});"
         },
         {
           "name": "getAnswer",
@@ -3992,7 +3992,7 @@
     {
       "name": "GlideRecord (Client-side)",
       "type": "Client-side",
-      "description": "Client-side GlideRecord for making asynchronous database queries from the browser. Uses AJAX calls to the server. Always use the callback pattern (asynchronous) — synchronous calls block the UI and are deprecated.",
+      "description": "Client-side GlideRecord for making asynchronous database queries from the browser. Uses AJAX calls to the server. Always use the callback pattern (asynchronous) \u2014 synchronous calls block the UI and are deprecated.",
       "methods": [
         {
           "name": "Constructor",
@@ -4802,7 +4802,7 @@
     {
       "name": "Business Rule Patterns",
       "type": "Server-side",
-      "description": "Common patterns for Business Rules — server-side scripts that run when records are queried, inserted, updated, or deleted. The \"current\" and \"previous\" objects are available.",
+      "description": "Common patterns for Business Rules \u2014 server-side scripts that run when records are queried, inserted, updated, or deleted. The \"current\" and \"previous\" objects are available.",
       "methods": [
         {
           "name": "Before Insert",
@@ -5094,7 +5094,7 @@
     {
       "name": "TableUtils",
       "type": "Server-side",
-      "description": "Utility class for table metadata operations — checking table existence, hierarchy, and relationships.",
+      "description": "Utility class for table metadata operations \u2014 checking table existence, hierarchy, and relationships.",
       "methods": [
         {
           "name": "tableExists",
@@ -5133,7 +5133,7 @@
     {
       "name": "Packages (Java)",
       "type": "Server-side",
-      "description": "Access Java classes from server-side JavaScript. Available in global scope. Use sparingly — prefer native ServiceNow APIs when possible.",
+      "description": "Access Java classes from server-side JavaScript. Only available in global scope (not scoped apps). Use sparingly \u2014 prefer native ServiceNow APIs.",
       "methods": [
         {
           "name": "java.util.ArrayList",
@@ -5164,6 +5164,12 @@
           "description": "Packages access may be restricted in scoped apps. Only available in global scope.",
           "parameters": [],
           "example": "// Check if Packages is available\ntry {\n  var test = new Packages.java.util.ArrayList();\n  gs.info('Packages available');\n} catch (e) {\n  gs.info('Packages not available in this scope');\n}"
+        },
+        {
+          "name": "Scope Warning",
+          "description": "Packages is only available in global scope. Scoped apps will throw errors.",
+          "parameters": [],
+          "example": "// Check availability\ntry {\n  var test = new Packages.java.util.ArrayList();\n  gs.info('Packages available (global scope)');\n} catch (e) {\n  gs.info('Packages not available (scoped app)');\n}"
         }
       ]
     },
@@ -5299,166 +5305,6 @@
             "message"
           ],
           "example": "var log = new GlideLog();\nlog.debug('ImportEngine', 'Payload: ' + JSON.stringify(payload));"
-        }
-      ]
-    },
-    {
-      "name": "JSUtil",
-      "type": "Server-side",
-      "description": "Server-side JavaScript utility class for type checking, object inspection, and value validation. Available globally.",
-      "methods": [
-        {
-          "name": "has",
-          "description": "Returns true if the value is not null, undefined, or empty string.",
-          "parameters": [
-            "item"
-          ],
-          "example": "if (JSUtil.has(current.assigned_to)) {\n  gs.info('Has assignee');\n}"
-        },
-        {
-          "name": "nil",
-          "description": "Returns true if the value is null, undefined, or empty string.",
-          "parameters": [
-            "item"
-          ],
-          "example": "if (JSUtil.nil(someVar)) {\n  gs.info('Variable is empty');\n}"
-        },
-        {
-          "name": "notNil",
-          "description": "Returns true if the value is NOT null/undefined/empty.",
-          "parameters": [
-            "item"
-          ],
-          "example": "if (JSUtil.notNil(current.getValue('parent'))) {\n  gs.info('Has parent record');\n}"
-        },
-        {
-          "name": "type_of",
-          "description": "Returns the type of an object as a string. More reliable than typeof for ServiceNow objects.",
-          "parameters": [
-            "obj"
-          ],
-          "example": "gs.info(JSUtil.type_of(current)); // 'GlideRecord'\ngs.info(JSUtil.type_of('hello')); // 'string'\ngs.info(JSUtil.type_of(null)); // 'null'"
-        },
-        {
-          "name": "instance_of",
-          "description": "Returns true if the object is an instance of the specified class.",
-          "parameters": [
-            "obj",
-            "className"
-          ],
-          "example": "if (JSUtil.instance_of(myObj, 'GlideRecord')) {\n  gs.info('Object is a GlideRecord');\n}"
-        },
-        {
-          "name": "getBooleanValue",
-          "description": "Converts truthy/falsy values to boolean. Handles strings like \"true\", \"1\", \"yes\".",
-          "parameters": [
-            "value"
-          ],
-          "example": "var isActive = JSUtil.getBooleanValue(gr.getValue('active'));\n// 'true', '1', 'yes' => true\n// 'false', '0', 'no', null => false"
-        },
-        {
-          "name": "doesNotHave",
-          "description": "Inverse of has(). Returns true if value is null/undefined/empty.",
-          "parameters": [
-            "item"
-          ],
-          "example": "if (JSUtil.doesNotHave(current.description)) {\n  gs.addInfoMessage('Consider adding a description');\n}"
-        },
-        {
-          "name": "logObject",
-          "description": "Logs all properties of an object to the system log. Useful for debugging complex objects.",
-          "parameters": [
-            "obj",
-            "name"
-          ],
-          "example": "JSUtil.logObject(current, 'incident record');"
-        }
-      ]
-    },
-    {
-      "name": "GlideNumberManager",
-      "type": "Server-side",
-      "description": "Manages number sequences for record auto-numbering. Controls prefixes and counters defined in the sys_number table.",
-      "methods": [
-        {
-          "name": "getNextObjNumberPadded",
-          "description": "Returns the next number in the sequence with zero-padding.",
-          "parameters": [],
-          "example": "var nm = new GlideNumberManager('incident');\nvar nextNum = nm.getNextObjNumberPadded();\ngs.info('Next: ' + nextNum); // 'INC0012346'"
-        }
-      ]
-    },
-    {
-      "name": "TableUtils",
-      "type": "Server-side",
-      "description": "Utility class for table metadata — existence checks, hierarchy queries, and extension relationships.",
-      "methods": [
-        {
-          "name": "tableExists",
-          "description": "Returns true if the table exists in the database.",
-          "parameters": [],
-          "example": "if (new TableUtils('u_custom_table').tableExists()) {\n  gs.info('Table exists');\n} else {\n  gs.error('Table not found');\n}"
-        },
-        {
-          "name": "getAbsoluteBase",
-          "description": "Returns the root base table in the hierarchy chain.",
-          "parameters": [],
-          "example": "var tu = new TableUtils('incident');\ngs.info(tu.getAbsoluteBase()); // 'task'"
-        },
-        {
-          "name": "getHierarchy",
-          "description": "Returns an ArrayList of all tables in the inheritance chain.",
-          "parameters": [],
-          "example": "var tu = new TableUtils('incident');\nvar hier = tu.getHierarchy();\nfor (var i = 0; i < hier.size(); i++) {\n  gs.info('Level ' + i + ': ' + hier.get(i));\n}"
-        },
-        {
-          "name": "getTables",
-          "description": "Returns all tables that extend this table (child tables).",
-          "parameters": [],
-          "example": "var tu = new TableUtils('task');\nvar extensions = tu.getTables();\ngs.info('Task extensions: ' + extensions);"
-        },
-        {
-          "name": "isValidTable",
-          "description": "Returns true if the table name is valid and exists.",
-          "parameters": [],
-          "example": "if (!new TableUtils(tableName).isValidTable()) {\n  gs.error('Invalid table: ' + tableName);\n  return;\n}"
-        }
-      ]
-    },
-    {
-      "name": "Packages (Java)",
-      "type": "Server-side (Global)",
-      "description": "Access Java classes from server-side JavaScript. Only available in global scope (not scoped apps). Use sparingly — prefer native ServiceNow APIs.",
-      "methods": [
-        {
-          "name": "java.util.ArrayList",
-          "description": "Create Java ArrayList for methods requiring Java list types.",
-          "parameters": [],
-          "example": "var list = new Packages.java.util.ArrayList();\nlist.add('item1');\nlist.add('item2');\ngs.info('Size: ' + list.size());"
-        },
-        {
-          "name": "java.lang.String",
-          "description": "Access Java String methods not available in Rhino JavaScript.",
-          "parameters": [],
-          "example": "var jStr = new Packages.java.lang.String('Hello World');\ngs.info(jStr.toUpperCase());"
-        },
-        {
-          "name": "java.util.HashMap",
-          "description": "Create Java HashMap for key-value pair storage.",
-          "parameters": [],
-          "example": "var map = new Packages.java.util.HashMap();\nmap.put('key1', 'value1');\nmap.put('key2', 'value2');\ngs.info(map.get('key1')); // 'value1'"
-        },
-        {
-          "name": "java.text.SimpleDateFormat",
-          "description": "Format dates using Java date format patterns.",
-          "parameters": [],
-          "example": "var sdf = new Packages.java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss');\nvar now = new Packages.java.util.Date();\ngs.info(sdf.format(now));"
-        },
-        {
-          "name": "Scope Warning",
-          "description": "Packages is only available in global scope. Scoped apps will throw errors.",
-          "parameters": [],
-          "example": "// Check availability\ntry {\n  var test = new Packages.java.util.ArrayList();\n  gs.info('Packages available (global scope)');\n} catch (e) {\n  gs.info('Packages not available (scoped app)');\n}"
         }
       ]
     },
@@ -5610,7 +5456,7 @@
         },
         {
           "name": "Get Single Value",
-          "description": "Fetch a single field value without iterating — one-liner query.",
+          "description": "Fetch a single field value without iterating \u2014 one-liner query.",
           "parameters": [],
           "example": "function getSingleValue(table, query, field) {\n  var gr = new GlideRecord(table);\n  gr.addEncodedQuery(query);\n  gr.setLimit(1);\n  gr.query();\n  if (gr.next()) return gr.getValue(field);\n  return null;\n}\n\n// Usage:\nvar email = getSingleValue('sys_user', 'user_name=admin', 'email');\nvar count = getSingleValue('incident', 'active=true', 'sys_id'); // just to check existence"
         }
@@ -5623,7 +5469,7 @@
       "methods": [
         {
           "name": "Business Days Between",
-          "description": "Calculate the number of business days (Mon–Fri) between two dates.",
+          "description": "Calculate the number of business days (Mon\u2013Fri) between two dates.",
           "parameters": [],
           "example": "function businessDaysBetween(startStr, endStr) {\n  var start = new GlideDateTime(startStr);\n  var end = new GlideDateTime(endStr);\n  var count = 0;\n  var current = new GlideDateTime(start);\n  while (current.before(end)) {\n    var dow = current.getDayOfWeekLocalTime();\n    if (dow >= 2 && dow <= 6) count++; // Mon=2, Fri=6\n    current.addDaysLocalTime(1);\n  }\n  return count;\n}\n\n// Usage:\nvar days = businessDaysBetween('2024-01-01', '2024-01-15');\ngs.info('Business days: ' + days);"
         },
@@ -5650,7 +5496,7 @@
     {
       "name": "Integration Helpers",
       "type": "Utils",
-      "description": "Reusable patterns for REST integrations — retry logic, error handling, pagination, and response parsing.",
+      "description": "Reusable patterns for REST integrations \u2014 retry logic, error handling, pagination, and response parsing.",
       "methods": [
         {
           "name": "REST Call with Retry",
@@ -5666,7 +5512,7 @@
         },
         {
           "name": "Safe JSON Parse",
-          "description": "Parse JSON with error handling — avoids script crashes on malformed responses.",
+          "description": "Parse JSON with error handling \u2014 avoids script crashes on malformed responses.",
           "parameters": [],
           "example": "function safeParseJSON(str, fallback) {\n  try {\n    return JSON.parse(str);\n  } catch (e) {\n    gs.warn('JSON parse failed: ' + e.getMessage());\n    return fallback || null;\n  }\n}\n\n// Usage:\nvar resp = rm.execute();\nvar data = safeParseJSON(resp.getBody(), { result: [] });\ngs.info('Records: ' + data.result.length);"
         }
@@ -5693,7 +5539,7 @@
           "name": "Query Optimization Tips",
           "description": "Common GlideRecord performance best practices.",
           "parameters": [],
-          "example": "// 1. ALWAYS use setLimit when you only need a few records\ngr.setLimit(1); // Don't fetch 10,000 when you need 1\n\n// 2. Use chooseWindow for pagination instead of setLimit\ngr.chooseWindow(0, 50); // First 50 records\ngr.chooseWindow(50, 100); // Next 50\n\n// 3. Avoid getRowCount() — it scans all records\n// BAD: gr.query(); var count = gr.getRowCount();\n// GOOD: Use GlideAggregate\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nif (ga.next()) gs.info('Count: ' + ga.getAggregate('COUNT'));\n\n// 4. Use sys_id queries when possible (indexed)\ngr.addQuery('sys_id', sysId); // Fastest possible query\n\n// 5. Avoid dot-walking in queries when you have the sys_id\n// SLOW: gr.addQuery('caller_id.email', 'a@b.com');\n// FAST: find user first, then query by sys_id"
+          "example": "// 1. ALWAYS use setLimit when you only need a few records\ngr.setLimit(1); // Don't fetch 10,000 when you need 1\n\n// 2. Use chooseWindow for pagination instead of setLimit\ngr.chooseWindow(0, 50); // First 50 records\ngr.chooseWindow(50, 100); // Next 50\n\n// 3. Avoid getRowCount() \u2014 it scans all records\n// BAD: gr.query(); var count = gr.getRowCount();\n// GOOD: Use GlideAggregate\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nif (ga.next()) gs.info('Count: ' + ga.getAggregate('COUNT'));\n\n// 4. Use sys_id queries when possible (indexed)\ngr.addQuery('sys_id', sysId); // Fastest possible query\n\n// 5. Avoid dot-walking in queries when you have the sys_id\n// SLOW: gr.addQuery('caller_id.email', 'a@b.com');\n// FAST: find user first, then query by sys_id"
         },
         {
           "name": "Memory-Safe Batch Loop",
@@ -5724,7 +5570,7 @@
           "name": "Comma-Separated to Array",
           "description": "Convert a comma-separated string to a trimmed array (handles ServiceNow list fields).",
           "parameters": [],
-          "example": "function toArray(commaSeparated) {\n  if (!commaSeparated) return [];\n  return commaSeparated.toString().split(',').map(function(s) {\n    return s.trim();\n  }).filter(function(s) { return s !== ''; });\n}\n\n// Usage — works great with Watch List, group members, etc.\nvar watchList = toArray(current.getValue('watch_list'));\nwatchList.forEach(function(userId) {\n  gs.info('Watcher: ' + userId);\n});"
+          "example": "function toArray(commaSeparated) {\n  if (!commaSeparated) return [];\n  return commaSeparated.toString().split(',').map(function(s) {\n    return s.trim();\n  }).filter(function(s) { return s !== ''; });\n}\n\n// Usage \u2014 works great with Watch List, group members, etc.\nvar watchList = toArray(current.getValue('watch_list'));\nwatchList.forEach(function(userId) {\n  gs.info('Watcher: ' + userId);\n});"
         },
         {
           "name": "Template String",
@@ -5768,7 +5614,7 @@
     {
       "name": "Client Script Utilities",
       "type": "Utils",
-      "description": "Reusable patterns for client-side ServiceNow development — form manipulation, user interaction, and UI enhancements.",
+      "description": "Reusable patterns for client-side ServiceNow development \u2014 form manipulation, user interaction, and UI enhancements.",
       "methods": [
         {
           "name": "Field Dependency Manager",
@@ -5830,7 +5676,7 @@
     {
       "name": "Approval Patterns",
       "type": "Utils",
-      "description": "Common patterns for managing approvals programmatically — creating, querying, and auto-approving approval records.",
+      "description": "Common patterns for managing approvals programmatically \u2014 creating, querying, and auto-approving approval records.",
       "methods": [
         {
           "name": "Create Group Approval",
@@ -5855,7 +5701,7 @@
     {
       "name": "Attachment Utilities",
       "type": "Utils",
-      "description": "Helper functions for working with file attachments — uploading, downloading, copying between records, and content extraction.",
+      "description": "Helper functions for working with file attachments \u2014 uploading, downloading, copying between records, and content extraction.",
       "methods": [
         {
           "name": "Copy Attachments",
@@ -5977,7 +5823,7 @@
         },
         {
           "name": "Build HTML Table",
-          "description": "Generate an HTML table from an array of records — useful for email reports.",
+          "description": "Generate an HTML table from an array of records \u2014 useful for email reports.",
           "parameters": [],
           "example": "function buildHTMLTable(headers, rows) {\n  var html = '<table style=\"border-collapse:collapse;width:100%;\">';\n  html += '<tr>';\n  headers.forEach(function(h) {\n    html += '<th style=\"border:1px solid #ddd;padding:8px;background:#f5f5f5;text-align:left;\">' + h + '</th>';\n  });\n  html += '</tr>';\n  rows.forEach(function(row) {\n    html += '<tr>';\n    row.forEach(function(cell) {\n      html += '<td style=\"border:1px solid #ddd;padding:8px;\">' + cell + '</td>';\n    });\n    html += '</tr>';\n  });\n  html += '</table>';\n  return html;\n}\n\n// Usage: Build a daily incident report\nvar rows = [];\nvar gr = new GlideRecord('incident');\ngr.addQuery('opened_at', '>=', gs.daysAgoStart(1));\ngr.query();\nwhile (gr.next()) {\n  rows.push([gr.number, gr.short_description, gr.getDisplayValue('priority')]);\n}\nvar table = buildHTMLTable(['Number', 'Description', 'Priority'], rows);"
         }
@@ -5992,25 +5838,25 @@
           "name": "Avoid getRowCount()",
           "description": "getRowCount() queries ALL records just to count them. Use GlideAggregate instead.",
           "parameters": [],
-          "example": "// BAD — scans entire table\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();\nvar count = gr.getRowCount(); // Slow! Loads all records\n\n// GOOD — database-level count\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nvar count = 0;\nif (ga.next()) count = parseInt(ga.getAggregate('COUNT'));"
+          "example": "// BAD \u2014 scans entire table\nvar gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.query();\nvar count = gr.getRowCount(); // Slow! Loads all records\n\n// GOOD \u2014 database-level count\nvar ga = new GlideAggregate('incident');\nga.addActiveQuery();\nga.addAggregate('COUNT');\nga.query();\nvar count = 0;\nif (ga.next()) count = parseInt(ga.getAggregate('COUNT'));"
         },
         {
           "name": "Avoid Dot-Walking in Loops",
           "description": "Dot-walking inside a while loop causes N+1 queries. Resolve references outside the loop or use a join.",
           "parameters": [],
-          "example": "// BAD — N+1 query problem\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  // Each dot-walk = separate DB query!\n  var email = gr.assigned_to.email; // BAD inside loop\n}\n\n// GOOD — use getDisplayValue or pre-fetch\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  var assignedName = gr.getDisplayValue('assigned_to'); // No extra query\n  var assignedId = gr.getValue('assigned_to'); // Just the sys_id\n}"
+          "example": "// BAD \u2014 N+1 query problem\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  // Each dot-walk = separate DB query!\n  var email = gr.assigned_to.email; // BAD inside loop\n}\n\n// GOOD \u2014 use getDisplayValue or pre-fetch\nvar gr = new GlideRecord('incident');\ngr.query();\nwhile (gr.next()) {\n  var assignedName = gr.getDisplayValue('assigned_to'); // No extra query\n  var assignedId = gr.getValue('assigned_to'); // Just the sys_id\n}"
         },
         {
           "name": "Avoid Synchronous GlideAjax",
           "description": "getXMLWait() blocks the browser thread. Always use the async callback pattern.",
           "parameters": [],
-          "example": "// BAD — blocks the entire browser\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLWait(); // FREEZES the UI!\nvar answer = ga.getAnswer();\n\n// GOOD — async with callback\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLAnswer(function(answer) {\n  // UI stays responsive\n  console.log(answer);\n});"
+          "example": "// BAD \u2014 blocks the entire browser\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLWait(); // FREEZES the UI!\nvar answer = ga.getAnswer();\n\n// GOOD \u2014 async with callback\nvar ga = new GlideAjax('MyUtil');\nga.addParam('sysparm_name', 'getData');\nga.getXMLAnswer(function(answer) {\n  // UI stays responsive\n  console.log(answer);\n});"
         },
         {
           "name": "Avoid setValue with Display Values",
           "description": "setValue expects internal values, not display values. Use setDisplayValue for display values.",
           "parameters": [],
-          "example": "// BAD — sets the literal string, not the reference\ncurrent.assigned_to = 'John Smith'; // Stores 'John Smith' as text!\n\n// GOOD — use sys_id for reference fields\ncurrent.setValue('assigned_to', userSysId);\n\n// GOOD — if you only have the name\ncurrent.assigned_to.setDisplayValue('John Smith');\n\n// Client-side — third param is the display value\ng_form.setValue('assigned_to', userSysId, 'John Smith');"
+          "example": "// BAD \u2014 sets the literal string, not the reference\ncurrent.assigned_to = 'John Smith'; // Stores 'John Smith' as text!\n\n// GOOD \u2014 use sys_id for reference fields\ncurrent.setValue('assigned_to', userSysId);\n\n// GOOD \u2014 if you only have the name\ncurrent.assigned_to.setDisplayValue('John Smith');\n\n// Client-side \u2014 third param is the display value\ng_form.setValue('assigned_to', userSysId, 'John Smith');"
         },
         {
           "name": "Always Use setWorkflow Safely",
@@ -6048,7 +5894,7 @@
     {
       "name": "Knowledge Base Helpers",
       "type": "Utils",
-      "description": "Patterns for programmatically managing Knowledge Base articles — creating, searching, and publishing.",
+      "description": "Patterns for programmatically managing Knowledge Base articles \u2014 creating, searching, and publishing.",
       "methods": [
         {
           "name": "Create KB Article",
@@ -6086,7 +5932,7 @@
     {
       "name": "Event Queue Patterns",
       "type": "Utils",
-      "description": "Patterns for using the event queue to decouple and defer processing — events, script actions, and async execution.",
+      "description": "Patterns for using the event queue to decouple and defer processing \u2014 events, script actions, and async execution.",
       "methods": [
         {
           "name": "Fire Custom Event",
@@ -6098,7 +5944,7 @@
           "name": "Delayed Processing",
           "description": "Use events to defer heavy processing to avoid blocking the current transaction.",
           "parameters": [],
-          "example": "// In a Business Rule (runs fast):\nif (current.priority.changesTo(1)) {\n  // Don't do heavy work here — queue it\n  gs.eventQueue('x_myapp.p1_escalation', current, gs.getUserID(), '');\n}\n\n// In a Script Action (runs async, no user waiting):\nvar incident = event.GlideRecord;\n// Heavy operations are fine here:\n// - Send Slack notification\n// - Create multiple tasks\n// - Update CMDB relationships\n// - Generate reports"
+          "example": "// In a Business Rule (runs fast):\nif (current.priority.changesTo(1)) {\n  // Don't do heavy work here \u2014 queue it\n  gs.eventQueue('x_myapp.p1_escalation', current, gs.getUserID(), '');\n}\n\n// In a Script Action (runs async, no user waiting):\nvar incident = event.GlideRecord;\n// Heavy operations are fine here:\n// - Send Slack notification\n// - Create multiple tasks\n// - Update CMDB relationships\n// - Generate reports"
         }
       ]
     },
@@ -6242,20 +6088,20 @@
           "name": "Prevent Duplicate Processing",
           "description": "Use a mutex/lock pattern to ensure a record is only processed once at a time.",
           "parameters": [],
-          "example": "function acquireLock(key, timeoutSeconds) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.addQuery('u_expires', '>', new GlideDateTime());\n  lock.query();\n  if (lock.hasNext()) return false; // Already locked\n  \n  // Clean expired locks\n  var old = new GlideRecord('u_script_locks');\n  old.addQuery('u_key', key);\n  old.query();\n  old.deleteMultiple();\n  \n  // Create new lock\n  var newLock = new GlideRecord('u_script_locks');\n  newLock.initialize();\n  newLock.u_key = key;\n  var expires = new GlideDateTime();\n  expires.addSeconds(timeoutSeconds || 300);\n  newLock.u_expires = expires;\n  newLock.insert();\n  return true;\n}\n\nfunction releaseLock(key) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.deleteMultiple();\n}\n\n// Usage:\nvar lockKey = 'process_' + current.getUniqueValue();\nif (acquireLock(lockKey, 120)) {\n  try {\n    // Safe to process — no other script is handling this record\n    processRecord(current);\n  } finally {\n    releaseLock(lockKey);\n  }\n}"
+          "example": "function acquireLock(key, timeoutSeconds) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.addQuery('u_expires', '>', new GlideDateTime());\n  lock.query();\n  if (lock.hasNext()) return false; // Already locked\n  \n  // Clean expired locks\n  var old = new GlideRecord('u_script_locks');\n  old.addQuery('u_key', key);\n  old.query();\n  old.deleteMultiple();\n  \n  // Create new lock\n  var newLock = new GlideRecord('u_script_locks');\n  newLock.initialize();\n  newLock.u_key = key;\n  var expires = new GlideDateTime();\n  expires.addSeconds(timeoutSeconds || 300);\n  newLock.u_expires = expires;\n  newLock.insert();\n  return true;\n}\n\nfunction releaseLock(key) {\n  var lock = new GlideRecord('u_script_locks');\n  lock.addQuery('u_key', key);\n  lock.deleteMultiple();\n}\n\n// Usage:\nvar lockKey = 'process_' + current.getUniqueValue();\nif (acquireLock(lockKey, 120)) {\n  try {\n    // Safe to process \u2014 no other script is handling this record\n    processRecord(current);\n  } finally {\n    releaseLock(lockKey);\n  }\n}"
         },
         {
           "name": "Prevent Recursive BR",
           "description": "Stop Business Rules from triggering themselves in infinite loops.",
           "parameters": [],
-          "example": "// In a Business Rule that updates the same table:\nif (gs.getSession().getClientData('br_' + current.getUniqueValue())) {\n  return; // Already processing this record — skip to prevent loop\n}\ngs.getSession().putClientData('br_' + current.getUniqueValue(), 'true');\n\ntry {\n  // Your update logic here\n  var related = new GlideRecord('incident');\n  related.get(current.parent);\n  related.state = current.state;\n  related.update(); // Won't trigger this BR again\n} finally {\n  gs.getSession().putClientData('br_' + current.getUniqueValue(), '');\n}"
+          "example": "// In a Business Rule that updates the same table:\nif (gs.getSession().getClientData('br_' + current.getUniqueValue())) {\n  return; // Already processing this record \u2014 skip to prevent loop\n}\ngs.getSession().putClientData('br_' + current.getUniqueValue(), 'true');\n\ntry {\n  // Your update logic here\n  var related = new GlideRecord('incident');\n  related.get(current.parent);\n  related.state = current.state;\n  related.update(); // Won't trigger this BR again\n} finally {\n  gs.getSession().putClientData('br_' + current.getUniqueValue(), '');\n}"
         }
       ]
     },
     {
       "name": "Script Include Design Patterns",
       "type": "Utils",
-      "description": "Production-grade Script Include patterns — proper OOP, reusable classes, and clean architecture.",
+      "description": "Production-grade Script Include patterns \u2014 proper OOP, reusable classes, and clean architecture.",
       "methods": [
         {
           "name": "Standard Class Pattern",
