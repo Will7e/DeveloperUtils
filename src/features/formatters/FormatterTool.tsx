@@ -69,6 +69,7 @@ export function FormatterTool() {
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const handleFormatRef = React.useRef<(() => void) | null>(null);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     monaco.editor.defineTheme("devutils-dark", {
@@ -90,6 +91,12 @@ export function FormatterTool() {
       },
     });
     monaco.editor.setTheme("devutils-dark");
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      if (handleFormatRef.current) {
+        handleFormatRef.current();
+      }
+    });
   }, []);
 
   // Split Resizing
@@ -179,6 +186,10 @@ export function FormatterTool() {
       // Error handled by useMemo
     }
   };
+
+  useEffect(() => {
+    handleFormatRef.current = handleFormat;
+  });
 
   const handleClear = () => {
     updateContent(type, activeFile.id, "");
