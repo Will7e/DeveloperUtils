@@ -46,7 +46,6 @@ const languageIcons: Record<Language, React.ReactNode> = {
   typescript: <span className="lang-icon lang-ts">TS</span>,
   python: <span className="lang-icon lang-py">PY</span>,
   html: <span className="lang-icon lang-html">{"<>"}</span>,
-  json: <span className="lang-icon lang-json">{"{}"}</span>,
 };
 
 export function Sidebar() {

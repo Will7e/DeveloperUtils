@@ -39,7 +39,6 @@ const tabIcons: Record<Language, string> = {
   typescript: "TS",
   python: "PY",
   html: "<>",
-  json: "{}",
 };
 
 const langBadges: Record<Language, { cls: string; label: string }> = {
@@ -47,7 +46,6 @@ const langBadges: Record<Language, { cls: string; label: string }> = {
   typescript: { cls: "lang-badge-ts", label: "TypeScript" },
   python: { cls: "lang-badge-py", label: "Python" },
   html: { cls: "lang-badge-html", label: "HTML" },
-  json: { cls: "lang-badge-json", label: "JSON" },
 };
 
 export function EditorTabs() {
@@ -82,8 +80,7 @@ export function EditorTabs() {
 
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
-  const isJson = activeFile?.language === "json";
-  const canRun = activeFile && !isHtml && !isJson;
+  const canRun = activeFile && !isHtml;
 
   // Close menu on outside click
   useEffect(() => {
@@ -116,7 +113,7 @@ export function EditorTabs() {
 
   // ── Run Code ──────────────────────────────────────────────
   const handleRun = useCallback(async () => {
-    if (!activeFile || isRunning || isHtml || isJson) return;
+    if (!activeFile || isRunning || isHtml) return;
 
     // Ensure output panel is visible when running
     if (!outputPanelOpen) {
@@ -200,7 +197,6 @@ export function EditorTabs() {
     activeFile,
     isRunning,
     isHtml,
-    isJson,
     outputPanelOpen,
     setIsRunning,
     clearOutput,
@@ -356,11 +352,7 @@ export function EditorTabs() {
                   onClick={handleRun}
                   disabled={!canRun}
                 >
-                  {isJson ? (
-                    <Eye className="h-3.5 w-3.5" />
-                  ) : (
-                    <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
-                  )}
+                  <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
                   <span>Run</span>
                 </button>
               </TooltipTrigger>
