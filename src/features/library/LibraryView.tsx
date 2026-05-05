@@ -339,7 +339,7 @@ function tokenizeLine(line: string): Token[] {
   }
 
   while (i < line.length) {
-    const ch = line[i];
+    const ch = line[i] as string;
     const rest = line.slice(i);
 
     // Inline comment
@@ -363,9 +363,9 @@ function tokenizeLine(line: string): Token[] {
     }
 
     // Numbers
-    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;\[]/.test(line[i - 1]))) {
+    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;\[]/.test(line[i - 1] as string))) {
       let j = i;
-      while (j < line.length && /[0-9._xXa-fA-F]/.test(line[j])) j++;
+      while (j < line.length && /[0-9._xXa-fA-F]/.test(line[j] as string)) j++;
       tokens.push({ type: 'number', value: line.slice(i, j) });
       i = j;
       continue;
@@ -374,7 +374,7 @@ function tokenizeLine(line: string): Token[] {
     // Operators
     if (/[=!<>+\-*/%&|^~?:]/.test(ch)) {
       let j = i;
-      while (j < line.length && /[=!<>+\-*/%&|^~?:]/.test(line[j])) j++;
+      while (j < line.length && /[=!<>+\-*/%&|^~?:]/.test(line[j] as string)) j++;
       tokens.push({ type: 'operator', value: line.slice(i, j) });
       i = j;
       continue;
@@ -390,7 +390,7 @@ function tokenizeLine(line: string): Token[] {
     // Whitespace
     if (/\s/.test(ch)) {
       let j = i;
-      while (j < line.length && /\s/.test(line[j])) j++;
+      while (j < line.length && /\s/.test(line[j] as string)) j++;
       tokens.push({ type: 'text', value: line.slice(i, j) });
       i = j;
       continue;
@@ -399,7 +399,7 @@ function tokenizeLine(line: string): Token[] {
     // Words (identifiers, keywords)
     if (/[a-zA-Z_$]/.test(ch)) {
       let j = i;
-      while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j])) j++;
+      while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j] as string)) j++;
       const word = line.slice(i, j);
 
       // Determine type

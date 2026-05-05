@@ -264,7 +264,10 @@ export function LibrarySidebar() {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (selectedResultIndex >= 0 && selectedResultIndex < searchResults.length) {
-        setSelectedId(searchResults[selectedResultIndex].apiName);
+        const selected = searchResults[selectedResultIndex];
+        if (selected) {
+          setSelectedId(selected.apiName);
+        }
       }
     } else if (e.key === "Escape") {
       e.preventDefault();
