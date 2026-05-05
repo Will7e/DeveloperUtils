@@ -2181,13 +2181,13 @@ body {
   display: inline-block;
   padding: 1px 5px;
   margin-left: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);
   line-height: 1.5;
 }
 
