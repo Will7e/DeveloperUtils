@@ -5,14 +5,12 @@
 import { useCallback, useRef, useMemo, useState, type DragEvent, useEffect } from "react";
 import {
   ReactFlow,
-  Background,
   MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
   useReactFlow,
   ReactFlowProvider,
-  BackgroundVariant,
   SelectionMode,
   type Connection,
   type Node,
@@ -396,9 +394,24 @@ function WorkflowCanvas() {
   const handleNodeDataChange = useCallback(
     (nodeId: string, data: Record<string, unknown>) => {
       setNodes((nds) =>
-        nds.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n
-        )
+        nds.map((n) => {
+          if (n.id === nodeId) {
+            let newType = n.type;
+            if (data.nodeType && typeof data.nodeType === "string") {
+              const newTypeMap: Record<string, string> = {
+                start: "startNode",
+                end: "endNode",
+                process: "processNode",
+                decision: "decisionNode",
+                data: "dataNode",
+                integration: "integrationNode"
+              };
+              newType = newTypeMap[data.nodeType] || n.type;
+            }
+            return { ...n, type: newType, data: { ...n.data, ...data } };
+          }
+          return n;
+        })
       );
     },
     [setNodes]
@@ -462,20 +475,6 @@ function WorkflowCanvas() {
             className="wf-canvas"
             proOptions={{ hideAttribution: true }}
           >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={24}
-              size={1.2}
-              color="rgba(148, 163, 184, 0.12)"
-            />
-            {/* Second layer — subtle cross pattern for depth */}
-            <Background
-              id="bg-grid"
-              variant={BackgroundVariant.Lines}
-              gap={120}
-              size={0.4}
-              color="rgba(148, 163, 184, 0.04)"
-            />
             {showMinimap && (
               <MiniMap
                 className="wf-minimap"

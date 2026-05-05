@@ -2,13 +2,22 @@
 // PropertiesPanel — Edit selected node/edge properties
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
-import { X, Type, AlignLeft, Tag, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { X, Type, AlignLeft, Tag, ChevronRight, Play, Square, Cog, GitBranch, Database, Globe } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 
 interface PropertiesPanelProps {
   onNodeDataChange?: (nodeId: string, data: Record<string, unknown>) => void;
 }
+
+const TYPE_ICONS: Record<string, React.ReactNode> = {
+  start: <Play className="h-3.5 w-3.5" style={{ color: "#22c55e" }} />,
+  end: <Square className="h-3.5 w-3.5" style={{ color: "#ef4444" }} />,
+  process: <Cog className="h-3.5 w-3.5" style={{ color: "#0ea5e9" }} />,
+  decision: <GitBranch className="h-3.5 w-3.5" style={{ color: "#f59e0b" }} />,
+  data: <Database className="h-3.5 w-3.5" style={{ color: "#a78bfa" }} />,
+  integration: <Globe className="h-3.5 w-3.5" style={{ color: "#2dd4bf" }} />,
+};
 
 export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
   const workflows = useAppStore((s) => s.workflows);
@@ -109,6 +118,54 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
     updateWorkflowEdges(workflow.id, updatedEdges);
   }, [workflow, selectedEdge, edgeLabel, updateWorkflowEdges]);
 
+  const handleNodeTypeChange = useCallback(
+    (newNodeType: "start" | "end" | "process" | "decision" | "data" | "integration") => {
+      if (!workflow || !selectedNode) return;
+      
+      const newTypeMap: Record<string, string> = {
+        start: "startNode",
+        end: "endNode",
+        process: "processNode",
+        decision: "decisionNode",
+        data: "dataNode",
+        integration: "integrationNode"
+      };
+
+      const updatedNodes = workflow.nodes.map((n) =>
+        n.id === selectedNode.id
+          ? { 
+              ...n, 
+              type: newTypeMap[newNodeType] || n.type, 
+              data: { ...n.data, nodeType: newNodeType } 
+            }
+          : n
+      );
+      updateWorkflowNodes(workflow.id, updatedNodes);
+
+      if (onNodeDataChange) {
+        onNodeDataChange(selectedNode.id, {
+          ...selectedNode.data,
+          nodeType: newNodeType,
+        });
+      }
+    },
+    [workflow, selectedNode, updateWorkflowNodes, onNodeDataChange]
+  );
+
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const typeMenuRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (!showTypeMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (typeMenuRef.current && !typeMenuRef.current.contains(e.target as Node)) {
+        setShowTypeMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showTypeMenu]);
+
   // Collapsed state
   if (collapsed) {
     return (
@@ -176,8 +233,36 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
               <Tag className="h-3 w-3" />
               <span>Type</span>
             </div>
-            <div className="wf-prop-value-badge">
-              {selectedNode.data.nodeType}
+            <div className="wf-prop-dropdown-container" ref={typeMenuRef}>
+              <button 
+                className="wf-prop-dropdown-btn" 
+                onClick={() => setShowTypeMenu(!showTypeMenu)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {TYPE_ICONS[selectedNode.data.nodeType as string]}
+                  <span>{selectedNode.data.nodeType as string}</span>
+                </div>
+                <ChevronRight className="h-3.5 w-3.5" style={{ transform: showTypeMenu ? "rotate(-90deg)" : "rotate(90deg)" }} />
+              </button>
+              
+              {showTypeMenu && (
+                <div className="wf-prop-dropdown-menu">
+                  {(["start", "end", "process", "decision", "data", "integration"] as const).map((type) => (
+                    <button
+                      key={type}
+                      className="wf-prop-dropdown-item"
+                      onClick={() => {
+                        handleNodeTypeChange(type);
+                        setShowTypeMenu(false);
+                      }}
+                      style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                    >
+                      {TYPE_ICONS[type]}
+                      <span>{type}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           <div className="wf-prop-group">
