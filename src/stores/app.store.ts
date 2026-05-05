@@ -27,6 +27,7 @@ const initialFile = createDefaultFile("javascript");
 
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
+const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -53,7 +54,8 @@ export const useAppStore = create<AppState>()(
       formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile] },
       activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id },
       formatterType: "json",
-      comparatorInputs: { a: "", b: "" },
+      comparatorSessions: [initialComparatorSession],
+      activeComparatorSessionId: initialComparatorSession.id,
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
       librarySelectedItemId: null,
       librarySearchQuery: "",
@@ -274,9 +276,50 @@ export const useAppStore = create<AppState>()(
         set({ formatterType: type });
       },
 
-      setComparatorInput: (side, input) => {
+      createComparatorSession: (name) => {
+        const id = generateId();
+        const newSession = { id, name: name || "List Compare", a: "", b: "" };
         set((state) => ({
-          comparatorInputs: { ...state.comparatorInputs, [side]: input }
+          comparatorSessions: [...state.comparatorSessions, newSession],
+          activeComparatorSessionId: id
+        }));
+      },
+
+      deleteComparatorSession: (id) => {
+        set((state) => {
+          const remaining = state.comparatorSessions.filter(s => s.id !== id);
+          if (remaining.length === 0) {
+            const newSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+            return {
+              comparatorSessions: [newSession],
+              activeComparatorSessionId: newSession.id
+            };
+          }
+          return {
+            comparatorSessions: remaining,
+            activeComparatorSessionId:
+              state.activeComparatorSessionId === id ? remaining[remaining.length - 1]!.id : state.activeComparatorSessionId
+          };
+        });
+      },
+
+      setActiveComparatorSession: (id) => {
+        set({ activeComparatorSessionId: id });
+      },
+
+      updateComparatorSessionInput: (id, side, input) => {
+        set((state) => ({
+          comparatorSessions: state.comparatorSessions.map(s =>
+            s.id === id ? { ...s, [side]: input } : s
+          )
+        }));
+      },
+
+      renameComparatorSession: (id, name) => {
+        set((state) => ({
+          comparatorSessions: state.comparatorSessions.map(s =>
+            s.id === id ? { ...s, name } : s
+          )
         }));
       },
 
@@ -306,7 +349,8 @@ export const useAppStore = create<AppState>()(
         formatterFiles: state.formatterFiles,
         activeFormatterFileId: state.activeFormatterFileId,
         formatterType: state.formatterType,
-        comparatorInputs: state.comparatorInputs,
+        comparatorSessions: state.comparatorSessions,
+        activeComparatorSessionId: state.activeComparatorSessionId,
         comparatorSettings: state.comparatorSettings,
         librarySelectedItemId: state.librarySelectedItemId,
         librarySearchQuery: state.librarySearchQuery,

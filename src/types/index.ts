@@ -44,6 +44,14 @@ export interface FormatterFile {
   content: string;
 }
 
+/** A single session in the comparator tool */
+export interface ComparatorSession {
+  id: string;
+  name: string;
+  a: string;
+  b: string;
+}
+
 /** Editor settings */
 export interface EditorSettings {
   theme: "dark" | "light";
@@ -110,7 +118,8 @@ export interface AppState {
   formatterFiles: { json: FormatterFile[]; xml: FormatterFile[] };
   activeFormatterFileId: { json: string; xml: string };
   formatterType: "json" | "xml";
-  comparatorInputs: { a: string; b: string };
+  comparatorSessions: ComparatorSession[];
+  activeComparatorSessionId: string;
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
@@ -146,10 +155,16 @@ export interface AppState {
   setActiveFormatterFile: (type: "json" | "xml", id: string) => void;
   updateFormatterFileContent: (type: "json" | "xml", id: string, content: string) => void;
   renameFormatterFile: (type: "json" | "xml", id: string, name: string) => void;
-  
   setFormatterType: (type: "json" | "xml") => void;
-  setComparatorInput: (side: "a" | "b", input: string) => void;
+
+  // Comparator actions
+  createComparatorSession: (name?: string) => void;
+  deleteComparatorSession: (id: string) => void;
+  setActiveComparatorSession: (id: string) => void;
+  updateComparatorSessionInput: (id: string, side: "a" | "b", input: string) => void;
+  renameComparatorSession: (id: string, name: string) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
+  
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
 }

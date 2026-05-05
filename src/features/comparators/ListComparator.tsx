@@ -11,7 +11,10 @@ import {
   Play,
   Settings2,
   AlignLeft,
-  ChevronDown
+  ChevronDown,
+  FileText,
+  Plus,
+  X
 } from "lucide-react";
 import { 
   Panel, 
@@ -61,9 +64,15 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
 
 export function ListComparator() {
   // Store persistence
-  const comparatorInputs = useAppStore((s) => s.comparatorInputs);
+  const sessions = useAppStore((s) => s.comparatorSessions);
+  const activeSessionId = useAppStore((s) => s.activeComparatorSessionId);
+  const setActiveSession = useAppStore((s) => s.setActiveComparatorSession);
+  const createSession = useAppStore((s) => s.createComparatorSession);
+  const deleteSession = useAppStore((s) => s.deleteComparatorSession);
+  const renameSession = useAppStore((s) => s.renameComparatorSession);
+  const updateSessionInput = useAppStore((s) => s.updateComparatorSessionInput);
+
   const comparatorSettings = useAppStore((s) => s.comparatorSettings);
-  const setComparatorInput = useAppStore((s) => s.setComparatorInput);
   const updateComparatorSettings = useAppStore((s) => s.updateComparatorSettings);
   const addToast = useAppStore((s) => s.addToast);
 
@@ -74,8 +83,13 @@ export function ListComparator() {
   const [lastResults, setLastResults] = useState<ComparisonResults>({ aOnly: [], bOnly: [], both: [] });
   const [hasCompared, setHasCompared] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
-  const { a: inputA, b: inputB } = comparatorInputs;
+  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
+  const inputA = activeSession.a;
+  const inputB = activeSession.b;
+
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
   // Hydration check to ensure we use persisted state
@@ -93,9 +107,9 @@ export function ListComparator() {
 
   const formatInput = useCallback((input: string, key: "a" | "b") => {
     const list = processList(input);
-    setComparatorInput(key, list.join("\n"));
+    updateSessionInput(activeSession.id, key, list.join("\n"));
     addToast({ message: "List formatted with newlines", type: "info" });
-  }, [processList, setComparatorInput, addToast]);
+  }, [processList, updateSessionInput, activeSession.id, addToast]);
 
   const handleCompare = useCallback(() => {
     const listA = processList(inputA);
@@ -174,22 +188,79 @@ export function ListComparator() {
 
   return (
     <div className="list-comparator-container">
-      {/* Header / Toolbar */}
-      <div className="json-formatter-toolbar">
-        <div className="toolbar-left">
-          <Columns className="h-4 w-4 text-accent" />
-          <h2 className="text-sm font-semibold">List Comparator</h2>
-          <div className="toolbar-sep mx-2" />
-          
+      <div className="tabs-bar">
+        <div className="tabs-list">
+          {sessions.map(session => (
+            <button 
+              key={session.id}
+              className={cn(
+                "tab",
+                activeSessionId === session.id && "tab-active"
+              )}
+              onClick={() => setActiveSession(session.id)}
+              onDoubleClick={() => {
+                setEditName(session.name);
+                setEditingSessionId(session.id);
+              }}
+            >
+              <span className="tab-icon tab-icon-javascript">
+                <Columns className="h-3 w-3" />
+              </span>
+              {editingSessionId === session.id ? (
+                <input
+                  autoFocus
+                  className="tab-rename-input"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={() => {
+                    if (editName.trim() && editName !== session.name) {
+                      renameSession(session.id, editName.trim());
+                    }
+                    setEditingSessionId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.currentTarget.blur();
+                    } else if (e.key === "Escape") {
+                      setEditingSessionId(null);
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="tab-name">
+                  {session.name}
+                </span>
+              )}
+              <span 
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteSession(session.id);
+                }}
+              >
+                <X className="h-3 w-3" />
+              </span>
+            </button>
+          ))}
+          <button 
+            className="tab-new"
+            onClick={() => createSession()}
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="tabs-toolbar">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="toolbar-btn">
                 <Settings2 className="h-3.5 w-3.5" />
-                Comparison Settings
+                Settings
                 <ChevronDown className="h-3 w-3 opacity-50" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="end">
               <DropdownMenuLabel>Analysis Rules</DropdownMenuLabel>
               <DropdownMenuCheckboxItem
                 checked={caseSensitive}
@@ -216,13 +287,13 @@ export function ListComparator() {
               </DropdownMenuCheckboxItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-        
-        <div className="toolbar-right">
+
+          <div className="tabs-toolbar-sep" />
+
           <ActionTooltip content="Reset both input lists">
             <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
-              setComparatorInput("a", ""); 
-              setComparatorInput("b", ""); 
+              updateSessionInput(activeSession.id, "a", ""); 
+              updateSessionInput(activeSession.id, "b", ""); 
               setHasCompared(false); 
               setLastResults({ aOnly: [], bOnly: [], both: [] });
             }}>
@@ -230,11 +301,13 @@ export function ListComparator() {
               Clear
             </button>
           </ActionTooltip>
-          <div className="toolbar-sep" />
+
+          <div className="tabs-toolbar-sep" />
+
           <ActionTooltip content="Analyze differences between List A and B">
-            <button className="toolbar-btn-primary" onClick={handleCompare}>
-              <Play className="h-3.5 w-3.5 fill-current" />
-              Compare Now
+            <button className="tabs-run-btn" onClick={handleCompare}>
+              <Play className="h-3 w-3 fill-current" />
+              <span>Compare Now</span>
             </button>
           </ActionTooltip>
         </div>
@@ -266,7 +339,7 @@ export function ListComparator() {
                     className="comparator-textarea"
                     placeholder="Paste List A here..."
                     value={inputA}
-                    onChange={(e) => setComparatorInput("a", e.target.value)}
+                    onChange={(e) => updateSessionInput(activeSession.id, "a", e.target.value)}
                     spellCheck={false}
                   />
                 </div>
@@ -296,7 +369,7 @@ export function ListComparator() {
                     className="comparator-textarea"
                     placeholder="Paste List B here..."
                     value={inputB}
-                    onChange={(e) => setComparatorInput("b", e.target.value)}
+                    onChange={(e) => updateSessionInput(activeSession.id, "b", e.target.value)}
                     spellCheck={false}
                   />
                 </div>
