@@ -5004,6 +5004,549 @@
           "example": "<!-- Widget HTML Template -->\n<div class=\"panel panel-default\">\n  <div class=\"panel-heading\">\n    <h3>My Incidents ({{c.data.incidents.length}})</h3>\n  </div>\n  <div class=\"panel-body\">\n    <div ng-repeat=\"inc in c.data.incidents\" class=\"list-group-item\">\n      <h4>\n        <a href ng-click=\"c.openIncident(inc.sys_id)\">{{inc.number}}</a>\n        <span class=\"badge\">{{inc.state}}</span>\n      </h4>\n      <p>{{inc.short_description}}</p>\n    </div>\n    <p ng-if=\"c.data.incidents.length == 0\">No open incidents</p>\n  </div>\n</div>"
         }
       ]
+    },
+    {
+      "name": "JSUtil",
+      "type": "Server-side",
+      "description": "Server-side JavaScript utility class providing type checking, object inspection, and utility methods. Available globally in server scripts.",
+      "methods": [
+        {
+          "name": "has",
+          "description": "Returns true if the value is not null, undefined, or empty.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.has(current.assigned_to)) {\n  gs.info('Has assignee: ' + current.assigned_to.getDisplayValue());\n}"
+        },
+        {
+          "name": "nil",
+          "description": "Returns true if the value is null, undefined, or empty string.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.nil(someVar)) {\n  gs.info('Variable is empty');\n}"
+        },
+        {
+          "name": "notNil",
+          "description": "Returns true if the value is NOT null, undefined, or empty.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.notNil(current.getValue('parent'))) {\n  gs.info('Has parent record');\n}"
+        },
+        {
+          "name": "type_of",
+          "description": "Returns the type of an object as a string (more reliable than typeof for ServiceNow objects).",
+          "parameters": [
+            "obj"
+          ],
+          "example": "gs.info(JSUtil.type_of(current)); // 'GlideRecord'\ngs.info(JSUtil.type_of('hello')); // 'string'\ngs.info(JSUtil.type_of(42)); // 'number'\ngs.info(JSUtil.type_of(null)); // 'null'"
+        },
+        {
+          "name": "instance_of",
+          "description": "Returns true if the object is an instance of the specified class.",
+          "parameters": [
+            "obj",
+            "className"
+          ],
+          "example": "if (JSUtil.instance_of(myObj, 'GlideRecord')) {\n  gs.info('It is a GlideRecord');\n}"
+        },
+        {
+          "name": "getBooleanValue",
+          "description": "Converts various truthy/falsy values to a proper boolean.",
+          "parameters": [
+            "value"
+          ],
+          "example": "var isActive = JSUtil.getBooleanValue(gr.getValue('active'));\n// Handles 'true', '1', 'yes', true => true\n// Handles 'false', '0', 'no', false, null => false"
+        },
+        {
+          "name": "doesNotHave",
+          "description": "Returns true if the value is null, undefined, or empty.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.doesNotHave(current.description)) {\n  gs.addInfoMessage('Consider adding a description');\n}"
+        },
+        {
+          "name": "logObject",
+          "description": "Logs all properties of an object. Useful for debugging.",
+          "parameters": [
+            "obj",
+            "name"
+          ],
+          "example": "JSUtil.logObject(current, 'current record');"
+        }
+      ]
+    },
+    {
+      "name": "GlideNumberManager",
+      "type": "Server-side",
+      "description": "Generates unique numbers for records. Manages number sequences defined in the sys_number table (e.g., INC, CHG, PRB prefixes).",
+      "methods": [
+        {
+          "name": "getNextObjNumberPadded",
+          "description": "Returns the next number in the sequence for the specified category.",
+          "parameters": [],
+          "example": "// Numbers are typically auto-assigned on insert\n// But you can manually get the next number:\nvar nm = new GlideNumberManager('incident');\nvar nextNum = nm.getNextObjNumberPadded();\ngs.info('Next incident number: ' + nextNum); // 'INC0012346'"
+        }
+      ]
+    },
+    {
+      "name": "TableUtils",
+      "type": "Server-side",
+      "description": "Utility class for table metadata operations — checking table existence, hierarchy, and relationships.",
+      "methods": [
+        {
+          "name": "tableExists",
+          "description": "Returns true if the specified table exists.",
+          "parameters": [
+            "tableName"
+          ],
+          "example": "if (new TableUtils('u_custom_table').tableExists()) {\n  gs.info('Table exists');\n}"
+        },
+        {
+          "name": "getAbsoluteBase",
+          "description": "Returns the top-level base table in the hierarchy.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('incident');\ngs.info(tu.getAbsoluteBase()); // 'task'"
+        },
+        {
+          "name": "getHierarchy",
+          "description": "Returns an ArrayList of tables in the hierarchy.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('incident');\nvar hier = tu.getHierarchy();\nfor (var i = 0; i < hier.size(); i++) {\n  gs.info('Level ' + i + ': ' + hier.get(i));\n}"
+        },
+        {
+          "name": "getTables",
+          "description": "Returns all tables that extend this table.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('task');\nvar extensions = tu.getTables();\ngs.info('Tables extending task: ' + extensions);\n// incident, problem, change_request, etc."
+        },
+        {
+          "name": "isValidTable",
+          "description": "Returns true if the table name is valid.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('nonexistent_table');\nif (!tu.isValidTable()) {\n  gs.error('Table not found');\n}"
+        }
+      ]
+    },
+    {
+      "name": "Packages (Java)",
+      "type": "Server-side",
+      "description": "Access Java classes from server-side JavaScript. Available in global scope. Use sparingly — prefer native ServiceNow APIs when possible.",
+      "methods": [
+        {
+          "name": "java.util.ArrayList",
+          "description": "Create Java ArrayList objects for methods requiring Java lists.",
+          "parameters": [],
+          "example": "var list = new Packages.java.util.ArrayList();\nlist.add('item1');\nlist.add('item2');\ngs.info('Size: ' + list.size()); // 2"
+        },
+        {
+          "name": "java.lang.String",
+          "description": "Access Java String methods not available in JavaScript.",
+          "parameters": [],
+          "example": "var jStr = new Packages.java.lang.String('Hello World');\ngs.info(jStr.toUpperCase());\ngs.info(jStr.substring(0, 5)); // 'Hello'"
+        },
+        {
+          "name": "java.util.HashMap",
+          "description": "Create Java HashMap objects.",
+          "parameters": [],
+          "example": "var map = new Packages.java.util.HashMap();\nmap.put('key1', 'value1');\nmap.put('key2', 'value2');\ngs.info(map.get('key1')); // 'value1'"
+        },
+        {
+          "name": "java.text.SimpleDateFormat",
+          "description": "Format dates using Java date patterns.",
+          "parameters": [],
+          "example": "var sdf = new Packages.java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss');\nvar now = new Packages.java.util.Date();\ngs.info(sdf.format(now));"
+        },
+        {
+          "name": "Security Note",
+          "description": "Packages access may be restricted in scoped apps. Only available in global scope.",
+          "parameters": [],
+          "example": "// Check if Packages is available\ntry {\n  var test = new Packages.java.util.ArrayList();\n  gs.info('Packages available');\n} catch (e) {\n  gs.info('Packages not available in this scope');\n}"
+        }
+      ]
+    },
+    {
+      "name": "GlideEmailWatermark",
+      "type": "Server-side",
+      "description": "Manages email watermarks for inbound email reply tracking. Watermarks allow ServiceNow to associate inbound email replies with existing records.",
+      "methods": [
+        {
+          "name": "getWatermark",
+          "description": "Returns the watermark string for the current email.",
+          "parameters": [],
+          "example": "// In an Email Notification script\nvar watermark = email.watermark;\ngs.info('Watermark: ' + watermark);"
+        },
+        {
+          "name": "Inbound Email Pattern",
+          "description": "Process inbound emails and update records based on watermarks.",
+          "parameters": [],
+          "example": "// Inbound Email Action script\n// 'current' = the record the email is linked to\n// 'email' = the inbound email\n\ncurrent.comments = 'Reply from: ' + email.origemail + '\\n' + email.body_text;\ncurrent.update();\n\n// Access email properties\ngs.info('From: ' + email.origemail);\ngs.info('Subject: ' + email.subject);\ngs.info('Body: ' + email.body_text);"
+        }
+      ]
+    },
+    {
+      "name": "Inbound Email Action Patterns",
+      "type": "Server-side",
+      "description": "Scripts that process inbound emails. Available variables: email (inbound email), current (matched record), event (trigger event). Configured under System Policy > Email > Inbound Actions.",
+      "methods": [
+        {
+          "name": "Create Record",
+          "description": "Create a new record from an inbound email when no matching record is found.",
+          "parameters": [],
+          "example": "// Inbound Email Action: Create Incident from Email\nvar gr = new GlideRecord('incident');\ngr.initialize();\ngr.short_description = email.subject;\ngr.description = email.body_text;\n\n// Find caller by email address\nvar user = new GlideRecord('sys_user');\nif (user.get('email', email.origemail)) {\n  gr.caller_id = user.getUniqueValue();\n}\n\ngr.contact_type = 'email';\nvar sysId = gr.insert();\ngs.info('Created incident from email: ' + gr.number);"
+        },
+        {
+          "name": "Update Record",
+          "description": "Update an existing record when a reply is received. The watermark matches inbound email to the correct record.",
+          "parameters": [],
+          "example": "// Inbound Email Action: Update from Reply\ncurrent.comments = email.body_text;\ncurrent.update();"
+        },
+        {
+          "name": "Reject Pattern",
+          "description": "Reject emails based on criteria like auto-replies or spam.",
+          "parameters": [],
+          "example": "// Check for auto-replies\nvar subject = email.subject;\nif (subject.indexOf('Out of Office') >= 0 || \n    subject.indexOf('Automatic reply') >= 0) {\n  gs.info('Skipping auto-reply from: ' + email.origemail);\n  email.setDropped(true);\n  return;\n}"
+        }
+      ]
+    },
+    {
+      "name": "Notification Script Patterns",
+      "type": "Server-side",
+      "description": "Scripts used in Email Notifications for dynamic content. Mail scripts run in the context of the notification with access to current (record), template, and email objects.",
+      "methods": [
+        {
+          "name": "Mail Script",
+          "description": "Dynamic content for email notifications. Referenced in templates via ${mail_script:script_name}.",
+          "parameters": [],
+          "example": "// Mail Script: incident_details\ntemplate.print('<table>');\ntemplate.print('<tr><td><b>Number:</b></td><td>' + current.number + '</td></tr>');\ntemplate.print('<tr><td><b>Priority:</b></td><td>' + current.priority.getDisplayValue() + '</td></tr>');\ntemplate.print('<tr><td><b>State:</b></td><td>' + current.state.getDisplayValue() + '</td></tr>');\ntemplate.print('<tr><td><b>Assigned to:</b></td><td>' + current.assigned_to.getDisplayValue() + '</td></tr>');\ntemplate.print('</table>');"
+        },
+        {
+          "name": "Condition Script",
+          "description": "Determines whether a notification should be sent. Set answer to true to send.",
+          "parameters": [],
+          "example": "// Only send for P1 incidents assigned to active users\nvar assignee = new GlideRecord('sys_user');\nif (assignee.get(current.assigned_to)) {\n  answer = assignee.active == true && current.priority == 1;\n} else {\n  answer = false;\n}"
+        },
+        {
+          "name": "Recipients Script",
+          "description": "Dynamically determine notification recipients via script.",
+          "parameters": [],
+          "example": "// Send to all members of the assignment group\nvar gr = new GlideRecord('sys_user_grmember');\ngr.addQuery('group', current.assignment_group);\ngr.query();\nwhile (gr.next()) {\n  var user = gr.user.getRefRecord();\n  if (user.active == true && user.email != '') {\n    email.addAddress('to', user.getValue('email'));\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "sn_cc.ConnectionInfoProvider",
+      "type": "Server-side",
+      "description": "Retrieves Connection & Credential alias information for secure integration credentials. Avoids hardcoding credentials in scripts.",
+      "methods": [
+        {
+          "name": "getConnectionInfo",
+          "description": "Returns connection details for a credential alias.",
+          "parameters": [
+            "aliasGR"
+          ],
+          "example": "var provider = new sn_cc.ConnectionInfoProvider();\nvar connGR = new GlideRecord('sys_alias');\nconnGR.get('name', 'MyIntegrationAlias');\nvar info = provider.getConnectionInfo(connGR);\nvar host = info.getAttribute('host');\nvar port = info.getAttribute('port');"
+        },
+        {
+          "name": "getCredentialAttribute",
+          "description": "Gets a credential attribute (username, password, token) from the alias.",
+          "parameters": [
+            "attributeName"
+          ],
+          "example": "var username = info.getCredentialAttribute('user_name');\nvar password = info.getCredentialAttribute('password');\n\n// Use with RESTMessageV2\nvar rm = new sn_ws.RESTMessageV2();\nrm.setBasicAuth(username, password);"
+        }
+      ]
+    },
+    {
+      "name": "GlideLog",
+      "type": "Server-side",
+      "description": "Utility for creating structured log entries in the system log (syslog). Provides log level methods with source tags for filtering.",
+      "methods": [
+        {
+          "name": "info",
+          "description": "Logs an informational message with a source identifier.",
+          "parameters": [
+            "source",
+            "message"
+          ],
+          "example": "var log = new GlideLog();\nlog.info('MyIntegration', 'Processing record: ' + current.number);"
+        },
+        {
+          "name": "warn",
+          "description": "Logs a warning message. Shows up in syslog with warning level.",
+          "parameters": [
+            "source",
+            "message"
+          ],
+          "example": "var log = new GlideLog();\nlog.warn('DataSync', 'Retry attempt ' + retryCount + ' for ' + endpoint);"
+        },
+        {
+          "name": "error",
+          "description": "Logs an error message. Shows up in syslog with error level.",
+          "parameters": [
+            "source",
+            "message"
+          ],
+          "example": "var log = new GlideLog();\nlog.error('PaymentGateway', 'Transaction failed: ' + errorMessage);"
+        },
+        {
+          "name": "debug",
+          "description": "Logs a debug message (only visible when session debugging is enabled).",
+          "parameters": [
+            "source",
+            "message"
+          ],
+          "example": "var log = new GlideLog();\nlog.debug('ImportEngine', 'Payload: ' + JSON.stringify(payload));"
+        }
+      ]
+    },
+    {
+      "name": "JSUtil",
+      "type": "Server-side",
+      "description": "Server-side JavaScript utility class for type checking, object inspection, and value validation. Available globally.",
+      "methods": [
+        {
+          "name": "has",
+          "description": "Returns true if the value is not null, undefined, or empty string.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.has(current.assigned_to)) {\n  gs.info('Has assignee');\n}"
+        },
+        {
+          "name": "nil",
+          "description": "Returns true if the value is null, undefined, or empty string.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.nil(someVar)) {\n  gs.info('Variable is empty');\n}"
+        },
+        {
+          "name": "notNil",
+          "description": "Returns true if the value is NOT null/undefined/empty.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.notNil(current.getValue('parent'))) {\n  gs.info('Has parent record');\n}"
+        },
+        {
+          "name": "type_of",
+          "description": "Returns the type of an object as a string. More reliable than typeof for ServiceNow objects.",
+          "parameters": [
+            "obj"
+          ],
+          "example": "gs.info(JSUtil.type_of(current)); // 'GlideRecord'\ngs.info(JSUtil.type_of('hello')); // 'string'\ngs.info(JSUtil.type_of(null)); // 'null'"
+        },
+        {
+          "name": "instance_of",
+          "description": "Returns true if the object is an instance of the specified class.",
+          "parameters": [
+            "obj",
+            "className"
+          ],
+          "example": "if (JSUtil.instance_of(myObj, 'GlideRecord')) {\n  gs.info('Object is a GlideRecord');\n}"
+        },
+        {
+          "name": "getBooleanValue",
+          "description": "Converts truthy/falsy values to boolean. Handles strings like \"true\", \"1\", \"yes\".",
+          "parameters": [
+            "value"
+          ],
+          "example": "var isActive = JSUtil.getBooleanValue(gr.getValue('active'));\n// 'true', '1', 'yes' => true\n// 'false', '0', 'no', null => false"
+        },
+        {
+          "name": "doesNotHave",
+          "description": "Inverse of has(). Returns true if value is null/undefined/empty.",
+          "parameters": [
+            "item"
+          ],
+          "example": "if (JSUtil.doesNotHave(current.description)) {\n  gs.addInfoMessage('Consider adding a description');\n}"
+        },
+        {
+          "name": "logObject",
+          "description": "Logs all properties of an object to the system log. Useful for debugging complex objects.",
+          "parameters": [
+            "obj",
+            "name"
+          ],
+          "example": "JSUtil.logObject(current, 'incident record');"
+        }
+      ]
+    },
+    {
+      "name": "GlideNumberManager",
+      "type": "Server-side",
+      "description": "Manages number sequences for record auto-numbering. Controls prefixes and counters defined in the sys_number table.",
+      "methods": [
+        {
+          "name": "getNextObjNumberPadded",
+          "description": "Returns the next number in the sequence with zero-padding.",
+          "parameters": [],
+          "example": "var nm = new GlideNumberManager('incident');\nvar nextNum = nm.getNextObjNumberPadded();\ngs.info('Next: ' + nextNum); // 'INC0012346'"
+        }
+      ]
+    },
+    {
+      "name": "TableUtils",
+      "type": "Server-side",
+      "description": "Utility class for table metadata — existence checks, hierarchy queries, and extension relationships.",
+      "methods": [
+        {
+          "name": "tableExists",
+          "description": "Returns true if the table exists in the database.",
+          "parameters": [],
+          "example": "if (new TableUtils('u_custom_table').tableExists()) {\n  gs.info('Table exists');\n} else {\n  gs.error('Table not found');\n}"
+        },
+        {
+          "name": "getAbsoluteBase",
+          "description": "Returns the root base table in the hierarchy chain.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('incident');\ngs.info(tu.getAbsoluteBase()); // 'task'"
+        },
+        {
+          "name": "getHierarchy",
+          "description": "Returns an ArrayList of all tables in the inheritance chain.",
+          "parameters": [],
+          "example": "var tu = new TableUtils('incident');\nvar hier = tu.getHierarchy();\nfor (var i = 0; i < hier.size(); i++) {\n  gs.info('Level ' + i + ': ' + hier.get(i));\n}"
+        },
+        {
+          "name": "getTables",
+          "description": "Returns all tables that extend this table (child tables).",
+          "parameters": [],
+          "example": "var tu = new TableUtils('task');\nvar extensions = tu.getTables();\ngs.info('Task extensions: ' + extensions);"
+        },
+        {
+          "name": "isValidTable",
+          "description": "Returns true if the table name is valid and exists.",
+          "parameters": [],
+          "example": "if (!new TableUtils(tableName).isValidTable()) {\n  gs.error('Invalid table: ' + tableName);\n  return;\n}"
+        }
+      ]
+    },
+    {
+      "name": "Packages (Java)",
+      "type": "Server-side (Global)",
+      "description": "Access Java classes from server-side JavaScript. Only available in global scope (not scoped apps). Use sparingly — prefer native ServiceNow APIs.",
+      "methods": [
+        {
+          "name": "java.util.ArrayList",
+          "description": "Create Java ArrayList for methods requiring Java list types.",
+          "parameters": [],
+          "example": "var list = new Packages.java.util.ArrayList();\nlist.add('item1');\nlist.add('item2');\ngs.info('Size: ' + list.size());"
+        },
+        {
+          "name": "java.lang.String",
+          "description": "Access Java String methods not available in Rhino JavaScript.",
+          "parameters": [],
+          "example": "var jStr = new Packages.java.lang.String('Hello World');\ngs.info(jStr.toUpperCase());"
+        },
+        {
+          "name": "java.util.HashMap",
+          "description": "Create Java HashMap for key-value pair storage.",
+          "parameters": [],
+          "example": "var map = new Packages.java.util.HashMap();\nmap.put('key1', 'value1');\nmap.put('key2', 'value2');\ngs.info(map.get('key1')); // 'value1'"
+        },
+        {
+          "name": "java.text.SimpleDateFormat",
+          "description": "Format dates using Java date format patterns.",
+          "parameters": [],
+          "example": "var sdf = new Packages.java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss');\nvar now = new Packages.java.util.Date();\ngs.info(sdf.format(now));"
+        },
+        {
+          "name": "Scope Warning",
+          "description": "Packages is only available in global scope. Scoped apps will throw errors.",
+          "parameters": [],
+          "example": "// Check availability\ntry {\n  var test = new Packages.java.util.ArrayList();\n  gs.info('Packages available (global scope)');\n} catch (e) {\n  gs.info('Packages not available (scoped app)');\n}"
+        }
+      ]
+    },
+    {
+      "name": "GlideRegex",
+      "type": "Server-side",
+      "description": "Server-side regular expression utility. Provides pattern matching and extraction beyond native JavaScript regex.",
+      "methods": [
+        {
+          "name": "match",
+          "description": "Tests if a string matches a regex pattern. Returns true/false.",
+          "parameters": [
+            "pattern",
+            "value"
+          ],
+          "example": "var gr = new GlideRegex();\nif (gr.match('^INC[0-9]{7}$', current.getValue('number'))) {\n  gs.info('Valid incident number format');\n}"
+        },
+        {
+          "name": "extract",
+          "description": "Extracts matching groups from a string using a regex pattern.",
+          "parameters": [
+            "pattern",
+            "value",
+            "groupIndex"
+          ],
+          "example": "// Extract ticket number from email subject\nvar subject = 'RE: Issue with INC0012345 - Server down';\nvar regex = new GlideRegex('(INC[0-9]+)', subject);\nvar match = regex.match(subject);\nif (match) {\n  gs.info('Found ticket: ' + RegExp.$1);\n}"
+        }
+      ]
+    },
+    {
+      "name": "GlideUINotification",
+      "type": "Client-side",
+      "description": "Client-side API for displaying toast-style notifications in the ServiceNow UI. These appear briefly in the corner of the screen.",
+      "methods": [
+        {
+          "name": "Constructor",
+          "description": "Creates a new UI notification.",
+          "parameters": [],
+          "example": "var notification = new GlideUINotification();"
+        },
+        {
+          "name": "setText",
+          "description": "Sets the notification message text.",
+          "parameters": [
+            "text"
+          ],
+          "example": "var n = new GlideUINotification();\nn.setText('Record saved successfully');\nn.setType('info'); // 'info', 'warning', 'error'\nn.show();"
+        },
+        {
+          "name": "setType",
+          "description": "Sets the notification type: info, warning, or error.",
+          "parameters": [
+            "type"
+          ],
+          "example": "n.setType('warning');"
+        },
+        {
+          "name": "show",
+          "description": "Displays the notification.",
+          "parameters": [],
+          "example": "var n = new GlideUINotification();\nn.setText('Changes saved');\nn.setType('info');\nn.show();"
+        }
+      ]
+    },
+    {
+      "name": "ScriptLoader",
+      "type": "Client-side",
+      "description": "Client-side utility for dynamically loading JavaScript files. Used to load UI Scripts or external JS libraries on demand.",
+      "methods": [
+        {
+          "name": "getScripts",
+          "description": "Loads one or more UI Scripts by name and executes a callback when complete.",
+          "parameters": [
+            "scriptNames",
+            "callback"
+          ],
+          "example": "// Load a UI Script dynamically\nScriptLoader.getScripts('my_ui_script.jsdbx', function() {\n  // Script is now loaded and available\n  myCustomFunction();\n});"
+        },
+        {
+          "name": "getScripts (multiple)",
+          "description": "Load multiple scripts at once.",
+          "parameters": [
+            "scriptArray",
+            "callback"
+          ],
+          "example": "ScriptLoader.getScripts(\n  ['script1.jsdbx', 'script2.jsdbx'],\n  function() {\n    // Both scripts loaded\n    initializeApp();\n  }\n);"
+        }
+      ]
     }
   ]
 }
