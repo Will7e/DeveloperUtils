@@ -325,6 +325,66 @@
           "description": "Returns the current database operation: insert, update, or delete. Used in Business Rules.",
           "parameters": [],
           "example": "// In a Business Rule that runs on insert AND update\nvar op = current.operation();\nif (op == 'insert') {\n  gs.info('New record created');\n} else if (op == 'update') {\n  gs.info('Record updated');\n}"
+        },
+        {
+          "name": "getClassDisplayValue",
+          "description": "Returns the display value of the sys_class_name field (the human-readable table label).",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('task');\ngr.addQuery('number', 'INC0010001');\ngr.query();\nif (gr.next()) {\n  gs.info(gr.getClassDisplayValue()); // 'Incident'\n}"
+        },
+        {
+          "name": "setForceUpdate",
+          "description": "Forces an update even if no fields have changed. Triggers business rules.",
+          "parameters": [
+            "force"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\ngr.setForceUpdate(true);\ngr.update(); // Triggers update rules even with no changes"
+        },
+        {
+          "name": "isActionAborted",
+          "description": "Returns true if setAbortAction(true) was called on this record.",
+          "parameters": [],
+          "example": "if (current.isActionAborted()) {\n  gs.info('Action was aborted by a business rule');\n}"
+        },
+        {
+          "name": "setNewGuidValue",
+          "description": "Sets a specific sys_id for a record before insert (instead of auto-generated).",
+          "parameters": [
+            "guid"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.setNewGuidValue('custom_sys_id_value_32chars00');\ngr.short_description = 'Test';\ngr.insert();"
+        },
+        {
+          "name": "applyTemplate",
+          "description": "Applies a record template to the current record.",
+          "parameters": [
+            "templateSysId"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.applyTemplate('template_sys_id');\ngr.insert();"
+        },
+        {
+          "name": "getFields",
+          "description": "Returns a Java ArrayList of all fields on the record.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\nvar fields = gr.getFields();\nfor (var i = 0; i < fields.size(); i++) {\n  var field = fields.get(i);\n  gs.info(field.getName() + ' = ' + field.getDisplayValue());\n}"
+        },
+        {
+          "name": "canDelete",
+          "description": "Returns true if the current user can delete this record.",
+          "parameters": [],
+          "example": "if (gr.canDelete()) {\n  gr.deleteRecord();\n} else {\n  gs.addErrorMessage('You do not have permission to delete this record');\n}"
+        },
+        {
+          "name": "canCreate",
+          "description": "Returns true if the current user can create records in this table.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('change_request');\nif (gr.canCreate()) {\n  gr.initialize();\n  gr.insert();\n}"
+        },
+        {
+          "name": "getED",
+          "description": "Returns the GlideElementDescriptor for the specified field.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\nvar ed = gr.getED();\ngs.info('Table label: ' + ed.getLabel());"
         }
       ]
     },
@@ -625,6 +685,116 @@
             "value"
           ],
           "example": "var decoded = gs.base64Decode(encoded);"
+        },
+        {
+          "name": "flushMessages",
+          "description": "Clears all queued info/error messages for the session.",
+          "parameters": [],
+          "example": "gs.flushMessages();"
+        },
+        {
+          "name": "getCurrentScopeName",
+          "description": "Returns the name of the current application scope.",
+          "parameters": [],
+          "example": "var scope = gs.getCurrentScopeName();\ngs.info('Current scope: ' + scope); // 'global' or 'x_myapp'"
+        },
+        {
+          "name": "getCallerScopeName",
+          "description": "Returns the caller application scope name.",
+          "parameters": [],
+          "example": "var caller = gs.getCallerScopeName();"
+        },
+        {
+          "name": "setRedirect",
+          "description": "Redirects the user to the specified URL after the current script finishes.",
+          "parameters": [
+            "url"
+          ],
+          "example": "gs.setRedirect('incident_list.do?sysparm_query=active=true');"
+        },
+        {
+          "name": "isMobile",
+          "description": "Returns true if the user is accessing from a mobile device.",
+          "parameters": [],
+          "example": "if (gs.isMobile()) {\n  // Adjust behavior for mobile users\n}"
+        },
+        {
+          "name": "isDebugging",
+          "description": "Returns true if debugging is enabled for the current session.",
+          "parameters": [],
+          "example": "if (gs.isDebugging()) {\n  gs.debug('Detailed debug info here');\n}"
+        },
+        {
+          "name": "getMaxSchemaNameLength",
+          "description": "Returns the maximum field name length for the database.",
+          "parameters": [],
+          "example": "gs.info('Max field name: ' + gs.getMaxSchemaNameLength());"
+        },
+        {
+          "name": "getNewAppScopeCompanyPrefix",
+          "description": "Returns the company prefix for scoped app naming.",
+          "parameters": [],
+          "example": "var prefix = gs.getNewAppScopeCompanyPrefix();\ngs.info('Prefix: ' + prefix);"
+        },
+        {
+          "name": "yearsAgo",
+          "description": "Returns a date/time for N years ago.",
+          "parameters": [
+            "years"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('opened_at', '>=', gs.yearsAgo(1));\ngr.query();"
+        },
+        {
+          "name": "monthsAgo",
+          "description": "Returns a date/time for N months ago.",
+          "parameters": [
+            "months"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.addQuery('opened_at', '>=', gs.monthsAgo(3));\ngr.query();\ngs.info('Incidents in last 3 months: ' + gr.getRowCount());"
+        },
+        {
+          "name": "quartersAgoStart",
+          "description": "Returns midnight at the start of N quarters ago.",
+          "parameters": [
+            "quarters"
+          ],
+          "example": "var cutoff = gs.quartersAgoStart(1);\nvar gr = new GlideRecord('incident');\ngr.addQuery('closed_at', '>=', cutoff);\ngr.query();"
+        },
+        {
+          "name": "beginningOfLastWeek",
+          "description": "Returns midnight at the start of last week.",
+          "parameters": [],
+          "example": "gr.addQuery('sys_created_on', '>=', gs.beginningOfLastWeek());"
+        },
+        {
+          "name": "endOfLastWeek",
+          "description": "Returns the end of last week.",
+          "parameters": [],
+          "example": "gr.addQuery('sys_created_on', '<=', gs.endOfLastWeek());"
+        },
+        {
+          "name": "beginningOfThisWeek",
+          "description": "Returns midnight at the start of this week.",
+          "parameters": [],
+          "example": "gr.addQuery('sys_created_on', '>=', gs.beginningOfThisWeek());"
+        },
+        {
+          "name": "beginningOfThisYear",
+          "description": "Returns midnight on January 1st of the current year.",
+          "parameters": [],
+          "example": "gr.addQuery('opened_at', '>=', gs.beginningOfThisYear());"
+        },
+        {
+          "name": "endOfLastYear",
+          "description": "Returns the last moment of December 31st of the previous year.",
+          "parameters": [],
+          "example": "gr.addQuery('closed_at', '<=', gs.endOfLastYear());"
+        },
+        {
+          "name": "beginningOfLastYear",
+          "description": "Returns midnight on January 1st of the previous year.",
+          "parameters": [],
+          "example": "gr.addQuery('opened_at', '>=', gs.beginningOfLastYear());"
         }
       ]
     },
@@ -959,6 +1129,50 @@
           "description": "Shows all related lists on the form.",
           "parameters": [],
           "example": "g_form.showRelatedLists();"
+        },
+        {
+          "name": "disableAttachments",
+          "description": "Disables the attachment button on the form.",
+          "parameters": [],
+          "example": "g_form.disableAttachments();"
+        },
+        {
+          "name": "enableAttachments",
+          "description": "Enables the attachment button on the form.",
+          "parameters": [],
+          "example": "g_form.enableAttachments();"
+        },
+        {
+          "name": "getFormElement",
+          "description": "Returns the DOM form element.",
+          "parameters": [],
+          "example": "var formEl = g_form.getFormElement();"
+        },
+        {
+          "name": "getSectionNames",
+          "description": "Returns an array of all section names on the form.",
+          "parameters": [],
+          "example": "var sections = g_form.getSectionNames();\nsections.forEach(function(name) {\n  console.log('Section: ' + name);\n});"
+        },
+        {
+          "name": "setAction",
+          "description": "Sets the form action URL (used before submit).",
+          "parameters": [
+            "action"
+          ],
+          "example": "g_form.setAction('incident.do');"
+        },
+        {
+          "name": "getActionName",
+          "description": "Returns the name of the UI Action that triggered the form submission.",
+          "parameters": [],
+          "example": "var action = g_form.getActionName();\nif (action === 'sysverb_update') {\n  // Standard update button\n}"
+        },
+        {
+          "name": "isReadOnly",
+          "description": "Returns true if the entire form is read-only.",
+          "parameters": [],
+          "example": "if (g_form.isReadOnly()) {\n  console.log('Form is read-only');\n}"
         }
       ]
     },
@@ -1073,6 +1287,24 @@
             "callback"
           ],
           "example": "var ga = new GlideAjax('OffboardingRecordProducerAjax');\nga.addParam('sysparm_name', 'getSupervisorInfo');\nga.addParam('sysparm_supervisor', g_form.getValue('supervisor'));\nga.getXMLAnswer(function(answer) {\n  var info = JSON.parse(answer);\n  g_form.setValue('email', info.email);\n});"
+        },
+        {
+          "name": "getXMLWait",
+          "description": "Sends the AJAX request synchronously (blocks UI). DEPRECATED — use getXMLAnswer with callback instead. Only listed for legacy code reference.",
+          "parameters": [],
+          "example": "// DEPRECATED — blocks UI thread. Use async pattern instead.\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLWait();\nvar answer = ga.getAnswer();\n\n// PREFERRED async pattern:\nvar ga = new GlideAjax('MyScriptInclude');\nga.addParam('sysparm_name', 'myMethod');\nga.getXMLAnswer(function(answer) {\n  console.log(answer);\n});"
+        },
+        {
+          "name": "getAnswer",
+          "description": "Returns the answer attribute from a synchronous getXMLWait() call.",
+          "parameters": [],
+          "example": "// Only use after getXMLWait()\nvar answer = ga.getAnswer();"
+        },
+        {
+          "name": "Script Include Pattern",
+          "description": "The server-side Script Include must extend AbstractAjaxProcessor. The sysparm_name parameter maps to the function name.",
+          "parameters": [],
+          "example": "// === Script Include (Server-side) ===\nvar MyAjaxUtil = Class.create();\nMyAjaxUtil.prototype = Object.extendsObject(AbstractAjaxProcessor, {\n  getUserInfo: function() {\n    var userId = this.getParameter('sysparm_user_id');\n    var gr = new GlideRecord('sys_user');\n    if (gr.get(userId)) {\n      return JSON.stringify({\n        name: gr.getDisplayValue('name'),\n        email: gr.getValue('email')\n      });\n    }\n    return JSON.stringify({error: 'User not found'});\n  },\n  type: 'MyAjaxUtil'\n});\n\n// === Client Script ===\nvar ga = new GlideAjax('MyAjaxUtil');\nga.addParam('sysparm_name', 'getUserInfo');\nga.addParam('sysparm_user_id', g_form.getValue('caller_id'));\nga.getXMLAnswer(function(answer) {\n  var info = JSON.parse(answer);\n  alert('Name: ' + info.name);\n});"
         }
       ]
     },
@@ -1172,6 +1404,56 @@
             "value"
           ],
           "example": "// Detect when an incident is resolved\nif (current.state.changesTo(6)) { // 6 = Resolved\n  gs.eventQueue('incident.resolved', current, gs.getUserID(), gs.getUserName());\n}"
+        },
+        {
+          "name": "getHTMLValue",
+          "description": "Returns the HTML-formatted value of the field (preserves HTML tags for journal/HTML fields).",
+          "parameters": [],
+          "example": "var htmlNotes = current.work_notes.getHTMLValue();\ngs.info(htmlNotes);"
+        },
+        {
+          "name": "getChoices",
+          "description": "Returns all choice options for a choice field as an array.",
+          "parameters": [
+            "dependent (optional)"
+          ],
+          "example": "var choices = current.state.getChoices();\nfor (var i = 0; i < choices.size(); i++) {\n  gs.info(choices.get(i).getLabel() + ' = ' + choices.get(i).getValue());\n}"
+        },
+        {
+          "name": "getBooleanAttribute",
+          "description": "Returns a boolean dictionary attribute value.",
+          "parameters": [
+            "attributeName"
+          ],
+          "example": "var isReadOnly = current.number.getBooleanAttribute('read_only');"
+        },
+        {
+          "name": "getDecryptedValue",
+          "description": "Returns the decrypted value for encrypted fields.",
+          "parameters": [],
+          "example": "var plainText = current.u_encrypted_field.getDecryptedValue();"
+        },
+        {
+          "name": "dateNumericValue",
+          "description": "Returns the numeric value of a date field (ms since epoch).",
+          "parameters": [],
+          "example": "var ms = current.opened_at.dateNumericValue();\ngs.info('Opened at (ms): ' + ms);"
+        },
+        {
+          "name": "setDateNumericValue",
+          "description": "Sets a date field using milliseconds since epoch.",
+          "parameters": [
+            "milliseconds"
+          ],
+          "example": "current.u_custom_date.setDateNumericValue(Date.now());"
+        },
+        {
+          "name": "setValue",
+          "description": "Sets the value of the field.",
+          "parameters": [
+            "value"
+          ],
+          "example": "current.short_description.setValue('Updated via GlideElement');"
         }
       ]
     },
@@ -1400,6 +1682,64 @@
           "description": "Returns true if the GlideDateTime contains a valid date/time value.",
           "parameters": [],
           "example": "var gdt = new GlideDateTime('invalid string');\nif (!gdt.isValid()) {\n  gs.warn('Invalid date/time value');\n}"
+        },
+        {
+          "name": "addMonthsUTC",
+          "description": "Adds the specified number of months (UTC).",
+          "parameters": [
+            "months"
+          ],
+          "example": "var gdt = new GlideDateTime();\ngdt.addMonthsUTC(3);\ngs.info('3 months from now: ' + gdt.getDisplayValue());"
+        },
+        {
+          "name": "addYearsLocalTime",
+          "description": "Adds years based on local time.",
+          "parameters": [
+            "years"
+          ],
+          "example": "var gdt = new GlideDateTime();\ngdt.addYearsLocalTime(1);\ncurrent.setValue('renewal_date', gdt);"
+        },
+        {
+          "name": "getMonthLocalTime",
+          "description": "Returns the month (1-12) in local time.",
+          "parameters": [],
+          "example": "var month = new GlideDateTime().getMonthLocalTime();\ngs.info('Current month: ' + month);"
+        },
+        {
+          "name": "getYearLocalTime",
+          "description": "Returns the year in local time.",
+          "parameters": [],
+          "example": "var year = new GlideDateTime().getYearLocalTime();"
+        },
+        {
+          "name": "toString",
+          "description": "Returns the date/time as a string in internal format.",
+          "parameters": [],
+          "example": "var gdt = new GlideDateTime();\ngs.info(gdt.toString());"
+        },
+        {
+          "name": "onOrAfter",
+          "description": "Returns true if this date is on or after the specified date.",
+          "parameters": [
+            "otherGdt"
+          ],
+          "example": "var due = new GlideDateTime(current.getValue('due_date'));\nvar now = new GlideDateTime();\nif (now.onOrAfter(due)) {\n  gs.info('Past due!');\n}"
+        },
+        {
+          "name": "onOrBefore",
+          "description": "Returns true if this date is on or before the specified date.",
+          "parameters": [
+            "otherGdt"
+          ],
+          "example": "if (startDate.onOrBefore(endDate)) {\n  gs.info('Valid date range');\n}"
+        },
+        {
+          "name": "equals",
+          "description": "Returns true if this date/time equals the specified date/time.",
+          "parameters": [
+            "otherGdt"
+          ],
+          "example": "if (gdt1.equals(gdt2)) {\n  gs.info('Dates are identical');\n}"
         }
       ]
     },
@@ -1527,6 +1867,34 @@
             "value"
           ],
           "example": "rm.setEccParameter('skip_sensor', 'true');"
+        },
+        {
+          "name": "setLogLevel",
+          "description": "Sets the logging level for the REST message (basic, elevated, all).",
+          "parameters": [
+            "level"
+          ],
+          "example": "rm.setLogLevel('all'); // Log full request/response for debugging"
+        },
+        {
+          "name": "getEndpoint",
+          "description": "Returns the current endpoint URL.",
+          "parameters": [],
+          "example": "gs.info('Calling: ' + rm.getEndpoint());"
+        },
+        {
+          "name": "getRequestBody",
+          "description": "Returns the current request body.",
+          "parameters": [],
+          "example": "gs.info('Body: ' + rm.getRequestBody());"
+        },
+        {
+          "name": "getRequestHeader",
+          "description": "Returns the value of a request header.",
+          "parameters": [
+            "name"
+          ],
+          "example": "gs.info('Content-Type: ' + rm.getRequestHeader('Content-Type'));"
         }
       ]
     },
@@ -1710,6 +2078,38 @@
           "description": "Disables business rules and workflows for update/insert/delete operations.",
           "parameters": [],
           "example": "new GlideQuery('incident')\n  .where('sys_id', sysId)\n  .disableWorkflow()\n  .update({ state: 7 });"
+        },
+        {
+          "name": "limit",
+          "description": "Limits the number of records returned.",
+          "parameters": [
+            "count"
+          ],
+          "example": "new GlideQuery('incident')\n  .where('active', true)\n  .limit(5)\n  .select('number', 'short_description')\n  .forEach(function(inc) { gs.info(inc.number); });"
+        },
+        {
+          "name": "get",
+          "description": "Gets a single record by sys_id. Returns an Optional.",
+          "parameters": [
+            "sysId",
+            "fields"
+          ],
+          "example": "var incident = new GlideQuery('incident')\n  .get(sysId, ['number', 'short_description', 'state'])\n  .orElse({ number: 'NOT FOUND' });\ngs.info(incident.number);"
+        },
+        {
+          "name": "deleteMultiple",
+          "description": "Deletes all records matching the query.",
+          "parameters": [],
+          "example": "new GlideQuery('u_temp_data')\n  .where('sys_created_on', '<', gs.daysAgoStart(90))\n  .deleteMultiple();"
+        },
+        {
+          "name": "aggregate",
+          "description": "Adds an aggregate operation (COUNT, SUM, AVG, MIN, MAX).",
+          "parameters": [
+            "operation",
+            "field (optional)"
+          ],
+          "example": "var count = new GlideQuery('incident')\n  .where('active', true)\n  .aggregate('COUNT')\n  .select()\n  .next();\ngs.info('Active incidents: ' + count.count);"
         }
       ]
     },
@@ -3794,6 +4194,279 @@
           "description": "Returns true if the current session is impersonating.",
           "parameters": [],
           "example": "if (new GlideImpersonate().isImpersonating()) {\n  gs.info('Running as impersonated user');\n}"
+        }
+      ]
+    },
+    {
+      "name": "RESTResponseV2",
+      "type": "Server-side",
+      "description": "Object returned by RESTMessageV2.execute(). Provides access to the response status, headers, and body content.",
+      "methods": [
+        {
+          "name": "getStatusCode",
+          "description": "Returns the HTTP status code.",
+          "parameters": [],
+          "example": "var resp = rm.execute();\nvar status = resp.getStatusCode();\nif (status == 200) {\n  gs.info('Success');\n} else if (status == 401) {\n  gs.error('Authentication failed');\n}"
+        },
+        {
+          "name": "getBody",
+          "description": "Returns the response body as a string.",
+          "parameters": [],
+          "example": "var body = resp.getBody();\nvar data = JSON.parse(body);\ngs.info('Results: ' + data.result.length);"
+        },
+        {
+          "name": "getHeader",
+          "description": "Returns the value of a response header.",
+          "parameters": [
+            "name"
+          ],
+          "example": "var contentType = resp.getHeader('Content-Type');\nvar remaining = resp.getHeader('X-RateLimit-Remaining');"
+        },
+        {
+          "name": "getHeaders",
+          "description": "Returns all response headers as an object.",
+          "parameters": [],
+          "example": "var headers = resp.getHeaders();\nfor (var key in headers) {\n  gs.info(key + ': ' + headers[key]);\n}"
+        },
+        {
+          "name": "haveError",
+          "description": "Returns true if the request resulted in an error.",
+          "parameters": [],
+          "example": "if (resp.haveError()) {\n  gs.error('REST error: ' + resp.getErrorCode() + ' - ' + resp.getErrorMessage());\n}"
+        },
+        {
+          "name": "getErrorCode",
+          "description": "Returns the error code if an error occurred.",
+          "parameters": [],
+          "example": "var code = resp.getErrorCode();"
+        },
+        {
+          "name": "getErrorMessage",
+          "description": "Returns the error message.",
+          "parameters": [],
+          "example": "gs.error(resp.getErrorMessage());"
+        },
+        {
+          "name": "waitForResponse",
+          "description": "Waits for an async response (used with executeAsync).",
+          "parameters": [
+            "timeoutSeconds"
+          ],
+          "example": "var resp = rm.executeAsync();\nresp.waitForResponse(60);\nif (resp.getStatusCode() == 200) {\n  gs.info('Async call completed');\n}"
+        },
+        {
+          "name": "getQueryString",
+          "description": "Returns the query string from the request URL.",
+          "parameters": [],
+          "example": "var qs = resp.getQueryString();"
+        }
+      ]
+    },
+    {
+      "name": "GlideRecordUtil",
+      "type": "Server-side",
+      "description": "Utility class providing helper methods for GlideRecord operations like field copying, CI merging, and record comparison.",
+      "methods": [
+        {
+          "name": "getCIGR",
+          "description": "Returns a GlideRecord for a CI with the correct class.",
+          "parameters": [
+            "sysId"
+          ],
+          "example": "var ciGR = GlideRecordUtil.getCIGR(ciSysId);\ngs.info('CI class: ' + ciGR.getRecordClassName());"
+        },
+        {
+          "name": "getFields",
+          "description": "Returns an ArrayList of field names for the table.",
+          "parameters": [
+            "glideRecord"
+          ],
+          "example": "var gr = new GlideRecord('incident');\nvar fields = new GlideRecordUtil().getFields(gr);\ngs.info('Field count: ' + fields.size());"
+        },
+        {
+          "name": "getTables",
+          "description": "Returns the hierarchy of tables for a record.",
+          "parameters": [
+            "glideRecord"
+          ],
+          "example": "var gr = new GlideRecord('incident');\nvar tables = new GlideRecordUtil().getTables(gr);\ngs.info(tables); // ['task', 'incident']"
+        },
+        {
+          "name": "mergeToGR",
+          "description": "Copies field values from a source to a target GlideRecord.",
+          "parameters": [
+            "sourceGR",
+            "targetGR",
+            "ignoreFields"
+          ],
+          "example": "var src = new GlideRecord('incident');\nsrc.get(sourceSysId);\nvar tgt = new GlideRecord('incident');\ntgt.initialize();\nnew GlideRecordUtil().mergeToGR(src, tgt, ['sys_id','number']);\ntgt.insert();"
+        }
+      ]
+    },
+    {
+      "name": "GlideappCatalogItem",
+      "type": "Server-side",
+      "description": "Server-side API for working with Service Catalog items. Provides methods for checking item availability, ordering, and variable access.",
+      "methods": [
+        {
+          "name": "canView",
+          "description": "Returns true if the current user can view the catalog item.",
+          "parameters": [],
+          "example": "var item = new GlideappCatalogItem(itemSysId);\nif (item.canView()) {\n  gs.info('Item is visible to user');\n}"
+        },
+        {
+          "name": "getVariables",
+          "description": "Returns the variables associated with the catalog item.",
+          "parameters": [],
+          "example": "var item = new GlideappCatalogItem(itemSysId);\nvar vars = item.getVariables();\ngs.info('Variable count: ' + vars.size());"
+        },
+        {
+          "name": "isVisibleServicePortal",
+          "description": "Returns true if the item is visible in the Service Portal.",
+          "parameters": [],
+          "example": "if (item.isVisibleServicePortal()) {\n  data.showItem = true;\n}"
+        }
+      ]
+    },
+    {
+      "name": "GlideappQuestion",
+      "type": "Server-side",
+      "description": "Represents a catalog variable (question) in the Service Catalog. Used in catalog item scripts and flows.",
+      "methods": [
+        {
+          "name": "getValue",
+          "description": "Returns the value of the catalog variable.",
+          "parameters": [],
+          "example": "var question = producer.getVariable('u_department');\nvar value = question.getValue();"
+        },
+        {
+          "name": "getDisplayValue",
+          "description": "Returns the display value of the variable.",
+          "parameters": [],
+          "example": "var display = question.getDisplayValue();"
+        },
+        {
+          "name": "getLabel",
+          "description": "Returns the label/question text.",
+          "parameters": [],
+          "example": "gs.info(question.getLabel());"
+        },
+        {
+          "name": "getName",
+          "description": "Returns the variable name.",
+          "parameters": [],
+          "example": "gs.info(question.getName()); // 'u_department'"
+        }
+      ]
+    },
+    {
+      "name": "GlideappVariablePoolQuestionSet",
+      "type": "Server-side",
+      "description": "Provides access to all variables in a requested item or catalog task. Used in workflows and catalog scripts.",
+      "methods": [
+        {
+          "name": "getFlatQuestions",
+          "description": "Returns a flat list of all variables.",
+          "parameters": [],
+          "example": "var vars = current.variable_pool.getFlatQuestions();\nfor (var i = 0; i < vars.length; i++) {\n  gs.info(vars[i].getName() + ' = ' + vars[i].getValue());\n}"
+        },
+        {
+          "name": "getQuestion",
+          "description": "Returns a specific variable by name.",
+          "parameters": [
+            "variableName"
+          ],
+          "example": "var q = current.variable_pool.getQuestion('u_reason');\ngs.info('Reason: ' + q.getValue());"
+        }
+      ]
+    },
+    {
+      "name": "SLADefinition",
+      "type": "Server-side",
+      "description": "Server-side API for interacting with SLA definitions and task SLAs.",
+      "methods": [
+        {
+          "name": "Usage Pattern",
+          "description": "Task SLAs are managed via the task_sla table. Common patterns include querying active SLAs and checking breach status.",
+          "parameters": [],
+          "example": "// Check if a task has any breached SLAs\nvar sla = new GlideRecord('task_sla');\nsla.addQuery('task', current.getUniqueValue());\nsla.addQuery('has_breached', true);\nsla.query();\nif (sla.hasNext()) {\n  gs.info('Task has breached SLAs');\n  current.setValue('u_sla_breached', true);\n}"
+        },
+        {
+          "name": "Pause/Resume",
+          "description": "SLA timers can be paused and resumed based on conditions.",
+          "parameters": [],
+          "example": "// Pause SLA when incident is on hold\nvar sla = new GlideRecord('task_sla');\nsla.addQuery('task', current.getUniqueValue());\nsla.addQuery('active', true);\nsla.query();\nwhile (sla.next()) {\n  if (current.state == 3) { // On Hold\n    sla.pause_time = new GlideDateTime();\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "GlideUpdateManager2",
+      "type": "Server-side",
+      "description": "Manages update sets programmatically. Allows creating, switching, and managing update sets via scripts.",
+      "methods": [
+        {
+          "name": "saveRecord",
+          "description": "Saves a record to the current update set.",
+          "parameters": [
+            "glideRecord"
+          ],
+          "example": "var um = new GlideUpdateManager2();\num.saveRecord(current);"
+        },
+        {
+          "name": "saveChoices",
+          "description": "Saves choice list changes to the update set.",
+          "parameters": [
+            "tableName",
+            "fieldName"
+          ],
+          "example": "var um = new GlideUpdateManager2();\num.saveChoices('incident', 'u_custom_field');"
+        }
+      ]
+    },
+    {
+      "name": "GlideEventManager",
+      "type": "Server-side",
+      "description": "Manages custom events in the ServiceNow event framework.",
+      "methods": [
+        {
+          "name": "fireEvent",
+          "description": "Fires a custom event that can be handled by Script Actions or Notifications.",
+          "parameters": [
+            "eventName",
+            "glideRecord",
+            "parm1",
+            "parm2"
+          ],
+          "example": "// Register event in sys_event_registry first\nGlideEventManager.fireEvent('x_myapp.custom_approval_needed', current, current.getValue('assigned_to'), current.getValue('priority'));"
+        },
+        {
+          "name": "Usage Pattern",
+          "description": "Events decouple actions from triggers. Register events, then handle them with Script Actions or Notifications.",
+          "parameters": [],
+          "example": "// 1. Register event: sys_event_registry\n// Name: x_myapp.order_completed\n\n// 2. Fire event (in Business Rule)\ngs.eventQueue('x_myapp.order_completed', current, \n  current.getValue('requested_for'),\n  current.getValue('cat_item'));\n\n// 3. Handle in Script Action or Notification\n// event.parm1 = requested_for\n// event.parm2 = cat_item"
+        }
+      ]
+    },
+    {
+      "name": "PAScorecard (sn_pad)",
+      "type": "Server-side",
+      "description": "Performance Analytics API for querying indicator scores, breakdowns, and trend data.",
+      "methods": [
+        {
+          "name": "query",
+          "description": "Queries a PA indicator for scores.",
+          "parameters": [
+            "indicatorSysId",
+            "breakdown",
+            "options"
+          ],
+          "example": "var pa = new sn_pad.PAScorecard();\npa.addFilter('indicator', indicatorSysId);\npa.addFilter('breakdown', breakdownSysId);\nvar result = pa.query();\ngs.info('Score: ' + result.getScore());"
+        },
+        {
+          "name": "getIndicators",
+          "description": "Returns all indicators matching criteria.",
+          "parameters": [],
+          "example": "// Query via GlideRecord on pa_indicators\nvar gr = new GlideRecord('pa_indicators');\ngr.addActiveQuery();\ngr.query();\nwhile (gr.next()) {\n  gs.info(gr.getValue('name') + ': ' + gr.getValue('value'));\n}"
         }
       ]
     }
