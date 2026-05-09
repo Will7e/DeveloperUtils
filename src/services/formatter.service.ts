@@ -10,6 +10,7 @@ import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as parserEstree from "prettier/plugins/estree";
 import * as parserHtml from "prettier/plugins/html";
+import * as parserPostcss from "prettier/plugins/postcss";
 import * as parserTypeScript from "prettier/plugins/typescript";
 
 /** Parser mapping for Prettier */
@@ -24,7 +25,7 @@ const PARSER_MAP: Record<string, { parser: string; plugins: any[] }> = {
   },
   html: {
     parser: "html",
-    plugins: [parserHtml],
+    plugins: [parserHtml, parserPostcss, parserBabel, parserEstree, parserTypeScript],
   },
   json: {
     parser: "json",

@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Plus, Terminal, Play, Square, Eye } from "lucide-react";
+import { X, Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import {
   Tooltip,
@@ -77,6 +77,7 @@ export function EditorTabs() {
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [isCopied, setIsCopied] = useState(false);
 
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
@@ -210,6 +211,18 @@ export function EditorTabs() {
     executionTimeout,
   ]);
 
+  const handleCopy = useCallback(() => {
+    if (!activeFile) return;
+    
+    navigator.clipboard.writeText(activeFile.content);
+    setIsCopied(true);
+    addToast({ message: "Content copied to clipboard", type: "success", duration: 2000 });
+    
+    setTimeout(() => {
+      setIsCopied(false);
+    }, 2000);
+  }, [activeFile, addToast]);
+
   // ── Cancel Execution ──────────────────────────────────────
   const handleCancel = useCallback(async () => {
     if (!isRunning) return;
@@ -307,20 +320,49 @@ export function EditorTabs() {
           <div className="tabs-toolbar-sep" />
 
           {/* Console toggle */}
+          {!isHtml && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    className={cn(
+                      "console-toggle-btn",
+                      outputPanelOpen && "console-toggle-btn-active"
+                    )}
+                    onClick={toggleOutputPanel}
+                  >
+                    <Terminal className="h-3.5 w-3.5" />
+                    <span className="console-toggle-label">Console</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Toggle Console <kbd>⌘J</kbd></TooltipContent>
+              </Tooltip>
+              <div className="tabs-toolbar-sep" />
+            </>
+          )}
+
+          {/* Copy button */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 className={cn(
-                  "console-toggle-btn",
-                  outputPanelOpen && "console-toggle-btn-active"
+                  "toolbar-action-btn",
+                  isCopied && "toolbar-action-btn-active"
                 )}
-                onClick={toggleOutputPanel}
+                onClick={handleCopy}
+                disabled={!activeFile}
               >
-                <Terminal className="h-3.5 w-3.5" />
-                <span className="console-toggle-label">Console</span>
+                {isCopied ? (
+                  <Check className="h-3.5 w-3.5 text-green-400" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+                <span className="toolbar-action-label">Copy</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Toggle Console <kbd>⌘J</kbd></TooltipContent>
+            <TooltipContent side="bottom">
+              {isCopied ? "Copied!" : "Copy Code"}
+            </TooltipContent>
           </Tooltip>
 
           <div className="tabs-toolbar-sep" />

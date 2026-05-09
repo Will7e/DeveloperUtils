@@ -142,11 +142,14 @@ export function useKeyboardShortcuts() {
           try {
             const formatted = await formatCode(activeFile.content, activeFile.language);
             updateFileContent(activeFile.id, formatted);
+            useAppStore.getState().saveFile(activeFile.id);
             addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
           } catch {
+            useAppStore.getState().saveFile(activeFile.id);
             addToast({ message: "Saved (formatting not available)", type: "info", duration: 1500 });
           }
         } else {
+          useAppStore.getState().saveFile(activeFile.id);
           addToast({ message: "Saved", type: "info", duration: 1500 });
         }
         return;

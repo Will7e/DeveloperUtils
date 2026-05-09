@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
-import { Terminal, Trash2, X, Clock, ChevronDown } from "lucide-react";
+import { Terminal, Trash2, X, Clock, ChevronDown, Copy, Check } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -22,6 +22,7 @@ export function OutputPanel() {
   const isRunning = useAppStore((s) => s.isRunning);
   const outputFlash = useAppStore((s) => s.outputFlash);
   const [showHistory, setShowHistory] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -75,6 +76,29 @@ export function OutputPanel() {
               <TooltipContent>Execution History</TooltipContent>
             </Tooltip>
           )}
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="toolbar-icon-btn"
+                onClick={() => {
+                  const text = outputEntries.map(e => `[${formatTime(e.timestamp)}] ${e.content}`).join('\n');
+                  navigator.clipboard.writeText(text);
+                  setIsCopied(true);
+                  setTimeout(() => setIsCopied(false), 2000);
+                }}
+                disabled={outputEntries.length === 0}
+                style={{ width: 24, height: 24, color: isCopied ? "var(--green)" : undefined }}
+              >
+                {isCopied ? (
+                  <Check style={{ width: 12, height: 12 }} />
+                ) : (
+                  <Copy style={{ width: 12, height: 12 }} />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isCopied ? "Copied!" : "Copy Output"}</TooltipContent>
+          </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>

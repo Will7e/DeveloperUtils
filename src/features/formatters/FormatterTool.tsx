@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData } from "./xmlUtils";
@@ -128,8 +129,11 @@ export function FormatterTool() {
     try {
       if (type === "json") {
         return parseJsonRobust(currentInput);
-      } else {
+      } else if (type === "xml") {
         return { data: xmlToTreeData(currentInput), error: null };
+      } else {
+        // HTML — simple placeholder for now as we don't have a specific tree view for HTML
+        return { data: currentInput, error: null };
       }
     } catch (e: any) {
       return { data: null, error: e.message };
@@ -174,13 +178,16 @@ export function FormatterTool() {
     }
   };
 
-  const handleFormat = () => {
+  const handleFormat = async () => {
     if (!currentInput || error) return;
     try {
       if (type === "json") {
         updateContent("json", activeFile.id, formatJsonRobust(currentInput, jsonSettings));
-      } else {
+      } else if (type === "xml") {
         updateContent("xml", activeFile.id, formatXml(currentInput));
+      } else if (type === "html") {
+        const formatted = await formatCode(currentInput, "html");
+        updateContent("html", activeFile.id, formatted);
       }
     } catch (e: any) {
       // Error handled by useMemo
@@ -301,6 +308,17 @@ export function FormatterTool() {
                   <FileCode className="h-4 w-4" />
                   <span>XML Formatter</span>
                   {type === "xml" && <div className="active-dot" />}
+                </button>
+                <button 
+                  className={cn("formatter-dropdown-item", type === "html" && "active")}
+                  onClick={() => { 
+                    setType("html"); 
+                    setShowTypeDropdown(false);
+                  }}
+                >
+                  <Code2 className="h-4 w-4" />
+                  <span>HTML Formatter</span>
+                  {type === "html" && <div className="active-dot" />}
                 </button>
               </div>
             )}
@@ -605,8 +623,12 @@ export function FormatterTool() {
                     expandVersion={expandVersion} 
                     expandTarget={expandTarget} 
                   />
-                ) : (
+                ) : type === "xml" ? (
                   <XmlTreeView data={data as any} />
+                ) : (
+                  <div className="p-4 font-mono text-xs whitespace-pre text-[var(--text-2)]">
+                    {data}
+                  </div>
                 )}
               </div>
             ) : (

@@ -6,6 +6,7 @@ import { useCallback, useRef, useEffect } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { FileCode2 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
+import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import type { editor } from "monaco-editor";
 
 export function CodeEditor() {
@@ -14,6 +15,7 @@ export function CodeEditor() {
   const activeFileId = useAppStore((s) => s.activeFileId);
   const files = useAppStore((s) => s.files);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
+  const addToast = useAppStore((s) => s.addToast);
   const editorSettings = useAppStore((s) => s.editorSettings);
 
   const activeFile = files.find((f) => f.id === activeFileId);
@@ -85,6 +87,40 @@ export function CodeEditor() {
 
       // Focus editor
       editor.focus();
+
+      // Add Cmd+S / Ctrl+S support for formatting
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
+        const state = useAppStore.getState();
+        const activeFile = state.files.find((f) => f.id === state.activeFileId);
+        
+        if (!activeFile) return;
+
+        if (supportsFormatting(activeFile.language)) {
+          try {
+            const formatted = await formatCode(activeFile.content, activeFile.language);
+            state.updateFileContent(activeFile.id, formatted);
+            state.saveFile(activeFile.id);
+            state.addToast({ 
+              message: "Formatted & saved", 
+              type: "success", 
+              duration: 1500 
+            });
+          } catch (error) {
+            console.error("Formatting failed:", error);
+            state.addToast({ 
+              message: "Saved (formatting error)", 
+              type: "info", 
+              duration: 1500 
+            });
+          }
+        } else {
+          state.addToast({ 
+            message: "Saved", 
+            type: "info", 
+            duration: 1500 
+          });
+        }
+      });
     },
     []
   );

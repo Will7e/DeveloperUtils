@@ -27,6 +27,7 @@ const initialFile = createDefaultFile("javascript");
 
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
+const initialHtmlFile = { id: generateId(), name: "Untitled.html", content: "" };
 const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
 
 const initialWorkflow: Workflow = {
@@ -60,7 +61,7 @@ export const useAppStore = create<AppState>()(
       executionStartTime: null,
 
       // UI
-      sidebarOpen: true,
+      sidebarOpen: false,
       sidebarCollapsed: false,
       outputPanelOpen: true,
       settingsOpen: false,
@@ -68,8 +69,8 @@ export const useAppStore = create<AppState>()(
       editorSettings: DEFAULT_EDITOR_SETTINGS,
       toasts: [],
       outputFlash: null,
-      formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile] },
-      activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id },
+      formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile], html: [initialHtmlFile] },
+      activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id, html: initialHtmlFile.id },
       formatterType: "json",
       comparatorSessions: [initialComparatorSession],
       activeComparatorSessionId: initialComparatorSession.id,
@@ -131,8 +132,16 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           files: state.files.map((f) =>
             f.id === id
-              ? { ...f, content, isDirty: false, updatedAt: Date.now() }
+              ? { ...f, content, isDirty: true, updatedAt: Date.now() }
               : f
+          ),
+        }));
+      },
+
+      saveFile: (id: string) => {
+        set((state) => ({
+          files: state.files.map((f) =>
+            f.id === id ? { ...f, isDirty: false, updatedAt: Date.now() } : f
           ),
         }));
       },

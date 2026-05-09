@@ -115,9 +115,9 @@ export interface AppState {
   editorSettings: EditorSettings;
   toasts: Toast[];
   outputFlash: "success" | "error" | null;
-  formatterFiles: { json: FormatterFile[]; xml: FormatterFile[] };
-  activeFormatterFileId: { json: string; xml: string };
-  formatterType: "json" | "xml";
+  formatterFiles: { json: FormatterFile[]; xml: FormatterFile[]; html: FormatterFile[] };
+  activeFormatterFileId: { json: string; xml: string; html: string };
+  formatterType: "json" | "xml" | "html";
   comparatorSessions: ComparatorSession[];
   activeComparatorSessionId: string;
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
@@ -134,6 +134,7 @@ export interface AppState {
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
   updateFileContent: (id: string, content: string) => void;
+  saveFile: (id: string) => void;
   renameFile: (id: string, name: string) => void;
 
   addOutputEntry: (entry: Omit<OutputEntry, "id" | "timestamp">) => void;
@@ -155,12 +156,12 @@ export interface AppState {
   setOutputFlash: (flash: "success" | "error" | null) => void;
   
   // Formatter actions
-  createFormatterFile: (type: "json" | "xml", name?: string) => void;
-  deleteFormatterFile: (type: "json" | "xml", id: string) => void;
-  setActiveFormatterFile: (type: "json" | "xml", id: string) => void;
-  updateFormatterFileContent: (type: "json" | "xml", id: string, content: string) => void;
-  renameFormatterFile: (type: "json" | "xml", id: string, name: string) => void;
-  setFormatterType: (type: "json" | "xml") => void;
+  createFormatterFile: (type: "json" | "xml" | "html", name?: string) => void;
+  deleteFormatterFile: (type: "json" | "xml" | "html", id: string) => void;
+  setActiveFormatterFile: (type: "json" | "xml" | "html", id: string) => void;
+  updateFormatterFileContent: (type: "json" | "xml" | "html", id: string, content: string) => void;
+  renameFormatterFile: (type: "json" | "xml" | "html", id: string, name: string) => void;
+  setFormatterType: (type: "json" | "xml" | "html") => void;
 
   // Comparator actions
   createComparatorSession: (name?: string) => void;
