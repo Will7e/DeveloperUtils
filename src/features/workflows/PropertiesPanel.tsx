@@ -6,11 +6,11 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { X, Type, AlignLeft, Tag, ChevronRight, Play, Square, Cog, GitBranch, Database, Globe, Share2, Activity, Zap } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 
-import { type Node, type Edge } from "@xyflow/react";
+import { type Node as FlowNode, type Edge as FlowEdge } from "@xyflow/react";
 
 interface PropertiesPanelProps {
-  selectedNode?: Node | null;
-  selectedEdge?: Edge | null;
+  selectedNode?: FlowNode | null;
+  selectedEdge?: FlowEdge | null;
   onNodeDataChange?: (nodeId: string, data: Record<string, unknown>) => void;
   onEdgeDataChange?: (edgeId: string, data: Record<string, unknown>) => void;
 }
@@ -52,11 +52,11 @@ export function PropertiesPanel({
     const currentId = selectedNodeId || selectedEdgeId;
     if (currentId !== lastSelectedId.current) {
       if (selectedNode) {
-        setLabel(selectedNode.data.label || "");
-        setDescription(selectedNode.data.description || "");
+        setLabel((selectedNode.data.label as string) || "");
+        setDescription((selectedNode.data.description as string) || "");
       }
       if (selectedEdge) {
-        setEdgeLabel(selectedEdge.label || "");
+        setEdgeLabel((selectedEdge.label as string) || "");
       }
       lastSelectedId.current = currentId;
     }
