@@ -3,7 +3,7 @@
 // ============================================================
 
 import { memo } from "react";
-import { BaseEdge, getSmoothStepPath, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, getSmoothStepPath, getStraightPath, getBezierPath, type EdgeProps } from "@xyflow/react";
 
 function AnimatedEdgeComponent({
   id,
@@ -15,34 +15,43 @@ function AnimatedEdgeComponent({
   targetPosition,
   selected,
   animated,
+  data,
 }: EdgeProps) {
-  const [edgePath] = getSmoothStepPath({
+  const edgeType = (data?.edgeStyle as string) || "smoothstep";
+  
+  const pathParams = {
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
-    borderRadius: 16,
-  });
+  };
+
+  let [edgePath] = ["", ""];
+  
+  if (edgeType === "straight") {
+    [edgePath] = getStraightPath(pathParams);
+  } else if (edgeType === "bezier") {
+    [edgePath] = getBezierPath(pathParams);
+  } else {
+    [edgePath] = getSmoothStepPath({ ...pathParams, borderRadius: 16 });
+  }
+
+  const isDashed = data?.lineStyle === "dashed";
+  const isAnimated = animated || data?.lineStyle === "animated";
 
   return (
     <>
-      <defs>
-        <linearGradient id={`edge-gradient-${id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="rgba(14, 165, 233, 0.6)" />
-          <stop offset="100%" stopColor="rgba(139, 92, 246, 0.6)" />
-        </linearGradient>
-      </defs>
       <BaseEdge
         id={id}
         path={edgePath}
         style={{
-          stroke: selected ? "var(--accent)" : `url(#edge-gradient-${id})`,
-          strokeWidth: selected ? 2.5 : 2,
-          filter: selected ? "drop-shadow(0 0 6px rgba(14, 165, 233, 0.5))" : "none",
-          strokeDasharray: animated ? "8 4" : "none",
-          animation: animated ? "wf-edge-dash 0.6s linear infinite" : "none",
+          stroke: selected ? "#0ea5e9" : "rgba(14, 165, 233, 0.4)",
+          strokeWidth: selected ? 3 : 2,
+          filter: selected ? "drop-shadow(0 0 8px rgba(14, 165, 233, 0.6))" : "none",
+          strokeDasharray: isAnimated ? "8 4" : (isDashed ? "5 5" : "none"),
+          animation: isAnimated ? "wf-edge-dash 0.6s linear infinite" : "none",
         }}
       />
       {/* Invisible wide path for easier selection */}

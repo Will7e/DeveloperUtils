@@ -226,7 +226,11 @@ export interface WorkflowEdgeData {
   label?: string;
   animated?: boolean;
   type?: string;
-  data?: { color?: string };
+  data?: { 
+    color?: string;
+    edgeStyle?: "smoothstep" | "straight" | "bezier";
+    lineStyle?: "solid" | "animated" | "dashed";
+  };
 }
 
 export interface Workflow {

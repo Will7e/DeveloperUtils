@@ -51,10 +51,9 @@ const defaultEdgeOptions = {
   animated: true,
 };
 
-const dagreGraph = new dagre.graphlib.Graph();
-dagreGraph.setDefaultEdgeLabel(() => ({}));
-
 const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+  const dagreGraph = new dagre.graphlib.Graph();
+  dagreGraph.setDefaultEdgeLabel(() => ({}));
   dagreGraph.setGraph({ rankdir: direction, nodesep: 70, ranksep: 100 });
 
   nodes.forEach((node) => {
@@ -78,6 +77,7 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
 
   const newNodes = nodes.map((node) => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    if (!nodeWithPosition) return node;
 
     const nodeData = node.data as Record<string, any>;
     const type = node.type || nodeData?.nodeType;
@@ -94,13 +94,10 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
     return {
       ...node,
       position: { x, y },
-      width: undefined,
-      height: undefined,
-      style: undefined
     };
   });
 
-  return { nodes: newNodes, edges };
+  return { nodes: newNodes, edges: [...edges] };
 };
 
 function WorkflowCanvas() {
@@ -152,6 +149,14 @@ function WorkflowCanvas() {
     }
   }, [activeWorkflow, activeWorkflowId, setNodes, setEdges, setViewport]);
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(saveTimeout.current);
+      clearTimeout(viewportTimeout.current);
+    };
+  }, []);
+
   // Persist nodes/edges changes to store (debounced)
   const saveTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -185,7 +190,7 @@ function WorkflowCanvas() {
               id: n.id,
               type: n.type || "processNode",
               position: n.position,
-              data: n.data as { label: string; nodeType: "start" | "end" | "process" | "decision" | "data" | "integration"; description?: string; color?: string; icon?: string; properties?: Record<string, string> },
+              data: n.data as any,
               measured: n.measured as { width: number; height: number } | undefined,
               style: n.style,
               width: n.width,
@@ -214,6 +219,7 @@ function WorkflowCanvas() {
               label: (e.label as string) || undefined,
               animated: e.animated,
               type: e.type || "animated",
+              data: e.data as any,
             }))
           );
         }
@@ -257,6 +263,10 @@ function WorkflowCanvas() {
         target: connection.target,
         type: "animated",
         animated: true,
+        data: {
+          edgeStyle: "smoothstep",
+          lineStyle: "animated",
+        },
       };
       setEdges((eds) => {
         const updated = addEdge(newEdge, eds);
@@ -357,9 +367,40 @@ function WorkflowCanvas() {
       'TB'
     );
 
+    clearTimeout(saveTimeout.current);
     setNodes([...layoutedNodes]);
     setEdges([...layoutedEdges]);
-    persistNodes(layoutedNodes);
+    
+    // Immediate save for manual actions to ensure persistence on refresh
+    if (activeWorkflowId) {
+      updateWorkflowNodes(
+        activeWorkflowId,
+        layoutedNodes.map((n) => ({
+          id: n.id,
+          type: n.type || "processNode",
+          position: n.position,
+          data: n.data as any,
+          measured: n.measured as any,
+          style: n.style,
+          width: n.width,
+          height: n.height,
+        }))
+      );
+      updateWorkflowEdges(
+        activeWorkflowId,
+        layoutedEdges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle ?? null,
+          targetHandle: e.targetHandle ?? null,
+          label: (e.label as string) || undefined,
+          animated: e.animated,
+          type: e.type || "animated",
+          data: e.data as any,
+        }))
+      );
+    }
 
     window.requestAnimationFrame(() => {
       fitView({ padding: 0.3, maxZoom: 1 });
@@ -390,11 +431,10 @@ function WorkflowCanvas() {
     [nodes, edges, setNodes, setEdges, persistNodes, persistEdges]
   );
 
-  // Callback from PropertiesPanel to update React Flow's internal node data
   const handleNodeDataChange = useCallback(
     (nodeId: string, data: Record<string, unknown>) => {
-      setNodes((nds) =>
-        nds.map((n) => {
+      setNodes((nds) => {
+        const updated = nds.map((n) => {
           if (n.id === nodeId) {
             let newType = n.type;
             if (data.nodeType && typeof data.nodeType === "string") {
@@ -411,10 +451,46 @@ function WorkflowCanvas() {
             return { ...n, type: newType, data: { ...n.data, ...data } };
           }
           return n;
-        })
-      );
+        });
+        persistNodes(updated);
+        return updated;
+      });
     },
-    [setNodes]
+    [setNodes, persistNodes]
+  );
+
+  const handleEdgeDataChange = useCallback(
+    (edgeId: string, data: Record<string, any>) => {
+      setEdges((eds) => {
+        const updated = eds.map((e) => {
+          if (e.id === edgeId) {
+            // Unpack animated if present, otherwise merge into data
+            const { animated: isAnimated, ...rest } = data;
+            return { 
+              ...e, 
+              ...(isAnimated !== undefined ? { animated: isAnimated } : {}),
+              data: { ...e.data, ...rest.data } 
+            };
+          }
+          return e;
+        });
+        persistEdges(updated);
+        return updated;
+      });
+    },
+    [setEdges, persistEdges]
+  );
+
+  const selectedNodeId = useAppStore((s) => s.workflowSelectedNodeId);
+  const selectedEdgeId = useAppStore((s) => s.workflowSelectedEdgeId);
+
+  const selectedNode = useMemo(
+    () => nodes.find((n) => n.id === selectedNodeId),
+    [nodes, selectedNodeId]
+  );
+  const selectedEdge = useMemo(
+    () => edges.find((e) => e.id === selectedEdgeId),
+    [edges, selectedEdgeId]
   );
 
   // Use persisted viewport or sensible default (not fitView which over-zooms)
@@ -499,7 +575,12 @@ function WorkflowCanvas() {
             )}
           </ReactFlow>
         </div>
-        <PropertiesPanel onNodeDataChange={handleNodeDataChange} />
+        <PropertiesPanel 
+          selectedNode={selectedNode}
+          selectedEdge={selectedEdge}
+          onNodeDataChange={handleNodeDataChange} 
+          onEdgeDataChange={handleEdgeDataChange}
+        />
       </div>
     </div>
   );

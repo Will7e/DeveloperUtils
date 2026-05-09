@@ -6362,3 +6362,69 @@ body {
     border-color: rgba(14, 165, 233, 0.5);
   }
 }
+/* ---- Workflow Toggle Controls ---- */
+.wf-prop-toggle-group {
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.wf-prop-toggle-item {
+  flex: 1;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.wf-prop-toggle-item:hover {
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.wf-prop-toggle-item.active {
+  background: var(--bg-3);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ---- Workflow Save Status ---- */
+.wf-save-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+.wf-saving {
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.03);
+  animation: wf-pulse-text 1.5s infinite;
+}
+
+.wf-saved {
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+@keyframes wf-pulse-text {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}

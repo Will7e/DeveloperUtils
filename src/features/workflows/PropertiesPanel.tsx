@@ -3,11 +3,16 @@
 // ============================================================
 
 import { useCallback, useEffect, useState, useRef } from "react";
-import { X, Type, AlignLeft, Tag, ChevronRight, Play, Square, Cog, GitBranch, Database, Globe } from "lucide-react";
+import { X, Type, AlignLeft, Tag, ChevronRight, Play, Square, Cog, GitBranch, Database, Globe, Share2, Activity, Zap } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 
+import { type Node, type Edge } from "@xyflow/react";
+
 interface PropertiesPanelProps {
+  selectedNode?: Node | null;
+  selectedEdge?: Edge | null;
   onNodeDataChange?: (nodeId: string, data: Record<string, unknown>) => void;
+  onEdgeDataChange?: (edgeId: string, data: Record<string, unknown>) => void;
 }
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -19,7 +24,12 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   integration: <Globe className="h-3.5 w-3.5" style={{ color: "#2dd4bf" }} />,
 };
 
-export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
+export function PropertiesPanel({ 
+  selectedNode, 
+  selectedEdge, 
+  onNodeDataChange, 
+  onEdgeDataChange 
+}: PropertiesPanelProps) {
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
   const selectedNodeId = useAppStore((s) => s.workflowSelectedNodeId);
@@ -32,50 +42,39 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
   const setCollapsed = useAppStore((s) => s.setWorkflowPropertiesCollapsed);
 
   const workflow = workflows.find((w) => w.id === activeWorkflowId);
-  const selectedNode = workflow?.nodes.find((n) => n.id === selectedNodeId);
-  const selectedEdge = workflow?.edges.find((e) => e.id === selectedEdgeId);
 
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
   const [edgeLabel, setEdgeLabel] = useState("");
+  const lastSelectedId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (selectedNode) {
-      setLabel(selectedNode.data.label);
-      setDescription(selectedNode.data.description || "");
+    const currentId = selectedNodeId || selectedEdgeId;
+    if (currentId !== lastSelectedId.current) {
+      if (selectedNode) {
+        setLabel(selectedNode.data.label || "");
+        setDescription(selectedNode.data.description || "");
+      }
+      if (selectedEdge) {
+        setEdgeLabel(selectedEdge.label || "");
+      }
+      lastSelectedId.current = currentId;
     }
-  }, [selectedNode]);
-
-  useEffect(() => {
-    if (selectedEdge) {
-      setEdgeLabel(selectedEdge.label || "");
-    }
-  }, [selectedEdge]);
+  }, [selectedNode, selectedEdge, selectedNodeId, selectedEdgeId]);
 
   const handleNodeUpdate = useCallback(
     (updatedLabel?: string, updatedDescription?: string) => {
-      if (!workflow || !selectedNode) return;
+      if (!selectedNode || !onNodeDataChange) return;
       const finalLabel = updatedLabel ?? label;
       const finalDescription = updatedDescription ?? description;
 
-      // Update the store (persistence)
-      const updatedNodes = workflow.nodes.map((n) =>
-        n.id === selectedNode.id
-          ? { ...n, data: { ...n.data, label: finalLabel, description: finalDescription } }
-          : n
-      );
-      updateWorkflowNodes(workflow.id, updatedNodes);
-
-      // Also update React Flow's internal state via callback
-      if (onNodeDataChange) {
-        onNodeDataChange(selectedNode.id, {
-          ...selectedNode.data,
-          label: finalLabel,
-          description: finalDescription,
-        });
-      }
+      onNodeDataChange(selectedNode.id, {
+        ...selectedNode.data,
+        label: finalLabel,
+        description: finalDescription,
+      });
     },
-    [workflow, selectedNode, label, description, updateWorkflowNodes, onNodeDataChange]
+    [selectedNode, label, description, onNodeDataChange]
   );
 
   const handleLabelChange = useCallback(
@@ -110,46 +109,29 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
     [workflow, selectedNode, label, onNodeDataChange]
   );
 
-  const handleEdgeUpdate = useCallback(() => {
-    if (!workflow || !selectedEdge) return;
-    const updatedEdges = workflow.edges.map((e) =>
-      e.id === selectedEdge.id ? { ...e, label: edgeLabel } : e
-    );
-    updateWorkflowEdges(workflow.id, updatedEdges);
-  }, [workflow, selectedEdge, edgeLabel, updateWorkflowEdges]);
+  const handleEdgeUpdate = useCallback((data: Record<string, any>) => {
+    if (!selectedEdge || !onEdgeDataChange) return;
+    onEdgeDataChange(selectedEdge.id, data);
+  }, [selectedEdge, onEdgeDataChange]);
+
+  const handleEdgeLabelChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newLabel = e.target.value;
+    setEdgeLabel(newLabel);
+    if (workflow && selectedEdge) {
+      handleEdgeUpdate({ label: newLabel });
+    }
+  }, [workflow, selectedEdge, handleEdgeUpdate]);
 
   const handleNodeTypeChange = useCallback(
     (newNodeType: "start" | "end" | "process" | "decision" | "data" | "integration") => {
-      if (!workflow || !selectedNode) return;
+      if (!selectedNode || !onNodeDataChange) return;
       
-      const newTypeMap: Record<string, string> = {
-        start: "startNode",
-        end: "endNode",
-        process: "processNode",
-        decision: "decisionNode",
-        data: "dataNode",
-        integration: "integrationNode"
-      };
-
-      const updatedNodes = workflow.nodes.map((n) =>
-        n.id === selectedNode.id
-          ? { 
-              ...n, 
-              type: newTypeMap[newNodeType] || n.type, 
-              data: { ...n.data, nodeType: newNodeType } 
-            }
-          : n
-      );
-      updateWorkflowNodes(workflow.id, updatedNodes);
-
-      if (onNodeDataChange) {
-        onNodeDataChange(selectedNode.id, {
-          ...selectedNode.data,
-          nodeType: newNodeType,
-        });
-      }
+      onNodeDataChange(selectedNode.id, {
+        ...selectedNode.data,
+        nodeType: newNodeType,
+      });
     },
-    [workflow, selectedNode, updateWorkflowNodes, onNodeDataChange]
+    [selectedNode, onNodeDataChange]
   );
 
   const [showTypeMenu, setShowTypeMenu] = useState(false);
@@ -339,14 +321,56 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
             id="edge-label"
             className="wf-prop-input"
             value={edgeLabel}
-            onChange={(e) => setEdgeLabel(e.target.value)}
-            onBlur={handleEdgeUpdate}
-            onKeyDown={(e) => e.key === "Enter" && handleEdgeUpdate()}
+            onChange={handleEdgeLabelChange}
             placeholder="Add label..."
           />
         </div>
+
         <div className="wf-prop-group">
           <div className="wf-prop-label">
+            <Share2 className="h-3 w-3" />
+            <span>Path Style</span>
+          </div>
+          <div className="wf-prop-toggle-group">
+            {(["smoothstep", "straight", "bezier"] as const).map((style) => (
+              <button
+                key={style}
+                className={cn(
+                  "wf-prop-toggle-item",
+                  (selectedEdge?.data?.edgeStyle || "smoothstep") === style && "active"
+                )}
+                onClick={() => handleEdgeUpdate({ data: { ...selectedEdge?.data, edgeStyle: style } })}
+              >
+                {style.charAt(0).toUpperCase() + style.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="wf-prop-group">
+          <div className="wf-prop-label">
+            <Zap className="h-3 w-3" />
+            <span>Line Style</span>
+          </div>
+          <div className="wf-prop-toggle-group">
+            {(["solid", "animated", "dashed"] as const).map((style) => (
+              <button
+                key={style}
+                className={cn(
+                  "wf-prop-toggle-item",
+                  (selectedEdge?.data?.lineStyle || "solid") === style && "active"
+                )}
+                onClick={() => handleEdgeUpdate({ data: { ...selectedEdge?.data, lineStyle: style }, animated: style === "animated" })}
+              >
+                {style.charAt(0).toUpperCase() + style.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="wf-prop-group">
+          <div className="wf-prop-label">
+            <Activity className="h-3 w-3" />
             <span>Connection</span>
           </div>
           <div className="wf-prop-connection">
@@ -358,4 +382,9 @@ export function PropertiesPanel({ onNodeDataChange }: PropertiesPanelProps) {
       </div>
     </div>
   );
+}
+
+// Helper for class merging if not already imported or defined
+function cn(...classes: any[]) {
+  return classes.filter(Boolean).join(" ");
 }
