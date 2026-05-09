@@ -18,7 +18,7 @@ import {
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import dagre from "dagre";
+import * as dagre from "dagre";
 
 import { useAppStore } from "@/stores/app.store";
 import { generateId } from "@/lib/utils";
