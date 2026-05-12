@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableTab } from "@/components/ui/SortableTab";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { JsonTreeView } from "./JsonTreeView";
@@ -62,6 +65,7 @@ export function FormatterTool() {
   const deleteFile = useAppStore((s) => s.deleteFormatterFile);
   const updateContent = useAppStore((s) => s.updateFormatterFileContent);
   const renameFile = useAppStore((s) => s.renameFormatterFile);
+  const reorderFiles = useAppStore((s) => s.reorderFormatterFiles);
   const addToast = useAppStore((s) => s.addToast);
   
   // Migration: Ensure we're not stuck in 'html' type from stale localStorage
@@ -129,6 +133,21 @@ export function FormatterTool() {
   const files = formatterFiles[type] || formatterFiles.json;
   const activeFile = files.find(f => f.id === activeFileId) || files[0]!;
   const currentInput = activeFile.content;
+
+  // DnD sensor with activation constraint to allow clicks without triggering drag
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = files.findIndex((f) => f.id === active.id);
+    const newIndex = files.findIndex((f) => f.id === over.id);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderFiles(type, oldIndex, newIndex);
+    }
+  }, [files, type, reorderFiles]);
 
   // Derive data and error from current input
   const { data, error } = useMemo(() => {
@@ -454,59 +473,64 @@ export function FormatterTool() {
           >
             <div className="tabs-bar">
               <div className="tabs-list">
-                {files.map(file => (
-                  <button 
-                    key={file.id}
-                    className={cn(
-                      "tab",
-                      activeFile.id === file.id && "tab-active"
-                    )}
-                    onClick={() => setActiveFile(type, file.id)}
-                    onDoubleClick={() => {
-                      setEditName(file.name);
-                      setEditingFileId(file.id);
-                    }}
-                  >
-                    <span className={cn("tab-icon", `tab-icon-${type}`)}>
-                      {type === "json" ? "{}" : "<>"}
-                    </span>
-                    {editingFileId === file.id ? (
-                      <input
-                        autoFocus
-                        className="tab-rename-input"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onBlur={() => {
-                          if (editName.trim() && editName !== file.name) {
-                            renameFile(type, file.id, editName.trim());
-                          }
-                          setEditingFileId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            setEditingFileId(null);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="tab-name">
-                        {file.name}
-                      </span>
-                    )}
-                    <span 
-                      className="tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteFile(type, file.id);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
-                  </button>
-                ))}
+                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={files.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                    {files.map(file => (
+                      <SortableTab key={file.id} id={file.id}>
+                        <button 
+                          className={cn(
+                            "tab",
+                            activeFile.id === file.id && "tab-active"
+                          )}
+                          onClick={() => setActiveFile(type, file.id)}
+                          onDoubleClick={() => {
+                            setEditName(file.name);
+                            setEditingFileId(file.id);
+                          }}
+                        >
+                          <span className={cn("tab-icon", `tab-icon-${type}`)}>
+                            {type === "json" ? "{}" : "<>"}
+                          </span>
+                          {editingFileId === file.id ? (
+                            <input
+                              autoFocus
+                              className="tab-rename-input"
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              onBlur={() => {
+                                if (editName.trim() && editName !== file.name) {
+                                  renameFile(type, file.id, editName.trim());
+                                }
+                                setEditingFileId(null);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.currentTarget.blur();
+                                } else if (e.key === "Escape") {
+                                  setEditingFileId(null);
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <span className="tab-name">
+                              {file.name}
+                            </span>
+                          )}
+                          <span 
+                            className="tab-close"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteFile(type, file.id);
+                            }}
+                          >
+                            <X className="h-3 w-3" />
+                          </span>
+                        </button>
+                      </SortableTab>
+                    ))}
+                  </SortableContext>
+                </DndContext>
                 <button 
                   className="tab-new"
                   onClick={() => createFile(type)}

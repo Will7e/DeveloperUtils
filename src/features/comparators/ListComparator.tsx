@@ -1,4 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableTab } from "@/components/ui/SortableTab";
 import { 
   Columns, 
   ArrowRight, 
@@ -75,6 +78,7 @@ export function ListComparator() {
   const comparatorSettings = useAppStore((s) => s.comparatorSettings);
   const updateComparatorSettings = useAppStore((s) => s.updateComparatorSettings);
   const addToast = useAppStore((s) => s.addToast);
+  const reorderSessions = useAppStore((s) => s.reorderComparatorSessions);
 
   // Local runtime state
   const [query, setQuery] = useState("");
@@ -85,6 +89,21 @@ export function ListComparator() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+
+  // DnD sensor with activation constraint to allow clicks without triggering drag
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = sessions.findIndex((s) => s.id === active.id);
+    const newIndex = sessions.findIndex((s) => s.id === over.id);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderSessions(oldIndex, newIndex);
+    }
+  }, [sessions, reorderSessions]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
   const inputA = activeSession.a;
@@ -190,59 +209,64 @@ export function ListComparator() {
     <div className="list-comparator-container">
       <div className="tabs-bar">
         <div className="tabs-list">
-          {sessions.map(session => (
-            <button 
-              key={session.id}
-              className={cn(
-                "tab",
-                activeSessionId === session.id && "tab-active"
-              )}
-              onClick={() => setActiveSession(session.id)}
-              onDoubleClick={() => {
-                setEditName(session.name);
-                setEditingSessionId(session.id);
-              }}
-            >
-              <span className="tab-icon tab-icon-javascript">
-                <Columns className="h-3 w-3" />
-              </span>
-              {editingSessionId === session.id ? (
-                <input
-                  autoFocus
-                  className="tab-rename-input"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={() => {
-                    if (editName.trim() && editName !== session.name) {
-                      renameSession(session.id, editName.trim());
-                    }
-                    setEditingSessionId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.currentTarget.blur();
-                    } else if (e.key === "Escape") {
-                      setEditingSessionId(null);
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="tab-name">
-                  {session.name}
-                </span>
-              )}
-              <span 
-                className="tab-close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteSession(session.id);
-                }}
-              >
-                <X className="h-3 w-3" />
-              </span>
-            </button>
-          ))}
+          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={sessions.map(s => s.id)} strategy={horizontalListSortingStrategy}>
+              {sessions.map(session => (
+                <SortableTab key={session.id} id={session.id}>
+                  <button 
+                    className={cn(
+                      "tab",
+                      activeSessionId === session.id && "tab-active"
+                    )}
+                    onClick={() => setActiveSession(session.id)}
+                    onDoubleClick={() => {
+                      setEditName(session.name);
+                      setEditingSessionId(session.id);
+                    }}
+                  >
+                    <span className="tab-icon tab-icon-javascript">
+                      <Columns className="h-3 w-3" />
+                    </span>
+                    {editingSessionId === session.id ? (
+                      <input
+                        autoFocus
+                        className="tab-rename-input"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => {
+                          if (editName.trim() && editName !== session.name) {
+                            renameSession(session.id, editName.trim());
+                          }
+                          setEditingSessionId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            setEditingSessionId(null);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="tab-name">
+                        {session.name}
+                      </span>
+                    )}
+                    <span 
+                      className="tab-close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSession(session.id);
+                      }}
+                    >
+                      <X className="h-3 w-3" />
+                    </span>
+                  </button>
+                </SortableTab>
+              ))}
+            </SortableContext>
+          </DndContext>
           <button 
             className="tab-new"
             onClick={() => createSession()}

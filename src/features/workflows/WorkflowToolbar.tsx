@@ -3,6 +3,9 @@
 // ============================================================
 
 import { useCallback, useState } from "react";
+import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableTab } from "@/components/ui/SortableTab";
 import {
   Download,
   Upload,
@@ -50,6 +53,7 @@ export function WorkflowToolbar({
   const updateWorkflowNodes = useAppStore((s) => s.updateWorkflowNodes);
   const updateWorkflowEdges = useAppStore((s) => s.updateWorkflowEdges);
   const addToast = useAppStore((s) => s.addToast);
+  const reorderWorkflows = useAppStore((s) => s.reorderWorkflows);
 
   const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
 
@@ -109,6 +113,21 @@ export function WorkflowToolbar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
+  // DnD sensor with activation constraint to allow clicks without triggering drag
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = workflows.findIndex((w) => w.id === active.id);
+    const newIndex = workflows.findIndex((w) => w.id === over.id);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderWorkflows(oldIndex, newIndex);
+    }
+  }, [workflows, reorderWorkflows]);
+
   const handleAddWorkflow = useCallback(() => {
     createWorkflow();
     // Zustand updates are synchronous, so we can grab the new ID immediately
@@ -122,57 +141,62 @@ export function WorkflowToolbar({
       <div className="wf-toolbar-left">
         {/* Workflow Tabs */}
         <div className="wf-toolbar-tabs">
-          {workflows.map((w) => (
-            <button
-              key={w.id}
-              className={`wf-toolbar-tab ${w.id === activeWorkflowId ? "wf-toolbar-tab-active" : ""}`}
-              onClick={() => setActiveWorkflow(w.id)}
-              onDoubleClick={() => {
-                setRenamingId(w.id);
-                setRenameValue(w.name);
-              }}
-            >
-              {renamingId === w.id ? (
-                <input
-                  autoFocus
-                  onFocus={(e) => e.target.select()}
-                  className="wf-tab-rename-input"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => {
-                    if (renameValue.trim() && renameValue !== w.name) {
-                      renameWorkflow(w.id, renameValue.trim());
-                    }
-                    setRenamingId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (renameValue.trim() && renameValue !== w.name) {
-                        renameWorkflow(w.id, renameValue.trim());
-                      }
-                      setRenamingId(null);
-                    } else if (e.key === "Escape") {
-                      setRenamingId(null);
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span className="wf-toolbar-tab-name">{w.name}</span>
-              )}
-              {workflows.length > 1 && (
-                <button
-                  className="wf-toolbar-tab-close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteWorkflow(w.id);
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </button>
-          ))}
+          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={workflows.map((w) => w.id)} strategy={horizontalListSortingStrategy}>
+              {workflows.map((w) => (
+                <SortableTab key={w.id} id={w.id}>
+                  <button
+                    className={`wf-toolbar-tab ${w.id === activeWorkflowId ? "wf-toolbar-tab-active" : ""}`}
+                    onClick={() => setActiveWorkflow(w.id)}
+                    onDoubleClick={() => {
+                      setRenamingId(w.id);
+                      setRenameValue(w.name);
+                    }}
+                  >
+                    {renamingId === w.id ? (
+                      <input
+                        autoFocus
+                        onFocus={(e) => e.target.select()}
+                        className="wf-tab-rename-input"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => {
+                          if (renameValue.trim() && renameValue !== w.name) {
+                            renameWorkflow(w.id, renameValue.trim());
+                          }
+                          setRenamingId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            if (renameValue.trim() && renameValue !== w.name) {
+                              renameWorkflow(w.id, renameValue.trim());
+                            }
+                            setRenamingId(null);
+                          } else if (e.key === "Escape") {
+                            setRenamingId(null);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="wf-toolbar-tab-name">{w.name}</span>
+                    )}
+                    {workflows.length > 1 && (
+                      <button
+                        className="wf-toolbar-tab-close"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteWorkflow(w.id);
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </button>
+                </SortableTab>
+              ))}
+            </SortableContext>
+          </DndContext>
           <Tooltip>
             <TooltipTrigger asChild>
               <button className="wf-toolbar-tab-add" onClick={handleAddWorkflow}>

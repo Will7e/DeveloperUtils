@@ -2,7 +2,7 @@
 // HTML Preview — Full live preview panel for HTML files
 // ============================================================
 
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/stores/app.store";
 import { Globe, RefreshCw, ExternalLink, Smartphone, Monitor } from "lucide-react";
 import {
@@ -20,25 +20,24 @@ export function HtmlPreview() {
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
 
-  const writeToIframe = useCallback(() => {
-    if (iframeRef.current && activeFile) {
-      const doc = iframeRef.current.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(activeFile.content);
-        doc.close();
-      }
-    }
-  }, [activeFile?.content]);
+  // Debounce the HTML content to avoid rapid iframe re-renders on every keystroke.
+  // Uses srcdoc (W3C standard) instead of doc.open()/doc.write()/doc.close()
+  // which caused race conditions and preview failures during active typing.
+  const [debouncedContent, setDebouncedContent] = useState(activeFile?.content || "");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    if (isHtml) {
-      writeToIframe();
-    }
-  }, [isHtml, writeToIframe]);
+    if (!isHtml) return;
+    const timer = setTimeout(() => {
+      setDebouncedContent(activeFile?.content || "");
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [isHtml, activeFile?.content]);
 
   const handleRefresh = () => {
-    writeToIframe();
+    // Force a full iframe reload by bumping the key
+    setDebouncedContent(activeFile?.content || "");
+    setRefreshKey((k) => k + 1);
   };
 
   const handleOpenExternal = () => {
@@ -114,14 +113,16 @@ export function HtmlPreview() {
         </div>
       </div>
 
-      {/* Iframe container */}
+      {/* Iframe container — uses srcdoc for safe, atomic content updates */}
       <div className="html-preview-body">
         <iframe
+          key={refreshKey}
           ref={iframeRef}
           className="html-preview-frame"
           style={viewMode === "mobile" ? { maxWidth: 375, margin: "0 auto" } : undefined}
           sandbox="allow-scripts allow-same-origin"
           title="HTML Preview"
+          srcDoc={debouncedContent}
         />
       </div>
     </div>

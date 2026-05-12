@@ -4,6 +4,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
+import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableTab } from "@/components/ui/SortableTab";
 import { useAppStore } from "@/stores/app.store";
 import {
   Tooltip,
@@ -59,6 +62,7 @@ export function EditorTabs() {
   const deleteFile = useAppStore((s) => s.deleteFile);
   const renameFile = useAppStore((s) => s.renameFile);
   const createFile = useAppStore((s) => s.createFile);
+  const reorderFiles = useAppStore((s) => s.reorderFiles);
 
   // Run-related state
   const isRunning = useAppStore((s) => s.isRunning);
@@ -82,6 +86,21 @@ export function EditorTabs() {
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
   const canRun = activeFile && !isHtml;
+
+  // DnD sensor with activation constraint to allow clicks without triggering drag
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = files.findIndex((f) => f.id === active.id);
+    const newIndex = files.findIndex((f) => f.id === over.id);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderFiles(oldIndex, newIndex);
+    }
+  }, [files, reorderFiles]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -245,64 +264,69 @@ export function EditorTabs() {
     <>
       <div className="tabs-bar">
         <div className="tabs-list">
-          {files.map((file) => (
-            <button
-              key={file.id}
-              className={cn("tab", file.id === activeFileId && "tab-active")}
-              onClick={() => setActiveFile(file.id)}
-              onDoubleClick={() => {
-                setRenamingId(file.id);
-                setRenameValue(file.name);
-              }}
-            >
-              <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
-                {tabIcons[file.language]}
-              </span>
-              {renamingId === file.id ? (
-                <input
-                  autoFocus
-                  className="tab-rename-input"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onBlur={() => {
-                    if (renameValue.trim() && renameValue !== file.name) {
-                      renameFile(file.id, renameValue.trim());
-                    }
-                    setRenamingId(null);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      if (renameValue.trim() && renameValue !== file.name) {
-                        renameFile(file.id, renameValue.trim());
-                      }
-                      setRenamingId(null);
-                    } else if (e.key === "Escape") {
-                      setRenamingId(null);
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <>
-                  <span className="tab-name">{file.name}</span>
-                  {file.isDirty && <span className="tab-dirty" />}
-                </>
-              )}
-              {files.length > 1 && (
-                <ActionTooltip content="Close Tab" side="bottom">
-                  <span
-                    className="tab-close"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteFile(file.id);
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={files.map((f) => f.id)} strategy={horizontalListSortingStrategy}>
+              {files.map((file) => (
+                <SortableTab key={file.id} id={file.id}>
+                  <button
+                    className={cn("tab", file.id === activeFileId && "tab-active")}
+                    onClick={() => setActiveFile(file.id)}
+                    onDoubleClick={() => {
+                      setRenamingId(file.id);
+                      setRenameValue(file.name);
                     }}
                   >
-                    <X className="h-3 w-3" />
-                  </span>
-                </ActionTooltip>
-              )}
-            </button>
-          ))}
+                    <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
+                      {tabIcons[file.language]}
+                    </span>
+                    {renamingId === file.id ? (
+                      <input
+                        autoFocus
+                        className="tab-rename-input"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => {
+                          if (renameValue.trim() && renameValue !== file.name) {
+                            renameFile(file.id, renameValue.trim());
+                          }
+                          setRenamingId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            if (renameValue.trim() && renameValue !== file.name) {
+                              renameFile(file.id, renameValue.trim());
+                            }
+                            setRenamingId(null);
+                          } else if (e.key === "Escape") {
+                            setRenamingId(null);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <>
+                        <span className="tab-name">{file.name}</span>
+                        {file.isDirty && <span className="tab-dirty" />}
+                      </>
+                    )}
+                    {files.length > 1 && (
+                      <ActionTooltip content="Close Tab" side="bottom">
+                        <span
+                          className="tab-close"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteFile(file.id);
+                          }}
+                        >
+                          <X className="h-3 w-3" />
+                        </span>
+                      </ActionTooltip>
+                    )}
+                  </button>
+                </SortableTab>
+              ))}
+            </SortableContext>
+          </DndContext>
 
           <ActionTooltip content="New File" side="bottom">
             <button

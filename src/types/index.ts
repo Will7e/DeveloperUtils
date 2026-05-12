@@ -133,6 +133,7 @@ export interface AppState {
   createFile: (name: string, language: Language) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
+  reorderFiles: (fromIndex: number, toIndex: number) => void;
   updateFileContent: (id: string, content: string) => void;
   saveFile: (id: string) => void;
   renameFile: (id: string, name: string) => void;
@@ -161,6 +162,7 @@ export interface AppState {
   setActiveFormatterFile: (type: "json" | "xml", id: string) => void;
   updateFormatterFileContent: (type: "json" | "xml", id: string, content: string) => void;
   renameFormatterFile: (type: "json" | "xml", id: string, name: string) => void;
+  reorderFormatterFiles: (type: "json" | "xml", fromIndex: number, toIndex: number) => void;
   setFormatterType: (type: "json" | "xml") => void;
 
   // Comparator actions
@@ -169,6 +171,7 @@ export interface AppState {
   setActiveComparatorSession: (id: string) => void;
   updateComparatorSessionInput: (id: string, side: "a" | "b", input: string) => void;
   renameComparatorSession: (id: string, name: string) => void;
+  reorderComparatorSessions: (fromIndex: number, toIndex: number) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
   
   setLibrarySelectedItemId: (id: string | null) => void;
@@ -183,6 +186,7 @@ export interface AppState {
   deleteWorkflow: (id: string) => void;
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;
+  reorderWorkflows: (fromIndex: number, toIndex: number) => void;
   updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => void;
   updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => void;
   updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => void;

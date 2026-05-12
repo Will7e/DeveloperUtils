@@ -8,6 +8,14 @@ import type { AppState, Language, EditorFile, Workflow, WorkflowNodeData, Workfl
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
+/** Move an element in an array from one index to another (immutable) */
+function arrayMove<T>(arr: T[], from: number, to: number): T[] {
+  const result = [...arr];
+  const [item] = result.splice(from, 1);
+  result.splice(to, 0, item);
+  return result;
+}
+
 /** Create a default file for a language */
 function createDefaultFile(language: Language): EditorFile {
   const config = LANGUAGE_CONFIGS[language];
@@ -125,6 +133,12 @@ export const useAppStore = create<AppState>()(
 
       setActiveFile: (id: string) => {
         set({ activeFileId: id });
+      },
+
+      reorderFiles: (fromIndex: number, toIndex: number) => {
+        set((state) => ({
+          files: arrayMove(state.files, fromIndex, toIndex),
+        }));
       },
 
       updateFileContent: (id: string, content: string) => {
@@ -294,6 +308,15 @@ export const useAppStore = create<AppState>()(
           }
         }));
       },
+
+      reorderFormatterFiles: (type, fromIndex, toIndex) => {
+        set((state) => ({
+          formatterFiles: {
+            ...state.formatterFiles,
+            [type]: arrayMove(state.formatterFiles[type], fromIndex, toIndex),
+          },
+        }));
+      },
       
       setOutputFlash: (flash) => {
         set({ outputFlash: flash });
@@ -352,6 +375,12 @@ export const useAppStore = create<AppState>()(
           comparatorSessions: state.comparatorSessions.map(s =>
             s.id === id ? { ...s, name } : s
           )
+        }));
+      },
+
+      reorderComparatorSessions: (fromIndex, toIndex) => {
+        set((state) => ({
+          comparatorSessions: arrayMove(state.comparatorSessions, fromIndex, toIndex),
         }));
       },
 
@@ -431,6 +460,12 @@ export const useAppStore = create<AppState>()(
           workflows: state.workflows.map((w) =>
             w.id === id ? { ...w, name, updatedAt: Date.now() } : w
           ),
+        }));
+      },
+
+      reorderWorkflows: (fromIndex, toIndex) => {
+        set((state) => ({
+          workflows: arrayMove(state.workflows, fromIndex, toIndex),
         }));
       },
 
