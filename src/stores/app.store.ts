@@ -11,8 +11,10 @@ import { generateId } from "@/lib/utils";
 /** Move an element in an array from one index to another (immutable) */
 function arrayMove<T>(arr: T[], from: number, to: number): T[] {
   const result = [...arr];
-  const [item] = result.splice(from, 1);
-  result.splice(to, 0, item);
+  const removed = result.splice(from, 1);
+  if (removed.length > 0) {
+    result.splice(to, 0, removed[0]!);
+  }
   return result;
 }
 
