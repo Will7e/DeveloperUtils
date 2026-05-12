@@ -135,6 +135,9 @@ export function useKeyboardShortcuts() {
 
       // Ctrl/Cmd + S = Format & Save
       if (mod && e.key === "s") {
+        if (!window.location.pathname.includes("/compiler") && window.location.pathname !== "/") {
+          return;
+        }
         e.preventDefault();
         if (!activeFile) return;
 

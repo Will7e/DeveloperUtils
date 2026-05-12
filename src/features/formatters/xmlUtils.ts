@@ -5,25 +5,28 @@ export function formatXml(xml: string, indent: string = "  "): string {
   let formatted = "";
   let pad = 0;
   
-  // Split by tags
-  const tokens = xml
-    .replace(/>\s+</g, "><")
-    .replace(/</g, "~#~<")
-    .split("~#~");
+  // Clean up whitespace between tags
+  const cleanXml = xml.replace(/>\s+</g, "><").trim();
+  
+  // Use regex to find tags vs text
+  // This matches <tag...>, </tag>, or text content
+  const tokens = cleanXml.split(/(<[^>]+>)/g).filter(t => t.trim() !== "");
 
-  for (const token of tokens) {
+  for (let token of tokens) {
+    token = token.trim();
     if (!token) continue;
 
-    if (token.match(/^<\/\w/)) {
+    if (token.startsWith("</")) {
       // Closing tag
       pad--;
-    }
-
-    formatted += indent.repeat(Math.max(0, pad)) + token + "\n";
-
-    if (token.match(/^<\w[^>]*[^\/]>$/) && !token.match(/^<\/\w/)) {
-      // Opening tag (not self-closing)
+      formatted += indent.repeat(Math.max(0, pad)) + token + "\n";
+    } else if (token.startsWith("<") && !token.endsWith("/>") && !token.startsWith("<?") && !token.startsWith("<!")) {
+      // Opening tag (not self-closing, not PI, not comment/doctype)
+      formatted += indent.repeat(Math.max(0, pad)) + token + "\n";
       pad++;
+    } else {
+      // Text content, self-closing tag, or comment
+      formatted += indent.repeat(Math.max(0, pad)) + token + "\n";
     }
   }
 

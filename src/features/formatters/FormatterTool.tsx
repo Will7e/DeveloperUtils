@@ -64,6 +64,13 @@ export function FormatterTool() {
   const renameFile = useAppStore((s) => s.renameFormatterFile);
   const addToast = useAppStore((s) => s.addToast);
   
+  // Migration: Ensure we're not stuck in 'html' type from stale localStorage
+  useEffect(() => {
+    if ((type as string) === "html") {
+      setType("json");
+    }
+  }, [type, setType]);
+  
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
@@ -119,7 +126,7 @@ export function FormatterTool() {
   const [expandVersion, setExpandVersion] = useState(0);
   const [expandTarget, setExpandTarget] = useState(true);
 
-  const files = formatterFiles[type];
+  const files = formatterFiles[type] || formatterFiles.json;
   const activeFile = files.find(f => f.id === activeFileId) || files[0]!;
   const currentInput = activeFile.content;
 
@@ -176,13 +183,21 @@ export function FormatterTool() {
   };
 
   const handleFormat = async () => {
-    if (!currentInput || error) return;
+    if (!currentInput) return;
+    // For JSON we need valid input, for XML we can try even if there are errors
+    if (type === "json" && error) return;
+    
     try {
       if (type === "json") {
         updateContent("json", activeFile.id, formatJsonRobust(currentInput, jsonSettings));
-      } else if (type === "xml") {
-        updateContent("xml", activeFile.id, formatXml(currentInput));
+      } else {
+        updateContent("xml", activeFile.id, formatXml(currentInput, " ".repeat(jsonSettings.tabSize)));
       }
+      addToast({
+        message: `${type.toUpperCase()} formatted successfully`,
+        type: "success",
+        duration: 2000
+      });
     } catch (e: any) {
       // Error handled by useMemo
     }
@@ -323,7 +338,7 @@ export function FormatterTool() {
               <button 
                 className="toolbar-btn" 
                 onClick={handleFormat}
-                disabled={!currentInput || !!error}
+                disabled={!currentInput || (type === "json" && !!error)}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
                 Format
