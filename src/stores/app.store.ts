@@ -27,7 +27,6 @@ const initialFile = createDefaultFile("javascript");
 
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
-const initialHtmlFile = { id: generateId(), name: "Untitled.html", content: "" };
 const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
 
 const initialWorkflow: Workflow = {
@@ -69,8 +68,8 @@ export const useAppStore = create<AppState>()(
       editorSettings: DEFAULT_EDITOR_SETTINGS,
       toasts: [],
       outputFlash: null,
-      formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile], html: [initialHtmlFile] },
-      activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id, html: initialHtmlFile.id },
+      formatterFiles: { json: [initialJsonFile], xml: [initialXmlFile] },
+      activeFormatterFileId: { json: initialJsonFile.id, xml: initialXmlFile.id },
       formatterType: "json",
       comparatorSessions: [initialComparatorSession],
       activeComparatorSessionId: initialComparatorSession.id,
