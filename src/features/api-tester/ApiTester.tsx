@@ -43,6 +43,8 @@ import {
   WifiOff,
   Square,
   FileCode2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import {
@@ -614,6 +616,7 @@ export function ApiTester() {
   const [exportSelectedTabs, setExportSelectedTabs] = useState<string[]>([]);
 
   // Sidebar accordion
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState("devutils_api_sidebar_collapsed", false);
   const [presetsOpen, setPresetsOpen] = useLocalStorageState("devutils_api_sidebar_presets", false);
   const [historyOpen, setHistoryOpen] = useLocalStorageState("devutils_api_sidebar_history", false);
   const [collectionsOpen, setCollectionsOpen] = useLocalStorageState("devutils_api_sidebar_collections", false);
@@ -919,10 +922,33 @@ export function ApiTester() {
   return (
     <div className="api-tester-container">
       {/* ── Left Sidebar ───────────────────────────────────── */}
-      <aside className="api-sidebar">
-        <div className="api-sidebar-header">
-          <Globe className="h-4 w-4 text-accent" />
-          <span>API Client</span>
+      <aside className={`api-sidebar ${sidebarCollapsed ? "api-sidebar-collapsed" : ""}`}>
+        <div className="api-sidebar-header" style={{ justifyContent: 'space-between', paddingRight: sidebarCollapsed ? '0' : '8px', paddingLeft: sidebarCollapsed ? '0' : '16px', display: 'flex', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', width: sidebarCollapsed ? '100%' : 'auto' }}>
+            {sidebarCollapsed ? (
+              <button 
+                className="api-sidebar-footer-icon-btn" 
+                onClick={() => setSidebarCollapsed(false)}
+                title="Expand Sidebar"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            ) : (
+              <>
+                <Globe className="h-4 w-4 text-accent" />
+                <span>API Client</span>
+              </>
+            )}
+          </div>
+          {!sidebarCollapsed && (
+            <button 
+              className="api-sidebar-footer-icon-btn" 
+              onClick={() => setSidebarCollapsed(true)}
+              title="Collapse Sidebar"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <input 
@@ -946,20 +972,33 @@ export function ApiTester() {
           <div className="api-sidebar-section">
             <div
               className="api-sidebar-section-header"
-              onClick={() => setPresetsOpen(!presetsOpen)}
+              onClick={() => {
+                if (sidebarCollapsed) {
+                  setSidebarCollapsed(false);
+                  setPresetsOpen(true);
+                } else {
+                  setPresetsOpen(!presetsOpen);
+                }
+              }}
+              title={sidebarCollapsed ? "Mock API Presets" : ""}
+              style={{ justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '12px 0' : '8px 8px' }}
             >
-              <div className="api-sidebar-section-left">
-                <ChevronRight
-                  className={`h-3 w-3 api-sidebar-section-chevron ${presetsOpen ? "api-sidebar-section-chevron-open" : ""}`}
-                />
-                <span className="api-sidebar-section-title">
-                  Mock API Presets
-                </span>
+              <div className="api-sidebar-section-left" style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start', width: sidebarCollapsed ? '100%' : 'auto' }}>
+                {!sidebarCollapsed && (
+                  <ChevronRight
+                    className={`h-3 w-3 api-sidebar-section-chevron ${presetsOpen ? "api-sidebar-section-chevron-open" : ""}`}
+                  />
+                )}
+                <Sparkles className="h-4 w-4" />
+                {!sidebarCollapsed && (
+                  <span className="api-sidebar-section-title">
+                    Mock API Presets
+                  </span>
+                )}
               </div>
-              <Sparkles className="h-3 w-3 text-yellow" />
             </div>
             <div
-              className={`api-sidebar-section-body ${presetsOpen ? "api-sidebar-section-body-open" : ""}`}
+              className={`api-sidebar-section-body ${presetsOpen && !sidebarCollapsed ? "api-sidebar-section-body-open" : ""}`}
             >
               <div className="api-sidebar-section-body-inner">
                 {PRESETS.map((preset, index) => (
@@ -988,40 +1027,56 @@ export function ApiTester() {
           <div className="api-sidebar-section">
             <div
               className="api-sidebar-section-header"
-              onClick={() => setCollectionsOpen(!collectionsOpen)}
+              onClick={() => {
+                if (sidebarCollapsed) {
+                  setSidebarCollapsed(false);
+                  setCollectionsOpen(true);
+                } else {
+                  setCollectionsOpen(!collectionsOpen);
+                }
+              }}
+              title={sidebarCollapsed ? "Collections" : ""}
+              style={{ justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '12px 0' : '8px 8px' }}
             >
-              <div className="api-sidebar-section-left">
-                <ChevronRight
-                  className={`h-3 w-3 api-sidebar-section-chevron ${collectionsOpen ? "api-sidebar-section-chevron-open" : ""}`}
-                />
-                <span className="api-sidebar-section-title">
-                  Collections
-                </span>
+              <div className="api-sidebar-section-left" style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start', width: sidebarCollapsed ? '100%' : 'auto' }}>
+                {!sidebarCollapsed && (
+                  <ChevronRight
+                    className={`h-3 w-3 api-sidebar-section-chevron ${collectionsOpen ? "api-sidebar-section-chevron-open" : ""}`}
+                  />
+                )}
+                <Folder className="h-4 w-4" />
+                {!sidebarCollapsed && (
+                  <span className="api-sidebar-section-title">
+                    Collections
+                  </span>
+                )}
               </div>
-              <div style={{ display: "flex", gap: "4px" }}>
-                <SimpleTooltip content="Import JSON File(s)">
-                  <button 
-                    className="api-clear-btn" 
-                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-                    style={{ padding: "2px 4px" }}
-                  >
-                    <FileJson className="h-3 w-3" />
-                  </button>
-                </SimpleTooltip>
-                <SimpleTooltip content="Import Folder">
-                  <button 
-                    className="api-clear-btn" 
-                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
-                    style={{ padding: "2px 4px" }}
-                  >
-                    <FolderUp className="h-3 w-3" />
-                  </button>
-                </SimpleTooltip>
-              </div>
+              {!sidebarCollapsed && (
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <SimpleTooltip content="Import JSON File(s)">
+                    <button 
+                      className="api-clear-btn" 
+                      onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                      style={{ padding: "2px 4px" }}
+                    >
+                      <FileJson className="h-3 w-3" />
+                    </button>
+                  </SimpleTooltip>
+                  <SimpleTooltip content="Import Folder">
+                    <button 
+                      className="api-clear-btn" 
+                      onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                      style={{ padding: "2px 4px" }}
+                    >
+                      <FolderUp className="h-3 w-3" />
+                    </button>
+                  </SimpleTooltip>
+                </div>
+              )}
             </div>
             
             <div
-              className={`api-sidebar-section-body ${collectionsOpen ? "api-sidebar-section-body-open" : ""}`}
+              className={`api-sidebar-section-body ${collectionsOpen && !sidebarCollapsed ? "api-sidebar-section-body-open" : ""}`}
             >
               <div className="api-sidebar-section-body-inner" style={{ maxHeight: "300px", overflowY: "auto" }}>
                 {store.collections && store.collections.length === 0 ? (
@@ -1070,17 +1125,31 @@ export function ApiTester() {
           <div className="api-sidebar-section" style={{ flex: 1 }}>
             <div
               className="api-sidebar-section-header"
-              onClick={() => setHistoryOpen(!historyOpen)}
+              onClick={() => {
+                if (sidebarCollapsed) {
+                  setSidebarCollapsed(false);
+                  setHistoryOpen(true);
+                } else {
+                  setHistoryOpen(!historyOpen);
+                }
+              }}
+              title={sidebarCollapsed ? "Request History" : ""}
+              style={{ justifyContent: sidebarCollapsed ? 'center' : 'space-between', padding: sidebarCollapsed ? '12px 0' : '8px 8px' }}
             >
-              <div className="api-sidebar-section-left">
-                <ChevronRight
-                  className={`h-3 w-3 api-sidebar-section-chevron ${historyOpen ? "api-sidebar-section-chevron-open" : ""}`}
-                />
-                <span className="api-sidebar-section-title">
-                  Request History
-                </span>
+              <div className="api-sidebar-section-left" style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start', width: sidebarCollapsed ? '100%' : 'auto' }}>
+                {!sidebarCollapsed && (
+                  <ChevronRight
+                    className={`h-3 w-3 api-sidebar-section-chevron ${historyOpen ? "api-sidebar-section-chevron-open" : ""}`}
+                  />
+                )}
+                <History className="h-4 w-4" />
+                {!sidebarCollapsed && (
+                  <span className="api-sidebar-section-title">
+                    Request History
+                  </span>
+                )}
               </div>
-              {store.history.length > 0 && (
+              {!sidebarCollapsed && store.history.length > 0 && (
                 <button
                   className="api-clear-btn"
                   onClick={(e) => {
@@ -1093,7 +1162,7 @@ export function ApiTester() {
               )}
             </div>
             <div
-              className={`api-sidebar-section-body ${historyOpen ? "api-sidebar-section-body-open" : ""}`}
+              className={`api-sidebar-section-body ${historyOpen && !sidebarCollapsed ? "api-sidebar-section-body-open" : ""}`}
               style={{ flex: 1 }}
             >
               <div
@@ -1151,14 +1220,14 @@ export function ApiTester() {
         </div>
         
         {/* ── Sidebar Footer ─────────────────────────────────────── */}
-        <div className="api-sidebar-footer">
+        <div className="api-sidebar-footer" style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-start', padding: sidebarCollapsed ? '12px 0' : '12px 16px' }}>
           <button 
-            className="api-sidebar-footer-btn" 
+            className={sidebarCollapsed ? "api-sidebar-footer-icon-btn" : "api-sidebar-footer-btn"}
             title="API Tester Settings"
             onClick={() => setShowEnvVarsModal(true)}
           >
             <Settings className="h-4 w-4" />
-            <span>Settings</span>
+            {!sidebarCollapsed && <span>Settings</span>}
           </button>
         </div>
       </aside>
