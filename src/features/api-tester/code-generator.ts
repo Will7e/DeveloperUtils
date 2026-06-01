@@ -1,4 +1,4 @@
-import { TabState, applyAuth } from "@/stores/api-tester.store";
+import { TabState, KeyValueField, applyAuth, substituteEnvVars } from "@/stores/api-tester.store";
 
 export const CODE_LANGUAGES = [
   { id: "curl", name: "cURL", language: "bash" },
@@ -8,23 +8,38 @@ export const CODE_LANGUAGES = [
   { id: "go", name: "Go (net/http)", language: "go" },
 ];
 
-export function generateCodeSnippet(tab: TabState, curlString: string, languageId: string): string {
+export function generateCodeSnippet(
+  tab: TabState,
+  curlString: string,
+  languageId: string,
+  globalVars: KeyValueField[] = [],
+  activeEnvVars: KeyValueField[] = []
+): string {
   if (languageId === "curl") {
     return curlString;
   }
 
-  const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
+  const { method, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
+  const url = substituteEnvVars(tab.url, globalVars, activeEnvVars);
 
-  // 1. Gather enabled headers
+  // 1. Gather enabled headers with env var substitution
   let computedHeaders: Record<string, string> = {};
   headers.forEach((h) => {
     if (h.enabled && h.key.trim() !== "") {
-      computedHeaders[h.key.trim()] = h.value.trim();
+      computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), globalVars, activeEnvVars);
     }
   });
 
-  // 2. Apply auth (mutates url & headers if api-key in query or auth headers needed)
-  const authed = applyAuth(authType, authConfig, computedHeaders, url);
+  // 2. Apply auth with substituted values
+  const substitutedAuthConfig = {
+    bearerToken: substituteEnvVars(authConfig.bearerToken, globalVars, activeEnvVars),
+    basicUsername: substituteEnvVars(authConfig.basicUsername, globalVars, activeEnvVars),
+    basicPassword: substituteEnvVars(authConfig.basicPassword, globalVars, activeEnvVars),
+    apiKeyName: substituteEnvVars(authConfig.apiKeyName, globalVars, activeEnvVars),
+    apiKeyValue: substituteEnvVars(authConfig.apiKeyValue, globalVars, activeEnvVars),
+    apiKeyPlacement: authConfig.apiKeyPlacement,
+  };
+  const authed = applyAuth(authType, substitutedAuthConfig, computedHeaders, url);
   computedHeaders = authed.headers;
   const finalUrl = authed.url;
 
@@ -42,7 +57,7 @@ export function generateCodeSnippet(tab: TabState, curlString: string, languageI
   let bodyStr = "";
   if (method !== "GET" && method !== "HEAD") {
     if (bodyType === "json" || bodyType === "raw") {
-      bodyStr = bodyValue;
+      bodyStr = substituteEnvVars(bodyValue, globalVars, activeEnvVars);
     } else if (bodyType === "form-data") {
       // Simplistic representation of FormData
       const formDataParts = formParams

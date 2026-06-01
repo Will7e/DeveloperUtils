@@ -109,6 +109,7 @@ interface ApiTesterState {
   addTab: () => void;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  renameTab: (id: string, name: string) => void;
 
   // Active tab Setters
   setMethod: (method: HttpMethod) => void;
@@ -314,6 +315,32 @@ const saveStoredActiveEnvId = (id: string | null) => {
   }
 };
 
+// Load tabs from LocalStorage
+const loadStoredTabs = (): { tabs: TabState[]; activeTabId: string } | null => {
+  try {
+    const saved = localStorage.getItem("devutils_api_tabs");
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as { tabs: TabState[]; activeTabId: string };
+    if (!parsed.tabs || parsed.tabs.length === 0) return null;
+    // Reset transient state on load
+    parsed.tabs = parsed.tabs.map(t => ({ ...t, loading: false, error: null }));
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+// Save tabs to LocalStorage
+const saveStoredTabs = (tabs: TabState[], activeTabId: string) => {
+  try {
+    // Strip transient fields to save space
+    const serializable = tabs.map(t => ({ ...t, loading: false, error: null }));
+    localStorage.setItem("devutils_api_tabs", JSON.stringify({ tabs: serializable, activeTabId }));
+  } catch (e) {
+    console.error("Failed to save tabs", e);
+  }
+};
+
 // Substitute environment variables in a string
 export function substituteEnvVars(text: string, globalVars: KeyValueField[], activeEnvVars: KeyValueField[] = []): string {
   if (!text) return text;
@@ -367,10 +394,20 @@ export function applyAuth(
 }
 
 export const useApiTesterStore = create<ApiTesterState>((set, get) => {
-  const initialTab = createNewTab("Tab 1");
+  // Restore persisted tabs or create a default
+  const storedTabs = loadStoredTabs();
+  const initialTab = storedTabs ? storedTabs.tabs : [createNewTab("Tab 1")];
+  const initialActiveId = storedTabs ? storedTabs.activeTabId : initialTab[0]!.id;
+
+  // Helper: persist tabs after any mutation
+  const persistTabs = () => {
+    const { tabs, activeTabId } = get();
+    saveStoredTabs(tabs, activeTabId);
+  };
+
   return {
-    tabs: [initialTab],
-    activeTabId: initialTab.id,
+    tabs: initialTab,
+    activeTabId: initialActiveId,
     history: loadStoredHistory(),
     collections: loadStoredCollections(),
     envVars: loadStoredEnvVars(),
@@ -380,12 +417,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     // Tab management
     addTab: () => {
       set((state) => {
-        const newTab = createNewTab(`Tab ${state.tabs.length + 1}`);
+        // Find next available tab number to avoid duplicates
+        const existingNums = state.tabs
+          .map(t => { const m = t.name.match(/^Tab (\d+)$/); return m && m[1] ? parseInt(m[1], 10) : 0; })
+          .filter(n => n > 0);
+        const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : state.tabs.length + 1;
+        const newTab = createNewTab(`Tab ${nextNum}`);
         return {
           tabs: [...state.tabs, newTab],
           activeTabId: newTab.id,
         };
       });
+      persistTabs();
     },
     removeTab: (id) => {
       set((state) => {
@@ -396,13 +439,24 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           activeTabId: state.activeTabId === id ? (newTabs[newTabs.length - 1]?.id || "") : state.activeTabId,
         };
       });
+      persistTabs();
     },
-    setActiveTab: (id) => set({ activeTabId: id }),
+    setActiveTab: (id) => {
+      set({ activeTabId: id });
+      persistTabs();
+    },
+    renameTab: (id, name) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
+      }));
+      persistTabs();
+    },
 
     setMethod: (method) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, method } : t)),
       }));
+      persistTabs();
     },
     
     setUrl: (url) => {
@@ -410,32 +464,38 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, url } : t)),
       }));
       get().syncParamsFromUrl(url);
+      persistTabs();
     },
 
     setBodyType: (bodyType) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyType } : t)),
       }));
+      persistTabs();
     },
     setBodyValue: (bodyValue) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyValue } : t)),
       }));
+      persistTabs();
     },
     setRawType: (rawType) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, rawType } : t)),
       }));
+      persistTabs();
     },
     setAuthType: (authType) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authType } : t)),
       }));
+      persistTabs();
     },
     setAuthConfig: (config) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authConfig: { ...t.authConfig, ...config } } : t)),
       }));
+      persistTabs();
     },
 
     // Params actions
@@ -443,6 +503,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: [...t.params, createEmptyField()] } : t)),
       }));
+      persistTabs();
     },
     updateParam: (id, updates) => {
       set((state) => ({
@@ -453,6 +514,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         ),
       }));
       get().syncUrlFromParams();
+      persistTabs();
     },
     removeParam: (id) => {
       set((state) => ({
@@ -465,6 +527,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }),
       }));
       get().syncUrlFromParams();
+      persistTabs();
     },
 
     // Headers actions
@@ -472,6 +535,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, headers: [...t.headers, createEmptyField()] } : t)),
       }));
+      persistTabs();
     },
     updateHeader: (id, updates) => {
       set((state) => ({
@@ -481,6 +545,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             : t
         ),
       }));
+      persistTabs();
     },
     removeHeader: (id) => {
       set((state) => ({
@@ -492,6 +557,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           return t;
         }),
       }));
+      persistTabs();
     },
 
     // Form Data actions
@@ -499,6 +565,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, formParams: [...t.formParams, createEmptyField()] } : t)),
       }));
+      persistTabs();
     },
     updateFormParam: (id, updates) => {
       set((state) => ({
@@ -508,6 +575,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             : t
         ),
       }));
+      persistTabs();
     },
     removeFormParam: (id) => {
       set((state) => ({
@@ -519,6 +587,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           return t;
         }),
       }));
+      persistTabs();
     },
 
     // Sync logic: URL -> Params with high-efficiency stable diff checking
@@ -617,20 +686,22 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       if (!tab) return "";
       const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
 
+      const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+
       let computedHeaders: Record<string, string> = {};
       headers.forEach((h) => {
         if (h.enabled && h.key.trim() !== "") {
-          computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), state.envVars);
+          computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), state.envVars, activeEnvVars);
         }
       });
 
-      const substitutedUrl = substituteEnvVars(url, state.envVars);
+      const substitutedUrl = substituteEnvVars(url, state.envVars, activeEnvVars);
       const substitutedAuthConfig = {
-        bearerToken: substituteEnvVars(authConfig.bearerToken, state.envVars),
-        basicUsername: substituteEnvVars(authConfig.basicUsername, state.envVars),
-        basicPassword: substituteEnvVars(authConfig.basicPassword, state.envVars),
-        apiKeyName: substituteEnvVars(authConfig.apiKeyName, state.envVars),
-        apiKeyValue: substituteEnvVars(authConfig.apiKeyValue, state.envVars),
+        bearerToken: substituteEnvVars(authConfig.bearerToken, state.envVars, activeEnvVars),
+        basicUsername: substituteEnvVars(authConfig.basicUsername, state.envVars, activeEnvVars),
+        basicPassword: substituteEnvVars(authConfig.basicPassword, state.envVars, activeEnvVars),
+        apiKeyName: substituteEnvVars(authConfig.apiKeyName, state.envVars, activeEnvVars),
+        apiKeyValue: substituteEnvVars(authConfig.apiKeyValue, state.envVars, activeEnvVars),
         apiKeyPlacement: authConfig.apiKeyPlacement,
       };
 
@@ -810,6 +881,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, response: responseObj, loading: false } : t)),
           };
         });
+        persistTabs();
 
       } catch (err: any) {
         const endTime = performance.now();
@@ -869,6 +941,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         };
       });
       get().syncParamsFromUrl(item.url);
+      persistTabs();
     },
 
     // Clear all history
@@ -911,6 +984,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         };
       });
       get().syncUrlFromParams();
+      persistTabs();
     },
 
     // Collections
@@ -979,6 +1053,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         };
       });
       get().syncUrlFromParams();
+      persistTabs();
     },
 
     // Format JSON request body helper
@@ -996,6 +1071,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           return t;
         }),
       }));
+      persistTabs();
     },
 
     // POSIX-compliant cURL parser & importer
@@ -1141,6 +1217,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       }));
 
       get().syncParamsFromUrl(url);
+      persistTabs();
       return true;
     },
     

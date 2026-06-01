@@ -470,6 +470,22 @@
   font-weight: 500;
 }
 
+.api-tab-rename-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--text-1);
+  background: var(--bg-0);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 6px;
+  height: 20px;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 8px var(--accent-glow);
+}
+
 .api-tab-close {
   display: flex;
   align-items: center;

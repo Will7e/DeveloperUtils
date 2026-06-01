@@ -461,6 +461,7 @@ export function ApiTester() {
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
   const [settingsEnvId, setSettingsEnvId] = useState<string>("global");
   const [showEnvDropdown, setShowEnvDropdown] = useState(false);
+  const envDropdownRef = useRef<HTMLDivElement>(null);
   const [curlImportValue, setCurlImportValue] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<boolean>(false);
@@ -482,6 +483,11 @@ export function ApiTester() {
   // File import
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Tab rename
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  const [editingTabName, setEditingTabName] = useState("");
+  const editTabInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -561,6 +567,36 @@ export function ApiTester() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [activeTab.loading, activeTab.url, store]);
+
+  // ── Close env dropdown on outside click ─────────────────────
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (envDropdownRef.current && !envDropdownRef.current.contains(event.target as Node)) {
+        setShowEnvDropdown(false);
+      }
+    }
+    if (showEnvDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showEnvDropdown]);
+
+  const hasBody = activeTab.method !== "GET" && activeTab.method !== "HEAD";
+
+  // ── Reset requestTab when body becomes unavailable ──────────
+  useEffect(() => {
+    if (!hasBody && requestTab === "body") {
+      setRequestTab("params");
+    }
+  }, [hasBody, requestTab]);
+
+  // ── Focus tab rename input when editing ─────────────────────
+  useEffect(() => {
+    if (editingTabId && editTabInputRef.current) {
+      editTabInputRef.current.focus();
+      editTabInputRef.current.select();
+    }
+  }, [editingTabId]);
 
   // ── Resize Handlers ────────────────────────────────────────
   const handleResizeStart = useCallback(
@@ -687,9 +723,6 @@ export function ApiTester() {
     return "meta-time-slow";
   };
 
-  const methodSelectClass = `api-method-select api-method-select-${activeTab.method.toLowerCase()}`;
-
-  const hasBody = activeTab.method !== "GET" && activeTab.method !== "HEAD";
 
   return (
     <div className="api-tester-container">
@@ -952,11 +985,43 @@ export function ApiTester() {
                 key={tab.id} 
                 className={`api-tab-item ${tab.id === store.activeTabId ? 'api-tab-item-active' : ''}`}
                 onClick={() => store.setActiveTab(tab.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingTabId(tab.id);
+                  setEditingTabName(tab.name);
+                }}
               >
                 <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '8px', width: 'auto', padding: '1px 4px' }}>
                   {tab.method}
                 </span>
-                <span className="api-tab-title">{tab.name}</span>
+                {editingTabId === tab.id ? (
+                  <input
+                    ref={editTabInputRef}
+                    type="text"
+                    className="api-tab-rename-input"
+                    value={editingTabName}
+                    onChange={(e) => setEditingTabName(e.target.value)}
+                    onBlur={() => {
+                      if (editingTabName.trim()) {
+                        store.renameTab(tab.id, editingTabName.trim());
+                      }
+                      setEditingTabId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        if (editingTabName.trim()) {
+                          store.renameTab(tab.id, editingTabName.trim());
+                        }
+                        setEditingTabId(null);
+                      } else if (e.key === "Escape") {
+                        setEditingTabId(null);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="api-tab-title">{tab.name}</span>
+                )}
                 {tabs.length > 1 && (
                   <button 
                     className="api-tab-close" 
@@ -978,7 +1043,7 @@ export function ApiTester() {
             </SimpleTooltip>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative' }} ref={envDropdownRef}>
               <button 
                 onClick={() => setShowEnvDropdown(!showEnvDropdown)}
                 style={{ 
@@ -1273,7 +1338,7 @@ export function ApiTester() {
                     height="100%"
                     language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
                     theme="vs-dark"
-                    value={generateCodeSnippet(activeTab, store.generateCurl(), snippetLang)}
+                    value={generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : [])}
                     options={{
                       minimap: { enabled: false },
                       fontSize: 12,
@@ -1291,7 +1356,7 @@ export function ApiTester() {
                   type="button"
                   className="api-import-submit-btn"
                   onClick={() => {
-                    const code = generateCodeSnippet(activeTab, store.generateCurl(), snippetLang);
+                    const code = generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : []);
                     navigator.clipboard.writeText(code);
                     setSnippetCopied(true);
                     setTimeout(() => setSnippetCopied(false), 2000);
@@ -2364,8 +2429,7 @@ export function ApiTester() {
                             <button
                               onClick={() => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
-                                const newVars = [...sourceVars];
-                                if (newVars[i]) newVars[i].enabled = !newVars[i].enabled;
+                                const newVars = sourceVars.map((v, idx) => idx === i ? { ...v, enabled: !v.enabled } : v);
                                 if (settingsEnvId === 'global') store.setEnvVars(newVars);
                                 else store.setEnvironmentVars(settingsEnvId, newVars);
                               }}
@@ -2396,9 +2460,8 @@ export function ApiTester() {
                               onFocus={(e) => { e.currentTarget.style.background = 'var(--bg-2)'; e.currentTarget.style.borderColor = 'var(--border-2)'; }}
                               onBlur={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
                               onChange={(e) => {
-                                const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
-                                const newVars = [...sourceVars];
-                                if (newVars[i]) newVars[i].key = e.target.value;
+                              const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
+                                const newVars = sourceVars.map((v, idx) => idx === i ? { ...v, key: e.target.value } : v);
                                 if (settingsEnvId === 'global') store.setEnvVars(newVars);
                                 else store.setEnvironmentVars(settingsEnvId, newVars);
                               }}
@@ -2416,8 +2479,7 @@ export function ApiTester() {
                               onBlur={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
                               onChange={(e) => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
-                                const newVars = [...sourceVars];
-                                if (newVars[i]) newVars[i].value = e.target.value;
+                                const newVars = sourceVars.map((v, idx) => idx === i ? { ...v, value: e.target.value } : v);
                                 if (settingsEnvId === 'global') store.setEnvVars(newVars);
                                 else store.setEnvironmentVars(settingsEnvId, newVars);
                               }}
