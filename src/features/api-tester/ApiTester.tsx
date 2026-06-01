@@ -36,6 +36,7 @@ import {
   AuthType,
   HistoryItem,
 } from "@/stores/api-tester.store";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import "./api-tester.css";
 
 // ── Built-in Presets ─────────────────────────────────────────
@@ -689,9 +690,11 @@ export function ApiTester() {
               )}
             </div>
           ))}
-          <button className="api-tab-add" onClick={() => store.addTab()} title="New Tab">
-            <Plus className="h-3 w-3" />
-          </button>
+          <SimpleTooltip content="New Tab">
+            <button className="api-tab-add" onClick={() => store.addTab()}>
+              <Plus className="h-3 w-3" />
+            </button>
+          </SimpleTooltip>
         </div>
 
         {/* URL Bar */}
@@ -844,14 +847,15 @@ export function ApiTester() {
                             })
                           }
                         />
-                        <button
-                          type="button"
-                          className="api-delete-row-btn"
-                          onClick={() => store.removeParam(row.id)}
-                          title="Delete parameter"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <SimpleTooltip content="Delete parameter">
+                          <button
+                            type="button"
+                            className="api-delete-row-btn"
+                            onClick={() => store.removeParam(row.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </SimpleTooltip>
                       </div>
                     ))}
                     <button
@@ -905,14 +909,15 @@ export function ApiTester() {
                                 : []
                           }
                         />
-                        <button
-                          type="button"
-                          className="api-delete-row-btn"
-                          onClick={() => store.removeHeader(row.id)}
-                          title="Delete header"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <SimpleTooltip content="Delete header">
+                          <button
+                            type="button"
+                            className="api-delete-row-btn"
+                            onClick={() => store.removeHeader(row.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </SimpleTooltip>
                       </div>
                     ))}
                     <button
@@ -1150,21 +1155,20 @@ export function ApiTester() {
                                 })
                               }
                             />
-                            <button
-                              type="button"
-                              className="api-delete-row-btn"
-                              onClick={() => setShowPassword(!showPassword)}
-                              title={
-                                showPassword ? "Hide password" : "Show password"
-                              }
-                              style={{ flexShrink: 0 }}
-                            >
-                              {showPassword ? (
-                                <EyeOff className="h-3.5 w-3.5" />
-                              ) : (
-                                <Eye className="h-3.5 w-3.5" />
-                              )}
-                            </button>
+                            <SimpleTooltip content={showPassword ? "Hide password" : "Show password"}>
+                              <button
+                                type="button"
+                                className="api-delete-row-btn"
+                                onClick={() => setShowPassword(!showPassword)}
+                                style={{ flexShrink: 0 }}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Eye className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            </SimpleTooltip>
                           </div>
                           <span className="api-auth-hint">
                             Will be Base64-encoded as: Authorization: Basic

@@ -28,6 +28,7 @@ import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  SimpleTooltip,
 } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -665,26 +666,30 @@ export function DiffChecker() {
                         {session.name}
                       </span>
                     )}
-                    <span
-                      className="tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSession(session.id);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
+                    <SimpleTooltip content="Close Tab">
+                      <span
+                        className="tab-close"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSession(session.id);
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </span>
+                    </SimpleTooltip>
                   </button>
                 </SortableTab>
               ))}
             </SortableContext>
           </DndContext>
-          <button
-            className="tab-new"
-            onClick={() => createSession()}
-          >
-            <Plus className="h-4 w-4" />
-          </button>
+          <SimpleTooltip content="New Diff Session">
+            <button
+              className="tab-new"
+              onClick={() => createSession()}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </SimpleTooltip>
         </div>
 
         <div className="tabs-toolbar">
