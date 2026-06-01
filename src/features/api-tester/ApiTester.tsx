@@ -1189,6 +1189,7 @@ export function ApiTester() {
               className="api-curl-btn"
               onClick={() => {
                 setShowImportCurl(!showImportCurl);
+                setShowCodeSnippet(false);
                 setImportError(null);
                 setCurlImportValue("");
               }}
@@ -1206,8 +1207,16 @@ export function ApiTester() {
             <button
               type="button"
               className="api-curl-btn"
-              onClick={() => setShowCodeSnippet(true)}
+              onClick={() => {
+                setShowCodeSnippet(!showCodeSnippet);
+                setShowImportCurl(false);
+              }}
               title="Generate code snippet"
+              style={{
+                borderColor: showCodeSnippet ? "var(--accent)" : "",
+                background: showCodeSnippet ? "var(--accent-glow)" : "",
+                color: showCodeSnippet ? "var(--accent)" : "",
+              }}
             >
               <Code2 className="h-3.5 w-3.5" />
               <span>Code</span>
