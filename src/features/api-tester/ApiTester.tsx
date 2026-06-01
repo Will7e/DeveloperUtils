@@ -2357,10 +2357,10 @@ export function ApiTester() {
 
                   {/* Body */}
                   <div style={{ flex: 1, padding: '0 36px 36px', overflowY: 'auto' }}>
-                    <div style={{ background: 'var(--bg-0)', border: '1px solid var(--border-1)', borderRadius: '12px', overflow: 'hidden' }}>
-                      <div className="api-kv-editor">
+                    <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border-1)', borderRadius: '12px', overflow: 'hidden' }}>
+                      <div className="api-kv-editor" style={{ gap: 0 }}>
                         {(settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || []).map((v, i) => (
-                          <div key={v.id} className="api-kv-row">
+                          <div key={v.id} className="api-kv-row" style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-1)', borderRadius: 0, gap: '12px', background: 'transparent' }}>
                             <button
                               onClick={() => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
@@ -2381,7 +2381,6 @@ export function ApiTester() {
                                 justifyContent: 'center',
                                 cursor: 'pointer',
                                 padding: 0,
-                                marginLeft: '8px',
                                 transition: 'all 0.1s'
                               }}
                               title={v.enabled ? "Disable Variable" : "Enable Variable"}
@@ -2391,9 +2390,11 @@ export function ApiTester() {
                             <input
                               type="text"
                               className="api-kv-input"
-                              placeholder="Variable Name (e.g. host)"
+                              placeholder="Variable Name"
                               value={v.key}
-                              style={{ fontWeight: 500, color: 'var(--accent)' }}
+                              style={{ fontWeight: 500, color: 'var(--accent)', background: 'transparent', border: '1px solid transparent', padding: '4px 8px', boxShadow: 'none', transition: 'all 0.15s ease' }}
+                              onFocus={(e) => { e.currentTarget.style.background = 'var(--bg-2)'; e.currentTarget.style.borderColor = 'var(--border-2)'; }}
+                              onBlur={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
                               onChange={(e) => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
                                 const newVars = [...sourceVars];
@@ -2402,12 +2403,17 @@ export function ApiTester() {
                                 else store.setEnvironmentVars(settingsEnvId, newVars);
                               }}
                             />
+                            
+                            <div style={{ width: '1px', alignSelf: 'stretch', background: 'var(--border-2)', margin: '0 4px' }} />
+                            
                             <input
                               type="text"
                               className="api-kv-input"
                               placeholder="Value"
                               value={v.value}
-                              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', background: 'transparent', border: '1px solid transparent', padding: '4px 8px', boxShadow: 'none', transition: 'all 0.15s ease' }}
+                              onFocus={(e) => { e.currentTarget.style.background = 'var(--bg-2)'; e.currentTarget.style.borderColor = 'var(--border-2)'; }}
+                              onBlur={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
                               onChange={(e) => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
                                 const newVars = [...sourceVars];
@@ -2418,7 +2424,7 @@ export function ApiTester() {
                             />
                             <button
                               className="api-kv-remove"
-                              style={{ width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-3)' }}
+                              style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-3)' }}
                               onClick={() => {
                                 const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
                                 if (sourceVars.length > 1) {
@@ -2445,7 +2451,7 @@ export function ApiTester() {
                           </div>
                         ))}
                         
-                        <div style={{ padding: '8px', borderTop: '1px solid var(--border-1)' }}>
+                        <div style={{ padding: '8px 12px', background: 'var(--bg-1)' }}>
                           <button
                             onClick={() => {
                               const sourceVars = settingsEnvId === 'global' ? store.envVars : store.environments.find(e => e.id === settingsEnvId)?.variables || [];
