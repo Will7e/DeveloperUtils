@@ -13,6 +13,7 @@ import { ComparatorsPage } from "@/pages/ComparatorsPage";
 import { DiffCheckerPage } from "@/pages/DiffCheckerPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { WorkflowPage } from "@/pages/WorkflowPage";
+import { ApiTesterPage } from "@/pages/ApiTesterPage";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
@@ -43,6 +44,7 @@ function App() {
             <Route path="/diff" element={<DiffCheckerPage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/workflows" element={<WorkflowPage />} />
+            <Route path="/api-tester" element={<ApiTesterPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

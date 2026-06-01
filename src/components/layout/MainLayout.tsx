@@ -16,6 +16,7 @@ import {
   FileDiff,
   Library,
   GitFork,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -162,6 +163,14 @@ export function MainLayout() {
             icon={<GitFork className="h-[18px] w-[18px]" />}
             label="Workflows"
             active={location.pathname === "/workflows"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/api-tester"
+            icon={<Globe className="h-[18px] w-[18px]" />}
+            label="API Tester"
+            active={location.pathname === "/api-tester"}
             collapsed={sidebarCollapsed}
           />
 
