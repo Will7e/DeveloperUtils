@@ -105,6 +105,9 @@ interface ApiTesterState {
   environments: Environment[]; // Custom environments (Staging, Production, etc.)
   activeEnvironmentId: string | null; // active environment id, null means only Globals are used
 
+  isInitialized: boolean;
+  init: () => Promise<void>;
+
   // Tab management
   addTab: () => void;
   removeTab: (id: string) => void;
@@ -172,7 +175,7 @@ interface ApiTesterState {
   setEnvVars: (vars: KeyValueField[]) => void;
   
   // Multi-Environment
-  addEnvironment: (name: string) => void;
+  addEnvironment: (name: string) => string;
   updateEnvironment: (id: string, name: string) => void;
   removeEnvironment: (id: string) => void;
   setActiveEnvironment: (id: string | null) => void;
@@ -220,125 +223,40 @@ const createNewTab = (name: string): TabState => ({
   error: null,
 });
 
-// Load history from LocalStorage
-const loadStoredHistory = (): HistoryItem[] => {
-  try {
-    const saved = localStorage.getItem("devutils_api_history");
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
-};
+import { apiStorage } from "./api-tester.storage";
 
-// Save history to LocalStorage
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): T {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  return ((...args: any[]) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  }) as T;
+}
+
+const debouncedSaveTabs = debounce((tabs: TabState[], activeTabId: string) => {
+  apiStorage.saveTabs(tabs, activeTabId);
+}, 500);
+
+// We keep these synchronous wrappers for the rest of the file to use,
+// but they now forward to our async database adapter.
 const saveStoredHistory = (history: HistoryItem[]) => {
-  try {
-    localStorage.setItem("devutils_api_history", JSON.stringify(history));
-  } catch (e) {
-    console.error("Failed to save history", e);
-  }
+  apiStorage.saveHistory(history);
 };
 
-// Load collections from LocalStorage
-const loadStoredCollections = (): ImportedCollection[] => {
-  try {
-    const saved = localStorage.getItem("devutils_api_collections");
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
-};
-
-// Save collections to LocalStorage
 const saveStoredCollections = (collections: ImportedCollection[]) => {
-  try {
-    localStorage.setItem("devutils_api_collections", JSON.stringify(collections));
-  } catch (e) {
-    console.error("Failed to save collections", e);
-  }
+  apiStorage.saveCollections(collections);
 };
 
-// Load env vars from LocalStorage
-const loadStoredEnvVars = (): KeyValueField[] => {
-  try {
-    const saved = localStorage.getItem("devutils_api_env_vars");
-    return saved ? JSON.parse(saved) : [createEmptyField()];
-  } catch {
-    return [createEmptyField()];
-  }
-};
-
-// Save env vars to LocalStorage
 const saveStoredEnvVars = (vars: KeyValueField[]) => {
-  try {
-    localStorage.setItem("devutils_api_env_vars", JSON.stringify(vars));
-  } catch (e) {
-    console.error("Failed to save env vars", e);
-  }
+  apiStorage.saveEnvVars(vars);
 };
 
-// Load environments from LocalStorage
-const loadStoredEnvironments = (): Environment[] => {
-  try {
-    const saved = localStorage.getItem("devutils_api_environments");
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
-};
-
-// Save environments to LocalStorage
 const saveStoredEnvironments = (envs: Environment[]) => {
-  try {
-    localStorage.setItem("devutils_api_environments", JSON.stringify(envs));
-  } catch (e) {
-    console.error("Failed to save environments", e);
-  }
+  apiStorage.saveEnvironments(envs);
 };
 
-// Load active environment from LocalStorage
-const loadStoredActiveEnvId = (): string | null => {
-  try {
-    const saved = localStorage.getItem("devutils_api_active_env");
-    return saved ? JSON.parse(saved) : null;
-  } catch {
-    return null;
-  }
-};
-
-// Save active environment to LocalStorage
 const saveStoredActiveEnvId = (id: string | null) => {
-  try {
-    localStorage.setItem("devutils_api_active_env", JSON.stringify(id));
-  } catch (e) {
-    console.error("Failed to save active environment", e);
-  }
-};
-
-// Load tabs from LocalStorage
-const loadStoredTabs = (): { tabs: TabState[]; activeTabId: string } | null => {
-  try {
-    const saved = localStorage.getItem("devutils_api_tabs");
-    if (!saved) return null;
-    const parsed = JSON.parse(saved) as { tabs: TabState[]; activeTabId: string };
-    if (!parsed.tabs || parsed.tabs.length === 0) return null;
-    // Reset transient state on load
-    parsed.tabs = parsed.tabs.map(t => ({ ...t, loading: false, error: null }));
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-// Save tabs to LocalStorage
-const saveStoredTabs = (tabs: TabState[], activeTabId: string) => {
-  try {
-    // Strip transient fields to save space
-    const serializable = tabs.map(t => ({ ...t, loading: false, error: null }));
-    localStorage.setItem("devutils_api_tabs", JSON.stringify({ tabs: serializable, activeTabId }));
-  } catch (e) {
-    console.error("Failed to save tabs", e);
-  }
+  apiStorage.saveActiveEnvId(id);
 };
 
 // Substitute environment variables in a string
@@ -394,25 +312,45 @@ export function applyAuth(
 }
 
 export const useApiTesterStore = create<ApiTesterState>((set, get) => {
-  // Restore persisted tabs or create a default
-  const storedTabs = loadStoredTabs();
-  const initialTab = storedTabs ? storedTabs.tabs : [createNewTab("Tab 1")];
-  const initialActiveId = storedTabs ? storedTabs.activeTabId : initialTab[0]!.id;
+  const initialTab = createNewTab("Tab 1");
 
-  // Helper: persist tabs after any mutation
+  // Helper: persist tabs after any mutation using our debounced storage adapter
   const persistTabs = () => {
     const { tabs, activeTabId } = get();
-    saveStoredTabs(tabs, activeTabId);
+    debouncedSaveTabs(tabs, activeTabId);
   };
 
   return {
-    tabs: initialTab,
-    activeTabId: initialActiveId,
-    history: loadStoredHistory(),
-    collections: loadStoredCollections(),
-    envVars: loadStoredEnvVars(),
-    environments: loadStoredEnvironments(),
-    activeEnvironmentId: loadStoredActiveEnvId(),
+    isInitialized: false,
+    tabs: [initialTab],
+    activeTabId: initialTab.id,
+    history: [],
+    collections: [],
+    envVars: [createEmptyField()],
+    environments: [],
+    activeEnvironmentId: null,
+
+    init: async () => {
+      if (get().isInitialized) return;
+      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId] = await Promise.all([
+        apiStorage.getTabs(),
+        apiStorage.getHistory(),
+        apiStorage.getCollections(),
+        apiStorage.getEnvVars(),
+        apiStorage.getEnvironments(),
+        apiStorage.getActiveEnvId()
+      ]);
+      set({
+        isInitialized: true,
+        tabs: storedTabs ? storedTabs.tabs : [initialTab],
+        activeTabId: storedTabs ? storedTabs.activeTabId : initialTab.id,
+        history,
+        collections,
+        envVars: envVars.length > 0 ? envVars : [createEmptyField()],
+        environments,
+        activeEnvironmentId
+      });
+    },
 
     // Tab management
     addTab: () => {
@@ -858,23 +796,25 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           .filter(h => h.enabled && h.key.trim() !== "")
           .map(h => ({ key: h.key, value: h.value }));
 
-        const newHistoryItem: HistoryItem = {
-          id: genId(),
-          timestamp: Date.now(),
-          method,
-          url,
-          status: res.status,
-          time: timeMs,
-          headers: activeHeaders,
-          bodyType,
-          bodyValue: bodyType !== "none" ? bodyValue : undefined,
-          formParams: bodyType === "form-data" ? formParams.filter(f => f.enabled && f.key.trim() !== "").map(f => ({ key: f.key, value: f.value })) : undefined,
-          authType,
-          authConfig: authType !== "none" ? { ...authConfig } : undefined,
-        };
-
         set((state) => {
-          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
+          const historyId = state.activeTabId;
+
+          const newHistoryItem: HistoryItem = {
+            id: historyId,
+            timestamp: Date.now(),
+            method,
+            url,
+            status: res.status,
+            time: timeMs,
+            headers: activeHeaders,
+            bodyType,
+            bodyValue: bodyType !== "none" ? bodyValue : undefined,
+            formParams: bodyType === "form-data" ? formParams.filter(f => f.enabled && f.key.trim() !== "").map(f => ({ key: f.key, value: f.value })) : undefined,
+            authType,
+            authConfig: authType !== "none" ? { ...authConfig } : undefined,
+          };
+
+          const updatedHistory = [newHistoryItem, ...state.history.filter(h => h.id !== historyId)].slice(0, 50);
           saveStoredHistory(updatedHistory);
           return {
             history: updatedHistory,
@@ -892,16 +832,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           : err.message || "Failed to complete network request. This could be due to a CORS issue or network disconnect.";
 
         // Add failed entry to history
-        const newHistoryItem: HistoryItem = {
-          id: genId(),
-          timestamp: Date.now(),
-          method,
-          url,
-          error: true,
-        };
-
         set((state) => {
-          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
+          const historyId = state.activeTabId;
+
+          const newHistoryItem: HistoryItem = {
+            id: historyId,
+            timestamp: Date.now(),
+            method,
+            url,
+            error: true,
+          };
+
+          const updatedHistory = [newHistoryItem, ...state.history.filter(h => h.id !== historyId)].slice(0, 50);
           saveStoredHistory(updatedHistory);
           return {
             history: updatedHistory,
@@ -911,10 +853,17 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       }
     },
 
-    // Load request details from a saved history item into a new tab
+    // Load request details from a saved history item into the active tab
     loadHistoryItem: (item) => {
+      const existingTab = get().tabs.find(t => t.id === item.id);
+      if (existingTab) {
+        set({ activeTabId: existingTab.id });
+        return;
+      }
+
       set((state) => {
         const newTab = createNewTab(`History: ${item.method}`);
+        newTab.id = item.id;
         newTab.method = item.method;
         newTab.url = item.url;
         
@@ -923,17 +872,24 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             ...item.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
             createEmptyField(),
           ];
+        } else {
+          newTab.headers = [createEmptyField()];
         }
-        if (item.bodyType) newTab.bodyType = item.bodyType;
-        if (item.bodyValue) newTab.bodyValue = item.bodyValue;
+        
+        newTab.bodyType = item.bodyType || "none";
+        newTab.bodyValue = item.bodyValue || "";
+        
         if (item.formParams && item.formParams.length > 0) {
           newTab.formParams = [
             ...item.formParams.map(f => ({ id: genId(), key: f.key, value: f.value, enabled: true })),
             createEmptyField(),
           ];
+        } else {
+          newTab.formParams = [createEmptyField()];
         }
-        if (item.authType) newTab.authType = item.authType;
-        if (item.authConfig) newTab.authConfig = { ...defaultAuthConfig, ...item.authConfig };
+        
+        newTab.authType = item.authType || "none";
+        newTab.authConfig = item.authConfig ? { ...defaultAuthConfig, ...item.authConfig } : { ...defaultAuthConfig };
         
         return {
           tabs: [...state.tabs, newTab],
@@ -950,40 +906,48 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set({ history: [] });
     },
 
-    // Load template presets into a new tab with descriptive tab naming
+    // Load template presets into the active tab
     loadPreset: (preset) => {
       set((state) => {
-        const newTab = createNewTab(preset.name || preset.method);
-        newTab.method = preset.method;
-        newTab.url = preset.url;
-        newTab.bodyType = preset.bodyType || "none";
-        newTab.bodyValue = preset.bodyValue || "";
+        const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+        if (!activeTab) return state;
+
+        const updatedTab = { ...activeTab };
+        updatedTab.method = preset.method;
+        updatedTab.url = preset.url;
+        updatedTab.bodyType = preset.bodyType || "none";
+        updatedTab.bodyValue = preset.bodyValue || "";
 
         if (preset.params && preset.params.length > 0) {
-          newTab.params = [
+          updatedTab.params = [
             ...preset.params.map(p => ({ id: genId(), key: p.key, value: p.value, enabled: true })),
             createEmptyField(),
           ];
+        } else {
+          updatedTab.params = [createEmptyField()];
         }
 
         if (preset.headers && preset.headers.length > 0) {
-          newTab.headers = [
+          updatedTab.headers = [
             ...preset.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
             createEmptyField(),
           ];
         } else {
-          newTab.headers = [
+          updatedTab.headers = [
             { id: genId(), key: "Content-Type", value: "application/json", enabled: true },
             createEmptyField(),
           ];
         }
 
         return {
-          tabs: [...state.tabs, newTab],
-          activeTabId: newTab.id,
+          tabs: state.tabs.map((t) => (t.id === state.activeTabId ? updatedTab : t)),
         };
       });
-      get().syncUrlFromParams();
+      if (preset.params && preset.params.length > 0) {
+        get().syncUrlFromParams();
+      } else {
+        get().syncParamsFromUrl(preset.url);
+      }
       persistTabs();
     },
 
@@ -1266,9 +1230,10 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     
     // Multi-Environment
     addEnvironment: (name: string) => {
+      const newId = genId();
       set((state) => {
         const newEnv: Environment = {
-          id: genId(),
+          id: newId,
           name,
           variables: [createEmptyField()]
         };
@@ -1276,6 +1241,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         saveStoredEnvironments(updated);
         return { environments: updated };
       });
+      return newId;
     },
     
     updateEnvironment: (id: string, name: string) => {

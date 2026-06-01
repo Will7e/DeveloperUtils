@@ -431,6 +431,11 @@ function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispat
 export function ApiTester() {
   const store = useApiTesterStore();
   const addToast = useAppStore((s) => s.addToast);
+  
+  useEffect(() => {
+    store.init();
+  }, [store]);
+
   const tabs = store.tabs || [];
   const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
 
@@ -1098,7 +1103,8 @@ export function ApiTester() {
                       alignItems: 'center',
                       justifyContent: 'space-between'
                     }}
-                    onClick={() => {
+                    onMouseDown={(e) => {
+                      e.preventDefault();
                       store.setActiveEnvironment(null);
                       setShowEnvDropdown(false);
                     }}
@@ -1126,7 +1132,8 @@ export function ApiTester() {
                         alignItems: 'center',
                         justifyContent: 'space-between'
                       }}
-                      onClick={() => {
+                      onMouseDown={(e) => {
+                        e.preventDefault();
                         store.setActiveEnvironment(env.id);
                         setShowEnvDropdown(false);
                       }}
@@ -2313,7 +2320,8 @@ export function ApiTester() {
                 <button 
                   onClick={() => {
                     const envCount = store.environments.length + 1;
-                    store.addEnvironment(`Environment ${envCount}`);
+                    const newId = store.addEnvironment(`Environment ${envCount}`);
+                    setSettingsEnvId(newId);
                   }}
                   style={{ 
                     width: '100%', 

@@ -399,7 +399,7 @@
   align-items: flex-end;
   height: 36px;
   flex-shrink: 0;
-  overflow: hidden;
+  /* overflow removed to allow absolute positioning of dropdowns to spill out */
 }
 
 .api-tabs-scroll-container {
