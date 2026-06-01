@@ -291,22 +291,40 @@ function RawTypeDropdown({
 
 // ── Autocomplete Input Component ─────────────────────────────
 const HEADER_KEYS = [
-  "Content-Type",
-  "Authorization",
   "Accept",
-  "User-Agent",
+  "Accept-Encoding",
+  "Accept-Language",
+  "Authorization",
   "Cache-Control",
+  "Content-Type",
+  "User-Agent",
   "X-API-Key",
 ];
 
-const HEADER_VALUES = [
+const COMMON_MIME_TYPES = [
   "application/json",
   "application/xml",
+  "application/x-www-form-urlencoded",
   "text/plain",
   "text/html",
   "multipart/form-data",
-  "Bearer ",
 ];
+
+const HEADER_VALUES_MAP: Record<string, string[]> = {
+  "accept": COMMON_MIME_TYPES,
+  "content-type": COMMON_MIME_TYPES,
+  "authorization": ["Bearer ", "Basic ", "Digest ", "OAuth "],
+  "cache-control": [
+    "no-cache",
+    "no-store",
+    "no-cache, no-store, must-revalidate",
+    "max-age=3600",
+    "public",
+    "private",
+  ],
+  "accept-encoding": ["gzip", "deflate", "br", "gzip, deflate, br"],
+  "accept-language": ["en-US,en;q=0.9", "en-GB,en;q=0.8", "fr-FR,fr;q=0.9", "es-ES,es;q=0.9"],
+};
 
 function AutocompleteInput({
   value,
@@ -1045,13 +1063,7 @@ export function ApiTester() {
                           onChange={(val) =>
                             store.updateHeader(row.id, { value: val })
                           }
-                          options={
-                            row.key.toLowerCase() === "content-type"
-                              ? HEADER_VALUES
-                              : row.key.toLowerCase() === "authorization"
-                                ? ["Bearer ", "Basic "]
-                                : []
-                          }
+                          options={HEADER_VALUES_MAP[row.key.toLowerCase()] || []}
                         />
                         <SimpleTooltip content="Delete header">
                           <button
