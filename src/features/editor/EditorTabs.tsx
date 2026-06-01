@@ -17,7 +17,6 @@ import { LANGUAGE_CONFIGS } from "@/config";
 import { cn } from "@/lib/utils";
 import { compilerService } from "@/services/compiler.service";
 import { formatDuration } from "@/lib/utils";
-import { playSound } from "@/lib/sounds";
 import type { Language } from "@/types";
 
 interface ActionTooltipProps {
@@ -75,7 +74,6 @@ export function EditorTabs() {
   const setExecutionStartTime = useAppStore((s) => s.setExecutionStartTime);
   const setOutputFlash = useAppStore((s) => s.setOutputFlash);
   const addToast = useAppStore((s) => s.addToast);
-  const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
   const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
   const cancelExecution = useAppStore((s) => s.cancelExecution);
 
@@ -144,8 +142,6 @@ export function EditorTabs() {
     setExecutionStartTime(Date.now());
     clearOutput();
 
-    if (soundEffects) playSound("run");
-
     addOutputEntry({
       type: "info",
       content: `Running ${activeFile.name}...`,
@@ -200,7 +196,6 @@ export function EditorTabs() {
       });
 
       setOutputFlash(isSuccess ? "success" : "error");
-      if (soundEffects) playSound(isSuccess ? "success" : "error");
 
     } catch (error) {
       addOutputEntry({
@@ -208,7 +203,6 @@ export function EditorTabs() {
         content: `Error: ${error instanceof Error ? error.message : String(error)}`,
       });
       setOutputFlash("error");
-      if (soundEffects) playSound("error");
     } finally {
       setIsRunning(false);
       setExecutionStartTime(null);
@@ -226,7 +220,6 @@ export function EditorTabs() {
     setExecutionStartTime,
     setOutputFlash,
     addToast,
-    soundEffects,
     executionTimeout,
   ]);
 
@@ -255,10 +248,9 @@ export function EditorTabs() {
     });
 
     setOutputFlash("error");
-    if (soundEffects) playSound("error");
 
     addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
-  }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, soundEffects, addToast]);
+  }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, addToast]);
 
   return (
     <>

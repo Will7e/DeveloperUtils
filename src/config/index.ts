@@ -13,7 +13,6 @@ export const DEFAULT_EDITOR_SETTINGS = {
   bracketPairColorization: true,
   formatOnPaste: true,
   formatOnType: false,
-  soundEffects: false,
   executionTimeout: 10000,
 };
 

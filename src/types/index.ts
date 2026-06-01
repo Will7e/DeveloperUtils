@@ -81,7 +81,6 @@ export interface EditorSettings {
   bracketPairColorization: boolean;
   formatOnPaste: boolean;
   formatOnType: boolean;
-  soundEffects: boolean;
   executionTimeout: number; // milliseconds, default 10000
 }
 

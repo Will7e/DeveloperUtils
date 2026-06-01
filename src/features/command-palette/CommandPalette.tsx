@@ -13,8 +13,6 @@ import {
   Download,
   Sun,
   Moon,
-  Volume2,
-  VolumeX,
   X,
   StopCircle,
   Wand2,
@@ -195,22 +193,7 @@ export function CommandPalette() {
           }
         },
       },
-      {
-        id: "toggle-sound",
-        label: editorSettings.soundEffects ? "Disable Sound Effects" : "Enable Sound Effects",
-        category: "Settings",
-        icon: editorSettings.soundEffects
-          ? <VolumeX style={{ width: 14, height: 14 }} />
-          : <Volume2 style={{ width: 14, height: 14 }} />,
-        action: () => {
-          updateEditorSettings({ soundEffects: !editorSettings.soundEffects });
-          addToast({
-            message: editorSettings.soundEffects ? "Sound effects disabled" : "Sound effects enabled",
-            type: "info",
-            duration: 1500,
-          });
-        },
-      },
+
       {
         id: "toggle-minimap",
         label: editorSettings.minimap ? "Hide Minimap" : "Show Minimap",

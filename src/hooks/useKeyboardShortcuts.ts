@@ -9,7 +9,6 @@ import { useApiTesterStore } from "@/stores/api-tester.store";
 import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { formatDuration } from "@/lib/utils";
-import { playSound } from "@/lib/sounds";
 
 export function useKeyboardShortcuts() {
   const navigate = useNavigate();
@@ -28,7 +27,6 @@ export function useKeyboardShortcuts() {
   const setOutputFlash = useAppStore((s) => s.setOutputFlash);
   const addToast = useAppStore((s) => s.addToast);
   const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
-  const soundEffects = useAppStore((s) => s.editorSettings.soundEffects);
   const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
   const cancelExecution = useAppStore((s) => s.cancelExecution);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
@@ -57,7 +55,6 @@ export function useKeyboardShortcuts() {
             content: "⛔ Execution cancelled by user",
           });
           setOutputFlash("error");
-          if (soundEffects) playSound("error");
           addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
         }
         return;
@@ -76,7 +73,6 @@ export function useKeyboardShortcuts() {
         setIsRunning(true);
         setExecutionStartTime(Date.now());
         clearOutput();
-        if (soundEffects) playSound("run");
         addOutputEntry({ type: "info", content: `Running ${activeFile.name}...` });
         addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
 
@@ -121,7 +117,6 @@ export function useKeyboardShortcuts() {
           });
 
           setOutputFlash(isSuccess ? "success" : "error");
-          if (soundEffects) playSound(isSuccess ? "success" : "error");
 
         } catch (error) {
           addOutputEntry({
@@ -129,7 +124,6 @@ export function useKeyboardShortcuts() {
             content: `Error: ${error instanceof Error ? error.message : String(error)}`,
           });
           setOutputFlash("error");
-          if (soundEffects) playSound("error");
         } finally {
           setIsRunning(false);
           setExecutionStartTime(null);
@@ -235,7 +229,7 @@ export function useKeyboardShortcuts() {
         }
       }
     },
-    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, navigate]
+    [activeFile, isRunning, outputPanelOpen, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, navigate]
   );
 
   useEffect(() => {
