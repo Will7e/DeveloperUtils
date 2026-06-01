@@ -31,7 +31,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
-import { useResizable } from "@/hooks/useResizable";
+import { 
+  Panel, 
+  Group as PanelGroup, 
+  Separator as PanelResizeHandle 
+} from "react-resizable-panels";
 import { 
   Tooltip, 
   TooltipTrigger, 
@@ -100,10 +104,9 @@ export function FormatterTool() {
         { token: "variable", foreground: "e8eaed" },
       ],
       colors: {
-        "editor.background": "#00000000",
+        "editor.background": "#0f172a00",
         "editor.lineHighlightBackground": "#ffffff05",
         "editorLineNumber.foreground": "#2a2f42",
-        "minimap.background": "#00000000",
       },
     });
 
@@ -119,10 +122,9 @@ export function FormatterTool() {
         { token: "variable", foreground: "1e293b" },
       ],
       colors: {
-        "editor.background": "#00000000",
+        "editor.background": "#ffffff00",
         "editor.lineHighlightBackground": "#0000000a",
         "editorLineNumber.foreground": "#cbd5e1",
-        "minimap.background": "#00000000",
       },
     });
 
@@ -145,15 +147,6 @@ export function FormatterTool() {
       }
     }
   }, [currentThemeSetting]);
-
-  // Split Resizing
-  const { size: splitSize, containerRef, handleMouseDown, isDragging } = useResizable({
-    direction: "horizontal",
-    initialSize: 50,
-    storageKey: "formatter-split-size",
-    minSize: 20,
-    maxSize: 80
-  });
 
   const [jsonSettings, setJsonSettings] = useState<JsonFormatOptions>({
     tabSize: 2,
@@ -494,137 +487,128 @@ export function FormatterTool() {
       </div>
 
       <div 
-        ref={containerRef}
         className={cn(
           "json-formatter-content",
           isPreviewFullscreen && "fullscreen-preview"
         )}
       >
-        {/* Input Section */}
-        {!isPreviewFullscreen && (
-          <div 
-            className="json-input-section"
-            style={{ width: `${splitSize}%`, flex: "none" }}
-          >
-            <div className="tabs-bar">
-              <div className="tabs-list">
-                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                  <SortableContext items={files.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                    {files.map(file => (
-                      <SortableTab key={file.id} id={file.id}>
-                        <button 
-                          className={cn(
-                            "tab",
-                            activeFile.id === file.id && "tab-active"
-                          )}
-                          onClick={() => setActiveFile(type, file.id)}
-                          onDoubleClick={() => {
-                            setEditName(file.name);
-                            setEditingFileId(file.id);
-                          }}
-                        >
-                          <span className={cn("tab-icon", `tab-icon-${type}`)}>
-                            {type === "json" ? "{}" : "<>"}
-                          </span>
-                          {editingFileId === file.id ? (
-                            <input
-                              autoFocus
-                              className="tab-rename-input"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              onBlur={() => {
-                                if (editName.trim() && editName !== file.name) {
-                                  renameFile(type, file.id, editName.trim());
-                                }
-                                setEditingFileId(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.currentTarget.blur();
-                                } else if (e.key === "Escape") {
-                                  setEditingFileId(null);
-                                }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          ) : (
-                            <span className="tab-name">
-                              {file.name}
-                            </span>
-                          )}
-                          <span 
-                            className="tab-close"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteFile(type, file.id);
-                            }}
-                          >
-                            <X className="h-3 w-3" />
-                          </span>
-                        </button>
-                      </SortableTab>
-                    ))}
-                  </SortableContext>
-                </DndContext>
-                <button 
-                  className="tab-new"
-                  onClick={() => createFile(type)}
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 w-full relative">
-              <Editor
-                height="100%"
-                language={type}
-                value={currentInput}
-                onChange={(value) => updateContent(type, activeFile.id, value || "")}
-                onMount={handleEditorMount}
-                theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
-                options={{
-                  minimap: { enabled: true },
-                  scrollBeyondLastLine: false,
-                  wordWrap: "on",
-                  padding: { top: 16, bottom: 16 },
-                  formatOnPaste: true,
-                  formatOnType: true,
-                  folding: true,
-                  renderValidationDecorations: "on",
-                  bracketPairColorization: { enabled: true },
-                  fontSize: 13,
-                  fontFamily: "var(--font-mono)",
-                  lineNumbers: "on",
-                  renderLineHighlight: "all",
-                  scrollbar: {
-                    useShadows: false,
-                    verticalScrollbarSize: 10,
-                    horizontalScrollbarSize: 10,
-                  }
-                }}
-                loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading advanced editor...</div>}
-              />
-            </div>
-          </div>
-        )}
+        <PanelGroup orientation="horizontal" autoSaveId="formatter-split-size">
+          {/* Input Section */}
+          {!isPreviewFullscreen && (
+            <>
+              <Panel defaultSize={50} minSize={20}>
+                <div className="json-input-section h-full">
+                  <div className="tabs-bar">
+                    <div className="tabs-list">
+                      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <SortableContext items={files.map(f => f.id)} strategy={horizontalListSortingStrategy}>
+                          {files.map(file => (
+                            <SortableTab key={file.id} id={file.id}>
+                              <button 
+                                className={cn(
+                                  "tab",
+                                  activeFile.id === file.id && "tab-active"
+                                )}
+                                onClick={() => setActiveFile(type, file.id)}
+                                onDoubleClick={() => {
+                                  setEditName(file.name);
+                                  setEditingFileId(file.id);
+                                }}
+                              >
+                                <span className={cn("tab-icon", `tab-icon-${type}`)}>
+                                  {type === "json" ? "{}" : "<>"}
+                                </span>
+                                {editingFileId === file.id ? (
+                                  <input
+                                    autoFocus
+                                    className="tab-rename-input"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    onBlur={() => {
+                                      if (editName.trim() && editName !== file.name) {
+                                        renameFile(type, file.id, editName.trim());
+                                      }
+                                      setEditingFileId(null);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        e.currentTarget.blur();
+                                      } else if (e.key === "Escape") {
+                                        setEditingFileId(null);
+                                      }
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <span className="tab-name">
+                                    {file.name}
+                                  </span>
+                                )}
+                                <span 
+                                  className="tab-close"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteFile(type, file.id);
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </span>
+                              </button>
+                            </SortableTab>
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                      <button 
+                        className="tab-new"
+                        onClick={() => createFile(type)}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 w-full relative">
+                    <Editor
+                      height="100%"
+                      language={type}
+                      value={currentInput}
+                      onChange={(value) => updateContent(type, activeFile.id, value || "")}
+                      onMount={handleEditorMount}
+                      theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                      options={{
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        wordWrap: "on",
+                        padding: { top: 16, bottom: 16 },
+                        formatOnPaste: true,
+                        formatOnType: true,
+                        folding: true,
+                        renderValidationDecorations: "on",
+                        bracketPairColorization: { enabled: true },
+                        fontSize: 13,
+                        fontFamily: "var(--font-mono)",
+                        lineNumbers: "on",
+                        renderLineHighlight: "all",
+                        scrollbar: {
+                          useShadows: false,
+                          verticalScrollbarSize: 10,
+                          horizontalScrollbarSize: 10,
+                        }
+                      }}
+                      loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading advanced editor...</div>}
+                    />
+                  </div>
+                </div>
+              </Panel>
 
-        {/* Resize Handle */}
-        {!isPreviewFullscreen && (
-          <div 
-            className="comparator-resize-handle-h"
-            onMouseDown={handleMouseDown}
-            data-resize-handle-state={isDragging ? "drag" : "idle"}
-          >
-            <div className="resize-handle-indicator" />
-          </div>
-        )}
+              {/* Resize Handle */}
+              <PanelResizeHandle className="comparator-resize-handle-h" />
+            </>
+          )}
 
-        {/* Output Section */}
-        <div 
-          className="json-output-section"
-          style={{ width: isPreviewFullscreen ? "100%" : `${100 - splitSize}%`, flex: isPreviewFullscreen ? 1 : "none" }}
-        >
-          <div className="section-header-row">
+          {/* Output Section */}
+          <Panel defaultSize={50} minSize={20}>
+            <div className="json-output-section h-full">
+              <div className="section-header-row">
             <div className="section-label flex items-center">
               Preview
             </div>
@@ -692,7 +676,9 @@ export function FormatterTool() {
             )}
           </div>
         </div>
-      </div>
-    </div>
+      </Panel>
+    </PanelGroup>
+  </div>
+</div>
   );
 }
