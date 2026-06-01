@@ -136,6 +136,7 @@ html.light {
 html.light ::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.10);
 }
+
 html.light ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.18);
 }
@@ -166,6 +167,7 @@ html.light .activity-logo {
   background: linear-gradient(135deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.06));
   box-shadow: 0 0 12px rgba(2, 132, 199, 0.10);
 }
+
 html.light .activity-logo:hover {
   box-shadow: 0 0 18px rgba(2, 132, 199, 0.20);
 }
@@ -179,6 +181,7 @@ html.light .nav-item-indicator {
 html.light .run-btn {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10), 0 0 12px rgba(2, 132, 199, 0.15);
 }
+
 html.light .run-btn:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 18px rgba(2, 132, 199, 0.25);
 }
@@ -187,6 +190,7 @@ html.light .run-btn:hover {
 html.light .tabs-run-btn {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 8px rgba(34, 197, 94, 0.12);
 }
+
 html.light .tabs-run-btn:hover {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 0 14px rgba(34, 197, 94, 0.20);
 }
@@ -195,9 +199,11 @@ html.light .tabs-run-btn:hover {
 html.light .resize-handle-indicator {
   background: rgba(0, 0, 0, 0.10);
 }
+
 html.light .resize-handle:hover .resize-handle-indicator {
   background: rgba(0, 0, 0, 0.35);
 }
+
 html.light .resize-handle:active .resize-handle-indicator {
   background: #0f172a;
 }
@@ -211,15 +217,19 @@ html.light .tab-active {
 html.light .new-file-dropdown {
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
 }
+
 html.light .settings-panel {
   box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
 }
+
 html.light .palette-container {
   box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
+
 html.light .settings-overlay {
   background: rgba(0, 0, 0, 0.25);
 }
+
 html.light .palette-overlay {
   background: rgba(0, 0, 0, 0.20);
 }
@@ -229,6 +239,7 @@ html.light .palette-item-shortcut {
   background: rgba(0, 0, 0, 0.04);
   border-color: var(--border-2);
 }
+
 html.light .palette-item-active .palette-item-shortcut {
   background: rgba(0, 0, 0, 0.08);
 }
@@ -246,6 +257,7 @@ html.light .devutils-tooltip {
   color: #f8fafc;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.20);
 }
+
 html.light .devutils-tooltip kbd {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.18);
@@ -262,6 +274,7 @@ html.light .dropdown-content {
 html.light .formatter-dropdown {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
 }
+
 html.light .formatter-settings-popover {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
 }
@@ -270,6 +283,7 @@ html.light .formatter-settings-popover {
 html.light .toolbar-action-btn {
   background: rgba(0, 0, 0, 0.03);
 }
+
 html.light .toolbar-action-btn:hover:not(:disabled) {
   background: rgba(0, 0, 0, 0.06);
 }
@@ -289,25 +303,31 @@ html.light .lib-code-block {
   background: #1e293b;
   border-color: rgba(0, 0, 0, 0.12);
 }
+
 html.light .lib-code-toolbar {
   background: rgba(255, 255, 255, 0.04);
   border-bottom-color: rgba(255, 255, 255, 0.06);
 }
+
 html.light .lib-code-text {
   color: #e2e8f0;
 }
+
 html.light .lib-code-ln {
   color: #475569;
   border-right-color: rgba(255, 255, 255, 0.06);
 }
+
 html.light .lib-code-line:hover {
   background: rgba(255, 255, 255, 0.03);
 }
+
 html.light .lib-code-copy-btn {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.12);
   color: #cbd5e1;
 }
+
 html.light .lib-code-copy-btn:hover {
   background: rgba(255, 255, 255, 0.14);
   color: #f1f5f9;
@@ -328,6 +348,7 @@ html.light .lib-view-header {
 html.light .lib-view-empty-glow {
   background: radial-gradient(circle at 50% 40%, rgba(2, 132, 199, 0.06) 0%, transparent 60%);
 }
+
 html.light .lib-view-empty-icon-ring {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 }
@@ -336,6 +357,7 @@ html.light .lib-view-empty-icon-ring {
 html.light .sidebar-collapsed-file-active::before {
   box-shadow: 0 0 6px rgba(2, 132, 199, 0.3);
 }
+
 html.light .sidebar-file-active::before {
   box-shadow: 0 0 6px rgba(2, 132, 199, 0.2);
 }
@@ -351,22 +373,27 @@ html.light .dash-hero-badge {
   border-color: rgba(2, 132, 199, 0.20);
   color: #0369a1;
 }
+
 html.light .dash-hero-accent {
   background: linear-gradient(135deg, #0284c7, #0369a1, #075985);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
 html.light .dash-card {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
+
 html.light .dash-card::before {
   background: linear-gradient(135deg, rgba(2, 132, 199, 0.04), transparent 60%);
 }
+
 html.light .dash-card-active:hover {
   border-color: rgba(2, 132, 199, 0.25);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(2, 132, 199, 0.06);
 }
+
 html.light .dash-card-badge {
   background: rgba(0, 0, 0, 0.03);
 }
@@ -380,6 +407,7 @@ html.light .wf-canvas-wrapper {
     linear-gradient(to bottom right, #f8fafc, #f1f5f9);
   box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.02);
 }
+
 html.light .wf-minimap {
   background: rgba(255, 255, 255, 0.90) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
@@ -391,18 +419,22 @@ html.light .wf-node-data,
 html.light .wf-node-integration {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
+
 html.light .wf-node-process:hover,
 html.light .wf-node-data:hover,
 html.light .wf-node-integration:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
 }
+
 html.light .wf-node-start .wf-node-terminal-inner,
 html.light .wf-node-end .wf-node-terminal-inner {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
+
 html.light .wf-node-decision-diamond {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
+
 html.light .wf-handle {
   border-color: var(--bg-1) !important;
 }
@@ -412,11 +444,13 @@ html.light .wf-palette-item {
   background: rgba(0, 0, 0, 0.02);
   border-color: rgba(0, 0, 0, 0.05);
 }
+
 html.light .wf-palette-item:hover {
   background: rgba(0, 0, 0, 0.04);
   border-color: rgba(0, 0, 0, 0.10);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
+
 html.light .wf-palette-icon-wrapper {
   background: rgba(0, 0, 0, 0.03);
   border-color: rgba(0, 0, 0, 0.06);
@@ -427,6 +461,7 @@ html.light .wf-palette-icon-wrapper {
 html.light .wf-prop-toggle-group {
   background: rgba(0, 0, 0, 0.02);
 }
+
 html.light .wf-prop-toggle-item:hover {
   background: rgba(0, 0, 0, 0.04);
 }
@@ -437,15 +472,34 @@ html.light .results-tab.active {
 }
 
 /* ---- Light: JSON Tree Values ---- */
-html.light .json-value-string { color: #059669; }
-html.light .json-value-number { color: #d97706; }
-html.light .json-value-boolean { color: #7c3aed; }
-html.light .json-tree-label { color: #2563eb; }
+html.light .json-value-string {
+  color: #059669;
+}
+
+html.light .json-value-number {
+  color: #d97706;
+}
+
+html.light .json-value-boolean {
+  color: #7c3aed;
+}
+
+html.light .json-tree-label {
+  color: #2563eb;
+}
 
 /* ---- Light: XML Tree Values ---- */
-html.light .xml-tag-name { color: #2563eb; }
-html.light .xml-attr-name { color: #7c3aed; }
-html.light .xml-attr-value { color: #059669; }
+html.light .xml-tag-name {
+  color: #2563eb;
+}
+
+html.light .xml-attr-name {
+  color: #7c3aed;
+}
+
+html.light .xml-attr-value {
+  color: #059669;
+}
 
 /* ---- Light: Nav Active Item ---- */
 html.light .nav-item-active {
@@ -501,12 +555,15 @@ html.light .output-header {
 html.light .lib-sidebar-content::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.08);
 }
+
 html.light .lib-sidebar-content::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.15);
 }
+
 html.light .lib-view-content::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.08);
 }
+
 html.light .lib-view-content::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.15);
 }
@@ -521,10 +578,12 @@ html.light .diff-stat-add {
   background: rgba(5, 150, 105, 0.10);
   color: #059669;
 }
+
 html.light .diff-stat-del {
   background: rgba(220, 38, 38, 0.10);
   color: #dc2626;
 }
+
 html.light .diff-stat-eq {
   background: rgba(0, 0, 0, 0.03);
 }
@@ -3922,7 +3981,7 @@ body {
   background: #ffffff;
   border-radius: 50%;
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .formatter-setting-toggle.active .formatter-setting-toggle-knob {
@@ -6123,7 +6182,7 @@ body {
   flex: 1;
   position: relative;
   background-color: #050505;
-  background-image: 
+  background-image:
     url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E"),
     radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 50%),
     radial-gradient(circle at bottom left, rgba(167, 139, 250, 0.08), transparent 50%),
@@ -6307,26 +6366,87 @@ body {
 }
 
 /* Premium Node Accents */
-.wf-node-process { border-color: rgba(14, 165, 233, 0.3); border-top: 3px solid #0ea5e9; }
-.wf-node-process:hover { border-color: rgba(14, 165, 233, 0.6); border-top-color: #0ea5e9; }
-.wf-node-header-process { background: rgba(14, 165, 233, 0.03); border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0; }
+.wf-node-process {
+  border-color: rgba(14, 165, 233, 0.3);
+  border-top: 3px solid #0ea5e9;
+}
 
-.wf-node-decision-diamond { border-color: rgba(245, 158, 11, 0.3); border-top: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.03); }
-.wf-node-decision:hover .wf-node-decision-diamond { border-color: rgba(245, 158, 11, 0.6); border-top-color: #f59e0b; }
+.wf-node-process:hover {
+  border-color: rgba(14, 165, 233, 0.6);
+  border-top-color: #0ea5e9;
+}
 
-.wf-node-data { border-color: rgba(167, 139, 250, 0.3); border-top: 3px solid #a78bfa; }
-.wf-node-data:hover { border-color: rgba(167, 139, 250, 0.6); border-top-color: #a78bfa; }
-.wf-node-header-data { background: rgba(167, 139, 250, 0.03); border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0; }
+.wf-node-header-process {
+  background: rgba(14, 165, 233, 0.03);
+  border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0;
+}
 
-.wf-node-integration { border-color: rgba(45, 212, 191, 0.3); border-top: 3px solid #2dd4bf; }
-.wf-node-integration:hover { border-color: rgba(45, 212, 191, 0.6); border-top-color: #2dd4bf; }
-.wf-node-header-integration { background: rgba(45, 212, 191, 0.03); border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0; }
+.wf-node-decision-diamond {
+  border-color: rgba(245, 158, 11, 0.3);
+  border-top: 3px solid #f59e0b;
+  background: rgba(245, 158, 11, 0.03);
+}
 
-.wf-node-start .wf-node-terminal-inner { border-color: rgba(34, 197, 94, 0.3); border-left: 4px solid #22c55e; border-right: 4px solid #22c55e; background: rgba(34, 197, 94, 0.03); }
-.wf-node-start:hover .wf-node-terminal-inner { border-color: rgba(34, 197, 94, 0.6); border-left-color: #22c55e; border-right-color: #22c55e; }
+.wf-node-decision:hover .wf-node-decision-diamond {
+  border-color: rgba(245, 158, 11, 0.6);
+  border-top-color: #f59e0b;
+}
 
-.wf-node-end .wf-node-terminal-inner { border-color: rgba(239, 68, 68, 0.3); border-left: 4px solid #ef4444; border-right: 4px solid #ef4444; background: rgba(239, 68, 68, 0.03); }
-.wf-node-end:hover .wf-node-terminal-inner { border-color: rgba(239, 68, 68, 0.6); border-left-color: #ef4444; border-right-color: #ef4444; }
+.wf-node-data {
+  border-color: rgba(167, 139, 250, 0.3);
+  border-top: 3px solid #a78bfa;
+}
+
+.wf-node-data:hover {
+  border-color: rgba(167, 139, 250, 0.6);
+  border-top-color: #a78bfa;
+}
+
+.wf-node-header-data {
+  background: rgba(167, 139, 250, 0.03);
+  border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0;
+}
+
+.wf-node-integration {
+  border-color: rgba(45, 212, 191, 0.3);
+  border-top: 3px solid #2dd4bf;
+}
+
+.wf-node-integration:hover {
+  border-color: rgba(45, 212, 191, 0.6);
+  border-top-color: #2dd4bf;
+}
+
+.wf-node-header-integration {
+  background: rgba(45, 212, 191, 0.03);
+  border-radius: calc(var(--radius-lg) - 3px) calc(var(--radius-lg) - 3px) 0 0;
+}
+
+.wf-node-start .wf-node-terminal-inner {
+  border-color: rgba(34, 197, 94, 0.3);
+  border-left: 4px solid #22c55e;
+  border-right: 4px solid #22c55e;
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.wf-node-start:hover .wf-node-terminal-inner {
+  border-color: rgba(34, 197, 94, 0.6);
+  border-left-color: #22c55e;
+  border-right-color: #22c55e;
+}
+
+.wf-node-end .wf-node-terminal-inner {
+  border-color: rgba(239, 68, 68, 0.3);
+  border-left: 4px solid #ef4444;
+  border-right: 4px solid #ef4444;
+  background: rgba(239, 68, 68, 0.03);
+}
+
+.wf-node-end:hover .wf-node-terminal-inner {
+  border-color: rgba(239, 68, 68, 0.6);
+  border-left-color: #ef4444;
+  border-right-color: #ef4444;
+}
 
 .wf-node-header {
   display: flex;
@@ -6855,6 +6975,7 @@ body {
     border-color: rgba(14, 165, 233, 0.5);
   }
 }
+
 /* ---- Workflow Toggle Controls ---- */
 .wf-prop-toggle-group {
   display: flex;
@@ -6918,8 +7039,15 @@ body {
 }
 
 @keyframes wf-pulse-text {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ============================================================
@@ -7001,4 +7129,38 @@ body {
 .diff-lang-dropdown {
   max-height: 320px;
   overflow-y: auto;
+}
+
+/* ============================================================
+   MONACO DIFF EDITOR PREMIUM TWEAKS
+   ============================================================ */
+
+.diff-editor-container .monaco-diff-editor .monaco-sash {
+  background-color: var(--border-1) !important;
+  width: 1px !important;
+  transition: width 0.2s, background-color 0.2s;
+}
+
+.diff-editor-container .monaco-diff-editor .monaco-sash:hover,
+.diff-editor-container .monaco-diff-editor .monaco-sash.active {
+  background-color: var(--accent) !important;
+  width: 2px !important;
+}
+
+/* Improve the Revert Arrow buttons */
+.diff-editor-container .monaco-diff-editor .codicon-diff-insert,
+.diff-editor-container .monaco-diff-editor .codicon-diff-remove {
+  color: var(--text-2) !important;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.15s ease;
+}
+
+.diff-editor-container .monaco-diff-editor .codicon-diff-insert:hover,
+.diff-editor-container .monaco-diff-editor .codicon-diff-remove:hover {
+  color: var(--text-1) !important;
+  background: var(--bg-2);
+  border-color: var(--border-2);
 }
