@@ -19,6 +19,8 @@ import {
   Check,
   Search,
   ChevronRight,
+  Download,
+  X,
   ShieldCheck,
   Activity,
   Terminal,
@@ -28,7 +30,9 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
-  Download,
+  FileJson,
+  FolderUp,
+  Folder,
 } from "lucide-react";
 import {
   useApiTesterStore,
@@ -398,6 +402,26 @@ function AutocompleteInput({
   );
 }
 
+// ── Custom Hook for Local Storage ────────────────────────────
+function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
 // ── Main Component ───────────────────────────────────────────
 export function ApiTester() {
   const store = useApiTesterStore();
@@ -430,11 +454,56 @@ export function ApiTester() {
   const [showImportCurl, setShowImportCurl] = useState(false);
   const [curlImportValue, setCurlImportValue] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
-  const [importSuccess, setImportSuccess] = useState(false);
+  const [importSuccess, setImportSuccess] = useState<boolean>(false);
+  
+  // Export Modal State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportSelectedTabs, setExportSelectedTabs] = useState<string[]>([]);
 
   // Sidebar accordion
-  const [presetsOpen, setPresetsOpen] = useState(true);
-  const [historyOpen, setHistoryOpen] = useState(true);
+  const [presetsOpen, setPresetsOpen] = useLocalStorageState("devutils_api_sidebar_presets", false);
+  const [historyOpen, setHistoryOpen] = useLocalStorageState("devutils_api_sidebar_history", false);
+  const [collectionsOpen, setCollectionsOpen] = useLocalStorageState("devutils_api_sidebar_collections", false);
+
+  // File import
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    const requests: any[] = [];
+    let folderName = "Imported Files";
+    
+    // Check if webkitRelativePath exists to extract folder name
+    if (files[0] && files[0].webkitRelativePath) {
+      const parts = files[0].webkitRelativePath.split("/");
+      if (parts.length > 1) {
+        folderName = parts[0];
+      }
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.name.endsWith(".json")) continue;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.method && parsed.url) {
+          requests.push(parsed);
+        }
+      } catch (err) {
+        console.error("Failed to parse", file.name);
+      }
+    }
+    
+    if (requests.length > 0) {
+      store.importCollection(folderName, requests);
+    }
+    
+    if (e.target) e.target.value = ""; // reset
+  };
 
   // Resizable panes
   const [requestPaneHeight, setRequestPaneHeight] = useState(280);
@@ -602,6 +671,22 @@ export function ApiTester() {
           <span>API Client</span>
         </div>
 
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          style={{ display: "none" }} 
+          multiple 
+          accept=".json" 
+          onChange={handleImportFiles} 
+        />
+        <input 
+          type="file" 
+          ref={folderInputRef} 
+          style={{ display: "none" }} 
+          {...({ webkitdirectory: "", directory: "" } as any)} 
+          onChange={handleImportFiles} 
+        />
+
         <div className="api-sidebar-content">
           {/* Presets Section */}
           <div className="api-sidebar-section">
@@ -641,6 +726,88 @@ export function ApiTester() {
                     </div>
                   </button>
                 ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Collections Section */}
+          <div className="api-sidebar-section">
+            <div
+              className="api-sidebar-section-header"
+              onClick={() => setCollectionsOpen(!collectionsOpen)}
+            >
+              <div className="api-sidebar-section-left">
+                <ChevronRight
+                  className={`h-3 w-3 api-sidebar-section-chevron ${collectionsOpen ? "api-sidebar-section-chevron-open" : ""}`}
+                />
+                <span className="api-sidebar-section-title">
+                  Collections
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <SimpleTooltip content="Import JSON File(s)">
+                  <button 
+                    className="api-clear-btn" 
+                    onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                    style={{ padding: "2px 4px" }}
+                  >
+                    <FileJson className="h-3 w-3" />
+                  </button>
+                </SimpleTooltip>
+                <SimpleTooltip content="Import Folder">
+                  <button 
+                    className="api-clear-btn" 
+                    onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                    style={{ padding: "2px 4px" }}
+                  >
+                    <FolderUp className="h-3 w-3" />
+                  </button>
+                </SimpleTooltip>
+              </div>
+            </div>
+            
+            <div
+              className={`api-sidebar-section-body ${collectionsOpen ? "api-sidebar-section-body-open" : ""}`}
+            >
+              <div className="api-sidebar-section-body-inner" style={{ maxHeight: "300px", overflowY: "auto" }}>
+                {store.collections && store.collections.length === 0 ? (
+                  <div className="api-history-empty" style={{ margin: "0 8px" }}>
+                    <Folder className="h-5 w-5 opacity-30" />
+                    <span className="api-history-empty-title">
+                      No Collections
+                    </span>
+                    <p className="api-history-empty-desc">
+                      Import exported requests or folders here.
+                    </p>
+                  </div>
+                ) : (
+                  store.collections?.map((col) => (
+                    <div key={col.id} className="api-collection-group" style={{ padding: "0 8px" }}>
+                      <div className="api-collection-header">
+                        <Folder className="h-3 w-3 text-accent" />
+                        <span className="api-collection-name" title={col.name}>{col.name}</span>
+                        <button className="api-collection-remove" onClick={() => store.removeCollection(col.id)} title="Remove Collection">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                      {col.requests.map((req, idx) => (
+                        <button
+                          key={idx}
+                          className="api-history-card"
+                          onClick={() => store.loadImportedRequest(req)}
+                          title={req.name || req.url}
+                        >
+                          <span className={`api-badge api-badge-${req.method.toLowerCase()}`}>
+                            {req.method}
+                          </span>
+                          <div className="api-item-info">
+                            <span className="api-item-url">{req.name || req.url}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -761,6 +928,18 @@ export function ApiTester() {
           <SimpleTooltip content="New Tab">
             <button className="api-tab-add" onClick={() => store.addTab()}>
               <Plus className="h-3 w-3" />
+            </button>
+          </SimpleTooltip>
+          <div style={{ flex: 1 }} />
+          <SimpleTooltip content="Export Tabs as Folder">
+            <button 
+              className="api-tab-export" 
+              onClick={() => {
+                setExportSelectedTabs(store.tabs.map(t => t.id));
+                setShowExportModal(true);
+              }}
+            >
+              <Download className="h-3.5 w-3.5 text-accent" />
             </button>
           </SimpleTooltip>
         </div>
@@ -1727,6 +1906,75 @@ export function ApiTester() {
             )}
           </div>
         </div>
+        {/* Export Modal */}
+        {showExportModal && (
+          <div className="api-modal-overlay">
+            <div className="api-modal-content">
+              <div className="api-modal-header">
+                <h3 className="api-modal-title">Export Tabs</h3>
+                <button className="api-modal-close" onClick={() => setShowExportModal(false)}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="api-modal-body">
+                <p className="api-modal-desc">Select the tabs you want to export. They will be downloaded as a ZIP folder containing JSON files.</p>
+                
+                <div className="api-export-actions">
+                  <button 
+                    className="api-export-action-btn"
+                    onClick={() => setExportSelectedTabs(store.tabs.map(t => t.id))}
+                  >
+                    Select All
+                  </button>
+                  <button 
+                    className="api-export-action-btn"
+                    onClick={() => setExportSelectedTabs([])}
+                  >
+                    Deselect All
+                  </button>
+                </div>
+
+                <div className="api-export-tab-list">
+                  {store.tabs.map(tab => (
+                    <label key={tab.id} className="api-export-tab-item">
+                      <input 
+                        type="checkbox" 
+                        className="api-checkbox"
+                        checked={exportSelectedTabs.includes(tab.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setExportSelectedTabs([...exportSelectedTabs, tab.id]);
+                          } else {
+                            setExportSelectedTabs(exportSelectedTabs.filter(id => id !== tab.id));
+                          }
+                        }}
+                      />
+                      <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '9px', width: 'auto', padding: '2px 4px' }}>
+                        {tab.method}
+                      </span>
+                      <span className="api-export-tab-name">{tab.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="api-modal-footer">
+                <button className="api-btn-secondary" onClick={() => setShowExportModal(false)}>Cancel</button>
+                <button 
+                  className="api-send-btn" 
+                  disabled={exportSelectedTabs.length === 0}
+                  onClick={async () => {
+                    await store.exportTabsAsZip(exportSelectedTabs);
+                    setShowExportModal(false);
+                  }}
+                  style={{ height: "32px", padding: "0 16px" }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Export {exportSelectedTabs.length} Tabs</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

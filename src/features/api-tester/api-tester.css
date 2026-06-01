@@ -279,6 +279,54 @@
   color: var(--text-3);
 }
 
+/* ── Collections ──────────────────────────────────────────── */
+.api-collection-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.api-collection-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.api-collection-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.api-collection-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.api-collection-header:hover .api-collection-remove {
+  opacity: 1;
+}
+
+.api-collection-remove:hover {
+  background: var(--bg-hover);
+  color: var(--red);
+}
+
 /* ── Main View Panel ─────────────────────────────────────── */
 .api-main {
   flex: 1;
@@ -384,7 +432,7 @@
   color: var(--text-1);
 }
 
-.api-tab-add {
+.api-tab-add, .api-tab-export {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -400,7 +448,12 @@
   margin-inline-start: 4px;
 }
 
-.api-tab-add:hover {
+.api-tab-export {
+  margin-inline-start: 0;
+  margin-inline-end: 8px;
+}
+
+.api-tab-add:hover, .api-tab-export:hover {
   background: var(--bg-hover);
   color: var(--text-1);
 }
@@ -1862,6 +1915,172 @@ html.light .api-import-curl-panel {
 
 html.light .api-import-curl-textarea {
   background: #ffffff;
+}
+
+/* ── Export Modal ────────────────────────────────────────── */
+.api-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: api-fadeIn 0.2s;
+}
+
+.api-modal-content {
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 500px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  animation: api-slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.api-modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.api-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.api-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.api-modal-close:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.api-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.api-modal-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.api-export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.api-export-action-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.api-export-action-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.api-export-tab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.api-export-tab-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.api-export-tab-item:hover {
+  background: var(--bg-1);
+}
+
+.api-export-tab-name {
+  font-size: 13px;
+  color: var(--text-1);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.api-modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  background: var(--bg-0);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.api-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 16px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.api-btn-secondary:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+@keyframes api-slideUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 html.light .api-import-curl-textarea:focus {

@@ -3,6 +3,7 @@
 // ============================================================
 
 import { create } from "zustand";
+import JSZip from "jszip";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
 export type BodyType = "none" | "json" | "form-data" | "raw";
@@ -41,6 +42,27 @@ export interface HistoryItem {
   authConfig?: AuthConfig;
 }
 
+export interface ImportedRequest {
+  id: string;
+  name: string;
+  method: HttpMethod;
+  url: string;
+  params: KeyValueField[];
+  headers: KeyValueField[];
+  bodyType: BodyType;
+  bodyValue: string;
+  formParams: KeyValueField[];
+  rawType: string;
+  authType: AuthType;
+  authConfig: AuthConfig;
+}
+
+export interface ImportedCollection {
+  id: string;
+  name: string;
+  requests: ImportedRequest[];
+}
+
 export interface ApiResponse {
   status: number;
   statusText: string;
@@ -72,6 +94,7 @@ interface ApiTesterState {
   tabs: TabState[];
   activeTabId: string;
   history: HistoryItem[];
+  collections: ImportedCollection[];
 
   // Tab management
   addTab: () => void;
@@ -123,9 +146,17 @@ interface ApiTesterState {
     bodyValue?: string;
   }) => void;
 
+  // Collections
+  importCollection: (name: string, requests: ImportedRequest[]) => void;
+  removeCollection: (id: string) => void;
+  loadImportedRequest: (req: ImportedRequest) => void;
+
   // cURL & formatting
   formatActiveTabJsonBody: () => void;
   importFromCurl: (curlStr: string) => boolean;
+
+  // Export functionality
+  exportTabsAsZip: (tabIds: string[]) => Promise<void>;
 }
 
 // Generate unique ID
@@ -188,6 +219,25 @@ const saveStoredHistory = (history: HistoryItem[]) => {
   }
 };
 
+// Load collections from LocalStorage
+const loadStoredCollections = (): ImportedCollection[] => {
+  try {
+    const saved = localStorage.getItem("devutils_api_collections");
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Save collections to LocalStorage
+const saveStoredCollections = (collections: ImportedCollection[]) => {
+  try {
+    localStorage.setItem("devutils_api_collections", JSON.stringify(collections));
+  } catch (e) {
+    console.error("Failed to save collections", e);
+  }
+};
+
 // Apply authentication to headers/url before sending
 function applyAuth(
   authType: AuthType,
@@ -223,6 +273,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     tabs: [initialTab],
     activeTabId: initialTab.id,
     history: loadStoredHistory(),
+    collections: loadStoredCollections(),
 
     // Tab management
     addTab: () => {
@@ -734,6 +785,74 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       get().syncUrlFromParams();
     },
 
+    // Collections
+    importCollection: (name, requests) => {
+      const newCollection: ImportedCollection = {
+        id: genId(),
+        name,
+        requests,
+      };
+      set((state) => {
+        const updated = [...state.collections, newCollection];
+        saveStoredCollections(updated);
+        return { collections: updated };
+      });
+    },
+    removeCollection: (id) => {
+      set((state) => {
+        const updated = state.collections.filter((c) => c.id !== id);
+        saveStoredCollections(updated);
+        return { collections: updated };
+      });
+    },
+    loadImportedRequest: (req) => {
+      const existingTab = get().tabs.find(t => t.id === req.id);
+      if (existingTab) {
+        set({ activeTabId: existingTab.id });
+        return;
+      }
+
+      set((state) => {
+        const newTab = createNewTab(req.name || req.method);
+        newTab.id = req.id || genId();
+        newTab.method = req.method;
+        newTab.url = req.url;
+
+        if (req.params && req.params.length > 0) {
+          newTab.params = [
+            ...req.params.filter(p => p.key.trim() !== "" || p.value.trim() !== "").map((p) => ({ ...p, id: genId() })),
+            createEmptyField(),
+          ];
+        }
+
+        if (req.headers && req.headers.length > 0) {
+          newTab.headers = [
+            ...req.headers.filter(h => h.key.trim() !== "" || h.value.trim() !== "").map((h) => ({ ...h, id: genId() })),
+            createEmptyField(),
+          ];
+        }
+
+        if (req.formParams && req.formParams.length > 0) {
+          newTab.formParams = [
+            ...req.formParams.filter(f => f.key.trim() !== "" || f.value.trim() !== "").map((f) => ({ ...f, id: genId() })),
+            createEmptyField(),
+          ];
+        }
+
+        newTab.bodyType = req.bodyType || "none";
+        newTab.bodyValue = req.bodyValue || "";
+        newTab.rawType = req.rawType || "text/plain";
+        newTab.authType = req.authType || "none";
+        newTab.authConfig = { ...defaultAuthConfig, ...(req.authConfig || {}) };
+
+        return {
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
+        };
+      });
+      get().syncUrlFromParams();
+    },
+
     // Format JSON request body helper
     formatActiveTabJsonBody: () => {
       set((state) => ({
@@ -895,6 +1014,45 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
       get().syncParamsFromUrl(url);
       return true;
+    },
+    
+    exportTabsAsZip: async (tabIds: string[]) => {
+      const { tabs } = get();
+      const tabsToExport = tabs.filter(t => tabIds.includes(t.id));
+      if (tabsToExport.length === 0) return;
+      
+      const zip = new JSZip();
+      tabsToExport.forEach(tab => {
+        const exportData = {
+          id: tab.id,
+          name: tab.name,
+          method: tab.method,
+          url: tab.url,
+          params: tab.params,
+          headers: tab.headers,
+          bodyType: tab.bodyType,
+          bodyValue: tab.bodyValue,
+          formParams: tab.formParams,
+          rawType: tab.rawType,
+          authType: tab.authType,
+          authConfig: tab.authConfig
+        };
+        
+        const safeName = tab.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'request';
+        const filename = `${safeName}_${tab.id.substring(0, 6)}.json`;
+        
+        zip.file(filename, JSON.stringify(exportData, null, 2));
+      });
+      
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `api_exports_${new Date().getTime()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     },
   };
 });
