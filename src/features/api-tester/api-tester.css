@@ -1,11 +1,11 @@
 /* ============================================================
-   API Tester CSS — DevUtils Theme Styles
+   API Tester CSS — DevUtils Premium REST Client
    ============================================================ */
 
+/* ── Container Layout ─────────────────────────────────────── */
 .api-tester-container {
   display: flex;
   height: calc(100vh - 40px);
-  /* Account for any layout headers */
   width: 100%;
   background: var(--bg-0);
   overflow: hidden;
@@ -23,7 +23,7 @@
 }
 
 .api-sidebar-header {
-  padding: 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border-1);
   font-size: 13px;
   font-weight: 600;
@@ -33,28 +33,43 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .api-sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 6px;
 }
 
+/* ── Sidebar Sections with Collapsible Headers ────────────── */
 .api-sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-.api-sidebar-title-row {
+.api-sidebar-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px;
+  padding: 8px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.api-sidebar-section-header:hover {
+  background: var(--bg-hover);
+}
+
+.api-sidebar-section-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .api-sidebar-section-title {
@@ -65,15 +80,47 @@
   color: var(--text-3);
 }
 
+.api-sidebar-section-chevron {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text-3);
+}
+
+.api-sidebar-section-chevron-open {
+  transform: rotate(90deg);
+}
+
+.api-sidebar-section-body {
+  overflow: hidden;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease;
+  max-height: 0;
+  opacity: 0;
+}
+
+.api-sidebar-section-body-open {
+  max-height: 2000px;
+  opacity: 1;
+}
+
+.api-sidebar-section-body-inner {
+  padding: 4px 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .api-clear-btn {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-3);
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 2px 8px;
   border-radius: var(--radius-sm);
   transition: all 0.2s;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 
 .api-clear-btn:hover {
@@ -81,44 +128,40 @@
   background: var(--red-dim);
 }
 
-.api-preset-list,
-.api-history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* ── Preset & History Item Cards ───────────────────────── */
+/* ── Preset & History Item Cards ──────────────────────────── */
 .api-preset-card,
 .api-history-card {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: left;
   border: 1px solid transparent;
   width: 100%;
   background: transparent;
+  position: relative;
 }
 
 .api-preset-card:hover,
 .api-history-card:hover {
   background: var(--bg-hover);
   border-color: var(--border-1);
+  transform: translateX(2px);
 }
 
 .api-badge {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  padding: 2px 6px;
+  padding: 2px 0;
   border-radius: 4px;
   text-transform: uppercase;
   flex-shrink: 0;
-  width: 54px;
+  width: 48px;
   text-align: center;
+  letter-spacing: 0.3px;
 }
 
 /* Method badge color classes */
@@ -158,10 +201,11 @@
   flex-direction: column;
   overflow: hidden;
   flex: 1;
+  gap: 2px;
 }
 
 .api-item-url {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   color: var(--text-1);
   white-space: nowrap;
@@ -174,20 +218,27 @@
   color: var(--text-3);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 2px;
+  gap: 6px;
 }
 
 .api-item-status-ok {
   color: var(--green);
+  font-weight: 600;
 }
 
 .api-item-status-err {
   color: var(--red);
+  font-weight: 600;
 }
 
+.api-item-time-label {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+/* ── History Empty State ──────────────────────────────────── */
 .api-history-empty {
-  padding: 24px 12px;
+  padding: 20px 12px;
   text-align: center;
   color: var(--text-3);
   font-size: 12px;
@@ -199,6 +250,18 @@
   gap: 8px;
 }
 
+.api-history-empty-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.api-history-empty-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
 /* ── Main View Panel ─────────────────────────────────────── */
 .api-main {
   flex: 1;
@@ -208,35 +271,60 @@
   height: 100%;
 }
 
-/* ── URL Bar Input Group ────────────────────────────────── */
+/* ── URL Bar ──────────────────────────────────────────────── */
 .api-url-bar {
-  padding: 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-1);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: var(--bg-1);
   flex-shrink: 0;
 }
 
 .api-method-select {
-  height: 40px;
+  height: 42px;
   padding: 0 12px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   color: var(--text-1);
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
   outline: none;
+  min-width: 100px;
+  text-align: center;
+  letter-spacing: 0.5px;
 }
 
 .api-method-select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Method select color variants */
+.api-method-select-get {
+  border-color: rgba(56, 189, 248, 0.25);
+  color: var(--blue);
+}
+.api-method-select-post {
+  border-color: rgba(16, 185, 129, 0.25);
+  color: var(--green);
+}
+.api-method-select-put {
+  border-color: rgba(167, 139, 250, 0.25);
+  color: var(--purple);
+}
+.api-method-select-delete {
+  border-color: rgba(244, 63, 94, 0.25);
+  color: var(--red);
+}
+.api-method-select-patch {
+  border-color: rgba(245, 158, 11, 0.25);
+  color: var(--yellow);
 }
 
 .api-url-input-container {
@@ -246,14 +334,14 @@
   background: var(--bg-2);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
-  height: 40px;
-  padding: 0 12px;
-  transition: all 0.2s;
+  height: 42px;
+  padding: 0 14px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .api-url-input-container:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(14, 165, 233, 0.08);
   background: var(--bg-0);
 }
 
@@ -268,9 +356,44 @@
   outline: none;
 }
 
+.api-url-input::placeholder {
+  color: var(--text-3);
+}
+
+/* ── URL Action Buttons ───────────────────────────────────── */
+.api-url-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.api-curl-btn {
+  height: 42px;
+  padding: 0 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.api-curl-btn:hover {
+  color: var(--text-1);
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+
 .api-send-btn {
-  height: 40px;
-  padding: 0 20px;
+  height: 42px;
+  padding: 0 22px;
   background: var(--accent);
   color: #fff;
   font-family: var(--font-sans);
@@ -282,18 +405,30 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 0 12px var(--accent-glow);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 16px var(--accent-glow);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .api-send-btn:hover:not(:disabled) {
   background: var(--accent-dim);
-  box-shadow: 0 0 18px rgba(14, 165, 233, 0.35);
+  box-shadow: 0 0 24px rgba(14, 165, 233, 0.35);
+  transform: translateY(-1px);
+}
+
+.api-send-btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .api-send-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
+}
+
+.api-send-shortcut {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 2px;
+  font-family: var(--font-mono);
 }
 
 /* ── Split Panes Layout ──────────────────────────────────── */
@@ -311,32 +446,66 @@
   background: var(--bg-0);
 }
 
+.api-pane-request {
+  border-bottom: none;
+}
+
+/* ── Resizable Divider ───────────────────────────────────── */
+.api-resize-handle {
+  height: 6px;
+  background: var(--border-1);
+  cursor: row-resize;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.api-resize-handle:hover {
+  background: var(--accent);
+}
+
+.api-resize-handle-active {
+  background: var(--accent);
+}
+
+.api-resize-handle::after {
+  content: "";
+  width: 32px;
+  height: 2px;
+  background: var(--text-3);
+  border-radius: 1px;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.api-resize-handle:hover::after {
+  opacity: 0;
+}
+
+/* ── Response Pane Header ─────────────────────────────────── */
 .api-pane-header {
-  padding: 8px 16px;
+  padding: 6px 16px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border-1);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 40px;
 }
 
 .api-pane-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-2);
+  color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
 }
 
-.api-pane-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-}
-
-/* ── Tabs Layout System ─────────────────────────────────── */
+/* ── Tabs System ──────────────────────────────────────────── */
 .api-tabs {
   display: flex;
   flex-direction: column;
@@ -345,26 +514,27 @@
 
 .api-tabs-list {
   display: flex;
-  gap: 8px;
+  gap: 2px;
   border-bottom: 1px solid var(--border-1);
   padding: 0 16px;
   background: var(--bg-1);
-  height: 40px;
+  height: 38px;
   align-items: flex-end;
   flex-shrink: 0;
 }
 
 .api-tab-trigger {
-  padding: 6px 12px 10px;
-  font-size: 13px;
+  padding: 7px 14px 9px;
+  font-size: 12px;
   font-weight: 500;
-  color: var(--text-2);
+  color: var(--text-3);
   background: transparent;
   border: none;
   cursor: pointer;
   position: relative;
-  transition: color 0.2s;
+  transition: color 0.15s;
   outline: none;
+  white-space: nowrap;
 }
 
 .api-tab-trigger:hover {
@@ -380,42 +550,70 @@
   content: "";
   position: absolute;
   bottom: 0;
-  left: 0;
-  right: 0;
+  left: 4px;
+  right: 4px;
   height: 2px;
   background: var(--accent);
   border-radius: 2px 2px 0 0;
 }
 
+.api-tab-count {
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--bg-2);
+  color: var(--text-3);
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+}
+
+.api-tab-trigger-active .api-tab-count {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
 .api-tab-content {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* ── Key-Value Pair Editor Row ──────────────────────────── */
-.api-kv-editor {
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* ── Key-Value Pair Editor ─────────────────────────────────── */
+.api-kv-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .api-kv-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  animation: api-fadeInRow 0.15s ease-out;
+}
+
+@keyframes api-fadeInRow {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .api-checkbox {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-2);
   accent-color: var(--accent);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .api-kv-input {
@@ -424,25 +622,27 @@
   border: 1px solid var(--border-1);
   border-radius: var(--radius-sm);
   color: var(--text-1);
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-size: 12px;
   height: 32px;
   padding: 0 10px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .api-kv-input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
 .api-kv-input::placeholder {
   color: var(--text-3);
+  font-family: var(--font-sans);
 }
 
 .api-delete-row-btn {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -451,7 +651,8 @@
   color: var(--text-3);
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: all 0.2s;
+  transition: all 0.15s;
+  flex-shrink: 0;
 }
 
 .api-delete-row-btn:hover {
@@ -469,42 +670,61 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 5px;
+  padding: 5px 10px;
   border-radius: var(--radius-sm);
-  transition: background 0.2s;
+  transition: background 0.15s;
 }
 
 .api-add-row-btn:hover {
   background: var(--accent-glow);
 }
 
-/* ── Body Form Radio Options ────────────────────────────── */
+/* ── Body Form Radio Options ──────────────────────────────── */
 .api-body-toggles {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 8px;
-  border-bottom: 1px solid var(--border-1);
-  padding-bottom: 8px;
+  padding: 3px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  width: fit-content;
 }
 
 .api-body-radio {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   font-size: 12px;
   color: var(--text-2);
   cursor: pointer;
   font-weight: 500;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+  border: none;
+  background: transparent;
 }
 
-.api-body-radio input {
-  accent-color: var(--accent);
+.api-body-radio:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
 }
 
-/* Raw select options */
+.api-body-radio input[type="radio"] {
+  display: none;
+}
+
+.api-body-radio-active {
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .api-raw-select {
-  height: 28px;
+  height: 30px;
   padding: 0 8px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
@@ -514,9 +734,10 @@
   font-weight: 600;
   outline: none;
   cursor: pointer;
+  margin-left: 8px;
 }
 
-/* ── Monaco Editor Container in Tab Content ────────────────── */
+/* ── Monaco Editor Wrapper ────────────────────────────────── */
 .api-monaco-editor-wrapper {
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
@@ -525,7 +746,130 @@
   background: var(--bg-1);
 }
 
-/* ── CORS info panel alert ─────────────────────────────── */
+/* ── Auth Tab Styles ──────────────────────────────────────── */
+.api-auth-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.api-auth-type-selector {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+
+.api-auth-type-btn {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-2);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.api-auth-type-btn:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+
+.api-auth-type-btn-active {
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.api-auth-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 480px;
+}
+
+.api-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.api-auth-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.api-auth-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.api-auth-input {
+  width: 100%;
+  height: 34px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 0 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.api-auth-input:focus {
+  border-color: var(--accent);
+}
+
+.api-auth-input::placeholder {
+  color: var(--text-3);
+  font-family: var(--font-sans);
+}
+
+.api-auth-select {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+}
+
+.api-auth-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bg-1);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.api-auth-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+  margin-top: 2px;
+}
+
+/* ── CORS Info Panel ──────────────────────────────────────── */
 .api-cors-panel {
   background: var(--accent-glow);
   border: 1px solid var(--border-accent);
@@ -559,22 +903,23 @@
   line-height: 1.5;
 }
 
-/* ── Response Panel Header Metadata ──────────────────────── */
+/* ── Response Status Ribbon ───────────────────────────────── */
 .api-response-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .status-pill {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 20px;
   text-transform: uppercase;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  letter-spacing: 0.3px;
 }
 
 .status-pill-ok {
@@ -590,7 +935,7 @@
 }
 
 .meta-item {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-2);
   display: flex;
   align-items: center;
@@ -600,27 +945,47 @@
 .meta-item-value {
   font-weight: 600;
   color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
-/* ── Response Pretty / Raw / Preview Panels ─────────────── */
-.api-response-content {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  gap: 12px;
+/* Response time color classes */
+.meta-time-fast {
+  color: var(--green) !important;
+}
+.meta-time-medium {
+  color: var(--yellow) !important;
+}
+.meta-time-slow {
+  color: var(--red) !important;
 }
 
+/* ── Response Viewers ─────────────────────────────────────── */
 .api-response-monaco-wrapper {
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   overflow: hidden;
-  height: 350px;
+  flex: 1;
+  min-height: 200px;
   background: var(--bg-1);
+  animation: api-fadeIn 0.2s ease-out;
+}
+
+@keyframes api-fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .api-response-raw-text {
   width: 100%;
-  height: 350px;
+  flex: 1;
+  min-height: 200px;
   background: var(--bg-1);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
@@ -630,22 +995,20 @@
   padding: 12px;
   resize: none;
   outline: none;
+  animation: api-fadeIn 0.2s ease-out;
 }
 
 .api-response-preview-iframe {
   width: 100%;
-  height: 350px;
+  flex: 1;
+  min-height: 200px;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   background: #ffffff;
-  /* White background for preview rendering */
+  animation: api-fadeIn 0.2s ease-out;
 }
 
-/* ── Response Headers Table ───────────────────────────── */
-.api-headers-filter {
-  margin-bottom: 8px;
-}
-
+/* ── Response Headers Table ───────────────────────────────── */
 .api-headers-table {
   width: 100%;
   border-collapse: collapse;
@@ -653,7 +1016,7 @@
 
 .api-headers-th,
 .api-headers-td {
-  padding: 8px 12px;
+  padding: 7px 12px;
   font-size: 12px;
   text-align: left;
   border-bottom: 1px solid var(--border-1);
@@ -666,49 +1029,112 @@
   font-size: 10px;
   letter-spacing: 0.5px;
   background: var(--bg-1);
+  position: sticky;
+  top: 0;
 }
 
 .api-headers-key {
   font-family: var(--font-mono);
   color: var(--accent);
   font-weight: 600;
+  font-size: 11.5px;
 }
 
 .api-headers-val {
   font-family: var(--font-mono);
   color: var(--text-2);
   word-break: break-all;
+  font-size: 11.5px;
 }
 
 .api-headers-row:hover {
   background: var(--bg-hover);
 }
 
-/* ── Response States (Empty / Loading / Error) ───────────── */
+/* ── Response Tab Actions ─────────────────────────────────── */
+.api-copy-btn {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+  height: 28px;
+  align-self: center;
+}
+
+.api-copy-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* ── Response States ──────────────────────────────────────── */
 .api-response-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 320px;
+  flex: 1;
   color: var(--text-3);
   text-align: center;
-  gap: 16px;
-  border: 2px dashed var(--border-1);
-  border-radius: var(--radius-lg);
+  gap: 12px;
   margin: 16px;
+  padding: 40px 20px;
   background: var(--bg-1);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
+.api-response-empty::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 30%,
+    var(--accent-glow),
+    transparent 70%
+  );
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.api-response-empty-icon {
+  position: relative;
+  opacity: 0.25;
+  animation: api-pulse 3s ease-in-out infinite;
+}
+
+@keyframes api-pulse {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.05);
+  }
 }
 
 .api-response-empty-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-2);
+  position: relative;
 }
 
 .api-response-empty-desc {
   font-size: 12px;
-  max-width: 280px;
+  max-width: 320px;
+  position: relative;
+  line-height: 1.5;
 }
 
 .api-loading-state {
@@ -716,17 +1142,17 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 320px;
+  flex: 1;
   gap: 16px;
 }
 
 .api-spinner {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: 3px solid var(--border-2);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: api-spin 0.8s linear infinite;
+  animation: api-spin 0.7s linear infinite;
 }
 
 @keyframes api-spin {
@@ -735,20 +1161,28 @@
   }
 }
 
+.api-loading-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+/* ── Error Card ───────────────────────────────────────────── */
 .api-error-card {
   border: 1px solid var(--red-dim);
   background: rgba(244, 63, 94, 0.04);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 16px;
   margin: 16px;
   display: flex;
-  gap: 16px;
+  gap: 14px;
+  animation: api-fadeIn 0.2s ease-out;
 }
 
 .api-error-icon {
   color: var(--red);
   flex-shrink: 0;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .api-error-info {
@@ -758,13 +1192,13 @@
 }
 
 .api-error-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-1);
 }
 
 .api-error-message {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-2);
   font-family: var(--font-mono);
   line-height: 1.5;
@@ -774,7 +1208,7 @@
   padding: 10px;
 }
 
-/* ── Light Mode Color Adjustments ──────────────────────── */
+/* ── Light Mode Overrides ─────────────────────────────────── */
 html.light .api-sidebar {
   background: var(--bg-1);
   border-right-color: var(--border-1);
@@ -790,9 +1224,18 @@ html.light .api-url-input-container {
 
 html.light .api-url-input-container:focus-within {
   background: #ffffff;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(2, 132, 199, 0.06);
 }
 
 html.light .api-kv-input {
+  background: #ffffff;
+}
+
+html.light .api-kv-input:focus {
+  box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.12);
+}
+
+html.light .api-auth-input {
   background: #ffffff;
 }
 
@@ -804,4 +1247,59 @@ html.light .api-response-empty,
 html.light .api-response-monaco-wrapper,
 html.light .api-response-raw-text {
   background: #ffffff;
+}
+
+html.light .api-body-toggles,
+html.light .api-auth-type-selector {
+  background: var(--bg-2);
+}
+
+html.light .api-body-radio-active,
+html.light .api-auth-type-btn-active {
+  background: rgba(2, 132, 199, 0.10);
+}
+
+html.light .api-method-select {
+  background: var(--bg-2);
+}
+
+html.light .api-curl-btn {
+  background: var(--bg-2);
+}
+
+html.light .api-curl-btn:hover {
+  background: var(--bg-3);
+}
+
+html.light .api-preset-card:hover,
+html.light .api-history-card:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+html.light .api-send-btn {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10), 0 0 12px rgba(2, 132, 199, 0.12);
+}
+
+html.light .api-send-btn:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 20px rgba(2, 132, 199, 0.20);
+}
+
+html.light .api-auth-empty {
+  background: var(--bg-2);
+}
+
+html.light .api-resize-handle {
+  background: var(--border-2);
+}
+
+html.light .api-resize-handle:hover {
+  background: var(--accent);
+}
+
+html.light .api-tab-count {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html.light .api-tab-trigger-active .api-tab-count {
+  background: rgba(2, 132, 199, 0.10);
 }

@@ -6,12 +6,22 @@ import { create } from "zustand";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
 export type BodyType = "none" | "json" | "form-data" | "raw";
+export type AuthType = "none" | "bearer" | "basic" | "api-key";
 
 export interface KeyValueField {
   id: string;
   key: string;
   value: string;
   enabled: boolean;
+}
+
+export interface AuthConfig {
+  bearerToken: string;
+  basicUsername: string;
+  basicPassword: string;
+  apiKeyName: string;
+  apiKeyValue: string;
+  apiKeyPlacement: "header" | "query";
 }
 
 export interface HistoryItem {
@@ -22,6 +32,12 @@ export interface HistoryItem {
   status?: number;
   time?: number;
   error?: boolean;
+  // Enriched fields for full replay
+  headers?: Array<{ key: string; value: string }>;
+  bodyType?: BodyType;
+  bodyValue?: string;
+  authType?: AuthType;
+  authConfig?: AuthConfig;
 }
 
 export interface ApiResponse {
@@ -42,6 +58,8 @@ interface ApiTesterState {
   bodyValue: string;
   formParams: KeyValueField[];
   rawType: string;
+  authType: AuthType;
+  authConfig: AuthConfig;
   response: ApiResponse | null;
   loading: boolean;
   error: string | null;
@@ -53,6 +71,8 @@ interface ApiTesterState {
   setBodyType: (type: BodyType) => void;
   setBodyValue: (value: string) => void;
   setRawType: (type: string) => void;
+  setAuthType: (type: AuthType) => void;
+  setAuthConfig: (config: Partial<AuthConfig>) => void;
 
   // Key-value editors
   addParam: () => void;
@@ -74,6 +94,9 @@ interface ApiTesterState {
   // Request trigger
   sendRequest: () => Promise<void>;
   
+  // cURL generation
+  generateCurl: () => string;
+
   // History & Presets
   loadHistoryItem: (item: HistoryItem) => void;
   clearHistory: () => void;
@@ -98,6 +121,15 @@ const createEmptyField = (): KeyValueField => ({
   enabled: true,
 });
 
+const defaultAuthConfig: AuthConfig = {
+  bearerToken: "",
+  basicUsername: "",
+  basicPassword: "",
+  apiKeyName: "",
+  apiKeyValue: "",
+  apiKeyPlacement: "header",
+};
+
 // Load history from LocalStorage
 const loadStoredHistory = (): HistoryItem[] => {
   try {
@@ -117,6 +149,34 @@ const saveStoredHistory = (history: HistoryItem[]) => {
   }
 };
 
+// Apply authentication to headers/url before sending
+function applyAuth(
+  authType: AuthType,
+  authConfig: AuthConfig,
+  headers: Record<string, string>,
+  url: string
+): { headers: Record<string, string>; url: string } {
+  const h = { ...headers };
+  let u = url;
+
+  if (authType === "bearer" && authConfig.bearerToken.trim()) {
+    h["Authorization"] = `Bearer ${authConfig.bearerToken.trim()}`;
+  } else if (authType === "basic" && authConfig.basicUsername.trim()) {
+    const encoded = btoa(`${authConfig.basicUsername}:${authConfig.basicPassword}`);
+    h["Authorization"] = `Basic ${encoded}`;
+  } else if (authType === "api-key" && authConfig.apiKeyName.trim() && authConfig.apiKeyValue.trim()) {
+    if (authConfig.apiKeyPlacement === "header") {
+      h[authConfig.apiKeyName.trim()] = authConfig.apiKeyValue.trim();
+    } else {
+      // Add to URL query params
+      const sep = u.includes("?") ? "&" : "?";
+      u += `${sep}${encodeURIComponent(authConfig.apiKeyName.trim())}=${encodeURIComponent(authConfig.apiKeyValue.trim())}`;
+    }
+  }
+
+  return { headers: h, url: u };
+}
+
 export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
   method: "GET",
   url: "https://jsonplaceholder.typicode.com/users",
@@ -126,9 +186,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
     createEmptyField(),
   ],
   bodyType: "none",
-  bodyValue: "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}",
+  bodyValue: '{\n  "name": "John Doe",\n  "email": "john@example.com"\n}',
   formParams: [createEmptyField()],
   rawType: "text/plain",
+  authType: "none",
+  authConfig: { ...defaultAuthConfig },
   response: null,
   loading: false,
   error: null,
@@ -145,6 +207,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
   setBodyType: (bodyType) => set({ bodyType }),
   setBodyValue: (bodyValue) => set({ bodyValue }),
   setRawType: (rawType) => set({ rawType }),
+  setAuthType: (authType) => set({ authType }),
+  setAuthConfig: (config) =>
+    set((state) => ({
+      authConfig: { ...state.authConfig, ...config },
+    })),
 
   // Params actions
   addParam: () => set((state) => ({ params: [...state.params, createEmptyField()] })),
@@ -233,9 +300,54 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
     }
   },
 
+  // Generate cURL command from current state
+  generateCurl: () => {
+    const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = get();
+
+    let computedHeaders: Record<string, string> = {};
+    headers.forEach((h) => {
+      if (h.enabled && h.key.trim() !== "") {
+        computedHeaders[h.key.trim()] = h.value.trim();
+      }
+    });
+
+    // Apply auth
+    const authed = applyAuth(authType, authConfig, computedHeaders, url);
+    computedHeaders = authed.headers;
+    const finalUrl = authed.url;
+
+    let parts: string[] = [`curl -X ${method}`];
+
+    // Headers
+    Object.entries(computedHeaders).forEach(([k, v]) => {
+      parts.push(`  -H '${k}: ${v}'`);
+    });
+
+    // Body
+    if (method !== "GET" && method !== "HEAD") {
+      if (bodyType === "json" && bodyValue.trim()) {
+        parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+      } else if (bodyType === "raw" && bodyValue.trim()) {
+        if (!computedHeaders["Content-Type"]) {
+          parts.push(`  -H 'Content-Type: ${rawType}'`);
+        }
+        parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+      } else if (bodyType === "form-data") {
+        formParams.forEach((f) => {
+          if (f.enabled && f.key.trim()) {
+            parts.push(`  -F '${f.key.trim()}=${f.value.trim()}'`);
+          }
+        });
+      }
+    }
+
+    parts.push(`  '${finalUrl}'`);
+    return parts.join(" \\\n");
+  },
+
   // Send request using standard window.fetch (the industry standard for lightweight browser clients)
   sendRequest: async () => {
-    const { method, url, params, headers, bodyType, bodyValue, formParams, rawType } = get();
+    const { method, url, params, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = get();
     set({ loading: true, error: null, response: null });
 
     const startTime = performance.now();
@@ -275,11 +387,16 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
       }
     }
 
+    // Apply authentication
+    const authed = applyAuth(authType, authConfig, computedHeaders, url);
+    computedHeaders = authed.headers;
+    const finalUrl = authed.url;
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-      const res = await fetch(url, {
+      const res = await fetch(finalUrl, {
         method,
         headers: computedHeaders,
         body: fetchBody,
@@ -309,7 +426,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
         body: bodyText,
       };
 
-      // Add to history
+      // Build enriched history item
+      const activeHeaders = headers
+        .filter(h => h.enabled && h.key.trim() !== "")
+        .map(h => ({ key: h.key, value: h.value }));
+
       const newHistoryItem: HistoryItem = {
         id: genId(),
         timestamp: Date.now(),
@@ -317,6 +438,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
         url,
         status: res.status,
         time: timeMs,
+        headers: activeHeaders,
+        bodyType,
+        bodyValue: bodyType !== "none" ? bodyValue : undefined,
+        authType,
+        authConfig: authType !== "none" ? { ...authConfig } : undefined,
       };
 
       set((state) => {
@@ -360,13 +486,34 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
 
   // Load request details from a saved history item
   loadHistoryItem: (item) => {
-    // If the saved URL contains query params, we parse them
-    set({
+    const newState: any = {
       method: item.method,
       url: item.url,
       response: null,
       error: null,
-    });
+    };
+
+    // Restore enriched fields if available
+    if (item.headers && item.headers.length > 0) {
+      newState.headers = [
+        ...item.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
+        createEmptyField(),
+      ];
+    }
+    if (item.bodyType) {
+      newState.bodyType = item.bodyType;
+    }
+    if (item.bodyValue) {
+      newState.bodyValue = item.bodyValue;
+    }
+    if (item.authType) {
+      newState.authType = item.authType;
+    }
+    if (item.authConfig) {
+      newState.authConfig = { ...defaultAuthConfig, ...item.authConfig };
+    }
+
+    set(newState);
     get().syncParamsFromUrl(item.url);
   },
 
@@ -393,6 +540,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
       headers: formattedHeaders,
       bodyType: preset.bodyType || "none",
       bodyValue: preset.bodyValue || "",
+      authType: "none",
+      authConfig: { ...defaultAuthConfig },
       response: null,
       error: null,
     });
