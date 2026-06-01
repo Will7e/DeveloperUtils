@@ -135,7 +135,51 @@
         transform: translateX(350%);
       }
     }
+
+    /* Light Theme Overrides for Loading Screen */
+    html.light body {
+      background: #f8fafc;
+    }
+
+    html.light #loading-screen {
+      background: #f8fafc;
+    }
+
+    html.light .loader-text {
+      background: linear-gradient(135deg, #0284c7, #0369a1, #075985);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    html.light .loader-icon {
+      color: #0284c7;
+      fill: rgba(2, 132, 199, 0.12);
+    }
+
+    html.light .loader-bar-track {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    html.light .loader-bar-fill {
+      background: linear-gradient(90deg, #0ea5e9, #0284c7, #0369a1);
+    }
   </style>
+
+  <!-- Prevent theme flashing on load -->
+  <script>
+    try {
+      const stateStr = localStorage.getItem('devutils-app-state');
+      if (stateStr) {
+        const state = JSON.parse(stateStr);
+        if (state && state.state && state.state.editorSettings && state.state.editorSettings.theme === 'light') {
+          document.documentElement.classList.add('light');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse theme from local storage', e);
+    }
+  </script>
 </head>
 
 <body>

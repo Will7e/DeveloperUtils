@@ -431,6 +431,7 @@ function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispat
 export function ApiTester() {
   const store = useApiTesterStore();
   const addToast = useAppStore((s) => s.addToast);
+  const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
   
   useEffect(() => {
     store.init();
@@ -1340,7 +1341,7 @@ export function ApiTester() {
                   <Editor
                     height="100%"
                     language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
-                    theme="vs-dark"
+                    theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
                     value={generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : [])}
                     options={{
                       minimap: { enabled: false },
@@ -1593,7 +1594,7 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language="json"
-                        theme="vs-dark"
+                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
                         value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
@@ -1667,7 +1668,7 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language={activeTab.rawType.split("/")[1] || "text"}
-                        theme="vs-dark"
+                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
                         value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
@@ -2076,7 +2077,7 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language={responseLang}
-                        theme="vs-dark"
+                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
                         value={prettyBody}
                         options={{
                           readOnly: true,
