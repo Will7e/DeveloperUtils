@@ -3,7 +3,8 @@
 // ============================================================
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import Editor from "@monaco-editor/react";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import { setupMonacoTheme } from "@/utils/monaco-theme";
 import {
   Send,
   Plus,
@@ -436,6 +437,10 @@ export function ApiTester() {
   useEffect(() => {
     store.init();
   }, [store]);
+
+  const handleEditorMount: OnMount = useCallback((editor, monaco) => {
+    setupMonacoTheme(monaco);
+  }, []);
 
   const tabs = store.tabs || [];
   const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
@@ -1341,11 +1346,13 @@ export function ApiTester() {
                   <Editor
                     height="100%"
                     language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
-                    theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
+                    theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                    onMount={handleEditorMount}
                     value={generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : [])}
                     options={{
                       minimap: { enabled: false },
-                      fontSize: 12,
+                      fontSize: 14,
+                      fontFamily: "var(--font-mono), monospace",
                       lineNumbers: "off",
                       scrollBeyondLastLine: false,
                       readOnly: true,
@@ -1594,7 +1601,8 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language="json"
-                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
+                        theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                        onMount={handleEditorMount}
                         value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
@@ -1668,7 +1676,8 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language={activeTab.rawType.split("/")[1] || "text"}
-                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
+                        theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                        onMount={handleEditorMount}
                         value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
@@ -2077,7 +2086,8 @@ export function ApiTester() {
                       <Editor
                         height="100%"
                         language={responseLang}
-                        theme={currentThemeSetting === "light" ? "vs" : "vs-dark"}
+                        theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                        onMount={handleEditorMount}
                         value={prettyBody}
                         options={{
                           readOnly: true,
