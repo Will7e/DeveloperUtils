@@ -584,6 +584,39 @@ export function ApiTester() {
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(0);
 
+  // Resize handler hook declared before early return check
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      isDragging.current = true;
+      dragStartY.current = e.clientY;
+      dragStartHeight.current = requestPaneHeight;
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+
+      const handleMove = (moveE: MouseEvent) => {
+        if (!isDragging.current) return;
+        const delta = moveE.clientY - dragStartY.current;
+        const newHeight = Math.max(
+          120,
+          Math.min(600, dragStartHeight.current + delta)
+        );
+        setRequestPaneHeight(newHeight);
+      };
+
+      const handleUp = () => {
+        isDragging.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+      };
+
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+    },
+    [requestPaneHeight]
+  );
+
   // Relative time ticker
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -725,38 +758,7 @@ export function ApiTester() {
     if (e.target) e.target.value = ""; // reset
   };
 
-  // ── Resize Handlers ────────────────────────────────────────
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      isDragging.current = true;
-      dragStartY.current = e.clientY;
-      dragStartHeight.current = requestPaneHeight;
-      document.body.style.cursor = "row-resize";
-      document.body.style.userSelect = "none";
 
-      const handleMove = (moveE: MouseEvent) => {
-        if (!isDragging.current) return;
-        const delta = moveE.clientY - dragStartY.current;
-        const newHeight = Math.max(
-          120,
-          Math.min(600, dragStartHeight.current + delta)
-        );
-        setRequestPaneHeight(newHeight);
-      };
-
-      const handleUp = () => {
-        isDragging.current = false;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", handleMove);
-        window.removeEventListener("mouseup", handleUp);
-      };
-
-      window.addEventListener("mousemove", handleMove);
-      window.addEventListener("mouseup", handleUp);
-    },
-    [requestPaneHeight]
-  );
 
   // ── Trigger API Execution ──────────────────────────────────
   const handleSend = async (e: React.FormEvent) => {
