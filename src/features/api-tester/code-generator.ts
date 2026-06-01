@@ -89,14 +89,14 @@ export function generateCodeSnippet(
 }
 
 function generateFetch(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: any[]): string {
-  let snippet = `const url = "${url}";\n`;
+  let snippet = `const url = ${JSON.stringify(url)};\n`;
   snippet += `const options = {\n`;
   snippet += `  method: "${method}",\n`;
 
   if (Object.keys(headers).length > 0) {
     snippet += `  headers: {\n`;
     for (const [key, value] of Object.entries(headers)) {
-      snippet += `    "${key}": "${value}",\n`;
+      snippet += `    "${key}": ${JSON.stringify(value)},\n`;
     }
     snippet += `  },\n`;
   }
@@ -119,7 +119,7 @@ function generateFetch(method: string, url: string, headers: Record<string, stri
     } else if (bodyType === "form-data") {
       snippet += `  body: new URLSearchParams({\n`;
       formParams.filter(f => f.enabled && f.key.trim()).forEach(f => {
-        snippet += `    "${f.key.trim()}": "${f.value}",\n`;
+        snippet += `    "${f.key.trim()}": ${JSON.stringify(f.value)},\n`;
       });
       snippet += `  }),\n`;
     }
@@ -138,12 +138,12 @@ function generateAxios(method: string, url: string, headers: Record<string, stri
   let snippet = `import axios from "axios";\n\n`;
   snippet += `const options = {\n`;
   snippet += `  method: "${method}",\n`;
-  snippet += `  url: "${url}",\n`;
+  snippet += `  url: ${JSON.stringify(url)},\n`;
 
   if (Object.keys(headers).length > 0) {
     snippet += `  headers: {\n`;
     for (const [key, value] of Object.entries(headers)) {
-      snippet += `    "${key}": "${value}",\n`;
+      snippet += `    "${key}": ${JSON.stringify(value)},\n`;
     }
     snippet += `  },\n`;
   }
@@ -161,7 +161,7 @@ function generateAxios(method: string, url: string, headers: Record<string, stri
     } else if (bodyType === "form-data") {
       snippet += `  data: {\n`;
       formParams.filter(f => f.enabled && f.key.trim()).forEach(f => {
-        snippet += `    "${f.key.trim()}": "${f.value}",\n`;
+        snippet += `    "${f.key.trim()}": ${JSON.stringify(f.value)},\n`;
       });
       snippet += `  },\n`;
     }
@@ -181,12 +181,12 @@ function generatePython(method: string, url: string, headers: Record<string, str
     snippet += `import json\n`;
   }
   snippet += `\n`;
-  snippet += `url = "${url}"\n`;
+  snippet += `url = ${JSON.stringify(url)}\n`;
 
   if (Object.keys(headers).length > 0) {
     snippet += `headers = {\n`;
     for (const [key, value] of Object.entries(headers)) {
-      snippet += `    "${key}": "${value}",\n`;
+      snippet += `    "${key}": ${JSON.stringify(value)},\n`;
     }
     snippet += `}\n`;
   } else {
@@ -209,7 +209,7 @@ function generatePython(method: string, url: string, headers: Record<string, str
     } else if (bodyType === "form-data") {
       snippet += `payload = {\n`;
       formParams.filter(f => f.enabled && f.key.trim()).forEach(f => {
-        snippet += `    "${f.key.trim()}": "${f.value}",\n`;
+        snippet += `    "${f.key.trim()}": ${JSON.stringify(f.value)},\n`;
       });
       snippet += `}\n\n`;
       snippet += `response = requests.${method.toLowerCase()}(url, headers=headers, data=payload)\n`;
@@ -230,7 +230,9 @@ function generateGo(method: string, url: string, headers: Record<string, string>
       snippet += `\t"strings"\n`;
   }
   snippet += `)\n\nfunc main() {\n`;
-  snippet += `\turl := "${url}"\n`;
+  snippet += `\turl := ${JSON.stringify(url)}\n`;
+
+  const h = { ...headers };
 
   let bodyVar = "nil";
   if (method !== "GET" && method !== "HEAD") {
@@ -241,17 +243,17 @@ function generateGo(method: string, url: string, headers: Record<string, string>
       }
     } else if (bodyType === "form-data") {
       const parts = formParams.filter(f => f.enabled && f.key.trim()).map(f => `${encodeURIComponent(f.key)}=${encodeURIComponent(f.value)}`).join("&");
-      snippet += `\tpayload := strings.NewReader("${parts}")\n`;
+      snippet += `\tpayload := strings.NewReader(${JSON.stringify(parts)})\n`;
       bodyVar = "payload";
-      headers["Content-Type"] = "application/x-www-form-urlencoded";
+      h["Content-Type"] = "application/x-www-form-urlencoded";
     }
   }
 
   snippet += `\n\treq, err := http.NewRequest("${method}", url, ${bodyVar})\n`;
   snippet += `\tif err != nil {\n\t\tfmt.Println(err)\n\t\treturn\n\t}\n`;
 
-  for (const [key, value] of Object.entries(headers)) {
-    snippet += `\treq.Header.Add("${key}", "${value}")\n`;
+  for (const [key, value] of Object.entries(h)) {
+    snippet += `\treq.Header.Add("${key}", ${JSON.stringify(value)})\n`;
   }
 
   snippet += `\n\tres, err := http.DefaultClient.Do(req)\n`;

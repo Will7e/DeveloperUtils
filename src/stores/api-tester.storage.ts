@@ -41,7 +41,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   async saveTabs(tabs: TabState[], activeTabId: string): Promise<void> {
     await delay(0);
     try {
-      const serializable = tabs.map(t => ({ ...t, loading: false, error: null }));
+      const serializable = tabs.map(t => ({ ...t, loading: false, error: null, response: null }));
       localStorage.setItem("devutils_api_tabs", JSON.stringify({ tabs: serializable, activeTabId }));
     } catch (e) {
       console.error("Failed to save tabs", e);

@@ -523,30 +523,16 @@ export function ApiTester() {
   const addToast = useAppStore((s) => s.addToast);
   const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
   
+  // Bug 2: Fix store.init() useEffect dependency array using stable getState init
   useEffect(() => {
-    store.init();
-  }, [store]);
+    useApiTesterStore.getState().init();
+  }, []);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     setupMonacoTheme(monaco);
     const theme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
   }, []);
-
-  const tabs = store.tabs || [];
-  const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
-
-  if (!activeTab) {
-    return (
-      <div className="api-tester-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-        <div style={{ textAlign: 'center' }}>
-          <Activity className="h-8 w-8 text-accent mx-auto mb-4" />
-          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Updating State...</h2>
-          <p style={{ color: 'var(--text-2)' }}>The state structure has changed. Please refresh the page.</p>
-        </div>
-      </div>
-    );
-  }
 
   // Tab states
   const [requestTab, setRequestTab] = useState<string>("params");
@@ -590,6 +576,103 @@ export function ApiTester() {
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingTabName, setEditingTabName] = useState("");
   const editTabInputRef = useRef<HTMLInputElement>(null);
+
+  // Resizable panes
+  const [requestPaneHeight, setRequestPaneHeight] = useState(280);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const dragStartY = useRef(0);
+  const dragStartHeight = useRef(0);
+
+  // Relative time ticker
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const tabs = store.tabs || [];
+  const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
+
+  // Bug 3: Fix keyboard shortcut stale closure using direct store access
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        const active = useApiTesterStore.getState().tabs.find(t => t.id === useApiTesterStore.getState().activeTabId);
+        if (active && !active.loading && active.url.trim()) {
+          useApiTesterStore.getState().sendRequest();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // ── Close env dropdown on outside click ─────────────────────
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (envDropdownRef.current && !envDropdownRef.current.contains(event.target as Node)) {
+        setShowEnvDropdown(false);
+      }
+    }
+    if (showEnvDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showEnvDropdown]);
+
+  const hasBody = activeTab ? (activeTab.method !== "GET" && activeTab.method !== "HEAD") : false;
+
+  // ── Reset requestTab when body becomes unavailable ──────────
+  useEffect(() => {
+    if (!hasBody && requestTab === "body") {
+      setRequestTab("params");
+    }
+  }, [hasBody, requestTab]);
+
+  // ── Focus tab rename input when editing ─────────────────────
+  useEffect(() => {
+    if (editingTabId && editTabInputRef.current) {
+      editTabInputRef.current.focus();
+      editTabInputRef.current.select();
+    }
+  }, [editingTabId]);
+
+  // ── Auto-scroll WebSocket console to bottom ──────────────────
+  useEffect(() => {
+    if (wsConsoleRef.current) {
+      wsConsoleRef.current.scrollTop = wsConsoleRef.current.scrollHeight;
+    }
+  }, [activeTab?.wsMessages]);
+
+  // ── Auto-switch request tab based on protocol ───────────────
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.protocol === "graphql") {
+      setRequestTab("graphql");
+    } else if (activeTab.protocol === "websocket") {
+      setRequestTab("ws-message");
+    } else {
+      setRequestTab("params");
+    }
+  }, [activeTab?.protocol, activeTab?.id]);
+
+  // Issue 19: Detect Mac vs Windows/Linux platform for shortcuts
+  const isMac = typeof window !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent);
+
+  // Issue 28 & Bug 1: Loading state during store initialization or when no active tab exists
+  if (!store.isInitialized || !activeTab) {
+    return (
+      <div className="api-tester-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div style={{ textAlign: 'center' }}>
+          <Activity className="h-8 w-8 text-accent mx-auto mb-4 animate-spin" />
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Loading Workspace...</h2>
+          <p style={{ color: 'var(--text-2)' }}>Please wait while we initialize the API Tester.</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleImportFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -642,83 +725,6 @@ export function ApiTester() {
     if (e.target) e.target.value = ""; // reset
   };
 
-  // Resizable panes
-  const [requestPaneHeight, setRequestPaneHeight] = useState(280);
-  const splitRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-  const dragStartY = useRef(0);
-  const dragStartHeight = useRef(0);
-
-  // Relative time ticker
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick((t) => t + 1), 30000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // ── Keyboard Shortcut: Cmd+Enter to Send ───────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        if (!activeTab.loading && activeTab.url.trim()) {
-          store.sendRequest();
-        }
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [activeTab.loading, activeTab.url, store]);
-
-  // ── Close env dropdown on outside click ─────────────────────
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (envDropdownRef.current && !envDropdownRef.current.contains(event.target as Node)) {
-        setShowEnvDropdown(false);
-      }
-    }
-    if (showEnvDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [showEnvDropdown]);
-
-  const hasBody = activeTab.method !== "GET" && activeTab.method !== "HEAD";
-
-  // ── Reset requestTab when body becomes unavailable ──────────
-  useEffect(() => {
-    if (!hasBody && requestTab === "body") {
-      setRequestTab("params");
-    }
-  }, [hasBody, requestTab]);
-
-  // ── Focus tab rename input when editing ─────────────────────
-  useEffect(() => {
-    if (editingTabId && editTabInputRef.current) {
-      editTabInputRef.current.focus();
-      editTabInputRef.current.select();
-    }
-  }, [editingTabId]);
-
-  // ── Auto-scroll WebSocket console to bottom ──────────────────
-  useEffect(() => {
-    if (wsConsoleRef.current) {
-      wsConsoleRef.current.scrollTop = wsConsoleRef.current.scrollHeight;
-    }
-  }, [activeTab?.wsMessages]);
-
-  // ── Auto-switch request tab based on protocol ───────────────
-  useEffect(() => {
-    if (!activeTab) return;
-    if (activeTab.protocol === "graphql") {
-      setRequestTab("graphql");
-    } else if (activeTab.protocol === "websocket") {
-      setRequestTab("ws-message");
-    } else {
-      setRequestTab("params");
-    }
-  }, [activeTab?.protocol, activeTab?.id]);
-
   // ── Resize Handlers ────────────────────────────────────────
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
@@ -768,18 +774,30 @@ export function ApiTester() {
   };
 
   // ── Copy Handlers ──────────────────────────────────────────
-  const handleCopyResponse = () => {
+  const handleCopyResponse = async () => {
     if (!activeTab.response?.body) return;
-    navigator.clipboard.writeText(activeTab.response.body);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(activeTab.response.body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      addToast({ message: "Response copied to clipboard!", type: "success", duration: 2000 });
+    } catch (err) {
+      console.error("Failed to copy response: ", err);
+      addToast({ message: "Failed to copy response to clipboard.", type: "error", duration: 3000 });
+    }
   };
 
-  const handleCopyCurl = () => {
-    const curl = store.generateCurl();
-    navigator.clipboard.writeText(curl);
-    setCurlCopied(true);
-    setTimeout(() => setCurlCopied(false), 2000);
+  const handleCopyCurl = async () => {
+    try {
+      const curl = store.generateCurl();
+      await navigator.clipboard.writeText(curl);
+      setCurlCopied(true);
+      setTimeout(() => setCurlCopied(false), 2000);
+      addToast({ message: "cURL command copied!", type: "success", duration: 2000 });
+    } catch (err) {
+      console.error("Failed to copy cURL: ", err);
+      addToast({ message: "Failed to copy cURL command.", type: "error", duration: 3000 });
+    }
   };
 
   const handleDownloadResponse = () => {
@@ -810,12 +828,42 @@ export function ApiTester() {
     }
   };
 
+  const formatGraphQLQuery = () => {
+    try {
+      let query = activeTab.graphqlQuery;
+      if (!query || !query.trim()) return;
+      query = query.replace(/\s+/g, ' ');
+      let indent = 0;
+      let formatted = "";
+      for (let i = 0; i < query.length; i++) {
+        const char = query[i];
+        if (char === '{') {
+          indent += 2;
+          formatted += ' {\n' + ' '.repeat(indent);
+        } else if (char === '}') {
+          indent = Math.max(0, indent - 2);
+          formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
+        } else if (char === ',') {
+          formatted += ',\n' + ' '.repeat(indent);
+        } else {
+          formatted += char;
+        }
+      }
+      formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
+      if (formatted !== activeTab.graphqlQuery) {
+        store.setGraphqlQuery(formatted);
+      }
+    } catch (e) {
+      console.error("Failed to format GraphQL query", e);
+    }
+  };
+
   // ── Helpers ────────────────────────────────────────────────
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
+    if (bytes <= 0 || isNaN(bytes)) return "0 B";
     const k = 1024;
-    const sizes = ["B", "KB", "MB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
 
@@ -1397,46 +1445,61 @@ export function ApiTester() {
 
             {activeTab.protocol === "websocket" ? (
               <button
-                type="submit"
-                className={`api-send-btn ${activeTab.wsConnected ? "api-send-btn-ws-connected" : ""}`}
-                disabled={activeTab.loading || !activeTab.url.trim()}
+                type="button"
+                className={`api-send-btn ${activeTab.wsConnected ? "api-send-btn-ws-connected" : ""} ${activeTab.loading ? "api-send-btn-loading" : ""}`}
+                disabled={!activeTab.loading && !activeTab.url.trim()}
+                onClick={(e) => {
+                  if (activeTab.loading || activeTab.wsConnected) {
+                    e.preventDefault();
+                    store.disconnectWs();
+                  } else {
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
               >
                 {activeTab.loading ? (
-                  <span
-                    className="api-spinner"
-                    style={{
-                      width: "14px",
-                      height: "14px",
-                      borderWidth: "2px",
-                    }}
-                  />
+                  <>
+                    <Square className="h-4 w-4 text-red animate-pulse" />
+                    <span>Cancel</span>
+                  </>
                 ) : activeTab.wsConnected ? (
-                  <WifiOff className="h-4 w-4" />
+                  <>
+                    <WifiOff className="h-4 w-4" />
+                    <span>Disconnect</span>
+                  </>
                 ) : (
-                  <Wifi className="h-4 w-4" />
+                  <>
+                    <Wifi className="h-4 w-4" />
+                    <span>Connect</span>
+                  </>
                 )}
-                <span>{activeTab.loading ? "Connecting..." : activeTab.wsConnected ? "Disconnect" : "Connect"}</span>
               </button>
             ) : (
               <button
-                type="submit"
-                className="api-send-btn"
-                disabled={activeTab.loading || !activeTab.url.trim()}
+                type="button"
+                className={`api-send-btn ${activeTab.loading || activeTab.sseActive ? "api-send-btn-loading" : ""}`}
+                disabled={!activeTab.loading && !activeTab.sseActive && !activeTab.url.trim()}
+                onClick={(e) => {
+                  if (activeTab.loading || activeTab.sseActive) {
+                    e.preventDefault();
+                    store.stopActiveRequest(activeTab.id);
+                  } else {
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
               >
-                {activeTab.loading ? (
-                  <span
-                    className="api-spinner"
-                    style={{
-                      width: "14px",
-                      height: "14px",
-                      borderWidth: "2px",
-                    }}
-                  />
+                {activeTab.loading || activeTab.sseActive ? (
+                  <>
+                    <Square className="h-4 w-4 text-red animate-pulse" />
+                    <span>Cancel</span>
+                  </>
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <>
+                    <Send className="h-4 w-4" />
+                    <span>Send</span>
+                    <span className="api-send-shortcut">{isMac ? "⌘↵" : "Ctrl+Enter"}</span>
+                  </>
                 )}
-                <span>{activeTab.loading ? "Sending..." : "Send"}</span>
-                <span className="api-send-shortcut">⌘↵</span>
               </button>
             )}
           </div>
@@ -1572,11 +1635,17 @@ export function ApiTester() {
                 <button
                   type="button"
                   className="api-import-submit-btn"
-                  onClick={() => {
-                    const code = generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : []);
-                    navigator.clipboard.writeText(code);
-                    setSnippetCopied(true);
-                    setTimeout(() => setSnippetCopied(false), 2000);
+                  onClick={async () => {
+                    try {
+                      const code = generateCodeSnippet(activeTab, store.generateCurl(), snippetLang, store.envVars, store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.variables || [] : []);
+                      await navigator.clipboard.writeText(code);
+                      setSnippetCopied(true);
+                      setTimeout(() => setSnippetCopied(false), 2000);
+                      addToast({ message: "Snippet copied to clipboard!", type: "success", duration: 2000 });
+                    } catch (err) {
+                      console.error("Failed to copy code snippet: ", err);
+                      addToast({ message: "Failed to copy code snippet.", type: "error", duration: 3000 });
+                    }
                   }}
                   style={{ display: "flex", alignItems: "center", gap: "6px" }}
                 >
@@ -1972,7 +2041,16 @@ export function ApiTester() {
                           <span>Query</span>
                         </div>
                       </div>
-                      <div style={{ flex: 1, position: "relative" }}>
+                      <div className="api-monaco-editor-wrapper" style={{ flex: 1, position: "relative" }}>
+                        <button
+                          type="button"
+                          className="api-editor-format-btn"
+                          onClick={formatGraphQLQuery}
+                          title="Beautify/Format GraphQL query"
+                        >
+                          <Sparkles className="h-3 w-3 text-yellow" />
+                          <span>Format</span>
+                        </button>
                         <Editor
                           height="100%"
                           language="graphql"
@@ -1986,41 +2064,6 @@ export function ApiTester() {
                             lineNumbers: "on",
                             tabSize: 2,
                             scrollBeyondLastLine: false,
-                          }}
-                          onValidate={() => {
-                            // Auto-format on validation or simply format manually before blur
-                          }}
-                        />
-                        <div 
-                          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}
-                          onBlurCapture={() => {
-                            try {
-                              let query = activeTab.graphqlQuery;
-                              if (!query || !query.trim()) return;
-                              query = query.replace(/\s+/g, ' ');
-                              let indent = 0;
-                              let formatted = "";
-                              for (let i = 0; i < query.length; i++) {
-                                const char = query[i];
-                                if (char === '{') {
-                                  indent += 2;
-                                  formatted += ' {\n' + ' '.repeat(indent);
-                                } else if (char === '}') {
-                                  indent = Math.max(0, indent - 2);
-                                  formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
-                                } else if (char === ',') {
-                                  formatted += ',\n' + ' '.repeat(indent);
-                                } else {
-                                  formatted += char;
-                                }
-                              }
-                              formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
-                              if (formatted !== activeTab.graphqlQuery) {
-                                store.setGraphqlQuery(formatted);
-                              }
-                            } catch (e) {
-                              console.error("Failed to format GraphQL query", e);
-                            }
                           }}
                         />
                       </div>
@@ -2622,7 +2665,7 @@ export function ApiTester() {
                       className="api-response-preview-iframe"
                       srcDoc={activeTab.response.body}
                       title="HTML Response Preview"
-                      sandbox="allow-scripts"
+                      sandbox=""
                     />
                   )}
 
@@ -3017,11 +3060,7 @@ export function ApiTester() {
                                   if (settingsEnvId === 'global') store.setEnvVars(newVars);
                                   else store.setEnvironmentVars(settingsEnvId, newVars);
                                 } else {
-                                  const newVars = [...sourceVars];
-                                  if (newVars[i]) {
-                                    newVars[i].key = "";
-                                    newVars[i].value = "";
-                                  }
+                                  const newVars = sourceVars.map((v, idx) => idx === i ? { ...v, key: "", value: "" } : v);
                                   if (settingsEnvId === 'global') store.setEnvVars(newVars);
                                   else store.setEnvironmentVars(settingsEnvId, newVars);
                                 }

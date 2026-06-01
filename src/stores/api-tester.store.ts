@@ -326,8 +326,13 @@ export function applyAuth(
   if (authType === "bearer" && authConfig.bearerToken.trim()) {
     h["Authorization"] = `Bearer ${authConfig.bearerToken.trim()}`;
   } else if (authType === "basic" && authConfig.basicUsername.trim()) {
-    // Robust Base64 UTF-8 safe encoding
-    const encoded = btoa(unescape(encodeURIComponent(`${authConfig.basicUsername}:${authConfig.basicPassword}`)));
+    // UTF-8 safe Base64 encoding using TextEncoder (replaces deprecated unescape)
+    const encoded = btoa(
+      Array.from(
+        new TextEncoder().encode(`${authConfig.basicUsername}:${authConfig.basicPassword}`),
+        (byte) => String.fromCharCode(byte)
+      ).join('')
+    );
     h["Authorization"] = `Basic ${encoded}`;
   } else if (authType === "api-key" && authConfig.apiKeyName.trim() && authConfig.apiKeyValue.trim()) {
     if (authConfig.apiKeyPlacement === "header") {
@@ -345,6 +350,23 @@ export function applyAuth(
 // ── External maps for non-serializable objects ──────────────
 const wsConnections = new Map<string, WebSocket>();
 const activeControllers = new Map<string, AbortController>();
+
+// Helper: get active environment variables (DRY)
+function getActiveEnvVars(state: { activeEnvironmentId: string | null; environments: Environment[] }): KeyValueField[] {
+  if (!state.activeEnvironmentId) return [];
+  return state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [];
+}
+
+// Helper: validate and normalize URL before fetch
+function normalizeUrl(url: string): string {
+  let normalized = url.trim();
+  if (!normalized) return normalized;
+  // Auto-prepend https:// if no protocol is specified
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+  return normalized;
+}
 
 export const useApiTesterStore = create<ApiTesterState>((set, get) => {
   const initialTab = createNewTab("Tab 1");
@@ -423,6 +445,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       persistTabs();
     },
     removeTab: (id) => {
+      // Clean up WebSocket connections and AbortControllers for the removed tab
+      const ws = wsConnections.get(id);
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close(1000, "Tab closed");
+      }
+      wsConnections.delete(id);
+      const controller = activeControllers.get(id);
+      if (controller) {
+        controller.abort();
+        activeControllers.delete(id);
+      }
+
       set((state) => {
         if (state.tabs.length === 1) return state; // Don't remove the last tab
         const newTabs = state.tabs.filter((t) => t.id !== id);
@@ -536,10 +570,17 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         existing.close();
       }
 
-      const activeEnvVars = state.activeEnvironmentId
-        ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || []
-        : [];
+      const activeEnvVars = getActiveEnvVars(state);
       let wsUrl = substituteEnvVars(tab.url, state.envVars, activeEnvVars);
+
+      // Append query params to WebSocket URL (same as REST mode)
+      const wsParams = tab.params.filter(p => p.enabled && p.key.trim() !== "");
+      if (wsParams.length > 0) {
+        const searchParams = new URLSearchParams();
+        wsParams.forEach(p => searchParams.append(p.key.trim(), substituteEnvVars(p.value, state.envVars, activeEnvVars)));
+        const sep = wsUrl.includes("?") ? "&" : "?";
+        wsUrl += `${sep}${searchParams.toString()}`;
+      }
 
       // Auto-convert http(s) to ws(s) if user forgot
       if (wsUrl.startsWith("http://")) wsUrl = wsUrl.replace("http://", "ws://");
@@ -612,9 +653,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       const ws = wsConnections.get(tabId);
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-      const activeEnvVars = state.activeEnvironmentId
-        ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || []
-        : [];
+      const activeEnvVars = getActiveEnvVars(state);
       const substituted = substituteEnvVars(text, state.envVars, activeEnvVars);
 
       ws.send(substituted);
@@ -829,7 +868,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       if (!tab) return "";
       const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
 
-      const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+      const activeEnvVars = getActiveEnvVars(state);
 
       let computedHeaders: Record<string, string> = {};
       headers.forEach((h) => {
@@ -882,7 +921,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         } else if (bodyType === "form-data") {
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim()) {
-              const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+              const activeEnvVars = getActiveEnvVars(state);
               const subVal = substituteEnvVars(f.value, state.envVars, activeEnvVars);
               parts.push(`  -F '${f.key.trim()}=${subVal.replace(/'/g, "'\\''")}'`);
             }
@@ -916,7 +955,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       let computedHeaders: Record<string, string> = {};
 
       // Assemble active headers
-      const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+      const activeEnvVars = getActiveEnvVars(state);
       headers.forEach((h) => {
         if (h.enabled && h.key.trim() !== "") {
           computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), state.envVars, activeEnvVars);
@@ -968,7 +1007,15 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }
       }
 
-      const substitutedUrl = substituteEnvVars(url, state.envVars, activeEnvVars);
+      // Normalize and validate URL
+      const substitutedUrl = normalizeUrl(substituteEnvVars(url, state.envVars, activeEnvVars));
+      if (!substitutedUrl) {
+        set((state) => ({
+          tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, error: "Please enter a valid URL.", loading: false } : t)),
+        }));
+        return;
+      }
+
       const substitutedAuthConfig = {
         bearerToken: substituteEnvVars(authConfig.bearerToken, state.envVars, activeEnvVars),
         basicUsername: substituteEnvVars(authConfig.basicUsername, state.envVars, activeEnvVars),
@@ -996,14 +1043,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         activeControllers.set(tab.id, controller);
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-        const res = await fetch(finalUrl, {
-          method: effectiveMethod,
-          headers: computedHeaders,
-          body: fetchBody,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
+        let res: Response;
+        try {
+          res = await fetch(finalUrl, {
+            method: effectiveMethod,
+            headers: computedHeaders,
+            body: fetchBody,
+            signal: controller.signal,
+          });
+        } catch (fetchErr) {
+          clearTimeout(timeoutId);
+          throw fetchErr;
+        }
 
         // Read response headers
         const resHeaders: Record<string, string> = {};
@@ -1061,6 +1112,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             }
           };
           readStream();
+          const ttfb = Math.round(performance.now() - startTime);
 
           // Add to history
           const activeHeaders = headers
@@ -1070,7 +1122,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             const historyId = genId();
             const newHistoryItem: HistoryItem = {
               id: historyId, timestamp: Date.now(), method: effectiveMethod as HttpMethod, url,
-              status: res.status, time: 0, headers: activeHeaders, bodyType, bodyValue: bodyType !== "none" ? bodyValue : undefined,
+              status: res.status, time: ttfb, headers: activeHeaders, bodyType, bodyValue: bodyType !== "none" ? bodyValue : undefined,
               authType, authConfig: authType !== "none" ? { ...authConfig } : undefined,
             };
             const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
@@ -1082,12 +1134,13 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }
 
         // ── Standard Response Mode ─────────────────────────────
-        const endTime = performance.now();
-        const timeMs = Math.round(endTime - startTime);
         activeControllers.delete(tab.id);
 
-        // Read response body text
+        // Read response body text (timeout still active to cover body read)
         const bodyText = await res.text();
+        clearTimeout(timeoutId); // Clear timeout AFTER body is fully read
+        const endTime = performance.now();
+        const timeMs = Math.round(endTime - startTime);
         const sizeBytes = new Blob([bodyText]).size;
 
         const responseObj: ApiResponse = {
