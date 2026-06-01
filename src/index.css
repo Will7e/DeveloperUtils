@@ -7164,3 +7164,13 @@ body {
   background: var(--bg-2);
   border-color: var(--border-2);
 }
+
+/* ============================================================
+   PREVENT MONACO INITIALIZATION WHITE FLASH
+   ============================================================ */
+
+.monaco-editor,
+.monaco-editor .margin,
+.monaco-editor-background {
+  background-color: var(--bg-1) !important;
+}

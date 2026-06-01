@@ -1698,6 +1698,8 @@ export function ApiTester() {
               <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
                 {showCodeSnippet && (
                   <Editor
+                    className="api-monaco-wrapper"
+                    loading={<div />}
                     height="100%"
                     language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
                     theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2022,6 +2024,8 @@ export function ApiTester() {
                         <span>Format</span>
                       </button>
                       <Editor
+                        className="api-monaco-wrapper"
+                        loading={<div />}
                         height="100%"
                         language="json"
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2097,6 +2101,8 @@ export function ApiTester() {
                   {activeTab.bodyType === "raw" && (
                     <div className="api-monaco-editor-wrapper">
                       <Editor
+                        className="api-monaco-wrapper"
+                        loading={<div />}
                         height="100%"
                         language={activeTab.rawType.split("/")[1] || "text"}
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2128,6 +2134,8 @@ export function ApiTester() {
                       </div>
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
+                          className="api-monaco-wrapper"
+                          loading={<div />}
                           height="100%"
                           language="graphql"
                           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2156,6 +2164,8 @@ export function ApiTester() {
                       </div>
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
+                          className="api-monaco-wrapper"
+                          loading={<div />}
                           height="100%"
                           language="json"
                           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2185,6 +2195,8 @@ export function ApiTester() {
                   </div>
                   <div style={{ flex: 1, border: "1px solid var(--border-1)", borderRadius: "var(--radius-md)", overflow: "hidden", position: "relative" }}>
                     <Editor
+                      className="api-monaco-wrapper"
+                      loading={<div />}
                       height="100%"
                       language="json"
                       theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2709,6 +2721,8 @@ export function ApiTester() {
                   {responseTab === "pretty" && (
                     <div className="api-response-monaco-wrapper">
                       <Editor
+                        className="api-monaco-wrapper"
+                        loading={<div />}
                         height="100%"
                         language={responseLang}
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}

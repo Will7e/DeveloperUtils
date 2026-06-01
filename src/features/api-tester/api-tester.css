@@ -2408,3 +2408,8 @@ html.light .api-editor-format-btn:hover {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* Prevent white flash during Monaco initialization */
+.api-monaco-wrapper {
+  background-color: var(--bg-1) !important;
+}

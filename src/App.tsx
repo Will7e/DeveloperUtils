@@ -4,6 +4,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
+import { loader } from "@monaco-editor/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompilerPage } from "@/pages/CompilerPage";
@@ -20,7 +21,12 @@ import { ToastContainer } from "@/features/toast/ToastContainer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useKeepAlive } from "@/hooks/useKeepAlive";
 import { useAppStore } from "@/stores/app.store";
+import { setupMonacoTheme } from "@/utils/monaco-theme";
 
+// Pre-initialize Monaco and register custom themes early to prevent initial light-theme fallback
+loader.init().then((monaco) => {
+  setupMonacoTheme(monaco);
+});
 
 function AppContent() {
   useKeyboardShortcuts();
