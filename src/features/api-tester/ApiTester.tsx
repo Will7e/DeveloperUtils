@@ -517,6 +517,17 @@ function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispat
   return [value, setValue];
 }
 
+const getLanguageFromContentType = (contentType?: string): string => {
+  if (!contentType) return "text";
+  const type = contentType.toLowerCase();
+  if (type.includes("json")) return "json";
+  if (type.includes("html")) return "html";
+  if (type.includes("xml")) return "xml";
+  if (type.includes("css")) return "css";
+  if (type.includes("javascript")) return "javascript";
+  return "text";
+};
+
 // ── Main Component ───────────────────────────────────────────
 export function ApiTester() {
   const store = useApiTesterStore();
@@ -694,6 +705,22 @@ export function ApiTester() {
   // Issue 19: Detect Mac vs Windows/Linux platform for shortcuts
   const isMac = typeof window !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent);
 
+  const responseLang = activeTab?.response
+    ? getLanguageFromContentType(activeTab.response.headers?.["content-type"])
+    : "text";
+
+  const prettyBody = React.useMemo(() => {
+    if (!activeTab?.response?.body) return "";
+    if (responseLang === "json") {
+      try {
+        return JSON.stringify(JSON.parse(activeTab.response.body), null, 2);
+      } catch {
+        return activeTab.response.body;
+      }
+    }
+    return activeTab.response.body;
+  }, [activeTab?.response?.body, responseLang]);
+
   // Issue 28 & Bug 1: Loading state during store initialization or when no active tab exists
   if (!store.isInitialized || !activeTab) {
     return (
@@ -869,32 +896,9 @@ export function ApiTester() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
 
-  const getLanguageFromContentType = (contentType?: string): string => {
-    if (!contentType) return "text";
-    const type = contentType.toLowerCase();
-    if (type.includes("json")) return "json";
-    if (type.includes("html")) return "html";
-    if (type.includes("xml")) return "xml";
-    if (type.includes("css")) return "css";
-    if (type.includes("javascript")) return "javascript";
-    return "text";
-  };
 
-  const responseLang = activeTab.response
-    ? getLanguageFromContentType(activeTab.response.headers?.["content-type"])
-    : "text";
 
-  const prettyBody = React.useMemo(() => {
-    if (!activeTab.response?.body) return "";
-    if (responseLang === "json") {
-      try {
-        return JSON.stringify(JSON.parse(activeTab.response.body), null, 2);
-      } catch {
-        return activeTab.response.body;
-      }
-    }
-    return activeTab.response.body;
-  }, [activeTab.response?.body, responseLang]);
+
 
   const getTimeClass = (ms: number): string => {
     if (ms < 200) return "meta-time-fast";
