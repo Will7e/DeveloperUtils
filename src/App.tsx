@@ -3,12 +3,14 @@
 // ============================================================
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { CompilerPage } from "@/pages/CompilerPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { FormattersPage } from "@/pages/FormattersPage";
 import { ComparatorsPage } from "@/pages/ComparatorsPage";
+import { DiffCheckerPage } from "@/pages/DiffCheckerPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { WorkflowPage } from "@/pages/WorkflowPage";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
@@ -16,12 +18,18 @@ import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useKeepAlive } from "@/hooks/useKeepAlive";
+import { useAppStore } from "@/stores/app.store";
 
 
 function App() {
   useKeyboardShortcuts();
   useKeepAlive();
 
+  // Apply light/dark theme class to document root
+  const theme = useAppStore((s) => s.editorSettings.theme);
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", theme === "light");
+  }, [theme]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -32,6 +40,7 @@ function App() {
             <Route path="/compiler" element={<CompilerPage />} />
             <Route path="/formatters" element={<FormattersPage />} />
             <Route path="/comparators" element={<ComparatorsPage />} />
+            <Route path="/diff" element={<DiffCheckerPage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/workflows" element={<WorkflowPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

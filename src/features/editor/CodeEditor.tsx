@@ -83,7 +83,52 @@ export function CodeEditor() {
         },
       });
 
-      monaco.editor.setTheme("devutils-dark");
+      // Light theme
+      monaco.editor.defineTheme("devutils-light", {
+        base: "vs",
+        inherit: true,
+        rules: [
+          { token: "comment", foreground: "94a3b8", fontStyle: "italic" },
+          { token: "keyword", foreground: "7c3aed" },
+          { token: "string", foreground: "059669" },
+          { token: "number", foreground: "d97706" },
+          { token: "type", foreground: "2563eb" },
+          { token: "function", foreground: "4f46e5" },
+          { token: "variable", foreground: "1e293b" },
+          { token: "operator", foreground: "64748b" },
+          { token: "regexp", foreground: "ea580c" },
+        ],
+        colors: {
+          "editor.background": "#f8fafc",
+          "editor.foreground": "#1e293b",
+          "editor.lineHighlightBackground": "#0000000a",
+          "editor.selectionBackground": "#0284c730",
+          "editor.inactiveSelectionBackground": "#0284c715",
+          "editorCursor.foreground": "#0284c7",
+          "editorLineNumber.foreground": "#cbd5e1",
+          "editorLineNumber.activeForeground": "#0284c7",
+          "editor.selectionHighlightBackground": "#0284c712",
+          "editorIndentGuide.background": "#e2e8f0",
+          "editorIndentGuide.activeBackground": "#94a3b8",
+          "editorBracketMatch.background": "#0284c720",
+          "editorBracketMatch.border": "#0284c740",
+          "editorWidget.background": "#ffffff",
+          "editorWidget.border": "#e2e8f0",
+          "editorSuggestWidget.background": "#ffffff",
+          "editorSuggestWidget.border": "#e2e8f0",
+          "editorSuggestWidget.selectedBackground": "#f1f5f9",
+          "editorHoverWidget.background": "#ffffff",
+          "editorHoverWidget.border": "#e2e8f0",
+          "minimap.background": "#f8fafc",
+          "scrollbarSlider.background": "#0000000a",
+          "scrollbarSlider.hoverBackground": "#00000014",
+          "scrollbarSlider.activeBackground": "#00000020",
+        },
+      });
+
+      // Set initial theme based on settings
+      const currentTheme = useAppStore.getState().editorSettings.theme;
+      monaco.editor.setTheme(currentTheme === "light" ? "devutils-light" : "devutils-dark");
 
       // Focus editor
       editor.focus();
@@ -124,6 +169,17 @@ export function CodeEditor() {
     },
     []
   );
+
+  // Dynamically switch Monaco theme when settings change
+  useEffect(() => {
+    if (editorRef.current) {
+      const monaco = (window as any).monaco;
+      if (monaco) {
+        monaco.editor.setTheme(editorSettings.theme === "light" ? "devutils-light" : "devutils-dark");
+      }
+    }
+  }, [editorSettings.theme]);
+
 
   // Manually trigger layout on container resize with explicit dimensions
   useEffect(() => {
@@ -176,7 +232,7 @@ export function CodeEditor() {
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorMount}
-        theme="devutils-dark"
+        theme={editorSettings.theme === "light" ? "devutils-light" : "devutils-dark"}
         options={{
           fontSize: editorSettings.fontSize,
           fontFamily: editorSettings.fontFamily,

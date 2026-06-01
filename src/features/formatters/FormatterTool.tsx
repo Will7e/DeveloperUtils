@@ -67,6 +67,7 @@ export function FormatterTool() {
   const renameFile = useAppStore((s) => s.renameFormatterFile);
   const reorderFiles = useAppStore((s) => s.reorderFormatterFiles);
   const addToast = useAppStore((s) => s.addToast);
+  const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
   
   // Migration: Ensure we're not stuck in 'html' type from stale localStorage
   useEffect(() => {
@@ -83,7 +84,10 @@ export function FormatterTool() {
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const handleFormatRef = React.useRef<(() => void) | null>(null);
 
+  const formatterEditorRef = React.useRef<any>(null);
+
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
+    formatterEditorRef.current = editor;
     monaco.editor.defineTheme("devutils-dark", {
       base: "vs-dark",
       inherit: true,
@@ -102,7 +106,28 @@ export function FormatterTool() {
         "minimap.background": "#00000000",
       },
     });
-    monaco.editor.setTheme("devutils-dark");
+
+    monaco.editor.defineTheme("devutils-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "comment", foreground: "94a3b8", fontStyle: "italic" },
+        { token: "keyword", foreground: "7c3aed" },
+        { token: "string", foreground: "059669" },
+        { token: "number", foreground: "d97706" },
+        { token: "type", foreground: "2563eb" },
+        { token: "variable", foreground: "1e293b" },
+      ],
+      colors: {
+        "editor.background": "#00000000",
+        "editor.lineHighlightBackground": "#0000000a",
+        "editorLineNumber.foreground": "#cbd5e1",
+        "minimap.background": "#00000000",
+      },
+    });
+
+    const initTheme = useAppStore.getState().editorSettings.theme;
+    monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       if (handleFormatRef.current) {
@@ -110,6 +135,16 @@ export function FormatterTool() {
       }
     });
   }, []);
+
+  // Switch Monaco theme dynamically
+  useEffect(() => {
+    if (formatterEditorRef.current) {
+      const monaco = (window as any).monaco;
+      if (monaco) {
+        monaco.editor.setTheme(currentThemeSetting === "light" ? "devutils-light" : "devutils-dark");
+      }
+    }
+  }, [currentThemeSetting]);
 
   // Split Resizing
   const { size: splitSize, containerRef, handleMouseDown, isDragging } = useResizable({
@@ -546,7 +581,7 @@ export function FormatterTool() {
                 value={currentInput}
                 onChange={(value) => updateContent(type, activeFile.id, value || "")}
                 onMount={handleEditorMount}
-                theme="devutils-dark"
+                theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
                 options={{
                   minimap: { enabled: true },
                   scrollBeyondLastLine: false,

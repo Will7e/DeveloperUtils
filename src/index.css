@@ -75,6 +75,494 @@
   --radius: var(--radius-md);
 }
 
+/* ============================================================
+   LIGHT MODE — Design Token Overrides
+   ============================================================ */
+
+html.light {
+  --bg-0: #f8fafc;
+  --bg-1: #ffffff;
+  --bg-2: #f1f5f9;
+  --bg-3: #e2e8f0;
+  --bg-4: #cbd5e1;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+
+  --border-1: rgba(0, 0, 0, 0.08);
+  --border-2: rgba(0, 0, 0, 0.14);
+  --border-accent: rgba(2, 132, 199, 0.35);
+
+  --text-1: #0f172a;
+  --text-2: #475569;
+  --text-3: #94a3b8;
+
+  --accent: #0284c7;
+  --accent-dim: #0369a1;
+  --accent-glow: rgba(2, 132, 199, 0.12);
+
+  --green: #059669;
+  --green-dim: rgba(5, 150, 105, 0.10);
+  --red: #dc2626;
+  --red-dim: rgba(220, 38, 38, 0.08);
+  --yellow: #d97706;
+  --yellow-dim: rgba(217, 119, 6, 0.10);
+  --blue: #2563eb;
+  --blue-dim: rgba(37, 99, 235, 0.10);
+  --purple: #7c3aed;
+  --purple-dim: rgba(124, 58, 237, 0.10);
+
+  /* shadcn compat */
+  --background: var(--bg-0);
+  --foreground: var(--text-1);
+  --card: var(--bg-1);
+  --card-foreground: var(--text-1);
+  --popover: var(--bg-1);
+  --popover-foreground: var(--text-1);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--bg-2);
+  --secondary-foreground: var(--text-1);
+  --muted: var(--bg-2);
+  --muted-foreground: var(--text-3);
+  --accent-ui: var(--bg-2);
+  --accent-foreground: var(--text-1);
+  --destructive: var(--red);
+  --destructive-foreground: #ffffff;
+  --border: var(--border-1);
+  --input: var(--border-1);
+  --ring: var(--accent);
+}
+
+/* ---- Light: Scrollbars ---- */
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.10);
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* ---- Light: Selection ---- */
+html.light ::selection {
+  background: rgba(2, 132, 199, 0.25);
+  color: #0f172a;
+}
+
+/* ---- Light: Brand Gradient Text ---- */
+html.light .activity-brand-text {
+  background: linear-gradient(135deg, #0f172a, #475569);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+html.light .brand-text {
+  background: linear-gradient(135deg, #0f172a, #64748b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ---- Light: Activity Bar Logo ---- */
+html.light .activity-logo {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.06));
+  box-shadow: 0 0 12px rgba(2, 132, 199, 0.10);
+}
+html.light .activity-logo:hover {
+  box-shadow: 0 0 18px rgba(2, 132, 199, 0.20);
+}
+
+/* ---- Light: Nav Indicator ---- */
+html.light .nav-item-indicator {
+  box-shadow: 0 0 8px rgba(2, 132, 199, 0.3);
+}
+
+/* ---- Light: Run Button ---- */
+html.light .run-btn {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10), 0 0 12px rgba(2, 132, 199, 0.15);
+}
+html.light .run-btn:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 18px rgba(2, 132, 199, 0.25);
+}
+
+/* ---- Light: Tabs Run Button ---- */
+html.light .tabs-run-btn {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 8px rgba(34, 197, 94, 0.12);
+}
+html.light .tabs-run-btn:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 0 14px rgba(34, 197, 94, 0.20);
+}
+
+/* ---- Light: Resize Handle ---- */
+html.light .resize-handle-indicator {
+  background: rgba(0, 0, 0, 0.10);
+}
+html.light .resize-handle:hover .resize-handle-indicator {
+  background: rgba(0, 0, 0, 0.35);
+}
+html.light .resize-handle:active .resize-handle-indicator {
+  background: #0f172a;
+}
+
+/* ---- Light: Tab Active ---- */
+html.light .tab-active {
+  background: var(--bg-0);
+}
+
+/* ---- Light: Dropdowns & Modals ---- */
+html.light .new-file-dropdown {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+html.light .settings-panel {
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.15);
+}
+html.light .palette-container {
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.20), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+html.light .settings-overlay {
+  background: rgba(0, 0, 0, 0.25);
+}
+html.light .palette-overlay {
+  background: rgba(0, 0, 0, 0.20);
+}
+
+/* ---- Light: Palette Item Shortcut ---- */
+html.light .palette-item-shortcut {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--border-2);
+}
+html.light .palette-item-active .palette-item-shortcut {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ---- Light: Toasts ---- */
+html.light .toast {
+  background: var(--bg-1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+/* ---- Light: Tooltips ---- */
+html.light .devutils-tooltip {
+  background: #1e293b;
+  border-color: #334155;
+  color: #f8fafc;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.20);
+}
+html.light .devutils-tooltip kbd {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #cbd5e1;
+}
+
+/* ---- Light: Dropdown Content ---- */
+html.light .dropdown-content {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(12px);
+}
+
+/* ---- Light: Formatter Dropdown ---- */
+html.light .formatter-dropdown {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10);
+}
+html.light .formatter-settings-popover {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+/* ---- Light: Toolbar Action ---- */
+html.light .toolbar-action-btn {
+  background: rgba(0, 0, 0, 0.03);
+}
+html.light .toolbar-action-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* ---- Light: Section Header Row ---- */
+html.light .section-header-row {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ---- Light: Formatter Settings Header ---- */
+html.light .formatter-settings-header {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ---- Light: Library Code Block — keep dark for readability ---- */
+html.light .lib-code-block {
+  background: #1e293b;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+html.light .lib-code-toolbar {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+}
+html.light .lib-code-text {
+  color: #e2e8f0;
+}
+html.light .lib-code-ln {
+  color: #475569;
+  border-right-color: rgba(255, 255, 255, 0.06);
+}
+html.light .lib-code-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+html.light .lib-code-copy-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+}
+html.light .lib-code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f1f5f9;
+}
+
+/* ---- Light: Library View Description ---- */
+html.light .lib-view-description,
+html.light .lib-method-desc {
+  color: #475569;
+}
+
+/* ---- Light: Library View Header Gradient ---- */
+html.light .lib-view-header {
+  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+}
+
+/* ---- Light: Library View Empty Glow ---- */
+html.light .lib-view-empty-glow {
+  background: radial-gradient(circle at 50% 40%, rgba(2, 132, 199, 0.06) 0%, transparent 60%);
+}
+html.light .lib-view-empty-icon-ring {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* ---- Light: Sidebar collapsed file active ---- */
+html.light .sidebar-collapsed-file-active::before {
+  box-shadow: 0 0 6px rgba(2, 132, 199, 0.3);
+}
+html.light .sidebar-file-active::before {
+  box-shadow: 0 0 6px rgba(2, 132, 199, 0.2);
+}
+
+/* ---- Light: Lib Group Count ---- */
+html.light .lib-group-count {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* ---- Light: Dashboard ---- */
+html.light .dash-hero-badge {
+  background: rgba(2, 132, 199, 0.08);
+  border-color: rgba(2, 132, 199, 0.20);
+  color: #0369a1;
+}
+html.light .dash-hero-accent {
+  background: linear-gradient(135deg, #0284c7, #0369a1, #075985);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+html.light .dash-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+html.light .dash-card::before {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.04), transparent 60%);
+}
+html.light .dash-card-active:hover {
+  border-color: rgba(2, 132, 199, 0.25);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(2, 132, 199, 0.06);
+}
+html.light .dash-card-badge {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ---- Light: Workflow Canvas ---- */
+html.light .wf-canvas-wrapper {
+  background-color: #f1f5f9;
+  background-image:
+    radial-gradient(circle at top right, rgba(2, 132, 199, 0.05), transparent 50%),
+    radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.05), transparent 50%),
+    linear-gradient(to bottom right, #f8fafc, #f1f5f9);
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.02);
+}
+html.light .wf-minimap {
+  background: rgba(255, 255, 255, 0.90) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* ---- Light: Workflow Nodes ---- */
+html.light .wf-node-process,
+html.light .wf-node-data,
+html.light .wf-node-integration {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+html.light .wf-node-process:hover,
+html.light .wf-node-data:hover,
+html.light .wf-node-integration:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+html.light .wf-node-start .wf-node-terminal-inner,
+html.light .wf-node-end .wf-node-terminal-inner {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+html.light .wf-node-decision-diamond {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+html.light .wf-handle {
+  border-color: var(--bg-1) !important;
+}
+
+/* ---- Light: Workflow Palette Items ---- */
+html.light .wf-palette-item {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+html.light .wf-palette-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.10);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+html.light .wf-palette-icon-wrapper {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* ---- Light: Workflow Toggle Group ---- */
+html.light .wf-prop-toggle-group {
+  background: rgba(0, 0, 0, 0.02);
+}
+html.light .wf-prop-toggle-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* ---- Light: Results Tab Active ---- */
+html.light .results-tab.active {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* ---- Light: JSON Tree Values ---- */
+html.light .json-value-string { color: #059669; }
+html.light .json-value-number { color: #d97706; }
+html.light .json-value-boolean { color: #7c3aed; }
+html.light .json-tree-label { color: #2563eb; }
+
+/* ---- Light: XML Tree Values ---- */
+html.light .xml-tag-name { color: #2563eb; }
+html.light .xml-attr-name { color: #7c3aed; }
+html.light .xml-attr-value { color: #059669; }
+
+/* ---- Light: Nav Active Item ---- */
+html.light .nav-item-active {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* ---- Light: Lib Group Header Hover ---- */
+html.light .lib-group-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ---- Light: Lib Item Active ---- */
+html.light .lib-item-active {
+  background: rgba(2, 132, 199, 0.06) !important;
+}
+
+/* ---- Light: Method Header Hover ---- */
+html.light .lib-method-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ---- Light: Console Toggle Active ---- */
+html.light .console-toggle-btn-active {
+  background: rgba(2, 132, 199, 0.06);
+  color: #0284c7;
+  border-color: rgba(2, 132, 199, 0.18);
+}
+
+/* ---- Light: Execution History ---- */
+html.light .execution-history {
+  background: var(--bg-0);
+}
+
+/* ---- Light: Output Entry Hover ---- */
+html.light .output-entry:hover {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+/* ---- Light: Smooth Transitions ---- */
+html.light body,
+html.light .main-layout,
+html.light .activity-bar,
+html.light .toolbar,
+html.light .tabs-bar,
+html.light .sidebar,
+html.light .status-bar,
+html.light .output-panel,
+html.light .output-header {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/* ---- Light: Sidebar Scrollbar ---- */
+html.light .lib-sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+}
+html.light .lib-sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.15);
+}
+html.light .lib-view-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+}
+html.light .lib-view-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* ---- Light: Sidebar Footer ---- */
+html.light .lib-sidebar-footer {
+  background: rgba(0, 0, 0, 0.01);
+}
+
+/* ---- Light: Diff Stats ---- */
+html.light .diff-stat-add {
+  background: rgba(5, 150, 105, 0.10);
+  color: #059669;
+}
+html.light .diff-stat-del {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+}
+html.light .diff-stat-eq {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* ---- Light: Lib Search Highlight ---- */
+html.light .lib-search-highlight,
+html.light .lib-text-highlight {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+/* ---- Light: Cancel Pulse ---- */
+html.light .tabs-run-btn-stop {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 8px rgba(220, 38, 38, 0.15);
+}
+
+/* ---- Light: Brand Icon Glow ---- */
+html.light .brand-icon-svg {
+  color: var(--accent);
+  fill: rgba(2, 132, 199, 0.12);
+}
+
+/* ---- Light: Comparator options ---- */
+html.light .comparator-option-label input {
+  accent-color: var(--accent);
+}
+
+/* ---- Light: Lib TOC Item Match ---- */
+html.light .lib-toc-item-match {
+  color: #0284c7 !important;
+  background: rgba(2, 132, 199, 0.08) !important;
+  border-color: rgba(2, 132, 199, 0.25) !important;
+}
+
+/* ============================================================
+   END LIGHT MODE
+   ============================================================ */
+
 /* ---- Reset ---- */
 * {
   margin: 0;
@@ -1055,6 +1543,11 @@ body {
 .tab-icon-xml {
   background: rgba(249, 115, 22, 0.10);
   color: #f97316;
+}
+
+.tab-icon-diff {
+  background: rgba(244, 114, 182, 0.10);
+  color: #f472b6;
 }
 
 .tab-name {
@@ -6427,4 +6920,85 @@ body {
 @keyframes wf-pulse-text {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
+}
+
+/* ============================================================
+   DIFF CHECKER
+   ============================================================ */
+
+.diff-checker-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+/* ---- Stats Bar — pill-badge style inspired by result-panel headers ---- */
+.diff-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.diff-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  transition: opacity 0.18s;
+}
+
+.diff-stat-add {
+  background: rgba(34, 197, 94, 0.12);
+  color: #4ade80;
+}
+
+.diff-stat-del {
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+}
+
+.diff-stat-eq {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-2);
+}
+
+.diff-stat-spacer {
+  flex: 1;
+}
+
+.diff-stat-lang {
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+}
+
+/* ---- Diff Editor Container ---- */
+.diff-editor-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.diff-lang-dropdown {
+  max-height: 320px;
+  overflow-y: auto;
 }

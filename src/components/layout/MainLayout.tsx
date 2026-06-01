@@ -13,6 +13,7 @@ import {
   ChevronsRight,
   FileCode,
   Columns,
+  FileDiff,
   Library,
   GitFork,
 } from "lucide-react";
@@ -137,6 +138,14 @@ export function MainLayout() {
             icon={<Columns className="h-[18px] w-[18px]" />}
             label="Comparators"
             active={location.pathname === "/comparators"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/diff"
+            icon={<FileDiff className="h-[18px] w-[18px]" />}
+            label="Diff Check"
+            active={location.pathname === "/diff"}
             collapsed={sidebarCollapsed}
           />
 

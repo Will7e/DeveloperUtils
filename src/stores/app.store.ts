@@ -4,7 +4,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, Language, EditorFile, Workflow, WorkflowNodeData, WorkflowEdgeData } from "@/types";
+import type { AppState, Language, EditorFile, Workflow, WorkflowNodeData, WorkflowEdgeData, DiffSession, DiffSettings } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
@@ -38,6 +38,8 @@ const initialFile = createDefaultFile("javascript");
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
 const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+const initialDiffSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext" };
+const initialDiffSettings: DiffSettings = { renderSideBySide: true, ignoreTrimWhitespace: true, enableSplitViewResizing: true };
 
 const initialWorkflow: Workflow = {
   id: generateId(),
@@ -84,6 +86,9 @@ export const useAppStore = create<AppState>()(
       comparatorSessions: [initialComparatorSession],
       activeComparatorSessionId: initialComparatorSession.id,
       comparatorSettings: { caseSensitive: false, trimWhitespace: true, sortAlpha: true },
+      diffSessions: [initialDiffSession],
+      activeDiffSessionId: initialDiffSession.id,
+      diffSettings: initialDiffSettings,
       librarySelectedItemId: null,
       librarySearchQuery: "",
       workflows: [initialWorkflow],
@@ -392,6 +397,74 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      // Diff checker actions
+      createDiffSession: (name) => {
+        const id = generateId();
+        const newSession: DiffSession = { id, name: name || "Diff Check", original: "", modified: "", language: "plaintext" };
+        set((state) => ({
+          diffSessions: [...state.diffSessions, newSession],
+          activeDiffSessionId: id
+        }));
+      },
+
+      deleteDiffSession: (id) => {
+        set((state) => {
+          const remaining = state.diffSessions.filter(s => s.id !== id);
+          if (remaining.length === 0) {
+            const newSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext" };
+            return {
+              diffSessions: [newSession],
+              activeDiffSessionId: newSession.id
+            };
+          }
+          return {
+            diffSessions: remaining,
+            activeDiffSessionId:
+              state.activeDiffSessionId === id ? remaining[remaining.length - 1]!.id : state.activeDiffSessionId
+          };
+        });
+      },
+
+      setActiveDiffSession: (id) => {
+        set({ activeDiffSessionId: id });
+      },
+
+      updateDiffSessionInput: (id, side, input) => {
+        set((state) => ({
+          diffSessions: state.diffSessions.map(s =>
+            s.id === id ? { ...s, [side]: input } : s
+          )
+        }));
+      },
+
+      updateDiffSessionLanguage: (id, language) => {
+        set((state) => ({
+          diffSessions: state.diffSessions.map(s =>
+            s.id === id ? { ...s, language } : s
+          )
+        }));
+      },
+
+      renameDiffSession: (id, name) => {
+        set((state) => ({
+          diffSessions: state.diffSessions.map(s =>
+            s.id === id ? { ...s, name } : s
+          )
+        }));
+      },
+
+      reorderDiffSessions: (fromIndex, toIndex) => {
+        set((state) => ({
+          diffSessions: arrayMove(state.diffSessions, fromIndex, toIndex),
+        }));
+      },
+
+      updateDiffSettings: (settings) => {
+        set((state) => ({
+          diffSettings: { ...state.diffSettings, ...settings }
+        }));
+      },
+
       setLibrarySelectedItemId: (id) => {
         set({ librarySelectedItemId: id });
       },
@@ -530,6 +603,9 @@ export const useAppStore = create<AppState>()(
         comparatorSessions: state.comparatorSessions,
         activeComparatorSessionId: state.activeComparatorSessionId,
         comparatorSettings: state.comparatorSettings,
+        diffSessions: state.diffSessions,
+        activeDiffSessionId: state.activeDiffSessionId,
+        diffSettings: state.diffSettings,
         librarySelectedItemId: state.librarySelectedItemId,
         librarySearchQuery: state.librarySearchQuery,
         workflows: state.workflows,

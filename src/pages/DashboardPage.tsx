@@ -3,7 +3,7 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork, FileDiff } from "lucide-react";
 
 interface ToolCardProps {
   to?: string;
@@ -118,6 +118,15 @@ export function DashboardPage() {
               glowColor="rgba(56, 189, 248, 0.12)"
               title="List Comparator"
               description="Compare two text lists side by side. Instantly spot unique items, common entries, and differences."
+              available
+            />
+            <ToolCard
+              to="/diff"
+              icon={<FileDiff className="h-5 w-5" />}
+              iconColor="#f472b6"
+              glowColor="rgba(244, 114, 182, 0.12)"
+              title="Diff Check"
+              description="Industrial-grade text and code diff viewer powered by Monaco. Side-by-side or inline with syntax highlighting."
               available
             />
             <ToolCard

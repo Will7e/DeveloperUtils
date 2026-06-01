@@ -52,6 +52,22 @@ export interface ComparatorSession {
   b: string;
 }
 
+/** A single session in the diff checker tool */
+export interface DiffSession {
+  id: string;
+  name: string;
+  original: string;
+  modified: string;
+  language: string;
+}
+
+/** Diff checker settings */
+export interface DiffSettings {
+  renderSideBySide: boolean;
+  ignoreTrimWhitespace: boolean;
+  enableSplitViewResizing: boolean;
+}
+
 /** Editor settings */
 export interface EditorSettings {
   theme: "dark" | "light";
@@ -121,6 +137,9 @@ export interface AppState {
   comparatorSessions: ComparatorSession[];
   activeComparatorSessionId: string;
   comparatorSettings: { caseSensitive: boolean; trimWhitespace: boolean; sortAlpha: boolean };
+  diffSessions: DiffSession[];
+  activeDiffSessionId: string;
+  diffSettings: DiffSettings;
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
 
@@ -173,6 +192,16 @@ export interface AppState {
   renameComparatorSession: (id: string, name: string) => void;
   reorderComparatorSessions: (fromIndex: number, toIndex: number) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;
+
+  // Diff checker actions
+  createDiffSession: (name?: string) => void;
+  deleteDiffSession: (id: string) => void;
+  setActiveDiffSession: (id: string) => void;
+  updateDiffSessionInput: (id: string, side: "original" | "modified", input: string) => void;
+  updateDiffSessionLanguage: (id: string, language: string) => void;
+  renameDiffSession: (id: string, name: string) => void;
+  reorderDiffSessions: (fromIndex: number, toIndex: number) => void;
+  updateDiffSettings: (settings: Partial<DiffSettings>) => void;
   
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;

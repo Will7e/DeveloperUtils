@@ -2,7 +2,7 @@
 // Settings Panel — Editor configuration overlay
 // ============================================================
 
-import { X, Settings, Volume2, VolumeX } from "lucide-react";
+import { X, Settings, Volume2, VolumeX, Sun, Moon } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { 
   Tooltip, 
@@ -162,6 +162,33 @@ export function SettingsPanel() {
           {/* Section: Experience */}
           <div className="settings-section-title" style={{ marginTop: 8 }}>
             Experience
+          </div>
+
+          {/* Theme */}
+          <div className="settings-row">
+            <label className="settings-label">
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {editorSettings.theme === "dark" ? (
+                  <Moon style={{ width: 13, height: 13, color: "#0ea5e9" }} />
+                ) : (
+                  <Sun style={{ width: 13, height: 13, color: "#f59e0b" }} />
+                )}
+                Theme
+              </span>
+            </label>
+            <div className="settings-control">
+              <button
+                className={`settings-toggle ${editorSettings.theme === "light" ? "active" : ""}`}
+                onClick={() =>
+                  updateEditorSettings({
+                    theme: editorSettings.theme === "dark" ? "light" : "dark",
+                  })
+                }
+              >
+                <span className="toggle-thumb" />
+              </button>
+              <span className="settings-value" style={{ textTransform: "capitalize" }}>{editorSettings.theme}</span>
+            </div>
           </div>
 
           {/* Sound Effects */}
