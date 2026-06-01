@@ -3,13 +3,16 @@
 // ============================================================
 
 import { useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app.store";
+import { useApiTesterStore } from "@/stores/api-tester.store";
 import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { formatDuration } from "@/lib/utils";
 import { playSound } from "@/lib/sounds";
 
 export function useKeyboardShortcuts() {
+  const navigate = useNavigate();
   const files = useAppStore((s) => s.files);
   const activeFileId = useAppStore((s) => s.activeFileId);
   const isRunning = useAppStore((s) => s.isRunning);
@@ -174,9 +177,65 @@ export function useKeyboardShortcuts() {
       if (mod && e.key === ",") {
         e.preventDefault();
         toggleSettings();
+        return;
+      }
+
+      // App Navigation (Cmd/Ctrl + Option + 1-8)
+      if (mod && e.altKey) {
+        switch (e.key) {
+          case "1":
+            e.preventDefault();
+            navigate("/");
+            return;
+          case "2":
+            e.preventDefault();
+            navigate("/compiler");
+            return;
+          case "3":
+            e.preventDefault();
+            navigate("/api-tester");
+            return;
+          case "4":
+            e.preventDefault();
+            navigate("/formatters");
+            return;
+          case "5":
+            e.preventDefault();
+            navigate("/comparators");
+            return;
+          case "6":
+            e.preventDefault();
+            navigate("/diff");
+            return;
+          case "7":
+            e.preventDefault();
+            navigate("/library");
+            return;
+          case "8":
+            e.preventDefault();
+            navigate("/workflows");
+            return;
+          
+          // Quick creators
+          case "t":
+            e.preventDefault();
+            useApiTesterStore.getState().addTab();
+            navigate("/api-tester");
+            return;
+          case "d":
+            e.preventDefault();
+            useAppStore.getState().createDiffSession();
+            navigate("/diff");
+            return;
+          case "w":
+            e.preventDefault();
+            useAppStore.getState().createWorkflow();
+            navigate("/workflows");
+            return;
+        }
       }
     },
-    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar]
+    [activeFile, isRunning, outputPanelOpen, soundEffects, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, navigate]
   );
 
   useEffect(() => {

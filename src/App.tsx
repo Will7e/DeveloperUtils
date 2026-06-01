@@ -22,7 +22,7 @@ import { useKeepAlive } from "@/hooks/useKeepAlive";
 import { useAppStore } from "@/stores/app.store";
 
 
-function App() {
+function AppContent() {
   useKeyboardShortcuts();
   useKeepAlive();
 
@@ -34,27 +34,33 @@ function App() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<MainLayout />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/compiler" element={<CompilerPage />} />
-            <Route path="/formatters" element={<FormattersPage />} />
-            <Route path="/comparators" element={<ComparatorsPage />} />
-            <Route path="/diff" element={<DiffCheckerPage />} />
-            <Route path="/library" element={<LibraryPage />} />
-            <Route path="/workflows" element={<WorkflowPage />} />
-            <Route path="/api-tester" element={<ApiTesterPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
+      <Routes>
+        <Route element={<MainLayout />}>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/compiler" element={<CompilerPage />} />
+          <Route path="/formatters" element={<FormattersPage />} />
+          <Route path="/comparators" element={<ComparatorsPage />} />
+          <Route path="/diff" element={<DiffCheckerPage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route path="/workflows" element={<WorkflowPage />} />
+          <Route path="/api-tester" element={<ApiTesterPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
 
-        {/* Global Overlays */}
-        <SettingsPanel />
-        <CommandPalette />
-        <ToastContainer />
-      </BrowserRouter>
+      {/* Global Overlays */}
+      <SettingsPanel />
+      <CommandPalette />
+      <ToastContainer />
     </TooltipProvider>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 }
 

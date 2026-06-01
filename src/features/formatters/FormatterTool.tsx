@@ -492,7 +492,7 @@ export function FormatterTool() {
           isPreviewFullscreen && "fullscreen-preview"
         )}
       >
-        <PanelGroup orientation="horizontal" autoSaveId="formatter-split-size">
+        <PanelGroup orientation="horizontal" id="formatter-split-size">
           {/* Input Section */}
           {!isPreviewFullscreen && (
             <>

@@ -18,11 +18,18 @@ import {
   X,
   StopCircle,
   Wand2,
+  LayoutDashboard,
+  Globe,
+  Library,
+  GitCompare,
+  Network,
+  Code2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
+import { useApiTesterStore } from "@/stores/api-tester.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
 import { 
@@ -77,6 +84,9 @@ export function CommandPalette() {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const createFormatterFile = useAppStore((s) => s.createFormatterFile);
   const createComparatorSession = useAppStore((s) => s.createComparatorSession);
+  const createDiffSession = useAppStore((s) => s.createDiffSession);
+  const createWorkflow = useAppStore((s) => s.createWorkflow);
+  const addApiTesterTab = useApiTesterStore((s) => s.addTab);
   const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
@@ -265,6 +275,113 @@ export function CommandPalette() {
           createComparatorSession();
           navigate("/comparators");
         },
+      },
+      {
+        id: "new-comparator-session",
+        label: "New Comparator Session",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createComparatorSession();
+          navigate("/comparators");
+        },
+      },
+      {
+        id: "new-diff-session",
+        label: "New Diff Session",
+        shortcut: "⌘⌥D",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createDiffSession();
+          navigate("/diff");
+        },
+      },
+      {
+        id: "new-workflow",
+        label: "New Workflow Diagram",
+        shortcut: "⌘⌥W",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          createWorkflow();
+          navigate("/workflows");
+        },
+      },
+      {
+        id: "new-api-request",
+        label: "New API Request Tab",
+        shortcut: "⌘⌥T",
+        category: "File",
+        icon: <FilePlus style={{ width: 14, height: 14 }} />,
+        action: () => {
+          addApiTesterTab();
+          navigate("/api-tester");
+        },
+      },
+      {
+        id: "nav-dashboard",
+        label: "Go to Dashboard",
+        shortcut: "⌘⌥1",
+        category: "Navigation",
+        icon: <LayoutDashboard style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/"),
+      },
+      {
+        id: "nav-compiler",
+        label: "Go to Compiler",
+        shortcut: "⌘⌥2",
+        category: "Navigation",
+        icon: <Code2 style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/compiler"),
+      },
+      {
+        id: "nav-api-tester",
+        label: "Go to API Tester",
+        shortcut: "⌘⌥3",
+        category: "Navigation",
+        icon: <Globe style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/api-tester"),
+      },
+      {
+        id: "nav-formatters",
+        label: "Go to Formatters",
+        shortcut: "⌘⌥4",
+        category: "Navigation",
+        icon: <Wand2 style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/formatters"),
+      },
+      {
+        id: "nav-comparators",
+        label: "Go to Comparators",
+        shortcut: "⌘⌥5",
+        category: "Navigation",
+        icon: <GitCompare style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/comparators"),
+      },
+      {
+        id: "nav-diff-checker",
+        label: "Go to Diff Checker",
+        shortcut: "⌘⌥6",
+        category: "Navigation",
+        icon: <GitCompare style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/diff"),
+      },
+      {
+        id: "nav-library",
+        label: "Go to Code Library",
+        shortcut: "⌘⌥7",
+        category: "Navigation",
+        icon: <Library style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/library"),
+      },
+      {
+        id: "nav-workflows",
+        label: "Go to Workflows",
+        shortcut: "⌘⌥8",
+        category: "Navigation",
+        icon: <Network style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/workflows"),
       }
     );
 
@@ -288,7 +405,8 @@ export function CommandPalette() {
     activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, 
     clearOutput, createFile, updateEditorSettings, addToast, cancelExecution, 
     setOutputFlash, addOutputEntry, updateFileContent, toggleSidebar, 
-    createFormatterFile, createComparatorSession, navigate
+    createFormatterFile, createComparatorSession, createDiffSession,
+    createWorkflow, addApiTesterTab, navigate
   ]);
 
   // Filter actions by query
