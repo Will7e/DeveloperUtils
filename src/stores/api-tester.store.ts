@@ -791,13 +791,13 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           body: bodyText,
         };
 
-        // Build enriched history item
         const activeHeaders = headers
           .filter(h => h.enabled && h.key.trim() !== "")
           .map(h => ({ key: h.key, value: h.value }));
 
         set((state) => {
-          const historyId = state.activeTabId;
+          // Industry standard: History is an append-only ledger. Generate a unique ID for every execution.
+          const historyId = genId();
 
           const newHistoryItem: HistoryItem = {
             id: historyId,
@@ -814,7 +814,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             authConfig: authType !== "none" ? { ...authConfig } : undefined,
           };
 
-          const updatedHistory = [newHistoryItem, ...state.history.filter(h => h.id !== historyId)].slice(0, 50);
+          // Prepend to history, max 100 items
+          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
           saveStoredHistory(updatedHistory);
           return {
             history: updatedHistory,
@@ -833,7 +834,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
         // Add failed entry to history
         set((state) => {
-          const historyId = state.activeTabId;
+          // Industry standard: History is an append-only ledger. Generate a unique ID for every execution.
+          const historyId = genId();
 
           const newHistoryItem: HistoryItem = {
             id: historyId,
@@ -843,7 +845,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             error: true,
           };
 
-          const updatedHistory = [newHistoryItem, ...state.history.filter(h => h.id !== historyId)].slice(0, 50);
+          // Prepend to history, max 100 items
+          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
           saveStoredHistory(updatedHistory);
           return {
             history: updatedHistory,
@@ -855,15 +858,9 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
     // Load request details from a saved history item into the active tab
     loadHistoryItem: (item) => {
-      const existingTab = get().tabs.find(t => t.id === item.id);
-      if (existingTab) {
-        set({ activeTabId: existingTab.id });
-        return;
-      }
-
       set((state) => {
-        const newTab = createNewTab(`History: ${item.method}`);
-        newTab.id = item.id;
+        const newTab = createNewTab(`Snapshot: ${item.method}`);
+        newTab.id = genId(); // Always spawn a new unique scratchpad tab from history
         newTab.method = item.method;
         newTab.url = item.url;
         
@@ -906,41 +903,47 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set({ history: [] });
     },
 
-    // Load template presets into the active tab
     loadPreset: (preset) => {
-      set((state) => {
-        const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
-        if (!activeTab) return state;
+      const presetId = `preset-${preset.name || "default"}`;
+      const existingTab = get().tabs.find(t => t.id === presetId);
+      
+      if (existingTab) {
+        set({ activeTabId: existingTab.id });
+        return;
+      }
 
-        const updatedTab = { ...activeTab };
-        updatedTab.method = preset.method;
-        updatedTab.url = preset.url;
-        updatedTab.bodyType = preset.bodyType || "none";
-        updatedTab.bodyValue = preset.bodyValue || "";
+      set((state) => {
+        const newTab = createNewTab(preset.name || "Preset");
+        newTab.id = presetId;
+        newTab.method = preset.method;
+        newTab.url = preset.url;
+        newTab.bodyType = preset.bodyType || "none";
+        newTab.bodyValue = preset.bodyValue || "";
 
         if (preset.params && preset.params.length > 0) {
-          updatedTab.params = [
+          newTab.params = [
             ...preset.params.map(p => ({ id: genId(), key: p.key, value: p.value, enabled: true })),
             createEmptyField(),
           ];
         } else {
-          updatedTab.params = [createEmptyField()];
+          newTab.params = [createEmptyField()];
         }
 
         if (preset.headers && preset.headers.length > 0) {
-          updatedTab.headers = [
+          newTab.headers = [
             ...preset.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
             createEmptyField(),
           ];
         } else {
-          updatedTab.headers = [
+          newTab.headers = [
             { id: genId(), key: "Content-Type", value: "application/json", enabled: true },
             createEmptyField(),
           ];
         }
 
         return {
-          tabs: state.tabs.map((t) => (t.id === state.activeTabId ? updatedTab : t)),
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
         };
       });
       if (preset.params && preset.params.length > 0) {
@@ -972,7 +975,9 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       });
     },
     loadImportedRequest: (req) => {
-      const existingTab = get().tabs.find(t => t.id === req.id);
+      const targetId = req.id || genId();
+      const existingTab = get().tabs.find(t => t.id === targetId);
+      
       if (existingTab) {
         set({ activeTabId: existingTab.id });
         return;
@@ -980,7 +985,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
       set((state) => {
         const newTab = createNewTab(req.name || req.method);
-        newTab.id = req.id || genId();
+        newTab.id = targetId;
         newTab.method = req.method;
         newTab.url = req.url;
 
