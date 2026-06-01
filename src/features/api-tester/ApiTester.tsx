@@ -1964,7 +1964,7 @@ export function ApiTester() {
               {/* GraphQL Tab */}
               {requestTab === "graphql" && activeTab.protocol === "graphql" && (
                 <div className="api-tab-content api-graphql-container" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-                  <PanelGroup orientation="vertical">
+                  <PanelGroup orientation="horizontal">
                     <Panel defaultSize={70} minSize={20} className="api-graphql-editor-pane" style={{ display: "flex", flexDirection: "column" }}>
                       <div className="api-graphql-pane-header">
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -2026,7 +2026,7 @@ export function ApiTester() {
                       </div>
                     </Panel>
                     
-                    <PanelResizeHandle className="api-panel-resize-handle api-panel-resize-handle-vertical" />
+                    <PanelResizeHandle className="api-panel-resize-handle api-panel-resize-handle-horizontal" />
                     
                     <Panel defaultSize={30} minSize={10} className="api-graphql-editor-pane" style={{ display: "flex", flexDirection: "column" }}>
                       <div className="api-graphql-pane-header">
