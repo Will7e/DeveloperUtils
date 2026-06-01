@@ -28,6 +28,7 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
+  Download,
 } from "lucide-react";
 import {
   useApiTesterStore,
@@ -408,6 +409,10 @@ export function ApiTester() {
   const [copied, setCopied] = useState(false);
   const [curlCopied, setCurlCopied] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showImportCurl, setShowImportCurl] = useState(false);
+  const [curlImportValue, setCurlImportValue] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
 
   // Sidebar accordion
   const [presetsOpen, setPresetsOpen] = useState(true);
@@ -494,6 +499,34 @@ export function ApiTester() {
     navigator.clipboard.writeText(curl);
     setCurlCopied(true);
     setTimeout(() => setCurlCopied(false), 2000);
+  };
+
+  const handleDownloadResponse = () => {
+    if (!activeTab.response?.body) return;
+    try {
+      const blob = new Blob([activeTab.response.body], {
+        type: activeTab.response.headers["content-type"] || "text/plain",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      
+      // Determine file extension
+      let ext = "txt";
+      if (responseLang === "json") ext = "json";
+      else if (responseLang === "html") ext = "html";
+      else if (responseLang === "xml") ext = "xml";
+      else if (responseLang === "css") ext = "css";
+      else if (responseLang === "javascript") ext = "js";
+
+      a.download = `response-${activeTab.name.replace(/\s+/g, "_").toLowerCase()}-${Date.now()}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Failed to download response", e);
+    }
   };
 
   // ── Helpers ────────────────────────────────────────────────
@@ -736,6 +769,25 @@ export function ApiTester() {
             <button
               type="button"
               className="api-curl-btn"
+              onClick={() => {
+                setShowImportCurl(!showImportCurl);
+                setImportError(null);
+                setCurlImportValue("");
+              }}
+              title="Import request from cURL command"
+              style={{
+                borderColor: showImportCurl ? "var(--accent)" : "",
+                background: showImportCurl ? "var(--accent-glow)" : "",
+                color: showImportCurl ? "var(--accent)" : "",
+              }}
+            >
+              <Terminal className="h-3.5 w-3.5" />
+              <span>Import</span>
+            </button>
+
+            <button
+              type="button"
+              className="api-curl-btn"
               onClick={handleCopyCurl}
               title="Copy as cURL command"
             >
@@ -772,6 +824,79 @@ export function ApiTester() {
             </button>
           </div>
         </form>
+
+        {/* cURL Import Drawer */}
+        {showImportCurl && (
+          <div className="api-import-curl-panel">
+            <div className="api-import-curl-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Terminal className="h-4 w-4 text-accent" />
+                <span className="api-import-curl-title">Import Request from cURL</span>
+              </div>
+              <button 
+                type="button" 
+                className="api-import-close-btn"
+                onClick={() => {
+                  setShowImportCurl(false);
+                  setImportError(null);
+                  setCurlImportValue("");
+                }}
+                title="Close"
+              >
+                &times;
+              </button>
+            </div>
+            <textarea
+              className="api-import-curl-textarea"
+              placeholder="Paste raw cURL command (e.g. curl -X POST 'https://api.example.com' -H 'Content-Type: application/json' -d '{&quot;status&quot;: &quot;ok&quot;}')"
+              value={curlImportValue}
+              onChange={(e) => {
+                setCurlImportValue(e.target.value);
+                setImportError(null);
+              }}
+            />
+            <div className="api-import-curl-actions">
+              {importError && <span className="api-import-curl-error">{importError}</span>}
+              {importSuccess && <span className="api-import-curl-success">Request imported successfully!</span>}
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                className="api-clear-btn"
+                onClick={() => {
+                  setCurlImportValue("");
+                  setImportError(null);
+                }}
+                style={{ padding: "6px 12px" }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="api-import-submit-btn"
+                onClick={() => {
+                  if (!curlImportValue.trim()) {
+                    setImportError("Please paste a valid cURL command.");
+                    return;
+                  }
+                  const success = store.importFromCurl(curlImportValue);
+                  if (success) {
+                    setImportSuccess(true);
+                    setImportError(null);
+                    setTimeout(() => {
+                      setImportSuccess(false);
+                      setShowImportCurl(false);
+                      setCurlImportValue("");
+                    }, 1200);
+                  } else {
+                    setImportError("Failed to parse cURL. Ensure command begins with 'curl' and contains a valid URL.");
+                  }
+                }}
+              >
+                Import Request
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Split Panes */}
         <div className="api-split-panes" ref={splitRef}>
@@ -985,7 +1110,16 @@ export function ApiTester() {
                   )}
 
                   {activeTab.bodyType === "json" && (
-                    <div className="api-monaco-editor-wrapper">
+                    <div className="api-monaco-editor-wrapper" style={{ position: "relative" }}>
+                      <button
+                        type="button"
+                        className="api-editor-format-btn"
+                        onClick={() => store.formatActiveTabJsonBody()}
+                        title="Beautify/Format JSON string"
+                      >
+                        <Sparkles className="h-3 w-3 text-yellow" />
+                        <span>Format</span>
+                      </button>
                       <Editor
                         height="100%"
                         language="json"
@@ -1427,21 +1561,32 @@ export function ApiTester() {
                   <div style={{ flex: 1 }} />
 
                   {responseTab !== "headers" && (
-                    <button
-                      type="button"
-                      className="api-copy-btn"
-                      onClick={handleCopyResponse}
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="h-3 w-3 text-green" /> Copied
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="h-3 w-3" /> Copy
-                        </>
-                      )}
-                    </button>
+                    <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className="api-copy-btn"
+                        onClick={handleDownloadResponse}
+                        title="Download raw response payload as a file"
+                      >
+                        <Download className="h-3 w-3 opacity-80" />
+                        <span>Download</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="api-copy-btn"
+                        onClick={handleCopyResponse}
+                      >
+                        {copied ? (
+                          <>
+                            <Check className="h-3 w-3 text-green" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" /> Copy
+                          </>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
 

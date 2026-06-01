@@ -114,6 +114,7 @@ interface ApiTesterState {
   loadHistoryItem: (item: HistoryItem) => void;
   clearHistory: () => void;
   loadPreset: (preset: {
+    name?: string;
     method: HttpMethod;
     url: string;
     headers?: Array<{ key: string; value: string }>;
@@ -121,6 +122,10 @@ interface ApiTesterState {
     bodyType?: BodyType;
     bodyValue?: string;
   }) => void;
+
+  // cURL & formatting
+  formatActiveTabJsonBody: () => void;
+  importFromCurl: (curlStr: string) => boolean;
 }
 
 // Generate unique ID
@@ -196,7 +201,8 @@ function applyAuth(
   if (authType === "bearer" && authConfig.bearerToken.trim()) {
     h["Authorization"] = `Bearer ${authConfig.bearerToken.trim()}`;
   } else if (authType === "basic" && authConfig.basicUsername.trim()) {
-    const encoded = btoa(`${authConfig.basicUsername}:${authConfig.basicPassword}`);
+    // Robust Base64 UTF-8 safe encoding
+    const encoded = btoa(unescape(encodeURIComponent(`${authConfig.basicUsername}:${authConfig.basicPassword}`)));
     h["Authorization"] = `Basic ${encoded}`;
   } else if (authType === "api-key" && authConfig.apiKeyName.trim() && authConfig.apiKeyValue.trim()) {
     if (authConfig.apiKeyPlacement === "header") {
@@ -362,10 +368,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       }));
     },
 
-    // Sync logic: URL -> Params
+    // Sync logic: URL -> Params with high-efficiency stable diff checking
     syncParamsFromUrl: (urlStr) => {
       try {
+        const activeTab = get().tabs.find((t) => t.id === get().activeTabId);
+        if (!activeTab) return;
+
         if (!urlStr || !urlStr.includes("?")) {
+          // If already clean empty parameters, skip update to prevent ID jitter
+          const firstParam = activeTab.params[0];
+          if (activeTab.params.length === 1 && firstParam !== undefined && firstParam.key === "" && firstParam.value === "") {
+            return;
+          }
           set((state) => ({
             tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: [createEmptyField()] } : t)),
           }));
@@ -374,10 +388,31 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         const queryString = urlStr.substring(urlStr.indexOf("?") + 1);
         const searchParams = new URLSearchParams(queryString);
         
-        const newParams: KeyValueField[] = [];
+        const parsed: Array<{ key: string; value: string }> = [];
         searchParams.forEach((value, key) => {
-          newParams.push({ id: genId(), key, value, enabled: true });
+          parsed.push({ key, value });
         });
+
+        // Filter current active/enabled params (excluding the blank trailing row)
+        const currentActive = activeTab.params.filter((p) => p.key !== "" || p.value !== "");
+
+        const isSame = parsed.length === currentActive.length &&
+          parsed.every((p, idx) => {
+            const cur = currentActive[idx];
+            return cur !== undefined && cur.key === p.key && cur.value === p.value;
+          });
+
+        if (isSame) {
+          // No parameters changed: maintain stable elements & keys!
+          return;
+        }
+
+        const newParams: KeyValueField[] = parsed.map((p) => ({
+          id: genId(),
+          key: p.key,
+          value: p.value,
+          enabled: true,
+        }));
 
         newParams.push(createEmptyField()); // Extra empty row at end
         set((state) => ({
@@ -455,25 +490,26 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
       // Headers
       Object.entries(computedHeaders).forEach(([k, v]) => {
-        parts.push(`  -H '${k}: ${v}'`);
+        // POSIX shell compliant single quote escaping
+        parts.push(`  -H '${k}: ${v.replace(/'/g, "'\\''")}'`);
       });
 
       // Body
       if (method !== "GET" && method !== "HEAD") {
         if (bodyType === "json" && bodyValue.trim()) {
-          parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+          parts.push(`  -d '${bodyValue.replace(/'/g, "'\\''")}'`);
         } else if (bodyType === "raw" && bodyValue.trim()) {
-          parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+          parts.push(`  -d '${bodyValue.replace(/'/g, "'\\''")}'`);
         } else if (bodyType === "form-data") {
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim()) {
-              parts.push(`  -F '${f.key.trim()}=${f.value.replace(/'/g, "\\'")}'`);
+              parts.push(`  -F '${f.key.trim()}=${f.value.replace(/'/g, "'\\''")}'`);
             }
           });
         }
       }
 
-      parts.push(`  '${finalUrl}'`);
+      parts.push(`  '${finalUrl.replace(/'/g, "'\\''")}'`);
       return parts.join(" \\\n");
     },
 
@@ -662,10 +698,10 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set({ history: [] });
     },
 
-    // Load template presets into a new tab
+    // Load template presets into a new tab with descriptive tab naming
     loadPreset: (preset) => {
       set((state) => {
-        const newTab = createNewTab(preset.method);
+        const newTab = createNewTab(preset.name || preset.method);
         newTab.method = preset.method;
         newTab.url = preset.url;
         newTab.bodyType = preset.bodyType || "none";
@@ -696,6 +732,169 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         };
       });
       get().syncUrlFromParams();
+    },
+
+    // Format JSON request body helper
+    formatActiveTabJsonBody: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (t.id === state.activeTabId && t.bodyType === "json") {
+            try {
+              const beautified = JSON.stringify(JSON.parse(t.bodyValue), null, 2);
+              return { ...t, bodyValue: beautified };
+            } catch {
+              // Ignore invalid JSON formatting requests
+            }
+          }
+          return t;
+        }),
+      }));
+    },
+
+    // POSIX-compliant cURL parser & importer
+    importFromCurl: (curlStr) => {
+      const cleaned = curlStr.replace(/\\\r?\n/g, " ").trim();
+      if (!cleaned.toLowerCase().startsWith("curl")) {
+        return false;
+      }
+
+      // Simple argument tokenizer supporting single/double quotes and backslash escapes
+      const args: string[] = [];
+      let current = "";
+      let inDouble = false;
+      let inSingle = false;
+      let escaped = false;
+
+      for (let i = 0; i < cleaned.length; i++) {
+        const char = cleaned[i];
+        if (escaped) {
+          current += char;
+          escaped = false;
+          continue;
+        }
+        if (char === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (char === '"' && !inSingle) {
+          inDouble = !inDouble;
+          continue;
+        }
+        if (char === "'" && !inDouble) {
+          inSingle = !inSingle;
+          continue;
+        }
+        if ((char === " " || char === "\t") && !inDouble && !inSingle) {
+          if (current.length > 0) {
+            args.push(current);
+            current = "";
+          }
+        } else {
+          current += char;
+        }
+      }
+      if (current.length > 0) {
+        args.push(current);
+      }
+
+      let method: HttpMethod = "GET";
+      let url = "";
+      const headers: KeyValueField[] = [];
+      let bodyType: BodyType = "none";
+      let bodyValue = "";
+      const formParams: KeyValueField[] = [];
+
+      for (let i = 1; i < args.length; i++) {
+        const arg = args[i];
+        if (!arg) continue;
+        const nextArg = args[i + 1] || "";
+
+        if (arg === "-X" || arg === "--request") {
+          const m = nextArg.toUpperCase();
+          if (["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"].includes(m)) {
+            method = m as HttpMethod;
+          }
+          i++;
+        } else if (arg === "-H" || arg === "--header") {
+          const colonIdx = nextArg.indexOf(":");
+          if (colonIdx !== -1) {
+            headers.push({
+              id: genId(),
+              key: nextArg.substring(0, colonIdx).trim(),
+              value: nextArg.substring(colonIdx + 1).trim(),
+              enabled: true,
+            });
+          }
+          i++;
+        } else if (arg === "-d" || arg === "--data" || arg === "--data-raw" || arg === "--data-binary") {
+          bodyType = "json";
+          bodyValue = nextArg;
+          if (method === "GET") {
+            method = "POST";
+          }
+          i++;
+        } else if (arg === "-F" || arg === "--form") {
+          bodyType = "form-data";
+          const eqIdx = nextArg.indexOf("=");
+          if (eqIdx !== -1) {
+            formParams.push({
+              id: genId(),
+              key: nextArg.substring(0, eqIdx).trim(),
+              value: nextArg.substring(eqIdx + 1).trim(),
+              enabled: true,
+            });
+          }
+          if (method === "GET") {
+            method = "POST";
+          }
+          i++;
+        } else if (arg.startsWith("http://") || arg.startsWith("https://")) {
+          url = arg;
+        } else if (!arg.startsWith("-") && !url) {
+          url = arg;
+        }
+      }
+
+      if (!url) return false;
+
+      // Determine precise JSON vs raw body
+      if (bodyType === "json" && bodyValue) {
+        try {
+          JSON.parse(bodyValue);
+        } catch {
+          bodyType = "raw";
+        }
+      }
+
+      // Add default content-type header if missing for JSON bodies
+      const hasContentType = headers.some(h => h.key.toLowerCase() === "content-type");
+      if (bodyType === "json" && !hasContentType) {
+        headers.push({ id: genId(), key: "Content-Type", value: "application/json", enabled: true });
+      }
+
+      headers.push(createEmptyField());
+      formParams.push(createEmptyField());
+
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (t.id === state.activeTabId) {
+            return {
+              ...t,
+              method,
+              url,
+              headers,
+              bodyType,
+              bodyValue,
+              formParams,
+              authType: "none",
+            };
+          }
+          return t;
+        }),
+      }));
+
+      get().syncParamsFromUrl(url);
+      return true;
     },
   };
 });
