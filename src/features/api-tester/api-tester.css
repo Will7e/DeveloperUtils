@@ -557,18 +557,43 @@
   flex-shrink: 0;
 }
 
-.api-method-dropdown-container {
-  position: relative;
+/* ── Unified Omnibox ──────────────────────────────────────── */
+.api-omnibox {
   display: flex;
-  height: 42px;
-}
-
-.api-method-select {
-  height: 42px;
-  padding: 0 10px 0 14px;
+  align-items: center;
+  flex: 1;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
+  height: 42px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  /* removed overflow: hidden to allow dropdowns to show */
+}
+
+.api-omnibox:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(14, 165, 233, 0.15);
+  background: var(--bg-0);
+}
+
+.api-omnibox-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-1);
+  flex-shrink: 0;
+}
+
+.api-method-dropdown-container {
+  position: relative;
+  display: flex;
+  height: 100%;
+}
+
+.api-method-select {
+  height: 100%;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
   color: var(--text-1);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -585,37 +610,24 @@
 }
 
 .api-method-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-  border-color: transparent;
+  background: var(--bg-hover);
+}
+
+.api-method-select:hover {
+  background: var(--bg-hover);
+}
+
+.api-omnibox > .api-method-dropdown-container:first-child .api-method-select {
+  border-top-left-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-md);
 }
 
 /* Method select color variants */
-.api-method-select-get {
-  border-color: rgba(56, 189, 248, 0.25);
-  background: color-mix(in oklab, var(--blue) 8%, var(--bg-2));
-  color: var(--blue);
-}
-.api-method-select-post {
-  border-color: rgba(16, 185, 129, 0.25);
-  background: color-mix(in oklab, var(--green) 8%, var(--bg-2));
-  color: var(--green);
-}
-.api-method-select-put {
-  border-color: rgba(167, 139, 250, 0.25);
-  background: color-mix(in oklab, var(--purple) 8%, var(--bg-2));
-  color: var(--purple);
-}
-.api-method-select-delete {
-  border-color: rgba(244, 63, 94, 0.25);
-  background: color-mix(in oklab, var(--red) 8%, var(--bg-2));
-  color: var(--red);
-}
-.api-method-select-patch {
-  border-color: rgba(245, 158, 11, 0.25);
-  background: color-mix(in oklab, var(--yellow) 8%, var(--bg-2));
-  color: var(--yellow);
-}
+.api-method-select-get { color: var(--blue); }
+.api-method-select-post { color: var(--green); }
+.api-method-select-put { color: var(--purple); }
+.api-method-select-delete { color: var(--red); }
+.api-method-select-patch { color: var(--yellow); }
 
 .api-method-dropdown-menu {
   position: absolute;
@@ -677,19 +689,9 @@
   display: flex;
   align-items: center;
   flex: 1;
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-md);
-  height: 42px;
+  background: transparent;
+  height: 100%;
   padding: 0 14px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.api-url-input-container:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(14, 165, 233, 0.15);
-  background: var(--bg-0);
-  outline: 2px solid transparent;
 }
 
 .api-url-input {
@@ -2210,42 +2212,6 @@ html.light .api-editor-format-btn:hover {
   color: var(--text-1);
 }
 
-/* ── Protocol Bar segmented selector ─────────────────────── */
-.api-protocol-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border-1);
-}
-
-.api-protocol-tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-md);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-2);
-  background: transparent;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.api-protocol-tab-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-}
-
-.api-protocol-tab-btn.active {
-  background: var(--bg-2);
-  color: var(--accent);
-  border-color: var(--border-2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
 
 /* ── CORS Proxy toggle button inside URL Bar ─────────────── */
 .api-proxy-toggle-btn {
@@ -2377,4 +2343,62 @@ html.light .api-editor-format-btn:hover {
   color: var(--accent) !important;
   font-family: var(--font-mono);
   font-weight: 700;
+}
+
+/* ── Resizable Panel Handle ────────────────────────────────── */
+.api-panel-resize-handle {
+  position: relative;
+  background-color: var(--border-1);
+  transition: background-color 0.2s ease;
+}
+
+.api-panel-resize-handle[data-resize-handle-state="hover"],
+.api-panel-resize-handle[data-resize-handle-state="drag"] {
+  background-color: var(--accent);
+}
+
+.api-panel-resize-handle-horizontal {
+  width: 2px;
+  cursor: col-resize;
+}
+
+.api-panel-resize-handle-vertical {
+  height: 2px;
+  cursor: row-resize;
+}
+
+.api-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: transparent;
+}
+
+.api-panel-resize-handle-horizontal::after {
+  left: -4px;
+  right: -4px;
+}
+
+.api-panel-resize-handle-vertical::after {
+  top: -4px;
+  bottom: -4px;
+}
+
+/* ── GraphQL Pane Headers ────────────────────────────────── */
+.api-graphql-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }

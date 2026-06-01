@@ -42,7 +42,9 @@ import {
   Wifi,
   WifiOff,
   Square,
+  FileCode2,
 } from "lucide-react";
+import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
 import {
   useApiTesterStore,
   HttpMethod,
@@ -157,6 +159,86 @@ function formatRelativeTime(timestamp: number): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return new Date(timestamp).toLocaleDateString();
+}
+
+// ── Protocol Dropdown Component ────────────────────────────────
+const PROTOCOLS = [
+  { id: "rest", label: "HTTP", icon: Globe },
+  { id: "graphql", label: "GraphQL", icon: Activity },
+  { id: "websocket", label: "WebSocket", icon: Wifi },
+] as const;
+
+function ProtocolDropdown({
+  value,
+  onChange,
+}: {
+  value: ApiProtocol;
+  onChange: (val: ApiProtocol) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const activeProto = PROTOCOLS.find(p => p.id === value) || PROTOCOLS[0];
+  const ActiveIcon = activeProto.icon;
+
+  return (
+    <div className="api-method-dropdown-container" ref={dropdownRef} style={{ width: '130px', flexShrink: 0 }}>
+      <button
+        type="button"
+        className="api-method-select api-method-select-get"
+        style={{ width: '100%', justifyContent: 'space-between', padding: '0 12px', color: 'var(--text-1)' }}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <ActiveIcon className="h-4 w-4" />
+          <span style={{ fontWeight: 600 }}>{activeProto.label}</span>
+        </div>
+        <ChevronDown
+          className={`h-3 w-3 opacity-70 transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {isOpen && (
+        <div className="api-method-dropdown-menu" style={{ width: '100%' }}>
+          {PROTOCOLS.map((p) => {
+            const Icon = p.icon;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className={`api-method-option api-method-option-get ${
+                  p.id === value ? "api-method-option-active" : ""
+                }`}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', color: 'var(--text-1)' }}
+                onClick={() => {
+                  onChange(p.id);
+                  setIsOpen(false);
+                }}
+              >
+                <Icon className="h-4 w-4 opacity-70" />
+                <span style={{ fontWeight: 500 }}>{p.label}</span>
+                {p.id === value && <Check className="h-3 w-3 ml-auto text-accent" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Method Dropdown Component ────────────────────────────────
@@ -1199,69 +1281,84 @@ export function ApiTester() {
           </div>
         </div>
 
-        {/* Protocol Selector Bar */}
-        <div className="api-protocol-bar">
-          {(
-            [
-              ["rest", "HTTP / REST"],
-              ["graphql", "GraphQL"],
-              ["websocket", "WebSocket Client"],
-            ] as const
-          ).map(([proto, label]) => (
-            <button
-              key={proto}
-              type="button"
-              className={`api-protocol-tab-btn ${activeTab.protocol === proto ? "active" : ""}`}
-              onClick={() => store.setProtocol(proto)}
-            >
-              {proto === "websocket" ? (
-                <Wifi className="h-3.5 w-3.5" />
-              ) : proto === "graphql" ? (
-                <Activity className="h-3.5 w-3.5" />
-              ) : (
-                <Globe className="h-3.5 w-3.5" />
-              )}
-              <span>{label}</span>
-            </button>
-          ))}
-          <div style={{ flex: 1 }} />
-          {activeTab.sseActive && (
-            <div className="api-sse-pulse-badge">
-              <Zap className="h-3 w-3 text-accent animate-pulse" />
-              <span>SSE Stream Active</span>
-            </div>
-          )}
-        </div>
-
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">
-          {activeTab.protocol !== "websocket" && (
-            <MethodDropdown
-              value={activeTab.method}
-              onChange={(val) => store.setMethod(val)}
+          <div className="api-omnibox">
+            <ProtocolDropdown
+              value={activeTab.protocol}
+              onChange={(val) => store.setProtocol(val)}
             />
-          )}
-          {activeTab.protocol === "websocket" && (
-            <div className="api-method-select api-method-select-ws" style={{ cursor: "default" }}>
-              <span>WS</span>
-            </div>
-          )}
+            
+            <div className="api-omnibox-divider" />
 
-          <div className="api-url-input-container">
-            <input
-              type="text"
-              className="api-url-input"
-              value={activeTab.url}
-              onChange={(e) => store.setUrl(e.target.value)}
-              placeholder={
-                activeTab.protocol === "websocket"
-                  ? "Enter WebSocket URL (e.g. wss://echo.websocket.org)"
-                  : activeTab.protocol === "graphql"
-                  ? "Enter GraphQL Endpoint URL"
-                  : "Enter request URL (e.g. https://api.github.com/users)"
-              }
-              required
-            />
+            {activeTab.protocol !== "websocket" && (
+              <>
+                <MethodDropdown
+                  value={activeTab.method}
+                  onChange={(val) => store.setMethod(val)}
+                />
+                <div className="api-omnibox-divider" />
+              </>
+            )}
+            {activeTab.protocol === "websocket" && (
+              <>
+                <div className="api-method-select api-method-select-ws" style={{ cursor: "default" }}>
+                  <span>WS</span>
+                </div>
+                <div className="api-omnibox-divider" />
+              </>
+            )}
+
+            <div className="api-url-input-container">
+              <input
+                type="text"
+                className="api-url-input"
+                value={activeTab.url}
+                onChange={(e) => store.setUrl(e.target.value)}
+                placeholder={
+                  activeTab.protocol === "websocket"
+                    ? "Enter WebSocket URL (e.g. wss://echo.websocket.org)"
+                    : activeTab.protocol === "graphql"
+                    ? "Enter GraphQL Endpoint URL"
+                    : "Enter request URL (e.g. https://api.github.com/users)"
+                }
+                required
+              />
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                {activeTab.protocol !== "websocket" && (
+                  <>
+                    <SimpleTooltip content="Import request from cURL command">
+                      <button
+                        type="button"
+                        className={`api-proxy-toggle-btn ${showImportCurl ? "api-proxy-toggle-btn-active" : ""}`}
+                        onClick={() => {
+                          setShowImportCurl(!showImportCurl);
+                          setShowCodeSnippet(false);
+                          setImportError(null);
+                          setCurlImportValue("");
+                        }}
+                      >
+                        <Terminal className="h-4 w-4" />
+                      </button>
+                    </SimpleTooltip>
+
+                    <SimpleTooltip content="Generate code snippet">
+                      <button
+                        type="button"
+                        className={`api-proxy-toggle-btn ${showCodeSnippet ? "api-proxy-toggle-btn-active" : ""}`}
+                        onClick={() => {
+                          setShowCodeSnippet(!showCodeSnippet);
+                          setShowImportCurl(false);
+                        }}
+                      >
+                        <Code2 className="h-4 w-4" />
+                      </button>
+                    </SimpleTooltip>
+
+                    <div style={{ width: '1px', height: '16px', background: 'var(--border-1)', margin: '0 4px' }} />
+                  </>
+                )}
             {activeTab.protocol !== "websocket" && (
               <SimpleTooltip content={activeTab.useProxy ? "CORS Proxy: ENABLED (Routing via corsproxy.io)" : "CORS Proxy: DISABLED (Direct browser request)"}>
                 <button
@@ -1284,49 +1381,16 @@ export function ApiTester() {
                 </button>
               </SimpleTooltip>
             )}
+              </div>
+            </div>
           </div>
 
           <div className="api-url-actions">
-            {activeTab.protocol !== "websocket" && (
-              <>
-                <button
-                  type="button"
-                  className="api-curl-btn"
-                  onClick={() => {
-                    setShowImportCurl(!showImportCurl);
-                    setShowCodeSnippet(false);
-                    setImportError(null);
-                    setCurlImportValue("");
-                  }}
-                  title="Import request from cURL command"
-                  style={{
-                    borderColor: showImportCurl ? "var(--accent)" : "",
-                    background: showImportCurl ? "var(--accent-glow)" : "",
-                    color: showImportCurl ? "var(--accent)" : "",
-                  }}
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  <span>Import</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="api-curl-btn"
-                  onClick={() => {
-                    setShowCodeSnippet(!showCodeSnippet);
-                    setShowImportCurl(false);
-                  }}
-                  title="Generate code snippet"
-                  style={{
-                    borderColor: showCodeSnippet ? "var(--accent)" : "",
-                    background: showCodeSnippet ? "var(--accent-glow)" : "",
-                    color: showCodeSnippet ? "var(--accent)" : "",
-                  }}
-                >
-                  <Code2 className="h-3.5 w-3.5" />
-                  <span>Code</span>
-                </button>
-              </>
+            {activeTab.sseActive && (
+              <div className="api-sse-pulse-badge" style={{ marginRight: '8px' }}>
+                <Zap className="h-3 w-3 text-accent animate-pulse" />
+                <span>SSE Stream Active</span>
+              </div>
             )}
 
             {activeTab.protocol === "websocket" ? (
@@ -1898,45 +1962,14 @@ export function ApiTester() {
               {/* GraphQL Tab */}
               {requestTab === "graphql" && activeTab.protocol === "graphql" && (
                 <div className="api-tab-content api-graphql-container" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-                  <div className="api-graphql-toolbar" style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border-1)", gap: "8px" }}>
-                    <button
-                      type="button"
-                      className="api-editor-format-btn"
-                      onClick={() => {
-                        try {
-                          let query = activeTab.graphqlQuery;
-                          query = query.replace(/\s+/g, ' ');
-                          let indent = 0;
-                          let formatted = "";
-                          for (let i = 0; i < query.length; i++) {
-                            const char = query[i];
-                            if (char === '{') {
-                              indent += 2;
-                              formatted += ' {\n' + ' '.repeat(indent);
-                            } else if (char === '}') {
-                              indent = Math.max(0, indent - 2);
-                              formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
-                            } else if (char === ',') {
-                              formatted += ',\n' + ' '.repeat(indent);
-                            } else {
-                              formatted += char;
-                            }
-                          }
-                          formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
-                          store.setGraphqlQuery(formatted);
-                        } catch (e) {
-                          console.error("Failed to format GraphQL query", e);
-                        }
-                      }}
-                      title="Format GraphQL query"
-                    >
-                      <Sparkles className="h-3 w-3 text-yellow" />
-                      <span>Format Query</span>
-                    </button>
-                  </div>
-                  <div className="api-graphql-editors" style={{ display: "flex", flex: 1, minHeight: 0 }}>
-                    <div className="api-graphql-editor-pane" style={{ flex: 2, display: "flex", flexDirection: "column", borderRight: "1px solid var(--border-1)" }}>
-                      <div className="api-graphql-pane-header" style={{ padding: "4px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-3)", background: "var(--bg-2)" }}>Query</div>
+                  <PanelGroup direction="vertical">
+                    <Panel defaultSize={70} minSize={20} className="api-graphql-editor-pane" style={{ display: "flex", flexDirection: "column" }}>
+                      <div className="api-graphql-pane-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <FileCode2 className="h-3.5 w-3.5" />
+                          <span>Query</span>
+                        </div>
+                      </div>
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
                           height="100%"
@@ -1952,11 +1985,54 @@ export function ApiTester() {
                             tabSize: 2,
                             scrollBeyondLastLine: false,
                           }}
+                          onValidate={() => {
+                            // Auto-format on validation or simply format manually before blur
+                          }}
+                        />
+                        <div 
+                          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none' }}
+                          onBlurCapture={() => {
+                            try {
+                              let query = activeTab.graphqlQuery;
+                              if (!query || !query.trim()) return;
+                              query = query.replace(/\s+/g, ' ');
+                              let indent = 0;
+                              let formatted = "";
+                              for (let i = 0; i < query.length; i++) {
+                                const char = query[i];
+                                if (char === '{') {
+                                  indent += 2;
+                                  formatted += ' {\n' + ' '.repeat(indent);
+                                } else if (char === '}') {
+                                  indent = Math.max(0, indent - 2);
+                                  formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
+                                } else if (char === ',') {
+                                  formatted += ',\n' + ' '.repeat(indent);
+                                } else {
+                                  formatted += char;
+                                }
+                              }
+                              formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
+                              if (formatted !== activeTab.graphqlQuery) {
+                                store.setGraphqlQuery(formatted);
+                              }
+                            } catch (e) {
+                              console.error("Failed to format GraphQL query", e);
+                            }
+                          }}
                         />
                       </div>
-                    </div>
-                    <div className="api-graphql-editor-pane" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-                      <div className="api-graphql-pane-header" style={{ padding: "4px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-3)", background: "var(--bg-2)" }}>Variables (JSON)</div>
+                    </Panel>
+                    
+                    <PanelResizeHandle className="api-panel-resize-handle api-panel-resize-handle-vertical" />
+                    
+                    <Panel defaultSize={30} minSize={10} className="api-graphql-editor-pane" style={{ display: "flex", flexDirection: "column" }}>
+                      <div className="api-graphql-pane-header">
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <FileJson className="h-3.5 w-3.5" />
+                          <span>Variables (JSON)</span>
+                        </div>
+                      </div>
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
                           height="100%"
@@ -1974,8 +2050,8 @@ export function ApiTester() {
                           }}
                         />
                       </div>
-                    </div>
-                  </div>
+                    </Panel>
+                  </PanelGroup>
                 </div>
               )}
 
