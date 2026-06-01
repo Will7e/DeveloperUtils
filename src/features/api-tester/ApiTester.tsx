@@ -1304,7 +1304,8 @@ export function ApiTester() {
               <button 
                 onClick={() => setShowEnvDropdown(!showEnvDropdown)}
                 style={{ 
-                  padding: '4px 8px', 
+                  padding: '6px 14px', 
+                  height: '30px',
                   background: 'var(--bg-1)', 
                   border: '1px solid var(--border-2)', 
                   borderRadius: '6px', 
