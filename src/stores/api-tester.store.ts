@@ -234,7 +234,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         const newTabs = state.tabs.filter((t) => t.id !== id);
         return {
           tabs: newTabs,
-          activeTabId: state.activeTabId === id ? newTabs[newTabs.length - 1].id : state.activeTabId,
+          activeTabId: state.activeTabId === id ? (newTabs[newTabs.length - 1]?.id || "") : state.activeTabId,
         };
       });
     },

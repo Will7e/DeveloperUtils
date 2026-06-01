@@ -1488,18 +1488,11 @@ export function ApiTester() {
                         overflow: "hidden",
                       }}
                     >
-                      <div
-                        className="api-url-input-container"
-                        style={{ height: "32px", padding: "0 8px" }}
-                      >
-                        <Search className="h-3.5 w-3.5 text-text-3 mr-2" />
+                      <div className="api-search-input-container">
+                        <Search className="h-3.5 w-3.5 text-text-3 mr-2" style={{ flexShrink: 0 }} />
                         <input
                           type="text"
-                          className="api-url-input"
-                          style={{
-                            fontSize: "12px",
-                            fontFamily: "var(--font-sans)",
-                          }}
+                          className="api-search-input"
                           placeholder="Search headers..."
                           value={headerSearch}
                           onChange={(e) => setHeaderSearch(e.target.value)}

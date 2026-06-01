@@ -1666,3 +1666,36 @@ html.light .api-tab-count {
 html.light .api-tab-trigger-active .api-tab-count {
   background: rgba(2, 132, 199, 0.10);
 }
+
+/* ── Search Input (Headers Tab) ──────────────────────────── */
+.api-search-input-container {
+  display: flex;
+  align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  height: 32px;
+  padding: 0 10px;
+  transition: all 0.2s;
+  flex: none;
+}
+
+.api-search-input-container:focus-within {
+  border-color: var(--text-3);
+  background: var(--bg-0);
+}
+
+.api-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  height: 100%;
+  outline: none;
+}
+
+.api-search-input::placeholder {
+  color: var(--text-3);
+}
