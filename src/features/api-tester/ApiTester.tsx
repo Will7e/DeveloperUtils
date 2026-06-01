@@ -44,7 +44,7 @@ import {
   Square,
   FileCode2,
 } from "lucide-react";
-import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import {
   useApiTesterStore,
   HttpMethod,
@@ -162,6 +162,8 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 // ── Protocol Dropdown Component ────────────────────────────────
+type ApiProtocol = "rest" | "graphql" | "websocket";
+
 const PROTOCOLS = [
   { id: "rest", label: "HTTP", icon: Globe },
   { id: "graphql", label: "GraphQL", icon: Activity },
@@ -1962,7 +1964,7 @@ export function ApiTester() {
               {/* GraphQL Tab */}
               {requestTab === "graphql" && activeTab.protocol === "graphql" && (
                 <div className="api-tab-content api-graphql-container" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-                  <PanelGroup direction="vertical">
+                  <PanelGroup orientation="vertical">
                     <Panel defaultSize={70} minSize={20} className="api-graphql-editor-pane" style={{ display: "flex", flexDirection: "column" }}>
                       <div className="api-graphql-pane-header">
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
