@@ -37,6 +37,11 @@ import {
   Code2,
   Settings,
   BookOpen,
+  Shield,
+  Zap,
+  Wifi,
+  WifiOff,
+  Square,
 } from "lucide-react";
 import {
   useApiTesterStore,
@@ -460,9 +465,9 @@ export function ApiTester() {
   }
 
   // Tab states
-  const [requestTab, setRequestTab] = useState<
-    "params" | "headers" | "body" | "auth"
-  >("params");
+  const [requestTab, setRequestTab] = useState<string>("params");
+  const [wsMessageText, setWsMessageText] = useState('{\n  "type": "ping"\n}');
+  const wsConsoleRef = useRef<HTMLDivElement>(null);
   const [responseTab, setResponseTab] = useState<
     "pretty" | "raw" | "preview" | "headers"
   >("pretty");
@@ -611,6 +616,25 @@ export function ApiTester() {
     }
   }, [editingTabId]);
 
+  // ── Auto-scroll WebSocket console to bottom ──────────────────
+  useEffect(() => {
+    if (wsConsoleRef.current) {
+      wsConsoleRef.current.scrollTop = wsConsoleRef.current.scrollHeight;
+    }
+  }, [activeTab?.wsMessages]);
+
+  // ── Auto-switch request tab based on protocol ───────────────
+  useEffect(() => {
+    if (!activeTab) return;
+    if (activeTab.protocol === "graphql") {
+      setRequestTab("graphql");
+    } else if (activeTab.protocol === "websocket") {
+      setRequestTab("ws-message");
+    } else {
+      setRequestTab("params");
+    }
+  }, [activeTab?.protocol, activeTab?.id]);
+
   // ── Resize Handlers ────────────────────────────────────────
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
@@ -648,7 +672,15 @@ export function ApiTester() {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeTab.url.trim()) return;
-    await store.sendRequest();
+    if (activeTab.protocol === "websocket") {
+      if (activeTab.wsConnected) {
+        store.disconnectWs();
+      } else {
+        store.connectWs();
+      }
+    } else {
+      await store.sendRequest();
+    }
   };
 
   // ── Copy Handlers ──────────────────────────────────────────
@@ -670,7 +702,7 @@ export function ApiTester() {
     if (!activeTab.response?.body) return;
     try {
       const blob = new Blob([activeTab.response.body], {
-        type: activeTab.response.headers["content-type"] || "text/plain",
+        type: activeTab.response.headers?.["content-type"] || "text/plain",
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -715,7 +747,7 @@ export function ApiTester() {
   };
 
   const responseLang = activeTab.response
-    ? getLanguageFromContentType(activeTab.response.headers["content-type"])
+    ? getLanguageFromContentType(activeTab.response.headers?.["content-type"])
     : "text";
 
   const prettyBody = React.useMemo(() => {
@@ -1167,12 +1199,53 @@ export function ApiTester() {
           </div>
         </div>
 
+        {/* Protocol Selector Bar */}
+        <div className="api-protocol-bar">
+          {(
+            [
+              ["rest", "HTTP / REST"],
+              ["graphql", "GraphQL"],
+              ["websocket", "WebSocket Client"],
+            ] as const
+          ).map(([proto, label]) => (
+            <button
+              key={proto}
+              type="button"
+              className={`api-protocol-tab-btn ${activeTab.protocol === proto ? "active" : ""}`}
+              onClick={() => store.setProtocol(proto)}
+            >
+              {proto === "websocket" ? (
+                <Wifi className="h-3.5 w-3.5" />
+              ) : proto === "graphql" ? (
+                <Activity className="h-3.5 w-3.5" />
+              ) : (
+                <Globe className="h-3.5 w-3.5" />
+              )}
+              <span>{label}</span>
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          {activeTab.sseActive && (
+            <div className="api-sse-pulse-badge">
+              <Zap className="h-3 w-3 text-accent animate-pulse" />
+              <span>SSE Stream Active</span>
+            </div>
+          )}
+        </div>
+
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">
-          <MethodDropdown
-            value={activeTab.method}
-            onChange={(val) => store.setMethod(val)}
-          />
+          {activeTab.protocol !== "websocket" && (
+            <MethodDropdown
+              value={activeTab.method}
+              onChange={(val) => store.setMethod(val)}
+            />
+          )}
+          {activeTab.protocol === "websocket" && (
+            <div className="api-method-select api-method-select-ws" style={{ cursor: "default" }}>
+              <span>WS</span>
+            </div>
+          )}
 
           <div className="api-url-input-container">
             <input
@@ -1180,70 +1253,126 @@ export function ApiTester() {
               className="api-url-input"
               value={activeTab.url}
               onChange={(e) => store.setUrl(e.target.value)}
-              placeholder="Enter request URL (e.g. https://api.github.com/users)"
+              placeholder={
+                activeTab.protocol === "websocket"
+                  ? "Enter WebSocket URL (e.g. wss://echo.websocket.org)"
+                  : activeTab.protocol === "graphql"
+                  ? "Enter GraphQL Endpoint URL"
+                  : "Enter request URL (e.g. https://api.github.com/users)"
+              }
               required
             />
+            {activeTab.protocol !== "websocket" && (
+              <SimpleTooltip content={activeTab.useProxy ? "CORS Proxy: ENABLED (Routing via corsproxy.io)" : "CORS Proxy: DISABLED (Direct browser request)"}>
+                <button
+                  type="button"
+                  className={`api-proxy-toggle-btn ${activeTab.useProxy ? "api-proxy-toggle-btn-active" : ""}`}
+                  onClick={() => store.toggleProxy()}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: activeTab.useProxy ? "var(--accent)" : "var(--text-3)",
+                    transition: "color 0.2s"
+                  }}
+                >
+                  <Shield className="h-4 w-4" />
+                </button>
+              </SimpleTooltip>
+            )}
           </div>
 
           <div className="api-url-actions">
-            <button
-              type="button"
-              className="api-curl-btn"
-              onClick={() => {
-                setShowImportCurl(!showImportCurl);
-                setShowCodeSnippet(false);
-                setImportError(null);
-                setCurlImportValue("");
-              }}
-              title="Import request from cURL command"
-              style={{
-                borderColor: showImportCurl ? "var(--accent)" : "",
-                background: showImportCurl ? "var(--accent-glow)" : "",
-                color: showImportCurl ? "var(--accent)" : "",
-              }}
-            >
-              <Terminal className="h-3.5 w-3.5" />
-              <span>Import</span>
-            </button>
-
-            <button
-              type="button"
-              className="api-curl-btn"
-              onClick={() => {
-                setShowCodeSnippet(!showCodeSnippet);
-                setShowImportCurl(false);
-              }}
-              title="Generate code snippet"
-              style={{
-                borderColor: showCodeSnippet ? "var(--accent)" : "",
-                background: showCodeSnippet ? "var(--accent-glow)" : "",
-                color: showCodeSnippet ? "var(--accent)" : "",
-              }}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              <span>Code</span>
-            </button>
-
-            <button
-              type="submit"
-              className="api-send-btn"
-              disabled={activeTab.loading || !activeTab.url.trim()}
-            >
-              {activeTab.loading ? (
-                <span
-                  className="api-spinner"
-                  style={{
-                    width: "14px",
-                    height: "14px",
-                    borderWidth: "2px",
+            {activeTab.protocol !== "websocket" && (
+              <>
+                <button
+                  type="button"
+                  className="api-curl-btn"
+                  onClick={() => {
+                    setShowImportCurl(!showImportCurl);
+                    setShowCodeSnippet(false);
+                    setImportError(null);
+                    setCurlImportValue("");
                   }}
-                />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
-              <span>{activeTab.loading ? "Sending..." : "Send"}</span>
-              <span className="api-send-shortcut">⌘↵</span>
-            </button>
+                  title="Import request from cURL command"
+                  style={{
+                    borderColor: showImportCurl ? "var(--accent)" : "",
+                    background: showImportCurl ? "var(--accent-glow)" : "",
+                    color: showImportCurl ? "var(--accent)" : "",
+                  }}
+                >
+                  <Terminal className="h-3.5 w-3.5" />
+                  <span>Import</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="api-curl-btn"
+                  onClick={() => {
+                    setShowCodeSnippet(!showCodeSnippet);
+                    setShowImportCurl(false);
+                  }}
+                  title="Generate code snippet"
+                  style={{
+                    borderColor: showCodeSnippet ? "var(--accent)" : "",
+                    background: showCodeSnippet ? "var(--accent-glow)" : "",
+                    color: showCodeSnippet ? "var(--accent)" : "",
+                  }}
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  <span>Code</span>
+                </button>
+              </>
+            )}
+
+            {activeTab.protocol === "websocket" ? (
+              <button
+                type="submit"
+                className={`api-send-btn ${activeTab.wsConnected ? "api-send-btn-ws-connected" : ""}`}
+                disabled={activeTab.loading || !activeTab.url.trim()}
+              >
+                {activeTab.loading ? (
+                  <span
+                    className="api-spinner"
+                    style={{
+                      width: "14px",
+                      height: "14px",
+                      borderWidth: "2px",
+                    }}
+                  />
+                ) : activeTab.wsConnected ? (
+                  <WifiOff className="h-4 w-4" />
+                ) : (
+                  <Wifi className="h-4 w-4" />
+                )}
+                <span>{activeTab.loading ? "Connecting..." : activeTab.wsConnected ? "Disconnect" : "Connect"}</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="api-send-btn"
+                disabled={activeTab.loading || !activeTab.url.trim()}
+              >
+                {activeTab.loading ? (
+                  <span
+                    className="api-spinner"
+                    style={{
+                      width: "14px",
+                      height: "14px",
+                      borderWidth: "2px",
+                    }}
+                  />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                <span>{activeTab.loading ? "Sending..." : "Send"}</span>
+                <span className="api-send-shortcut">⌘↵</span>
+              </button>
+            )}
           </div>
         </form>
 
@@ -1402,50 +1531,113 @@ export function ApiTester() {
           >
             <div className="api-tabs">
               <div className="api-tabs-list">
-                <button
-                  type="button"
-                  className={`api-tab-trigger ${requestTab === "params" ? "api-tab-trigger-active" : ""}`}
-                  onClick={() => setRequestTab("params")}
-                >
-                  Params
-                  <span className="api-tab-count">
-                    {activeTab.params.filter((p) => p.key.trim() !== "").length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className={`api-tab-trigger ${requestTab === "headers" ? "api-tab-trigger-active" : ""}`}
-                  onClick={() => setRequestTab("headers")}
-                >
-                  Headers
-                  <span className="api-tab-count">
-                    {activeTab.headers.filter((h) => h.key.trim() !== "").length}
-                  </span>
-                </button>
-                {hasBody && (
-                  <button
-                    type="button"
-                    className={`api-tab-trigger ${requestTab === "body" ? "api-tab-trigger-active" : ""}`}
-                    onClick={() => setRequestTab("body")}
-                  >
-                    Body
-                  </button>
+                {activeTab.protocol === "rest" && (
+                  <>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "params" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("params")}
+                    >
+                      Params
+                      <span className="api-tab-count">
+                        {activeTab.params.filter((p) => p.key.trim() !== "").length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "headers" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("headers")}
+                    >
+                      Headers
+                      <span className="api-tab-count">
+                        {activeTab.headers.filter((h) => h.key.trim() !== "").length}
+                      </span>
+                    </button>
+                    {hasBody && (
+                      <button
+                        type="button"
+                        className={`api-tab-trigger ${requestTab === "body" ? "api-tab-trigger-active" : ""}`}
+                        onClick={() => setRequestTab("body")}
+                      >
+                        Body
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "auth" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("auth")}
+                    >
+                      <Lock
+                        className="h-3 w-3"
+                        style={{
+                          display: "inline",
+                          marginRight: "4px",
+                          verticalAlign: "-1px",
+                        }}
+                      />
+                      Auth
+                    </button>
+                  </>
                 )}
-                <button
-                  type="button"
-                  className={`api-tab-trigger ${requestTab === "auth" ? "api-tab-trigger-active" : ""}`}
-                  onClick={() => setRequestTab("auth")}
-                >
-                  <Lock
-                    className="h-3 w-3"
-                    style={{
-                      display: "inline",
-                      marginRight: "4px",
-                      verticalAlign: "-1px",
-                    }}
-                  />
-                  Auth
-                </button>
+
+                {activeTab.protocol === "graphql" && (
+                  <>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "graphql" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("graphql")}
+                    >
+                      GraphQL
+                    </button>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "headers" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("headers")}
+                    >
+                      Headers
+                      <span className="api-tab-count">
+                        {activeTab.headers.filter((h) => h.key.trim() !== "").length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "auth" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("auth")}
+                    >
+                      <Lock
+                        className="h-3 w-3"
+                        style={{
+                          display: "inline",
+                          marginRight: "4px",
+                          verticalAlign: "-1px",
+                        }}
+                      />
+                      Auth
+                    </button>
+                  </>
+                )}
+
+                {activeTab.protocol === "websocket" && (
+                  <>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "ws-message" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("ws-message")}
+                    >
+                      Message
+                    </button>
+                    <button
+                      type="button"
+                      className={`api-tab-trigger ${requestTab === "params" ? "api-tab-trigger-active" : ""}`}
+                      onClick={() => setRequestTab("params")}
+                    >
+                      Query Params
+                      <span className="api-tab-count">
+                        {activeTab.params.filter((p) => p.key.trim() !== "").length}
+                      </span>
+                    </button>
+                  </>
+                )}
               </div>
 
               {/* Params Tab */}
@@ -1563,7 +1755,7 @@ export function ApiTester() {
               )}
 
               {/* Body Tab */}
-              {requestTab === "body" && hasBody && (
+              {requestTab === "body" && hasBody && activeTab.protocol === "rest" && (
                 <div className="api-tab-content">
                   <div className="api-body-toggles">
                     {(
@@ -1703,8 +1895,132 @@ export function ApiTester() {
                 </div>
               )}
 
+              {/* GraphQL Tab */}
+              {requestTab === "graphql" && activeTab.protocol === "graphql" && (
+                <div className="api-tab-content api-graphql-container" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                  <div className="api-graphql-toolbar" style={{ display: "flex", justifyContent: "flex-end", padding: "4px 8px", borderBottom: "1px solid var(--border-1)", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className="api-editor-format-btn"
+                      onClick={() => {
+                        try {
+                          let query = activeTab.graphqlQuery;
+                          query = query.replace(/\s+/g, ' ');
+                          let indent = 0;
+                          let formatted = "";
+                          for (let i = 0; i < query.length; i++) {
+                            const char = query[i];
+                            if (char === '{') {
+                              indent += 2;
+                              formatted += ' {\n' + ' '.repeat(indent);
+                            } else if (char === '}') {
+                              indent = Math.max(0, indent - 2);
+                              formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
+                            } else if (char === ',') {
+                              formatted += ',\n' + ' '.repeat(indent);
+                            } else {
+                              formatted += char;
+                            }
+                          }
+                          formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
+                          store.setGraphqlQuery(formatted);
+                        } catch (e) {
+                          console.error("Failed to format GraphQL query", e);
+                        }
+                      }}
+                      title="Format GraphQL query"
+                    >
+                      <Sparkles className="h-3 w-3 text-yellow" />
+                      <span>Format Query</span>
+                    </button>
+                  </div>
+                  <div className="api-graphql-editors" style={{ display: "flex", flex: 1, minHeight: 0 }}>
+                    <div className="api-graphql-editor-pane" style={{ flex: 2, display: "flex", flexDirection: "column", borderRight: "1px solid var(--border-1)" }}>
+                      <div className="api-graphql-pane-header" style={{ padding: "4px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-3)", background: "var(--bg-2)" }}>Query</div>
+                      <div style={{ flex: 1, position: "relative" }}>
+                        <Editor
+                          height="100%"
+                          language="graphql"
+                          theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                          onMount={handleEditorMount}
+                          value={activeTab.graphqlQuery || ""}
+                          onChange={(val) => store.setGraphqlQuery(val || "")}
+                          options={{
+                            minimap: { enabled: false },
+                            fontSize: 12,
+                            lineNumbers: "on",
+                            tabSize: 2,
+                            scrollBeyondLastLine: false,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="api-graphql-editor-pane" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+                      <div className="api-graphql-pane-header" style={{ padding: "4px 8px", fontSize: "11px", fontWeight: 600, color: "var(--text-3)", background: "var(--bg-2)" }}>Variables (JSON)</div>
+                      <div style={{ flex: 1, position: "relative" }}>
+                        <Editor
+                          height="100%"
+                          language="json"
+                          theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                          onMount={handleEditorMount}
+                          value={activeTab.graphqlVariables || ""}
+                          onChange={(val) => store.setGraphqlVariables(val || "")}
+                          options={{
+                            minimap: { enabled: false },
+                            fontSize: 12,
+                            lineNumbers: "on",
+                            tabSize: 2,
+                            scrollBeyondLastLine: false,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* WebSocket Message Tab */}
+              {requestTab === "ws-message" && activeTab.protocol === "websocket" && (
+                <div className="api-tab-content api-ws-message-container" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "12px", gap: "8px", boxSizing: "border-box" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--text-3)" }}>WebSocket Message Payload</span>
+                    <span style={{ fontSize: "10px", color: "var(--text-3)" }}>Supports variables like {"{{variable}}"}</span>
+                  </div>
+                  <div style={{ flex: 1, border: "1px solid var(--border-1)", borderRadius: "var(--radius-md)", overflow: "hidden", position: "relative" }}>
+                    <Editor
+                      height="100%"
+                      language="json"
+                      theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                      onMount={handleEditorMount}
+                      value={wsMessageText}
+                      onChange={(val) => setWsMessageText(val || "")}
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 12,
+                        lineNumbers: "on",
+                        scrollBeyondLastLine: false,
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="api-send-btn"
+                      disabled={!activeTab.wsConnected || !wsMessageText.trim()}
+                      onClick={() => {
+                        store.sendWsMessage(wsMessageText);
+                      }}
+                      style={{ height: "36px", padding: "0 16px" }}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      <span>Send Message</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Auth Tab */}
-              {requestTab === "auth" && (
+              {requestTab === "auth" && activeTab.protocol !== "websocket" && (
                 <div className="api-tab-content">
                   <div className="api-auth-section">
                     <div className="api-auth-type-selector">
@@ -1882,130 +2198,231 @@ export function ApiTester() {
           />
 
           {/* ── Response Pane ─────────────────────────────── */}
-          <div className="api-pane" style={{ flex: 1 }}>
-            <div className="api-pane-header">
-              <span className="api-pane-title">Response</span>
-              {activeTab.response && (
-                <div className="api-response-meta">
-                  <div
-                    className={`status-pill ${activeTab.response.status >= 200 && activeTab.response.status < 300 ? "status-pill-ok" : "status-pill-err"}`}
-                  >
-                    <Activity className="h-3 w-3" />
-                    <span>
-                      {activeTab.response.status} {activeTab.response.statusText}
-                    </span>
-                  </div>
-                  <div className="meta-item">
-                    <Clock className="h-3 w-3 opacity-60" />
-                    <span>
-                      <span
-                        className={`meta-item-value ${getTimeClass(activeTab.response.time)}`}
-                      >
-                        {activeTab.response.time} ms
-                      </span>
-                    </span>
-                  </div>
-                  <div className="meta-item">
-                    <Database className="h-3 w-3 opacity-60" />
-                    <span>
-                      <span className="meta-item-value">
-                        {formatBytes(activeTab.response.size)}
-                      </span>
-                    </span>
+          <div className="api-pane" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {activeTab.protocol === "websocket" ? (
+              /* WebSocket Console Stream */
+              <div className="api-ws-console-container" style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", borderBottom: "1px solid var(--border-1)", paddingBottom: "6px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-2)", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Activity className="h-3.5 w-3.5 text-accent" />
+                    Connection Console Stream ({(activeTab.wsMessages || []).length} messages)
+                  </span>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <button
+                      type="button"
+                      className="api-clear-btn"
+                      onClick={() => store.clearWsMessages()}
+                      disabled={(activeTab.wsMessages || []).length === 0}
+                    >
+                      Clear Logs
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Loading */}
-            {activeTab.loading && (
-              <div className="api-loading-state">
-                <div className="api-spinner" />
-                <span className="api-loading-text">
-                  Connecting to server...
-                </span>
+                
+                <div 
+                  className="api-ws-messages-list" 
+                  ref={wsConsoleRef}
+                  style={{ 
+                    flex: 1, 
+                    overflowY: "auto", 
+                    background: "var(--bg-2)", 
+                    borderRadius: "var(--radius-md)", 
+                    border: "1px solid var(--border-1)",
+                    padding: "10px",
+                    fontFamily: "var(--font-mono), monospace",
+                    fontSize: "11px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
+                  }}
+                >
+                  {(activeTab.wsMessages || []).length === 0 ? (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text-3)", gap: "8px" }}>
+                      {activeTab.wsConnected ? (
+                        <Wifi className="h-8 w-8 text-green opacity-40 animate-pulse" />
+                      ) : (
+                        <WifiOff className="h-8 w-8 opacity-25" />
+                      )}
+                      <span>
+                        {activeTab.wsConnected
+                          ? "Connected! Send a message from the Request pane to start testing."
+                          : "Console is empty. Connect to a WebSocket endpoint to stream messages."}
+                      </span>
+                    </div>
+                  ) : (
+                    (activeTab.wsMessages || []).map((msg) => {
+                      let typeColor = "var(--text-3)";
+                      let typeLabel = "INFO";
+                      if (msg.type === "send") {
+                        typeColor = "var(--blue)";
+                        typeLabel = "SENT";
+                      } else if (msg.type === "receive") {
+                        typeColor = "var(--green)";
+                        typeLabel = "RECV";
+                      } else if (msg.type === "error") {
+                        typeColor = "var(--red)";
+                        typeLabel = "ERR ";
+                      }
+                      
+                      return (
+                        <div 
+                          key={msg.id} 
+                          className={`api-ws-message-row api-ws-message-${msg.type}`}
+                          style={{ 
+                            display: "flex", 
+                            gap: "8px", 
+                            borderBottom: "1px dashed var(--border-2)", 
+                            paddingBottom: "4px" 
+                          }}
+                        >
+                          <span style={{ color: "var(--text-3)" }}>[{new Date(msg.timestamp).toLocaleTimeString()}]</span>
+                          <span style={{ color: typeColor, fontWeight: 700 }}>{typeLabel}</span>
+                          <span style={{ color: "var(--text-1)", flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{msg.text}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
-            )}
-
-            {/* Error */}
-            {activeTab.error && (
-              <div style={{ overflowY: "auto", flex: 1 }}>
-                <div className="api-error-card">
-                  <AlertCircle className="api-error-icon h-5 w-5" />
-                  <div className="api-error-info">
-                    <span className="api-error-title">
-                      HTTP Request Failed
-                    </span>
-                    <p className="api-error-message">{activeTab.error}</p>
-                  </div>
+            ) : (
+              /* REST & GraphQL Normal Response */
+              <>
+                <div className="api-pane-header">
+                  <span className="api-pane-title">Response</span>
+                  {activeTab.sseActive && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px' }}>
+                      <span className="api-sse-pulse" style={{ width: '8px', height: '8px', background: 'var(--accent)', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 8px var(--accent)' }}></span>
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)' }}>Streaming...</span>
+                      <button
+                        type="button"
+                        className="api-clear-btn"
+                        onClick={() => store.stopActiveRequest(activeTab.id)}
+                        style={{ padding: '2px 6px', color: 'var(--red)', background: 'var(--red-dim)', borderRadius: '4px' }}
+                      >
+                        Stop
+                      </button>
+                    </div>
+                  )}
+                  {activeTab.response && (
+                    <div className="api-response-meta">
+                      <div
+                        className={`status-pill ${activeTab.response.status >= 200 && activeTab.response.status < 300 ? "status-pill-ok" : "status-pill-err"}`}
+                      >
+                        <Activity className="h-3 w-3" />
+                        <span>
+                          {activeTab.response.status} {activeTab.response.statusText}
+                        </span>
+                      </div>
+                      <div className="meta-item">
+                        <Clock className="h-3 w-3 opacity-60" />
+                        <span>
+                          <span
+                            className={`meta-item-value ${getTimeClass(activeTab.response.time)}`}
+                          >
+                            {activeTab.response.time} ms
+                          </span>
+                        </span>
+                      </div>
+                      <div className="meta-item">
+                        <Database className="h-3 w-3 opacity-60" />
+                        <span>
+                          <span className="meta-item-value">
+                            {formatBytes(activeTab.response.size)}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ padding: "0 16px 16px" }}>
-                  <div className="api-cors-panel">
-                    <Info className="api-cors-icon h-5 w-5" />
-                    <div className="api-cors-details">
-                      <span className="api-cors-title">
-                        CORS Restriction Notice
-                      </span>
-                      <p className="api-cors-desc">
-                        Browser-based clients are subject to CORS restrictions.
-                        If the server doesn't include an
-                        `Access-Control-Allow-Origin` header, the request will
-                        be blocked.
-                      </p>
-                      <p
-                        className="api-cors-desc"
-                        style={{ marginTop: "6px", fontWeight: 600 }}
-                      >
-                        How to resolve:
-                      </p>
-                      <ul
-                        style={{
-                          paddingLeft: "16px",
-                          fontSize: "11px",
-                          color: "var(--text-2)",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "3px",
-                          marginTop: "4px",
-                        }}
-                      >
-                        <li>
-                          Use the built-in <strong>Mock API Presets</strong>{" "}
-                          which are CORS-enabled.
-                        </li>
-                        <li>
-                          Enable CORS on your server (e.g.
-                          `Access-Control-Allow-Origin: *`).
-                        </li>
-                        <li>
-                          Use a browser extension like "Allow CORS" for local
-                          testing.
-                        </li>
-                      </ul>
+                {/* Loading */}
+                {activeTab.loading && (
+                  <div className="api-loading-state">
+                    <div className="api-spinner" />
+                    <span className="api-loading-text">
+                      Connecting to server...
+                    </span>
+                  </div>
+                )}
+
+                {/* Error */}
+                {activeTab.error && (
+                  <div style={{ overflowY: "auto", flex: 1 }}>
+                    <div className="api-error-card">
+                      <AlertCircle className="api-error-icon h-5 w-5" />
+                      <div className="api-error-info">
+                        <span className="api-error-title">
+                          HTTP Request Failed
+                        </span>
+                        <p className="api-error-message">{activeTab.error}</p>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: "0 16px 16px" }}>
+                      <div className="api-cors-panel">
+                        <Info className="api-cors-icon h-5 w-5" />
+                        <div className="api-cors-details">
+                          <span className="api-cors-title">
+                            CORS Restriction Notice
+                          </span>
+                          <p className="api-cors-desc">
+                            Browser-based clients are subject to CORS restrictions.
+                            If the server doesn't include an
+                            `Access-Control-Allow-Origin` header, the request will
+                            be blocked.
+                          </p>
+                          <p
+                            className="api-cors-desc"
+                            style={{ marginTop: "6px", fontWeight: 600 }}
+                          >
+                            How to resolve:
+                          </p>
+                          <ul
+                            style={{
+                              paddingLeft: "16px",
+                              fontSize: "11px",
+                              color: "var(--text-2)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "3px",
+                              marginTop: "4px",
+                            }}
+                          >
+                            <li>
+                              Use a CORS proxy (enable the Shield icon in the URL bar to route via corsproxy.io).
+                            </li>
+                            <li>
+                              Use the built-in <strong>Mock API Presets</strong>{" "}
+                              which are CORS-enabled.
+                            </li>
+                            <li>
+                              Enable CORS on your server (e.g.
+                              `Access-Control-Allow-Origin: *`).
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
+                )}
 
-            {/* Empty State */}
-            {!activeTab.loading && !activeTab.error && !activeTab.response && (
-              <div className="api-response-empty">
-                <Send className="h-8 w-8 api-response-empty-icon text-accent" />
-                <span className="api-response-empty-title">
-                  Ready to Send
-                </span>
-                <p className="api-response-empty-desc">
-                  Configure your request above and press{" "}
-                  <strong>Send</strong> or <strong>⌘ Enter</strong> to
-                  execute.
-                </p>
-              </div>
-            )}
+                {/* Empty State */}
+                {!activeTab.loading && !activeTab.error && !activeTab.response && (
+                  <div className="api-response-empty">
+                    <Send className="h-8 w-8 api-response-empty-icon text-accent" />
+                    <span className="api-response-empty-title">
+                      Ready to Send
+                    </span>
+                    <p className="api-response-empty-desc">
+                      Configure your request above and press{" "}
+                      <strong>Send</strong> or <strong>⌘ Enter</strong> to
+                      execute.
+                    </p>
+                  </div>
+                )}
 
-            {/* Response Body */}
-            {!activeTab.loading && !activeTab.error && activeTab.response && (
+                {/* Response Body */}
+                {!activeTab.loading && !activeTab.error && activeTab.response && (
               <div
                 className="api-tabs"
                 style={{ flex: 1, overflow: "hidden" }}
@@ -2045,7 +2462,7 @@ export function ApiTester() {
                   >
                     Headers
                     <span className="api-tab-count">
-                      {Object.keys(activeTab.response.headers).length}
+                      {Object.keys(activeTab.response.headers || {}).length}
                     </span>
                   </button>
 
@@ -2173,7 +2590,7 @@ export function ApiTester() {
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(activeTab.response.headers)
+                            {Object.entries(activeTab.response.headers || {})
                               .filter(
                                 ([key, val]) =>
                                   key
@@ -2203,8 +2620,10 @@ export function ApiTester() {
                 </div>
               </div>
             )}
-          </div>
-        </div>
+          </>
+        )}
+      </div>
+    </div>
         {/* Export Modal */}
         {showExportModal && (
           <div className="api-modal-overlay">

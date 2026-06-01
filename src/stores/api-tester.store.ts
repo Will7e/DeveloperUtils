@@ -78,6 +78,13 @@ export interface ApiResponse {
   body: string;
 }
 
+export interface WsMessage {
+  id: string;
+  type: "send" | "receive" | "status" | "error";
+  text: string;
+  timestamp: number;
+}
+
 export interface TabState {
   id: string;
   name: string;
@@ -94,6 +101,13 @@ export interface TabState {
   response: ApiResponse | null;
   loading: boolean;
   error: string | null;
+  protocol: "rest" | "graphql" | "websocket";
+  useProxy: boolean;
+  graphqlQuery: string;
+  graphqlVariables: string;
+  wsMessages: WsMessage[];
+  wsConnected: boolean;
+  sseActive: boolean;
 }
 
 interface ApiTesterState {
@@ -122,6 +136,16 @@ interface ApiTesterState {
   setRawType: (type: string) => void;
   setAuthType: (type: AuthType) => void;
   setAuthConfig: (config: Partial<AuthConfig>) => void;
+  setProtocol: (protocol: "rest" | "graphql" | "websocket") => void;
+  setUseProxy: (useProxy: boolean) => void;
+  setGraphqlQuery: (query: string) => void;
+  setGraphqlVariables: (vars: string) => void;
+  toggleProxy: () => void;
+  connectWs: () => void;
+  disconnectWs: () => void;
+  sendWsMessage: (text: string) => void;
+  clearWsMessages: () => void;
+  stopActiveRequest: (id: string) => void;
 
   // Key-value editors for active tab
   addParam: () => void;
@@ -221,6 +245,13 @@ const createNewTab = (name: string): TabState => ({
   response: null,
   loading: false,
   error: null,
+  protocol: "rest",
+  useProxy: false,
+  graphqlQuery: "query {\n  \n}",
+  graphqlVariables: "{\n  \n}",
+  wsMessages: [],
+  wsConnected: false,
+  sseActive: false,
 });
 
 import { apiStorage } from "./api-tester.storage";
@@ -311,6 +342,10 @@ export function applyAuth(
   return { headers: h, url: u };
 }
 
+// ── External maps for non-serializable objects ──────────────
+const wsConnections = new Map<string, WebSocket>();
+const activeControllers = new Map<string, AbortController>();
+
 export const useApiTesterStore = create<ApiTesterState>((set, get) => {
   const initialTab = createNewTab("Tab 1");
 
@@ -340,9 +375,28 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         apiStorage.getEnvironments(),
         apiStorage.getActiveEnvId()
       ]);
+
+      const normalizedTabs = storedTabs
+        ? storedTabs.tabs.map(t => {
+            const base = createNewTab(t.name || "Tab");
+            return {
+              ...base,
+              ...t,
+              loading: false,
+              error: null,
+              wsConnected: false,
+              sseActive: false,
+              wsMessages: t.wsMessages || [],
+              graphqlQuery: t.graphqlQuery || base.graphqlQuery,
+              graphqlVariables: t.graphqlVariables || base.graphqlVariables,
+              protocol: t.protocol || "rest",
+            };
+          })
+        : [initialTab];
+
       set({
         isInitialized: true,
-        tabs: storedTabs ? storedTabs.tabs : [initialTab],
+        tabs: normalizedTabs,
         activeTabId: storedTabs ? storedTabs.activeTabId : initialTab.id,
         history,
         collections,
@@ -434,6 +488,157 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authConfig: { ...t.authConfig, ...config } } : t)),
       }));
       persistTabs();
+    },
+
+    // ── Protocol & Proxy ───────────────────────────────────────
+    setProtocol: (protocol) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, protocol } : t)),
+      }));
+      persistTabs();
+    },
+    setUseProxy: (useProxy) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, useProxy } : t)),
+      }));
+      persistTabs();
+    },
+    toggleProxy: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, useProxy: !t.useProxy } : t)),
+      }));
+      persistTabs();
+    },
+
+    // ── GraphQL ────────────────────────────────────────────────
+    setGraphqlQuery: (query) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, graphqlQuery: query } : t)),
+      }));
+      persistTabs();
+    },
+    setGraphqlVariables: (vars) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, graphqlVariables: vars } : t)),
+      }));
+      persistTabs();
+    },
+
+    // ── WebSocket ──────────────────────────────────────────────
+    connectWs: () => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if (!tab) return;
+
+      // Disconnect existing connection for this tab if any
+      const existing = wsConnections.get(tab.id);
+      if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+        existing.close();
+      }
+
+      const activeEnvVars = state.activeEnvironmentId
+        ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || []
+        : [];
+      let wsUrl = substituteEnvVars(tab.url, state.envVars, activeEnvVars);
+
+      // Auto-convert http(s) to ws(s) if user forgot
+      if (wsUrl.startsWith("http://")) wsUrl = wsUrl.replace("http://", "ws://");
+      else if (wsUrl.startsWith("https://")) wsUrl = wsUrl.replace("https://", "wss://");
+      else if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) wsUrl = "wss://" + wsUrl;
+
+      const statusMsg: WsMessage = { id: genId(), type: "status", text: `Connecting to ${wsUrl}...`, timestamp: Date.now() };
+      set((state) => ({
+        tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsMessages: [...t.wsMessages, statusMsg], loading: true, error: null } : t),
+      }));
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsConnections.set(tab.id, ws);
+
+        ws.onopen = () => {
+          const msg: WsMessage = { id: genId(), type: "status", text: `Connected to ${wsUrl}`, timestamp: Date.now() };
+          set((state) => ({
+            tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsConnected: true, loading: false, wsMessages: [...t.wsMessages, msg] } : t),
+          }));
+        };
+
+        ws.onmessage = (event) => {
+          const msg: WsMessage = { id: genId(), type: "receive", text: typeof event.data === "string" ? event.data : "[Binary data]", timestamp: Date.now() };
+          set((state) => ({
+            tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsMessages: [...t.wsMessages, msg] } : t),
+          }));
+        };
+
+        ws.onerror = () => {
+          const msg: WsMessage = { id: genId(), type: "error", text: "Connection error", timestamp: Date.now() };
+          set((state) => ({
+            tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsMessages: [...t.wsMessages, msg], loading: false } : t),
+          }));
+        };
+
+        ws.onclose = (event) => {
+          wsConnections.delete(tab.id);
+          const reason = event.reason ? ` (${event.reason})` : "";
+          const msg: WsMessage = { id: genId(), type: "status", text: `Disconnected [${event.code}]${reason}`, timestamp: Date.now() };
+          set((state) => ({
+            tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsConnected: false, loading: false, wsMessages: [...t.wsMessages, msg] } : t),
+          }));
+        };
+      } catch (err: unknown) {
+        const error = err as Error;
+        const msg: WsMessage = { id: genId(), type: "error", text: error.message || "Failed to connect", timestamp: Date.now() };
+        set((state) => ({
+          tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, wsMessages: [...t.wsMessages, msg], loading: false, error: error.message } : t),
+        }));
+      }
+    },
+
+    disconnectWs: () => {
+      const state = get();
+      const tabId = state.activeTabId;
+      const ws = wsConnections.get(tabId);
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close(1000, "User disconnected");
+      }
+      wsConnections.delete(tabId);
+      set((state) => ({
+        tabs: state.tabs.map((t) => t.id === tabId ? { ...t, wsConnected: false } : t),
+      }));
+    },
+
+    sendWsMessage: (text) => {
+      const state = get();
+      const tabId = state.activeTabId;
+      const ws = wsConnections.get(tabId);
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      const activeEnvVars = state.activeEnvironmentId
+        ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || []
+        : [];
+      const substituted = substituteEnvVars(text, state.envVars, activeEnvVars);
+
+      ws.send(substituted);
+      const msg: WsMessage = { id: genId(), type: "send", text: substituted, timestamp: Date.now() };
+      set((state) => ({
+        tabs: state.tabs.map((t) => t.id === tabId ? { ...t, wsMessages: [...t.wsMessages, msg] } : t),
+      }));
+    },
+
+    clearWsMessages: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => t.id === state.activeTabId ? { ...t, wsMessages: [] } : t),
+      }));
+    },
+
+    stopActiveRequest: (tabId) => {
+      const controller = activeControllers.get(tabId);
+      if (controller) {
+        controller.abort();
+        activeControllers.delete(tabId);
+      }
+      set((state) => ({
+        tabs: state.tabs.map((t) => t.id === tabId ? { ...t, loading: false, sseActive: false } : t),
+      }));
     },
 
     // Params actions
@@ -658,7 +863,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }
       }
 
-      let parts: string[] = [`curl -X ${method}`];
+      const parts: string[] = [`curl -X ${method}`];
 
       // Headers
       Object.entries(computedHeaders).forEach(([k, v]) => {
@@ -689,15 +894,22 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       return parts.join(" \\\n");
     },
 
-    // Send request using standard window.fetch
+    // Send request using standard window.fetch — enhanced with CORS proxy, GraphQL, and SSE streaming
     sendRequest: async () => {
       const state = get();
       const tab = state.tabs.find((t) => t.id === state.activeTabId);
       if (!tab) return;
-      const { method, url, params, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
+
+      // WebSocket protocol: delegate to connectWs instead
+      if (tab.protocol === "websocket") {
+        get().connectWs();
+        return;
+      }
+
+      const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
       
       set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, loading: true, error: null, response: null } : t)),
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, loading: true, error: null, response: null, sseActive: false } : t)),
       }));
 
       const startTime = performance.now();
@@ -711,33 +923,47 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }
       });
 
-      let fetchBody: any = undefined;
+      let fetchBody: BodyInit | undefined = undefined;
       const subBody = substituteEnvVars(bodyValue, state.envVars, activeEnvVars);
 
-      // Handle Request Body
-      if (method !== "GET" && method !== "HEAD") {
-        const hasContentType = Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type');
+      // GraphQL protocol: build POST body from query + variables
+      if (tab.protocol === "graphql") {
+        const gqlQuery = substituteEnvVars(tab.graphqlQuery, state.envVars, activeEnvVars);
+        let gqlVars = {};
+        try {
+          const rawVars = substituteEnvVars(tab.graphqlVariables, state.envVars, activeEnvVars).trim();
+          if (rawVars) gqlVars = JSON.parse(rawVars);
+        } catch { /* ignore invalid vars JSON */ }
+        fetchBody = JSON.stringify({ query: gqlQuery, variables: gqlVars });
+        if (!Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type')) {
+          computedHeaders["Content-Type"] = "application/json";
+        }
+      } else {
+        // Handle Request Body (standard REST)
+        if (method !== "GET" && method !== "HEAD") {
+          const hasContentType = Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type');
 
-        if (bodyType === "json") {
-          fetchBody = subBody;
-          if (!hasContentType) {
-            computedHeaders["Content-Type"] = "application/json";
-          }
-        } else if (bodyType === "form-data") {
-          const formData = new FormData();
-          formParams.forEach((f) => {
-            if (f.enabled && f.key.trim() !== "") {
-              formData.append(f.key.trim(), substituteEnvVars(f.value, state.envVars, activeEnvVars));
+          if (bodyType === "json") {
+            fetchBody = subBody;
+            if (!hasContentType) {
+              computedHeaders["Content-Type"] = "application/json";
             }
-          });
-          fetchBody = formData;
-          // Let the browser set Content-Type header with the boundary
-          const ctKeys = Object.keys(computedHeaders).filter(k => k.toLowerCase() === 'content-type');
-          ctKeys.forEach(k => delete computedHeaders[k]);
-        } else if (bodyType === "raw") {
-          fetchBody = subBody;
-          if (!hasContentType) {
-            computedHeaders["Content-Type"] = rawType;
+          } else if (bodyType === "form-data") {
+            const formData = new FormData();
+            formParams.forEach((f) => {
+              if (f.enabled && f.key.trim() !== "") {
+                formData.append(f.key.trim(), substituteEnvVars(f.value, state.envVars, activeEnvVars));
+              }
+            });
+            fetchBody = formData;
+            // Let the browser set Content-Type header with the boundary
+            const ctKeys = Object.keys(computedHeaders).filter(k => k.toLowerCase() === 'content-type');
+            ctKeys.forEach(k => delete computedHeaders[k]);
+          } else if (bodyType === "raw") {
+            fetchBody = subBody;
+            if (!hasContentType) {
+              computedHeaders["Content-Type"] = rawType;
+            }
           }
         }
       }
@@ -755,28 +981,110 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       // Apply authentication
       const authed = applyAuth(authType, substitutedAuthConfig, computedHeaders, substitutedUrl);
       computedHeaders = authed.headers;
-      const finalUrl = authed.url;
+      let finalUrl = authed.url;
+
+      // CORS Proxy: route through proxy if enabled
+      if (tab.useProxy) {
+        finalUrl = `https://corsproxy.io/?url=${encodeURIComponent(finalUrl)}`;
+      }
+
+      // Determine effective method: GraphQL always uses POST
+      const effectiveMethod = tab.protocol === "graphql" ? "POST" : method;
 
       try {
         const controller = new AbortController();
+        activeControllers.set(tab.id, controller);
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
         const res = await fetch(finalUrl, {
-          method,
+          method: effectiveMethod,
           headers: computedHeaders,
           body: fetchBody,
           signal: controller.signal,
         });
 
         clearTimeout(timeoutId);
-        const endTime = performance.now();
-        const timeMs = Math.round(endTime - startTime);
 
         // Read response headers
         const resHeaders: Record<string, string> = {};
         res.headers.forEach((val, key) => {
           resHeaders[key] = val;
         });
+
+        // Check if response is SSE (Server-Sent Events) stream
+        const contentType = resHeaders["content-type"] || "";
+        const isSSE = contentType.includes("text/event-stream");
+
+        if (isSSE && res.body) {
+          // ── SSE Streaming Mode ───────────────────────────────
+          set((state) => ({
+            tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, sseActive: true, loading: false } : t),
+          }));
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let accumulated = "";
+          const sseStartTime = performance.now();
+
+          const readStream = async () => {
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                accumulated += decoder.decode(value, { stream: true });
+                const elapsed = Math.round(performance.now() - sseStartTime);
+                const sizeBytes = new Blob([accumulated]).size;
+                set((state) => ({
+                  tabs: state.tabs.map((t) => t.id === tab.id ? {
+                    ...t,
+                    response: {
+                      status: res.status,
+                      statusText: res.statusText || `HTTP ${res.status}`,
+                      time: elapsed,
+                      size: sizeBytes,
+                      headers: resHeaders,
+                      body: accumulated,
+                    },
+                  } : t),
+                }));
+              }
+            } catch (err: unknown) {
+              const error = err as Error;
+              if (error.name !== "AbortError") {
+                console.error("SSE stream error:", err);
+              }
+            } finally {
+              activeControllers.delete(tab.id);
+              set((state) => ({
+                tabs: state.tabs.map((t) => t.id === tab.id ? { ...t, sseActive: false } : t),
+              }));
+            }
+          };
+          readStream();
+
+          // Add to history
+          const activeHeaders = headers
+            .filter(h => h.enabled && h.key.trim() !== "")
+            .map(h => ({ key: h.key, value: h.value }));
+          set((state) => {
+            const historyId = genId();
+            const newHistoryItem: HistoryItem = {
+              id: historyId, timestamp: Date.now(), method: effectiveMethod as HttpMethod, url,
+              status: res.status, time: 0, headers: activeHeaders, bodyType, bodyValue: bodyType !== "none" ? bodyValue : undefined,
+              authType, authConfig: authType !== "none" ? { ...authConfig } : undefined,
+            };
+            const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
+            saveStoredHistory(updatedHistory);
+            return { history: updatedHistory };
+          });
+          persistTabs();
+          return;
+        }
+
+        // ── Standard Response Mode ─────────────────────────────
+        const endTime = performance.now();
+        const timeMs = Math.round(endTime - startTime);
+        activeControllers.delete(tab.id);
 
         // Read response body text
         const bodyText = await res.text();
@@ -796,13 +1104,12 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           .map(h => ({ key: h.key, value: h.value }));
 
         set((state) => {
-          // Industry standard: History is an append-only ledger. Generate a unique ID for every execution.
           const historyId = genId();
 
           const newHistoryItem: HistoryItem = {
             id: historyId,
             timestamp: Date.now(),
-            method,
+            method: effectiveMethod as HttpMethod,
             url,
             status: res.status,
             time: timeMs,
@@ -814,7 +1121,6 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             authConfig: authType !== "none" ? { ...authConfig } : undefined,
           };
 
-          // Prepend to history, max 100 items
           const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
           saveStoredHistory(updatedHistory);
           return {
@@ -824,33 +1130,34 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         });
         persistTabs();
 
-      } catch (err: any) {
+      } catch (err: unknown) {
+        activeControllers.delete(tab.id);
         const endTime = performance.now();
         const timeMs = Math.round(endTime - startTime);
-        const isAbort = err.name === "AbortError";
+        const error = err as Error;
+        const isAbort = error.name === "AbortError";
         const errorMsg = isAbort
           ? "⏱ Request timed out after 30 seconds."
-          : err.message || "Failed to complete network request. This could be due to a CORS issue or network disconnect.";
+          : error.message || "Failed to complete network request. This could be due to a CORS issue or network disconnect.";
 
         // Add failed entry to history
         set((state) => {
-          // Industry standard: History is an append-only ledger. Generate a unique ID for every execution.
           const historyId = genId();
 
           const newHistoryItem: HistoryItem = {
             id: historyId,
             timestamp: Date.now(),
-            method,
+            method: tab.protocol === "graphql" ? "POST" as HttpMethod : method,
             url,
             error: true,
+            time: timeMs,
           };
 
-          // Prepend to history, max 100 items
           const updatedHistory = [newHistoryItem, ...state.history].slice(0, 100);
           saveStoredHistory(updatedHistory);
           return {
             history: updatedHistory,
-            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, error: errorMsg, loading: false } : t)),
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, error: errorMsg, loading: false, sseActive: false } : t)),
           };
         });
       }

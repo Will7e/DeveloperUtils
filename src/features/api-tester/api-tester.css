@@ -2209,3 +2209,172 @@ html.light .api-editor-format-btn:hover {
   background: rgba(255, 255, 255, 0.9);
   color: var(--text-1);
 }
+
+/* ── Protocol Bar segmented selector ─────────────────────── */
+.api-protocol-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.api-protocol-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.api-protocol-tab-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.api-protocol-tab-btn.active {
+  background: var(--bg-2);
+  color: var(--accent);
+  border-color: var(--border-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ── CORS Proxy toggle button inside URL Bar ─────────────── */
+.api-proxy-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.api-proxy-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-2);
+}
+
+.api-proxy-toggle-btn-active {
+  color: var(--accent) !important;
+  background: var(--accent-glow) !important;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.1);
+}
+
+/* ── SSE Streaming visualizer & pulse indicator ─────────── */
+.api-sse-pulse-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.api-sse-pulse {
+  animation: api-pulse-anim 1.5s infinite;
+}
+
+@keyframes api-pulse-anim {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.5;
+  }
+}
+
+/* ── GraphQL split pane layout & toolbar ─────────────────── */
+.api-graphql-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.api-graphql-toolbar {
+  background: var(--bg-2);
+}
+
+.api-graphql-editors {
+  background: var(--bg-0);
+}
+
+.api-graphql-pane-header {
+  border-bottom: 1px solid var(--border-1);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ── WebSocket logs and messaging console feed ──────────── */
+.api-ws-message-container {
+  box-sizing: border-box;
+}
+
+.api-ws-console-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.api-ws-messages-list {
+  scroll-behavior: smooth;
+}
+
+.api-ws-message-row {
+  line-height: 1.5;
+  transition: background 0.15s;
+}
+
+.api-ws-message-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.api-ws-message-send {
+  background: rgba(14, 165, 233, 0.03);
+}
+
+.api-ws-message-receive {
+  background: rgba(16, 185, 129, 0.03);
+}
+
+.api-ws-message-error {
+  background: rgba(244, 63, 94, 0.05);
+}
+
+.api-ws-message-status {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.api-send-btn-ws-connected {
+  background: linear-gradient(135deg, var(--red) 0%, color-mix(in oklab, var(--red) 80%, black) 100%) !important;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.3) !important;
+}
+
+.api-method-select-ws {
+  border-color: rgba(14, 165, 233, 0.25);
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-2)) !important;
+  color: var(--accent) !important;
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
