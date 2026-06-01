@@ -440,6 +440,8 @@ export function ApiTester() {
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     setupMonacoTheme(monaco);
+    const theme = useAppStore.getState().editorSettings.theme;
+    monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
   }, []);
 
   const tabs = store.tabs || [];
