@@ -42,71 +42,88 @@ import "./api-tester.css";
 // ── Built-in Presets ─────────────────────────────────────────
 const PRESETS = [
   {
-    name: "JSONPlaceholder GET Users",
+    name: "GitHub API - Get User",
     method: "GET" as HttpMethod,
-    url: "https://jsonplaceholder.typicode.com/users",
-    params: [],
-    headers: [{ key: "Accept", value: "application/json" }],
-    bodyType: "none" as BodyType,
-    description: "Fetch a list of mock user profiles (Supports CORS)",
-  },
-  {
-    name: "JSONPlaceholder POST Create",
-    method: "POST" as HttpMethod,
-    url: "https://jsonplaceholder.typicode.com/posts",
+    url: "https://api.github.com/users/octocat",
     params: [],
     headers: [
-      { key: "Content-Type", value: "application/json" },
-      { key: "Accept", value: "application/json" },
+      { key: "Accept", value: "application/vnd.github.v3+json" },
+      { key: "User-Agent", value: "DevUtils-API-Tester" }
+    ],
+    bodyType: "none" as BodyType,
+    description: "Fetch public profile details for a GitHub user.",
+  },
+  {
+    name: "ReqRes - Mock Authentication",
+    method: "POST" as HttpMethod,
+    url: "https://reqres.in/api/login",
+    params: [],
+    headers: [
+      { key: "Content-Type", value: "application/json" }
     ],
     bodyType: "json" as BodyType,
     bodyValue: JSON.stringify(
       {
-        title: "DevUtils Premium API Client",
-        body: "Tested using modern browser client-side REST technology.",
-        userId: 1,
+        email: "eve.holt@reqres.in",
+        password: "cityslicka"
       },
       null,
       2
     ),
-    description: "Submit a new mock blog post (Supports CORS)",
+    description: "Simulate a user login flow using ReqRes mock API.",
   },
   {
-    name: "HTTPBin GET IP",
-    method: "GET" as HttpMethod,
-    url: "https://httpbin.org/ip",
-    params: [],
-    headers: [],
-    bodyType: "none" as BodyType,
-    description: "Retrieve your public IP address (Supports CORS)",
-  },
-  {
-    name: "HTTPBin POST Echo",
+    name: "Postman Echo - Test Payload",
     method: "POST" as HttpMethod,
-    url: "https://httpbin.org/post",
-    params: [{ key: "source", value: "devutils" }],
-    headers: [{ key: "Content-Type", value: "application/json" }],
+    url: "https://postman-echo.com/post",
+    params: [
+      { key: "environment", value: "production" }
+    ],
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+      { key: "Authorization", value: "Bearer mock_token_123" }
+    ],
     bodyType: "json" as BodyType,
     bodyValue: JSON.stringify(
       {
-        hello: "world",
-        client: "devutils-api-tester",
-        isPremium: true,
+        event: "user_signup",
+        properties: {
+          plan: "pro",
+          source: "api_tester"
+        }
       },
       null,
       2
     ),
-    description: "Echo back request headers, params, and body payload",
+    description: "Echo service to test request headers, params, and body.",
   },
   {
-    name: "ReqRes List Users",
+    name: "JSONPlaceholder - Filter Data",
     method: "GET" as HttpMethod,
-    url: "https://reqres.in/api/users",
-    params: [{ key: "page", value: "2" }],
-    headers: [],
+    url: "https://jsonplaceholder.typicode.com/posts",
+    params: [
+      { key: "userId", value: "1" }
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" }
+    ],
     bodyType: "none" as BodyType,
-    description: "Retrieve paginated user accounts (Supports CORS)",
+    description: "Fetch and filter mock blog posts using query parameters.",
   },
+  {
+    name: "CoinGecko - Crypto Prices",
+    method: "GET" as HttpMethod,
+    url: "https://api.coingecko.com/api/v3/simple/price",
+    params: [
+      { key: "ids", value: "bitcoin,ethereum" },
+      { key: "vs_currencies", value: "usd" }
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" }
+    ],
+    bodyType: "none" as BodyType,
+    description: "Fetch real-time cryptocurrency prices from CoinGecko.",
+  }
 ];
 
 // ── Relative Timestamp Formatter ─────────────────────────────
