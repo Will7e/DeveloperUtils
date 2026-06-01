@@ -36,6 +36,7 @@ export interface HistoryItem {
   headers?: Array<{ key: string; value: string }>;
   bodyType?: BodyType;
   bodyValue?: string;
+  formParams?: Array<{ key: string; value: string }>;
   authType?: AuthType;
   authConfig?: AuthConfig;
 }
@@ -364,7 +365,12 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     // Sync logic: URL -> Params
     syncParamsFromUrl: (urlStr) => {
       try {
-        if (!urlStr || !urlStr.includes("?")) return;
+        if (!urlStr || !urlStr.includes("?")) {
+          set((state) => ({
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: [createEmptyField()] } : t)),
+          }));
+          return;
+        }
         const queryString = urlStr.substring(urlStr.indexOf("?") + 1);
         const searchParams = new URLSearchParams(queryString);
         
@@ -373,12 +379,10 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           newParams.push({ id: genId(), key, value, enabled: true });
         });
 
-        if (newParams.length > 0) {
-          newParams.push(createEmptyField()); // Extra empty row at end
-          set((state) => ({
-            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: newParams } : t)),
-          }));
-        }
+        newParams.push(createEmptyField()); // Extra empty row at end
+        set((state) => ({
+          tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: newParams } : t)),
+        }));
       } catch {
         // Invalid URL or error parsing search string, fail silently
       }
@@ -407,7 +411,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
         const searchParams = new URLSearchParams();
         activeParams.forEach((p) => {
-          searchParams.append(p.key.trim(), p.value.trim());
+          searchParams.append(p.key.trim(), p.value);
         });
 
         set((state) => ({
@@ -437,6 +441,16 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       computedHeaders = authed.headers;
       const finalUrl = authed.url;
 
+      // Ensure Content-Type is correct before adding to parts
+      if (method !== "GET" && method !== "HEAD") {
+        const hasContentType = Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type');
+        if (bodyType === "json" && !hasContentType) {
+          computedHeaders["Content-Type"] = "application/json";
+        } else if (bodyType === "raw" && !hasContentType) {
+          computedHeaders["Content-Type"] = rawType;
+        }
+      }
+
       let parts: string[] = [`curl -X ${method}`];
 
       // Headers
@@ -449,14 +463,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         if (bodyType === "json" && bodyValue.trim()) {
           parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
         } else if (bodyType === "raw" && bodyValue.trim()) {
-          if (!computedHeaders["Content-Type"]) {
-            parts.push(`  -H 'Content-Type: ${rawType}'`);
-          }
           parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
         } else if (bodyType === "form-data") {
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim()) {
-              parts.push(`  -F '${f.key.trim()}=${f.value.trim()}'`);
+              parts.push(`  -F '${f.key.trim()}=${f.value.replace(/'/g, "\\'")}'`);
             }
           });
         }
@@ -491,24 +502,27 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
       // Handle Request Body
       if (method !== "GET" && method !== "HEAD") {
+        const hasContentType = Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type');
+
         if (bodyType === "json") {
           fetchBody = bodyValue;
-          if (!computedHeaders["Content-Type"]) {
+          if (!hasContentType) {
             computedHeaders["Content-Type"] = "application/json";
           }
         } else if (bodyType === "form-data") {
           const formData = new FormData();
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim() !== "") {
-              formData.append(f.key.trim(), f.value.trim());
+              formData.append(f.key.trim(), f.value);
             }
           });
           fetchBody = formData;
           // Let the browser set Content-Type header with the boundary
-          delete computedHeaders["Content-Type"];
+          const ctKeys = Object.keys(computedHeaders).filter(k => k.toLowerCase() === 'content-type');
+          ctKeys.forEach(k => delete computedHeaders[k]);
         } else if (bodyType === "raw") {
           fetchBody = bodyValue;
-          if (!computedHeaders["Content-Type"]) {
+          if (!hasContentType) {
             computedHeaders["Content-Type"] = rawType;
           }
         }
@@ -568,6 +582,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           headers: activeHeaders,
           bodyType,
           bodyValue: bodyType !== "none" ? bodyValue : undefined,
+          formParams: bodyType === "form-data" ? formParams.filter(f => f.enabled && f.key.trim() !== "").map(f => ({ key: f.key, value: f.value })) : undefined,
           authType,
           authConfig: authType !== "none" ? { ...authConfig } : undefined,
         };
@@ -624,6 +639,12 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         }
         if (item.bodyType) newTab.bodyType = item.bodyType;
         if (item.bodyValue) newTab.bodyValue = item.bodyValue;
+        if (item.formParams && item.formParams.length > 0) {
+          newTab.formParams = [
+            ...item.formParams.map(f => ({ id: genId(), key: f.key, value: f.value, enabled: true })),
+            createEmptyField(),
+          ];
+        }
         if (item.authType) newTab.authType = item.authType;
         if (item.authConfig) newTab.authConfig = { ...defaultAuthConfig, ...item.authConfig };
         

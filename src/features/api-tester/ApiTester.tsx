@@ -503,7 +503,7 @@ export function ApiTester() {
     ? getLanguageFromContentType(activeTab.response.headers["content-type"])
     : "text";
 
-  const getPrettyBody = (): string => {
+  const prettyBody = React.useMemo(() => {
     if (!activeTab.response?.body) return "";
     if (responseLang === "json") {
       try {
@@ -513,7 +513,7 @@ export function ApiTester() {
       }
     }
     return activeTab.response.body;
-  };
+  }, [activeTab.response?.body, responseLang]);
 
   const getTimeClass = (ms: number): string => {
     if (ms < 200) return "meta-time-fast";
@@ -1445,7 +1445,7 @@ export function ApiTester() {
                         height="100%"
                         language={responseLang}
                         theme="vs-dark"
-                        value={getPrettyBody()}
+                        value={prettyBody}
                         options={{
                           readOnly: true,
                           minimap: { enabled: false },
