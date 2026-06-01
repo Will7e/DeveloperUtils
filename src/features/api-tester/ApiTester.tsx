@@ -973,10 +973,6 @@ export function ApiTester() {
             <Settings className="h-4 w-4" />
             <span>Settings</span>
           </button>
-          <div style={{ flex: 1 }} />
-          <button className="api-sidebar-footer-icon-btn" title="Documentation">
-            <BookOpen className="h-4 w-4" />
-          </button>
         </div>
       </aside>
 
