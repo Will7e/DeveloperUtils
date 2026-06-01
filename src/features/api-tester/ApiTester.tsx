@@ -33,6 +33,7 @@ import {
   FileJson,
   FolderUp,
   Folder,
+  Code2,
 } from "lucide-react";
 import {
   useApiTesterStore,
@@ -41,7 +42,9 @@ import {
   AuthType,
   HistoryItem,
 } from "@/stores/api-tester.store";
+import { useAppStore } from "@/stores/app.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { generateCodeSnippet, CODE_LANGUAGES } from "./code-generator";
 import "./api-tester.css";
 
 // ── Built-in Presets ─────────────────────────────────────────
@@ -425,6 +428,7 @@ function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispat
 // ── Main Component ───────────────────────────────────────────
 export function ApiTester() {
   const store = useApiTesterStore();
+  const addToast = useAppStore((s) => s.addToast);
   const tabs = store.tabs || [];
   const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
 
@@ -456,6 +460,11 @@ export function ApiTester() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<boolean>(false);
   
+  // Code Snippet State
+  const [showCodeSnippet, setShowCodeSnippet] = useState(false);
+  const [snippetLang, setSnippetLang] = useState("curl");
+  const [snippetCopied, setSnippetCopied] = useState(false);
+  
   // Export Modal State
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportSelectedTabs, setExportSelectedTabs] = useState<string[]>([]);
@@ -475,31 +484,46 @@ export function ApiTester() {
     
     const requests: any[] = [];
     let folderName = "Imported Files";
+    let skippedCount = 0;
     
     // Check if webkitRelativePath exists to extract folder name
     if (files[0] && files[0].webkitRelativePath) {
       const parts = files[0].webkitRelativePath.split("/");
-      if (parts.length > 1) {
+      if (parts.length > 1 && parts[0]) {
         folderName = parts[0];
       }
     }
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (!file.name.endsWith(".json")) continue;
+      if (!file) continue;
+      if (!file.name.endsWith(".json")) {
+        skippedCount++;
+        continue;
+      }
       try {
         const text = await file.text();
         const parsed = JSON.parse(text);
         if (parsed && parsed.method && parsed.url) {
           requests.push(parsed);
+        } else {
+          skippedCount++;
         }
       } catch (err) {
         console.error("Failed to parse", file.name);
+        skippedCount++;
       }
     }
     
     if (requests.length > 0) {
       store.importCollection(folderName, requests);
+      if (skippedCount > 0) {
+        addToast({ message: `Imported ${requests.length} requests. Skipped ${skippedCount} invalid files.`, type: "info", duration: 4000 });
+      } else {
+        addToast({ message: `Successfully imported ${requests.length} requests.`, type: "success", duration: 2500 });
+      }
+    } else if (skippedCount > 0) {
+      addToast({ message: `Failed to import. Skipped ${skippedCount} files due to invalid JSON or missing fields.`, type: "error", duration: 4000 });
     }
     
     if (e.target) e.target.value = ""; // reset
@@ -901,37 +925,38 @@ export function ApiTester() {
       <main className="api-main">
         {/* Tab Bar UI */}
         <div className="api-tab-bar">
-          {tabs.map(tab => (
-            <div 
-              key={tab.id} 
-              className={`api-tab-item ${tab.id === store.activeTabId ? 'api-tab-item-active' : ''}`}
-              onClick={() => store.setActiveTab(tab.id)}
-            >
-              <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '8px', width: 'auto', padding: '1px 4px' }}>
-                {tab.method}
-              </span>
-              <span className="api-tab-title">{tab.name}</span>
-              {tabs.length > 1 && (
-                <button 
-                  className="api-tab-close" 
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
-                    store.removeTab(tab.id); 
-                  }}
-                  title="Close Tab"
-                >
-                  &times;
-                </button>
-              )}
-            </div>
-          ))}
-          <SimpleTooltip content="New Tab">
-            <button className="api-tab-add" onClick={() => store.addTab()}>
-              <Plus className="h-3 w-3" />
-            </button>
-          </SimpleTooltip>
-          <div style={{ flex: 1 }} />
-          <SimpleTooltip content="Export Tabs as Folder">
+          <div className="api-tabs-scroll-container">
+            {tabs.map(tab => (
+              <div 
+                key={tab.id} 
+                className={`api-tab-item ${tab.id === store.activeTabId ? 'api-tab-item-active' : ''}`}
+                onClick={() => store.setActiveTab(tab.id)}
+              >
+                <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '8px', width: 'auto', padding: '1px 4px' }}>
+                  {tab.method}
+                </span>
+                <span className="api-tab-title">{tab.name}</span>
+                {tabs.length > 1 && (
+                  <button 
+                    className="api-tab-close" 
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      store.removeTab(tab.id); 
+                    }}
+                    title="Close Tab"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+            ))}
+            <SimpleTooltip content="New Tab">
+              <button className="api-tab-add" onClick={() => store.addTab()}>
+                <Plus className="h-3 w-3" />
+              </button>
+            </SimpleTooltip>
+          </div>
+          <SimpleTooltip content="Export all tabs to a ZIP file">
             <button 
               className="api-tab-export" 
               onClick={() => {
@@ -939,7 +964,8 @@ export function ApiTester() {
                 setShowExportModal(true);
               }}
             >
-              <Download className="h-3.5 w-3.5 text-accent" />
+              <Download className="h-3.5 w-3.5" />
+              <span>Export</span>
             </button>
           </SimpleTooltip>
         </div>
@@ -985,18 +1011,11 @@ export function ApiTester() {
             <button
               type="button"
               className="api-curl-btn"
-              onClick={handleCopyCurl}
-              title="Copy as cURL command"
+              onClick={() => setShowCodeSnippet(true)}
+              title="Generate code snippet"
             >
-              {curlCopied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-green" /> Copied
-                </>
-              ) : (
-                <>
-                  <Terminal className="h-3.5 w-3.5" /> cURL
-                </>
-              )}
+              <Code2 className="h-3.5 w-3.5" />
+              <span>Code</span>
             </button>
 
             <button
@@ -1093,6 +1112,75 @@ export function ApiTester() {
                 Import Request
               </button>
             </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Code Snippet Drawer */}
+        <div className="api-import-curl-wrapper" data-open={showCodeSnippet}>
+          <div className="api-import-curl-wrapper-inner">
+            <div className="api-import-curl-panel" style={{ height: "400px", display: "flex", flexDirection: "column" }}>
+              <div className="api-import-curl-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Code2 className="h-4 w-4 text-accent" />
+                  <span className="api-import-curl-title">Generate Code Snippet</span>
+                </div>
+                <button 
+                  type="button" 
+                  className="api-import-close-btn"
+                  onClick={() => setShowCodeSnippet(false)}
+                  title="Close"
+                >
+                  &times;
+                </button>
+              </div>
+              <div style={{ padding: "0 12px", display: "flex", gap: "8px", borderBottom: "1px solid var(--border)", overflowX: "auto" }}>
+                {CODE_LANGUAGES.map((lang) => (
+                  <button
+                    key={lang.id}
+                    className={`api-tab-trigger ${snippetLang === lang.id ? "api-tab-trigger-active" : ""}`}
+                    onClick={() => setSnippetLang(lang.id)}
+                    style={{ padding: "8px 12px" }}
+                  >
+                    {lang.name}
+                  </button>
+                ))}
+              </div>
+              <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+                {showCodeSnippet && (
+                  <Editor
+                    height="100%"
+                    language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
+                    theme="vs-dark"
+                    value={generateCodeSnippet(activeTab, store.generateCurl(), snippetLang)}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 12,
+                      lineNumbers: "off",
+                      scrollBeyondLastLine: false,
+                      readOnly: true,
+                      wordWrap: "on",
+                    }}
+                  />
+                )}
+              </div>
+              <div className="api-import-curl-actions" style={{ padding: "8px 12px", borderTop: "1px solid var(--border)" }}>
+                <div style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  className="api-import-submit-btn"
+                  onClick={() => {
+                    const code = generateCodeSnippet(activeTab, store.generateCurl(), snippetLang);
+                    navigator.clipboard.writeText(code);
+                    setSnippetCopied(true);
+                    setTimeout(() => setSnippetCopied(false), 2000);
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {snippetCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {snippetCopied ? "Copied!" : "Copy Code"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

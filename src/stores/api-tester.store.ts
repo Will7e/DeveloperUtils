@@ -239,7 +239,7 @@ const saveStoredCollections = (collections: ImportedCollection[]) => {
 };
 
 // Apply authentication to headers/url before sending
-function applyAuth(
+export function applyAuth(
   authType: AuthType,
   authConfig: AuthConfig,
   headers: Record<string, string>,

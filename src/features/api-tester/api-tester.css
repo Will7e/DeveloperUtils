@@ -164,9 +164,10 @@
 
 .api-preset-card:hover,
 .api-history-card:hover {
-  background: var(--bg-hover);
+  background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
   border-color: var(--border-1);
-  transform: translateX(2px);
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .api-badge {
@@ -343,15 +344,28 @@
   border-bottom: 1px solid var(--border-1);
   padding: 0 8px;
   gap: 4px;
-  overflow-x: auto;
   align-items: flex-end;
   height: 36px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
-.api-tab-bar::-webkit-scrollbar {
+.api-tabs-scroll-container {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  align-items: flex-end;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.api-tabs-scroll-container::-webkit-scrollbar {
   height: 0px;
 }
+
+
 
 .api-tab-item {
   display: flex;
@@ -392,7 +406,7 @@
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent), transparent 50%));
   z-index: 1;
 }
 
@@ -451,6 +465,12 @@
 .api-tab-export {
   margin-inline-start: 0;
   margin-inline-end: 8px;
+  width: auto;
+  padding: 0 8px;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .api-tab-add:hover, .api-tab-export:hover {
@@ -505,22 +525,27 @@
 /* Method select color variants */
 .api-method-select-get {
   border-color: rgba(56, 189, 248, 0.25);
+  background: color-mix(in oklab, var(--blue) 8%, var(--bg-2));
   color: var(--blue);
 }
 .api-method-select-post {
   border-color: rgba(16, 185, 129, 0.25);
+  background: color-mix(in oklab, var(--green) 8%, var(--bg-2));
   color: var(--green);
 }
 .api-method-select-put {
   border-color: rgba(167, 139, 250, 0.25);
+  background: color-mix(in oklab, var(--purple) 8%, var(--bg-2));
   color: var(--purple);
 }
 .api-method-select-delete {
   border-color: rgba(244, 63, 94, 0.25);
+  background: color-mix(in oklab, var(--red) 8%, var(--bg-2));
   color: var(--red);
 }
 .api-method-select-patch {
   border-color: rgba(245, 158, 11, 0.25);
+  background: color-mix(in oklab, var(--yellow) 8%, var(--bg-2));
   color: var(--yellow);
 }
 
@@ -594,7 +619,7 @@
 
 .api-url-input-container:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(14, 165, 233, 0.08);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 24px rgba(14, 165, 233, 0.15);
   background: var(--bg-0);
   outline: 2px solid transparent;
 }
@@ -648,7 +673,7 @@
 .api-send-btn {
   height: 42px;
   padding: 0 22px;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in oklab, var(--accent) 80%, black) 100%);
   color: #fff;
   font-family: var(--font-sans);
   font-size: 13px;
@@ -659,23 +684,43 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 0 16px var(--accent-glow);
+  box-shadow: 0 0 16px var(--accent-glow), inset 0 1px 1px rgba(255, 255, 255, 0.2);
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.api-send-btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: skewX(-20deg);
+  transition: all 0.5s ease;
 }
 
 .api-send-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-  box-shadow: 0 0 24px rgba(14, 165, 233, 0.35);
-  transform: translateY(-1px);
+  box-shadow: 0 0 24px rgba(14, 165, 233, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.api-send-btn:hover:not(:disabled)::after {
+  left: 150%;
 }
 
 .api-send-btn:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
 }
 
 .api-send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  background: var(--bg-2);
+  color: var(--text-3);
+  box-shadow: none;
 }
 
 .api-send-shortcut {
@@ -807,7 +852,7 @@
   left: 4px;
   right: 4px;
   height: 2px;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), transparent);
   border-radius: 2px 2px 0 0;
 }
 
