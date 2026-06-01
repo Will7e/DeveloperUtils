@@ -199,6 +199,168 @@ function MethodDropdown({
   );
 }
 
+const RAW_TYPES = [
+  { value: "text/plain", label: "Text" },
+  { value: "application/json", label: "JSON" },
+  { value: "application/xml", label: "XML" },
+  { value: "text/html", label: "HTML" },
+  { value: "text/javascript", label: "JavaScript" },
+];
+
+function RawTypeDropdown({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const activeLabel = RAW_TYPES.find((t) => t.value === value)?.label || "Text";
+
+  return (
+    <div className="api-raw-dropdown-container" ref={dropdownRef}>
+      <button
+        type="button"
+        className="api-raw-select"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span>{activeLabel}</span>
+        <ChevronDown
+          className={`h-3 w-3 opacity-70 transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {isOpen && (
+        <div className="api-raw-dropdown-menu">
+          {RAW_TYPES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              className={`api-raw-option ${
+                t.value === value ? "api-raw-option-active" : ""
+              }`}
+              onClick={() => {
+                onChange(t.value);
+                setIsOpen(false);
+              }}
+            >
+              {t.label}
+              {t.value === value && <Check className="h-3 w-3 ml-auto opacity-70" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Autocomplete Input Component ─────────────────────────────
+const HEADER_KEYS = [
+  "Content-Type",
+  "Authorization",
+  "Accept",
+  "User-Agent",
+  "Cache-Control",
+  "X-API-Key",
+];
+
+const HEADER_VALUES = [
+  "application/json",
+  "application/xml",
+  "text/plain",
+  "text/html",
+  "multipart/form-data",
+  "Bearer ",
+];
+
+function AutocompleteInput({
+  value,
+  onChange,
+  placeholder,
+  options,
+  className,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  options: string[];
+  className?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = searchTerm
+    ? options.filter((o) => o.toLowerCase().includes(searchTerm.toLowerCase()))
+    : options;
+
+  return (
+    <div className="api-autocomplete-container" ref={containerRef}>
+      <input
+        type="text"
+        className={className}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setSearchTerm(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => {
+          setSearchTerm("");
+          setIsOpen(true);
+        }}
+      />
+      {isOpen && filteredOptions.length > 0 && (
+        <div className="api-autocomplete-menu">
+          {filteredOptions.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="api-autocomplete-option"
+              onClick={() => {
+                onChange(opt);
+                setIsOpen(false);
+              }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────
 export function ApiTester() {
   const store = useApiTesterStore();
@@ -719,27 +881,29 @@ export function ApiTester() {
                             })
                           }
                         />
-                        <input
-                          type="text"
-                          className="api-kv-input"
-                          placeholder="Header name (e.g. Authorization)"
+                        <AutocompleteInput
+                          className="api-kv-input api-kv-key"
+                          placeholder="Header Name"
                           value={row.key}
-                          onChange={(e) =>
-                            store.updateHeader(row.id, { key: e.target.value })
+                          onChange={(val) =>
+                            store.updateHeader(row.id, { key: val })
                           }
-                          list="header-keys-suggestions"
+                          options={HEADER_KEYS}
                         />
-                        <input
-                          type="text"
-                          className="api-kv-input"
+                        <AutocompleteInput
+                          className="api-kv-input api-kv-value"
                           placeholder="Value"
                           value={row.value}
-                          onChange={(e) =>
-                            store.updateHeader(row.id, {
-                              value: e.target.value,
-                            })
+                          onChange={(val) =>
+                            store.updateHeader(row.id, { value: val })
                           }
-                          list="header-values-suggestions"
+                          options={
+                            row.key.toLowerCase() === "content-type"
+                              ? HEADER_VALUES
+                              : row.key.toLowerCase() === "authorization"
+                                ? ["Bearer ", "Basic "]
+                                : []
+                          }
                         />
                         <button
                           type="button"
@@ -759,24 +923,6 @@ export function ApiTester() {
                       <Plus className="h-3.5 w-3.5" /> Add Header
                     </button>
                   </div>
-
-                  {/* Header suggestions */}
-                  <datalist id="header-keys-suggestions">
-                    <option value="Content-Type" />
-                    <option value="Authorization" />
-                    <option value="Accept" />
-                    <option value="User-Agent" />
-                    <option value="Cache-Control" />
-                    <option value="X-API-Key" />
-                  </datalist>
-                  <datalist id="header-values-suggestions">
-                    <option value="application/json" />
-                    <option value="application/xml" />
-                    <option value="text/plain" />
-                    <option value="text/html" />
-                    <option value="multipart/form-data" />
-                    <option value="Bearer " />
-                  </datalist>
                 </div>
               )}
 
@@ -802,16 +948,10 @@ export function ApiTester() {
                       </button>
                     ))}
                     {activeTab.bodyType === "raw" && (
-                      <select
-                        className="api-raw-select"
+                      <RawTypeDropdown
                         value={activeTab.rawType}
-                        onChange={(e) => store.setRawType(e.target.value)}
-                      >
-                        <option value="text/plain">Text</option>
-                        <option value="application/xml">XML</option>
-                        <option value="text/html">HTML</option>
-                        <option value="text/javascript">JavaScript</option>
-                      </select>
+                        onChange={(val) => store.setRawType(val)}
+                      />
                     )}
                   </div>
 

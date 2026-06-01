@@ -11,6 +11,23 @@
   overflow: hidden;
 }
 
+/* Custom Scrollbars for API Tester */
+.api-tester-container ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.api-tester-container ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.api-tester-container ::-webkit-scrollbar-thumb {
+  background: var(--border-1);
+  border-radius: 4px;
+  border: 2px solid var(--bg-1);
+}
+.api-tester-container ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
 /* ── Left Sidebar ────────────────────────────────────────── */
 .api-sidebar {
   width: 280px;
@@ -380,7 +397,7 @@
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 3px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .api-tab-add:hover {
@@ -426,9 +443,10 @@
   letter-spacing: 0.5px;
 }
 
-.api-method-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+.api-method-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
 }
 
 /* Method select color variants */
@@ -458,10 +476,12 @@
   top: calc(100% + 4px);
   left: 0;
   width: 130px;
-  background: var(--bg-1);
+  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.05);
   z-index: 100;
   padding: 6px;
   display: flex;
@@ -523,6 +543,7 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(14, 165, 233, 0.08);
   background: var(--bg-0);
+  outline: 2px solid transparent;
 }
 
 .api-url-input {
@@ -607,7 +628,7 @@
 .api-send-shortcut {
   font-size: 10px;
   opacity: 0.6;
-  margin-left: 2px;
+  margin-inline-start: 2px;
   font-family: var(--font-mono);
 }
 
@@ -744,7 +765,7 @@
   color: var(--text-3);
   padding: 1px 5px;
   border-radius: 8px;
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .api-tab-trigger-active .api-tab-count {
@@ -773,6 +794,18 @@
   align-items: center;
   gap: 6px;
   animation: api-fadeInRow 0.15s ease-out;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.2s ease;
+  position: relative;
+}
+
+.api-kv-row:focus-within {
+  z-index: 10;
+}
+
+.api-kv-row:has(.api-checkbox:checked) {
+  background-color: var(--bg-hover);
 }
 
 @keyframes api-fadeInRow {
@@ -837,14 +870,68 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.api-kv-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-glow);
+.api-kv-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
 }
 
 .api-kv-input::placeholder {
   color: var(--text-3);
-  font-family: var(--font-sans);
+  font-weight: 400;
+}
+
+/* ── Autocomplete Components ──────────────────────────────── */
+.api-autocomplete-container {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.api-autocomplete-container .api-kv-input {
+  width: 100%;
+}
+
+.api-autocomplete-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 100;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: api-dropdownFadeIn 0.15s ease-out;
+}
+
+.api-autocomplete-option {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  text-align: start;
+  transition: all 0.15s;
+  color: var(--text-2);
+}
+
+.api-autocomplete-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
 }
 
 .api-delete-row-btn {
@@ -898,6 +985,8 @@
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   width: fit-content;
+  position: relative;
+  z-index: 10;
 }
 
 .api-body-radio {
@@ -930,6 +1019,13 @@
   font-weight: 600;
 }
 
+.api-raw-dropdown-container {
+  position: relative;
+  display: flex;
+  margin-inline-start: 8px;
+  z-index: 50;
+}
+
 .api-raw-select {
   height: 30px;
   padding: 0 8px;
@@ -941,7 +1037,65 @@
   font-weight: 600;
   outline: none;
   cursor: pointer;
-  margin-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.api-raw-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.api-raw-select:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.api-raw-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 120px;
+  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 100;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: api-dropdownFadeIn 0.15s ease-out;
+}
+
+.api-raw-option {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  text-align: start;
+  transition: all 0.15s;
+  color: var(--text-2);
+}
+
+.api-raw-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.api-raw-option-active {
+  background: var(--bg-2);
+  color: var(--text-1);
 }
 
 /* ── Monaco Editor Wrapper ────────────────────────────────── */
@@ -1035,8 +1189,10 @@
   transition: border-color 0.15s;
 }
 
-.api-auth-input:focus {
-  border-color: var(--accent);
+.api-auth-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
 }
 
 .api-auth-input::placeholder {
