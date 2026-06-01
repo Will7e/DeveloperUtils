@@ -125,12 +125,20 @@ export function MainLayout() {
             active={location.pathname === "/compiler"}
             collapsed={sidebarCollapsed}
           />
-          
+
           <NavItem
             to="/formatters"
             icon={<FileCode className="h-[18px] w-[18px]" />}
             label="Formatters"
             active={location.pathname === "/formatters"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
+            to="/diff"
+            icon={<FileDiff className="h-[18px] w-[18px]" />}
+            label="Diff Check"
+            active={location.pathname === "/diff"}
             collapsed={sidebarCollapsed}
           />
 
@@ -143,10 +151,10 @@ export function MainLayout() {
           />
 
           <NavItem
-            to="/diff"
-            icon={<FileDiff className="h-[18px] w-[18px]" />}
-            label="Diff Check"
-            active={location.pathname === "/diff"}
+            to="/api-tester"
+            icon={<Globe className="h-[18px] w-[18px]" />}
+            label="API Tester"
+            active={location.pathname === "/api-tester"}
             collapsed={sidebarCollapsed}
           />
 
@@ -163,14 +171,6 @@ export function MainLayout() {
             icon={<GitFork className="h-[18px] w-[18px]" />}
             label="Workflows"
             active={location.pathname === "/workflows"}
-            collapsed={sidebarCollapsed}
-          />
-
-          <NavItem
-            to="/api-tester"
-            icon={<Globe className="h-[18px] w-[18px]" />}
-            label="API Tester"
-            active={location.pathname === "/api-tester"}
             collapsed={sidebarCollapsed}
           />
 
