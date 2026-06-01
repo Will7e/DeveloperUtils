@@ -63,6 +63,12 @@ export interface ImportedCollection {
   requests: ImportedRequest[];
 }
 
+export interface Environment {
+  id: string;
+  name: string;
+  variables: KeyValueField[];
+}
+
 export interface ApiResponse {
   status: number;
   statusText: string;
@@ -95,6 +101,9 @@ interface ApiTesterState {
   activeTabId: string;
   history: HistoryItem[];
   collections: ImportedCollection[];
+  envVars: KeyValueField[]; // Global variables
+  environments: Environment[]; // Custom environments (Staging, Production, etc.)
+  activeEnvironmentId: string | null; // active environment id, null means only Globals are used
 
   // Tab management
   addTab: () => void;
@@ -157,6 +166,16 @@ interface ApiTesterState {
 
   // Export functionality
   exportTabsAsZip: (tabIds: string[]) => Promise<void>;
+
+  // Environment Variables
+  setEnvVars: (vars: KeyValueField[]) => void;
+  
+  // Multi-Environment
+  addEnvironment: (name: string) => void;
+  updateEnvironment: (id: string, name: string) => void;
+  removeEnvironment: (id: string) => void;
+  setActiveEnvironment: (id: string | null) => void;
+  setEnvironmentVars: (id: string, vars: KeyValueField[]) => void;
 }
 
 // Generate unique ID
@@ -238,6 +257,86 @@ const saveStoredCollections = (collections: ImportedCollection[]) => {
   }
 };
 
+// Load env vars from LocalStorage
+const loadStoredEnvVars = (): KeyValueField[] => {
+  try {
+    const saved = localStorage.getItem("devutils_api_env_vars");
+    return saved ? JSON.parse(saved) : [createEmptyField()];
+  } catch {
+    return [createEmptyField()];
+  }
+};
+
+// Save env vars to LocalStorage
+const saveStoredEnvVars = (vars: KeyValueField[]) => {
+  try {
+    localStorage.setItem("devutils_api_env_vars", JSON.stringify(vars));
+  } catch (e) {
+    console.error("Failed to save env vars", e);
+  }
+};
+
+// Load environments from LocalStorage
+const loadStoredEnvironments = (): Environment[] => {
+  try {
+    const saved = localStorage.getItem("devutils_api_environments");
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Save environments to LocalStorage
+const saveStoredEnvironments = (envs: Environment[]) => {
+  try {
+    localStorage.setItem("devutils_api_environments", JSON.stringify(envs));
+  } catch (e) {
+    console.error("Failed to save environments", e);
+  }
+};
+
+// Load active environment from LocalStorage
+const loadStoredActiveEnvId = (): string | null => {
+  try {
+    const saved = localStorage.getItem("devutils_api_active_env");
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+};
+
+// Save active environment to LocalStorage
+const saveStoredActiveEnvId = (id: string | null) => {
+  try {
+    localStorage.setItem("devutils_api_active_env", JSON.stringify(id));
+  } catch (e) {
+    console.error("Failed to save active environment", e);
+  }
+};
+
+// Substitute environment variables in a string
+export function substituteEnvVars(text: string, globalVars: KeyValueField[], activeEnvVars: KeyValueField[] = []): string {
+  if (!text) return text;
+  
+  // Filter out disabled variables
+  const globalEnabled = globalVars.filter(v => v.enabled && v.key.trim() !== "");
+  const activeEnabled = activeEnvVars.filter(v => v.enabled && v.key.trim() !== "");
+  
+  // Combine variables: active environment overrides global
+  const varMap = new Map<string, string>();
+  
+  // Add globals first
+  globalEnabled.forEach(v => varMap.set(v.key, v.value));
+  
+  // Override with active environment
+  activeEnabled.forEach(v => varMap.set(v.key, v.value));
+  
+  return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, key) => {
+    const cleanKey = key.trim();
+    return varMap.has(cleanKey) ? varMap.get(cleanKey)! : match;
+  });
+}
+
 // Apply authentication to headers/url before sending
 export function applyAuth(
   authType: AuthType,
@@ -274,6 +373,9 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     activeTabId: initialTab.id,
     history: loadStoredHistory(),
     collections: loadStoredCollections(),
+    envVars: loadStoredEnvVars(),
+    environments: loadStoredEnvironments(),
+    activeEnvironmentId: loadStoredActiveEnvId(),
 
     // Tab management
     addTab: () => {
@@ -518,12 +620,22 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       let computedHeaders: Record<string, string> = {};
       headers.forEach((h) => {
         if (h.enabled && h.key.trim() !== "") {
-          computedHeaders[h.key.trim()] = h.value.trim();
+          computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), state.envVars);
         }
       });
 
+      const substitutedUrl = substituteEnvVars(url, state.envVars);
+      const substitutedAuthConfig = {
+        bearerToken: substituteEnvVars(authConfig.bearerToken, state.envVars),
+        basicUsername: substituteEnvVars(authConfig.basicUsername, state.envVars),
+        basicPassword: substituteEnvVars(authConfig.basicPassword, state.envVars),
+        apiKeyName: substituteEnvVars(authConfig.apiKeyName, state.envVars),
+        apiKeyValue: substituteEnvVars(authConfig.apiKeyValue, state.envVars),
+        apiKeyPlacement: authConfig.apiKeyPlacement,
+      };
+
       // Apply auth
-      const authed = applyAuth(authType, authConfig, computedHeaders, url);
+      const authed = applyAuth(authType, substitutedAuthConfig, computedHeaders, substitutedUrl);
       computedHeaders = authed.headers;
       const finalUrl = authed.url;
 
@@ -547,14 +659,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
 
       // Body
       if (method !== "GET" && method !== "HEAD") {
-        if (bodyType === "json" && bodyValue.trim()) {
-          parts.push(`  -d '${bodyValue.replace(/'/g, "'\\''")}'`);
-        } else if (bodyType === "raw" && bodyValue.trim()) {
-          parts.push(`  -d '${bodyValue.replace(/'/g, "'\\''")}'`);
+        const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+        const subBody = substituteEnvVars(bodyValue, state.envVars, activeEnvVars);
+        if (bodyType === "json" && subBody.trim()) {
+          parts.push(`  -d '${subBody.replace(/'/g, "'\\''")}'`);
+        } else if (bodyType === "raw" && subBody.trim()) {
+          parts.push(`  -d '${subBody.replace(/'/g, "'\\''")}'`);
         } else if (bodyType === "form-data") {
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim()) {
-              parts.push(`  -F '${f.key.trim()}=${f.value.replace(/'/g, "'\\''")}'`);
+              const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
+              const subVal = substituteEnvVars(f.value, state.envVars, activeEnvVars);
+              parts.push(`  -F '${f.key.trim()}=${subVal.replace(/'/g, "'\\''")}'`);
             }
           });
         }
@@ -579,20 +695,22 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       let computedHeaders: Record<string, string> = {};
 
       // Assemble active headers
+      const activeEnvVars = state.activeEnvironmentId ? state.environments.find(e => e.id === state.activeEnvironmentId)?.variables || [] : [];
       headers.forEach((h) => {
         if (h.enabled && h.key.trim() !== "") {
-          computedHeaders[h.key.trim()] = h.value.trim();
+          computedHeaders[h.key.trim()] = substituteEnvVars(h.value.trim(), state.envVars, activeEnvVars);
         }
       });
 
       let fetchBody: any = undefined;
+      const subBody = substituteEnvVars(bodyValue, state.envVars, activeEnvVars);
 
       // Handle Request Body
       if (method !== "GET" && method !== "HEAD") {
         const hasContentType = Object.keys(computedHeaders).some(k => k.toLowerCase() === 'content-type');
 
         if (bodyType === "json") {
-          fetchBody = bodyValue;
+          fetchBody = subBody;
           if (!hasContentType) {
             computedHeaders["Content-Type"] = "application/json";
           }
@@ -600,7 +718,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           const formData = new FormData();
           formParams.forEach((f) => {
             if (f.enabled && f.key.trim() !== "") {
-              formData.append(f.key.trim(), f.value);
+              formData.append(f.key.trim(), substituteEnvVars(f.value, state.envVars, activeEnvVars));
             }
           });
           fetchBody = formData;
@@ -608,15 +726,25 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           const ctKeys = Object.keys(computedHeaders).filter(k => k.toLowerCase() === 'content-type');
           ctKeys.forEach(k => delete computedHeaders[k]);
         } else if (bodyType === "raw") {
-          fetchBody = bodyValue;
+          fetchBody = subBody;
           if (!hasContentType) {
             computedHeaders["Content-Type"] = rawType;
           }
         }
       }
 
+      const substitutedUrl = substituteEnvVars(url, state.envVars, activeEnvVars);
+      const substitutedAuthConfig = {
+        bearerToken: substituteEnvVars(authConfig.bearerToken, state.envVars, activeEnvVars),
+        basicUsername: substituteEnvVars(authConfig.basicUsername, state.envVars, activeEnvVars),
+        basicPassword: substituteEnvVars(authConfig.basicPassword, state.envVars, activeEnvVars),
+        apiKeyName: substituteEnvVars(authConfig.apiKeyName, state.envVars, activeEnvVars),
+        apiKeyValue: substituteEnvVars(authConfig.apiKeyValue, state.envVars, activeEnvVars),
+        apiKeyPlacement: authConfig.apiKeyPlacement,
+      };
+
       // Apply authentication
-      const authed = applyAuth(authType, authConfig, computedHeaders, url);
+      const authed = applyAuth(authType, substitutedAuthConfig, computedHeaders, substitutedUrl);
       computedHeaders = authed.headers;
       const finalUrl = authed.url;
 
@@ -1054,5 +1182,55 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     },
+    setEnvVars: (vars: KeyValueField[]) => {
+      saveStoredEnvVars(vars);
+      set({ envVars: vars });
+    },
+    
+    // Multi-Environment
+    addEnvironment: (name: string) => {
+      set((state) => {
+        const newEnv: Environment = {
+          id: genId(),
+          name,
+          variables: [createEmptyField()]
+        };
+        const updated = [...state.environments, newEnv];
+        saveStoredEnvironments(updated);
+        return { environments: updated };
+      });
+    },
+    
+    updateEnvironment: (id: string, name: string) => {
+      set((state) => {
+        const updated = state.environments.map(e => e.id === id ? { ...e, name } : e);
+        saveStoredEnvironments(updated);
+        return { environments: updated };
+      });
+    },
+    
+    removeEnvironment: (id: string) => {
+      set((state) => {
+        const updated = state.environments.filter(e => e.id !== id);
+        saveStoredEnvironments(updated);
+        return { 
+          environments: updated,
+          activeEnvironmentId: state.activeEnvironmentId === id ? null : state.activeEnvironmentId
+        };
+      });
+    },
+    
+    setActiveEnvironment: (id: string | null) => {
+      saveStoredActiveEnvId(id);
+      set({ activeEnvironmentId: id });
+    },
+    
+    setEnvironmentVars: (id: string, vars: KeyValueField[]) => {
+      set((state) => {
+        const updated = state.environments.map(e => e.id === id ? { ...e, variables: vars } : e);
+        saveStoredEnvironments(updated);
+        return { environments: updated };
+      });
+    }
   };
 });
