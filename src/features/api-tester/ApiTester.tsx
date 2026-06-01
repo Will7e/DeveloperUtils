@@ -27,6 +27,7 @@ import {
   User,
   Eye,
   EyeOff,
+  ChevronDown,
 } from "lucide-react";
 import {
   useApiTesterStore,
@@ -122,6 +123,80 @@ function formatRelativeTime(timestamp: number): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
   return new Date(timestamp).toLocaleDateString();
+}
+
+// ── Method Dropdown Component ────────────────────────────────
+const METHODS: HttpMethod[] = [
+  "GET",
+  "POST",
+  "PUT",
+  "DELETE",
+  "PATCH",
+  "HEAD",
+  "OPTIONS",
+];
+
+function MethodDropdown({
+  value,
+  onChange,
+}: {
+  value: HttpMethod;
+  onChange: (val: HttpMethod) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const methodSelectClass = `api-method-select api-method-select-${value.toLowerCase()}`;
+
+  return (
+    <div className="api-method-dropdown-container" ref={dropdownRef}>
+      <button
+        type="button"
+        className={methodSelectClass}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span>{value}</span>
+        <ChevronDown
+          className={`h-3 w-3 opacity-70 transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+      {isOpen && (
+        <div className="api-method-dropdown-menu">
+          {METHODS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={`api-method-option api-method-option-${m.toLowerCase()} ${
+                m === value ? "api-method-option-active" : ""
+              }`}
+              onClick={() => {
+                onChange(m);
+                setIsOpen(false);
+              }}
+            >
+              {m}
+              {m === value && <Check className="h-3 w-3 ml-auto opacity-70" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Main Component ───────────────────────────────────────────
@@ -414,19 +489,10 @@ export function ApiTester() {
       <main className="api-main">
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">
-          <select
-            className={methodSelectClass}
+          <MethodDropdown
             value={store.method}
-            onChange={(e) => store.setMethod(e.target.value as HttpMethod)}
-          >
-            <option value="GET">GET</option>
-            <option value="POST">POST</option>
-            <option value="PUT">PUT</option>
-            <option value="DELETE">DELETE</option>
-            <option value="PATCH">PATCH</option>
-            <option value="HEAD">HEAD</option>
-            <option value="OPTIONS">OPTIONS</option>
-          </select>
+            onChange={(val) => store.setMethod(val)}
+          />
 
           <div className="api-url-input-container">
             <input

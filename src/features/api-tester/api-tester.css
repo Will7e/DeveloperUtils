@@ -282,9 +282,15 @@
   flex-shrink: 0;
 }
 
+.api-method-dropdown-container {
+  position: relative;
+  display: flex;
+  height: 42px;
+}
+
 .api-method-select {
   height: 42px;
-  padding: 0 12px;
+  padding: 0 10px 0 14px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
@@ -295,8 +301,11 @@
   cursor: pointer;
   transition: all 0.2s;
   outline: none;
-  min-width: 100px;
-  text-align: center;
+  min-width: 105px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   letter-spacing: 0.5px;
 }
 
@@ -326,6 +335,60 @@
   border-color: rgba(245, 158, 11, 0.25);
   color: var(--yellow);
 }
+
+.api-method-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 130px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: api-dropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes api-dropdownFadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.api-method-option {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  transition: all 0.15s;
+  color: var(--text-2);
+}
+
+.api-method-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.api-method-option-active {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.api-method-option-get { color: var(--blue); }
+.api-method-option-post { color: var(--green); }
+.api-method-option-put { color: var(--purple); }
+.api-method-option-delete { color: var(--red); }
+.api-method-option-patch { color: var(--yellow); }
 
 .api-url-input-container {
   display: flex;
