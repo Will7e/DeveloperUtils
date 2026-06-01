@@ -1701,6 +1701,20 @@ html.light .api-tab-trigger-active .api-tab-count {
 }
 
 /* ── cURL Import & Formatting Upgrades ──────────────────────── */
+.api-import-curl-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.api-import-curl-wrapper[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+
+.api-import-curl-wrapper-inner {
+  overflow: hidden;
+}
+
 .api-import-curl-panel {
   display: flex;
   flex-direction: column;
@@ -1708,15 +1722,17 @@ html.light .api-tab-trigger-active .api-tab-count {
   border-bottom: 1px solid var(--border-1);
   padding: 14px 16px;
   gap: 10px;
-  animation: api-importSlideDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   flex-shrink: 0;
   box-shadow: inset 0 -10px 20px rgba(0, 0, 0, 0.05);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@keyframes api-importSlideDown {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+.api-import-curl-wrapper[data-open="true"] .api-import-curl-panel {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .api-import-curl-header {

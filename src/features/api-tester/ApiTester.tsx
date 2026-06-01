@@ -826,28 +826,29 @@ export function ApiTester() {
         </form>
 
         {/* cURL Import Drawer */}
-        {showImportCurl && (
-          <div className="api-import-curl-panel">
-            <div className="api-import-curl-header">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Terminal className="h-4 w-4 text-accent" />
-                <span className="api-import-curl-title">Import Request from cURL</span>
+        <div className="api-import-curl-wrapper" data-open={showImportCurl}>
+          <div className="api-import-curl-wrapper-inner">
+            <div className="api-import-curl-panel">
+              <div className="api-import-curl-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Terminal className="h-4 w-4 text-accent" />
+                  <span className="api-import-curl-title">Import Request from cURL</span>
+                </div>
+                <button 
+                  type="button" 
+                  className="api-import-close-btn"
+                  onClick={() => {
+                    setShowImportCurl(false);
+                    setImportError(null);
+                    setCurlImportValue("");
+                  }}
+                  title="Close"
+                >
+                  &times;
+                </button>
               </div>
-              <button 
-                type="button" 
-                className="api-import-close-btn"
-                onClick={() => {
-                  setShowImportCurl(false);
-                  setImportError(null);
-                  setCurlImportValue("");
-                }}
-                title="Close"
-              >
-                &times;
-              </button>
-            </div>
-            <textarea
-              className="api-import-curl-textarea"
+              <textarea
+                className="api-import-curl-textarea"
               placeholder="Paste raw cURL command (e.g. curl -X POST 'https://api.example.com' -H 'Content-Type: application/json' -d '{&quot;status&quot;: &quot;ok&quot;}')"
               value={curlImportValue}
               onChange={(e) => {
@@ -895,8 +896,9 @@ export function ApiTester() {
                 Import Request
               </button>
             </div>
+            </div>
           </div>
-        )}
+        </div>
 
         {/* Split Panes */}
         <div className="api-split-panes" ref={splitRef}>
