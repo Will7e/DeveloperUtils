@@ -129,6 +129,7 @@ export function CodeEditor() {
       ref={containerRef}
     >
       <Editor
+        className="monaco-wrapper"
         height="100%"
         language={activeFile.language}
         value={activeFile.content}

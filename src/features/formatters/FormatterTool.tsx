@@ -568,6 +568,7 @@ export function FormatterTool() {
                   </div>
                   <div className="flex-1 w-full relative">
                     <Editor
+                      className="monaco-wrapper"
                       height="100%"
                       language={type}
                       value={currentInput}

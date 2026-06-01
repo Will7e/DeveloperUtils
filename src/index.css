@@ -7169,6 +7169,8 @@ body {
    PREVENT MONACO INITIALIZATION WHITE FLASH
    ============================================================ */
 
+.monaco-wrapper,
+.api-monaco-wrapper,
 .monaco-editor,
 .monaco-editor .margin,
 .monaco-editor-background {
