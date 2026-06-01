@@ -202,6 +202,20 @@ function MethodDropdown({
 // ── Main Component ───────────────────────────────────────────
 export function ApiTester() {
   const store = useApiTesterStore();
+  const tabs = store.tabs || [];
+  const activeTab = tabs.find((t) => t.id === store.activeTabId) || tabs[0];
+
+  if (!activeTab) {
+    return (
+      <div className="api-tester-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+        <div style={{ textAlign: 'center' }}>
+          <Activity className="h-8 w-8 text-accent mx-auto mb-4" />
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Updating State...</h2>
+          <p style={{ color: 'var(--text-2)' }}>The state structure has changed. Please refresh the page.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Tab states
   const [requestTab, setRequestTab] = useState<
@@ -238,14 +252,14 @@ export function ApiTester() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        if (!store.loading && store.url.trim()) {
+        if (!activeTab.loading && activeTab.url.trim()) {
           store.sendRequest();
         }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [store.loading, store.url]);
+  }, [activeTab.loading, activeTab.url, store]);
 
   // ── Resize Handlers ────────────────────────────────────────
   const handleResizeStart = useCallback(
@@ -283,14 +297,14 @@ export function ApiTester() {
   // ── Trigger API Execution ──────────────────────────────────
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!store.url.trim()) return;
+    if (!activeTab.url.trim()) return;
     await store.sendRequest();
   };
 
   // ── Copy Handlers ──────────────────────────────────────────
   const handleCopyResponse = () => {
-    if (!store.response?.body) return;
-    navigator.clipboard.writeText(store.response.body);
+    if (!activeTab.response?.body) return;
+    navigator.clipboard.writeText(activeTab.response.body);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -322,20 +336,20 @@ export function ApiTester() {
     return "text";
   };
 
-  const responseLang = store.response
-    ? getLanguageFromContentType(store.response.headers["content-type"])
+  const responseLang = activeTab.response
+    ? getLanguageFromContentType(activeTab.response.headers["content-type"])
     : "text";
 
   const getPrettyBody = (): string => {
-    if (!store.response?.body) return "";
+    if (!activeTab.response?.body) return "";
     if (responseLang === "json") {
       try {
-        return JSON.stringify(JSON.parse(store.response.body), null, 2);
+        return JSON.stringify(JSON.parse(activeTab.response.body), null, 2);
       } catch {
-        return store.response.body;
+        return activeTab.response.body;
       }
     }
-    return store.response.body;
+    return activeTab.response.body;
   };
 
   const getTimeClass = (ms: number): string => {
@@ -344,9 +358,9 @@ export function ApiTester() {
     return "meta-time-slow";
   };
 
-  const methodSelectClass = `api-method-select api-method-select-${store.method.toLowerCase()}`;
+  const methodSelectClass = `api-method-select api-method-select-${activeTab.method.toLowerCase()}`;
 
-  const hasBody = store.method !== "GET" && store.method !== "HEAD";
+  const hasBody = activeTab.method !== "GET" && activeTab.method !== "HEAD";
 
   return (
     <div className="api-tester-container">
@@ -487,10 +501,41 @@ export function ApiTester() {
 
       {/* ── Main Panel ─────────────────────────────────────── */}
       <main className="api-main">
+        {/* Tab Bar UI */}
+        <div className="api-tab-bar">
+          {tabs.map(tab => (
+            <div 
+              key={tab.id} 
+              className={`api-tab-item ${tab.id === store.activeTabId ? 'api-tab-item-active' : ''}`}
+              onClick={() => store.setActiveTab(tab.id)}
+            >
+              <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '8px', width: 'auto', padding: '1px 4px' }}>
+                {tab.method}
+              </span>
+              <span className="api-tab-title">{tab.name}</span>
+              {tabs.length > 1 && (
+                <button 
+                  className="api-tab-close" 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    store.removeTab(tab.id); 
+                  }}
+                  title="Close Tab"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          ))}
+          <button className="api-tab-add" onClick={() => store.addTab()} title="New Tab">
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>
+
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">
           <MethodDropdown
-            value={store.method}
+            value={activeTab.method}
             onChange={(val) => store.setMethod(val)}
           />
 
@@ -498,7 +543,7 @@ export function ApiTester() {
             <input
               type="text"
               className="api-url-input"
-              value={store.url}
+              value={activeTab.url}
               onChange={(e) => store.setUrl(e.target.value)}
               placeholder="Enter request URL (e.g. https://api.github.com/users)"
               required
@@ -526,9 +571,9 @@ export function ApiTester() {
             <button
               type="submit"
               className="api-send-btn"
-              disabled={store.loading || !store.url.trim()}
+              disabled={activeTab.loading || !activeTab.url.trim()}
             >
-              {store.loading ? (
+              {activeTab.loading ? (
                 <span
                   className="api-spinner"
                   style={{
@@ -540,7 +585,7 @@ export function ApiTester() {
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              <span>{store.loading ? "Sending..." : "Send"}</span>
+              <span>{activeTab.loading ? "Sending..." : "Send"}</span>
               <span className="api-send-shortcut">⌘↵</span>
             </button>
           </div>
@@ -562,7 +607,7 @@ export function ApiTester() {
                 >
                   Params
                   <span className="api-tab-count">
-                    {store.params.filter((p) => p.key.trim() !== "").length}
+                    {activeTab.params.filter((p) => p.key.trim() !== "").length}
                   </span>
                 </button>
                 <button
@@ -572,7 +617,7 @@ export function ApiTester() {
                 >
                   Headers
                   <span className="api-tab-count">
-                    {store.headers.filter((h) => h.key.trim() !== "").length}
+                    {activeTab.headers.filter((h) => h.key.trim() !== "").length}
                   </span>
                 </button>
                 {hasBody && (
@@ -605,7 +650,7 @@ export function ApiTester() {
               {requestTab === "params" && (
                 <div className="api-tab-content">
                   <div className="api-kv-editor">
-                    {store.params.map((row) => (
+                    {activeTab.params.map((row) => (
                       <div key={row.id} className="api-kv-row">
                         <input
                           type="checkbox"
@@ -662,7 +707,7 @@ export function ApiTester() {
               {requestTab === "headers" && (
                 <div className="api-tab-content">
                   <div className="api-kv-editor">
-                    {store.headers.map((row) => (
+                    {activeTab.headers.map((row) => (
                       <div key={row.id} className="api-kv-row">
                         <input
                           type="checkbox"
@@ -750,16 +795,16 @@ export function ApiTester() {
                       <button
                         key={type}
                         type="button"
-                        className={`api-body-radio ${store.bodyType === type ? "api-body-radio-active" : ""}`}
+                        className={`api-body-radio ${activeTab.bodyType === type ? "api-body-radio-active" : ""}`}
                         onClick={() => store.setBodyType(type)}
                       >
                         {label}
                       </button>
                     ))}
-                    {store.bodyType === "raw" && (
+                    {activeTab.bodyType === "raw" && (
                       <select
                         className="api-raw-select"
-                        value={store.rawType}
+                        value={activeTab.rawType}
                         onChange={(e) => store.setRawType(e.target.value)}
                       >
                         <option value="text/plain">Text</option>
@@ -770,20 +815,20 @@ export function ApiTester() {
                     )}
                   </div>
 
-                  {store.bodyType === "none" && (
+                  {activeTab.bodyType === "none" && (
                     <div className="api-auth-empty">
                       <ShieldCheck className="h-4 w-4 opacity-50" />
                       <span>No request body will be sent.</span>
                     </div>
                   )}
 
-                  {store.bodyType === "json" && (
+                  {activeTab.bodyType === "json" && (
                     <div className="api-monaco-editor-wrapper">
                       <Editor
                         height="100%"
                         language="json"
                         theme="vs-dark"
-                        value={store.bodyValue}
+                        value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
                           minimap: { enabled: false },
@@ -796,9 +841,9 @@ export function ApiTester() {
                     </div>
                   )}
 
-                  {store.bodyType === "form-data" && (
+                  {activeTab.bodyType === "form-data" && (
                     <div className="api-kv-editor">
-                      {store.formParams.map((row) => (
+                      {activeTab.formParams.map((row) => (
                         <div key={row.id} className="api-kv-row">
                           <input
                             type="checkbox"
@@ -851,13 +896,13 @@ export function ApiTester() {
                     </div>
                   )}
 
-                  {store.bodyType === "raw" && (
+                  {activeTab.bodyType === "raw" && (
                     <div className="api-monaco-editor-wrapper">
                       <Editor
                         height="100%"
-                        language={store.rawType.split("/")[1] || "text"}
+                        language={activeTab.rawType.split("/")[1] || "text"}
                         theme="vs-dark"
-                        value={store.bodyValue}
+                        value={activeTab.bodyValue}
                         onChange={(val) => store.setBodyValue(val || "")}
                         options={{
                           minimap: { enabled: false },
@@ -887,7 +932,7 @@ export function ApiTester() {
                         <button
                           key={type}
                           type="button"
-                          className={`api-auth-type-btn ${store.authType === type ? "api-auth-type-btn-active" : ""}`}
+                          className={`api-auth-type-btn ${activeTab.authType === type ? "api-auth-type-btn-active" : ""}`}
                           onClick={() => store.setAuthType(type)}
                         >
                           {label}
@@ -895,7 +940,7 @@ export function ApiTester() {
                       ))}
                     </div>
 
-                    {store.authType === "none" && (
+                    {activeTab.authType === "none" && (
                       <div className="api-auth-empty">
                         <ShieldCheck className="h-4 w-4 opacity-50" />
                         <span>
@@ -904,7 +949,7 @@ export function ApiTester() {
                       </div>
                     )}
 
-                    {store.authType === "bearer" && (
+                    {activeTab.authType === "bearer" && (
                       <div className="api-auth-fields">
                         <div className="api-auth-field">
                           <label className="api-auth-label">Token</label>
@@ -912,7 +957,7 @@ export function ApiTester() {
                             type="text"
                             className="api-auth-input"
                             placeholder="Enter bearer token"
-                            value={store.authConfig.bearerToken}
+                            value={activeTab.authConfig.bearerToken}
                             onChange={(e) =>
                               store.setAuthConfig({
                                 bearerToken: e.target.value,
@@ -927,7 +972,7 @@ export function ApiTester() {
                       </div>
                     )}
 
-                    {store.authType === "basic" && (
+                    {activeTab.authType === "basic" && (
                       <div className="api-auth-fields">
                         <div className="api-auth-field">
                           <label className="api-auth-label">Username</label>
@@ -936,7 +981,7 @@ export function ApiTester() {
                               type="text"
                               className="api-auth-input"
                               placeholder="Username"
-                              value={store.authConfig.basicUsername}
+                              value={activeTab.authConfig.basicUsername}
                               onChange={(e) =>
                                 store.setAuthConfig({
                                   basicUsername: e.target.value,
@@ -958,7 +1003,7 @@ export function ApiTester() {
                               type={showPassword ? "text" : "password"}
                               className="api-auth-input"
                               placeholder="Password"
-                              value={store.authConfig.basicPassword}
+                              value={activeTab.authConfig.basicPassword}
                               onChange={(e) =>
                                 store.setAuthConfig({
                                   basicPassword: e.target.value,
@@ -989,7 +1034,7 @@ export function ApiTester() {
                       </div>
                     )}
 
-                    {store.authType === "api-key" && (
+                    {activeTab.authType === "api-key" && (
                       <div className="api-auth-fields">
                         <div className="api-auth-field">
                           <label className="api-auth-label">Key Name</label>
@@ -997,7 +1042,7 @@ export function ApiTester() {
                             type="text"
                             className="api-auth-input"
                             placeholder="e.g. X-API-Key"
-                            value={store.authConfig.apiKeyName}
+                            value={activeTab.authConfig.apiKeyName}
                             onChange={(e) =>
                               store.setAuthConfig({
                                 apiKeyName: e.target.value,
@@ -1011,7 +1056,7 @@ export function ApiTester() {
                             type="text"
                             className="api-auth-input"
                             placeholder="Enter API key value"
-                            value={store.authConfig.apiKeyValue}
+                            value={activeTab.authConfig.apiKeyValue}
                             onChange={(e) =>
                               store.setAuthConfig({
                                 apiKeyValue: e.target.value,
@@ -1023,7 +1068,7 @@ export function ApiTester() {
                           <label className="api-auth-label">Add to</label>
                           <select
                             className="api-auth-select"
-                            value={store.authConfig.apiKeyPlacement}
+                            value={activeTab.authConfig.apiKeyPlacement}
                             onChange={(e) =>
                               store.setAuthConfig({
                                 apiKeyPlacement: e.target.value as
@@ -1054,23 +1099,23 @@ export function ApiTester() {
           <div className="api-pane" style={{ flex: 1 }}>
             <div className="api-pane-header">
               <span className="api-pane-title">Response</span>
-              {store.response && (
+              {activeTab.response && (
                 <div className="api-response-meta">
                   <div
-                    className={`status-pill ${store.response.status >= 200 && store.response.status < 300 ? "status-pill-ok" : "status-pill-err"}`}
+                    className={`status-pill ${activeTab.response.status >= 200 && activeTab.response.status < 300 ? "status-pill-ok" : "status-pill-err"}`}
                   >
                     <Activity className="h-3 w-3" />
                     <span>
-                      {store.response.status} {store.response.statusText}
+                      {activeTab.response.status} {activeTab.response.statusText}
                     </span>
                   </div>
                   <div className="meta-item">
                     <Clock className="h-3 w-3 opacity-60" />
                     <span>
                       <span
-                        className={`meta-item-value ${getTimeClass(store.response.time)}`}
+                        className={`meta-item-value ${getTimeClass(activeTab.response.time)}`}
                       >
-                        {store.response.time} ms
+                        {activeTab.response.time} ms
                       </span>
                     </span>
                   </div>
@@ -1078,7 +1123,7 @@ export function ApiTester() {
                     <Database className="h-3 w-3 opacity-60" />
                     <span>
                       <span className="meta-item-value">
-                        {formatBytes(store.response.size)}
+                        {formatBytes(activeTab.response.size)}
                       </span>
                     </span>
                   </div>
@@ -1087,7 +1132,7 @@ export function ApiTester() {
             </div>
 
             {/* Loading */}
-            {store.loading && (
+            {activeTab.loading && (
               <div className="api-loading-state">
                 <div className="api-spinner" />
                 <span className="api-loading-text">
@@ -1097,7 +1142,7 @@ export function ApiTester() {
             )}
 
             {/* Error */}
-            {store.error && (
+            {activeTab.error && (
               <div style={{ overflowY: "auto", flex: 1 }}>
                 <div className="api-error-card">
                   <AlertCircle className="api-error-icon h-5 w-5" />
@@ -1105,7 +1150,7 @@ export function ApiTester() {
                     <span className="api-error-title">
                       HTTP Request Failed
                     </span>
-                    <p className="api-error-message">{store.error}</p>
+                    <p className="api-error-message">{activeTab.error}</p>
                   </div>
                 </div>
 
@@ -1159,7 +1204,7 @@ export function ApiTester() {
             )}
 
             {/* Empty State */}
-            {!store.loading && !store.error && !store.response && (
+            {!activeTab.loading && !activeTab.error && !activeTab.response && (
               <div className="api-response-empty">
                 <Send className="h-8 w-8 api-response-empty-icon text-accent" />
                 <span className="api-response-empty-title">
@@ -1174,7 +1219,7 @@ export function ApiTester() {
             )}
 
             {/* Response Body */}
-            {!store.loading && !store.error && store.response && (
+            {!activeTab.loading && !activeTab.error && activeTab.response && (
               <div
                 className="api-tabs"
                 style={{ flex: 1, overflow: "hidden" }}
@@ -1214,7 +1259,7 @@ export function ApiTester() {
                   >
                     Headers
                     <span className="api-tab-count">
-                      {Object.keys(store.response.headers).length}
+                      {Object.keys(activeTab.response.headers).length}
                     </span>
                   </button>
 
@@ -1273,7 +1318,7 @@ export function ApiTester() {
                   {responseTab === "raw" && (
                     <textarea
                       className="api-response-raw-text"
-                      value={store.response.body}
+                      value={activeTab.response.body}
                       readOnly
                     />
                   )}
@@ -1282,7 +1327,7 @@ export function ApiTester() {
                   {responseTab === "preview" && responseLang === "html" && (
                     <iframe
                       className="api-response-preview-iframe"
-                      srcDoc={store.response.body}
+                      srcDoc={activeTab.response.body}
                       title="HTML Response Preview"
                       sandbox="allow-scripts"
                     />
@@ -1337,7 +1382,7 @@ export function ApiTester() {
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.entries(store.response.headers)
+                            {Object.entries(activeTab.response.headers)
                               .filter(
                                 ([key, val]) =>
                                   key

@@ -49,7 +49,9 @@ export interface ApiResponse {
   body: string;
 }
 
-interface ApiTesterState {
+export interface TabState {
+  id: string;
+  name: string;
   method: HttpMethod;
   url: string;
   params: KeyValueField[];
@@ -63,9 +65,19 @@ interface ApiTesterState {
   response: ApiResponse | null;
   loading: boolean;
   error: string | null;
+}
+
+interface ApiTesterState {
+  tabs: TabState[];
+  activeTabId: string;
   history: HistoryItem[];
 
-  // Setters
+  // Tab management
+  addTab: () => void;
+  removeTab: (id: string) => void;
+  setActiveTab: (id: string) => void;
+
+  // Active tab Setters
   setMethod: (method: HttpMethod) => void;
   setUrl: (url: string) => void;
   setBodyType: (type: BodyType) => void;
@@ -74,7 +86,7 @@ interface ApiTesterState {
   setAuthType: (type: AuthType) => void;
   setAuthConfig: (config: Partial<AuthConfig>) => void;
 
-  // Key-value editors
+  // Key-value editors for active tab
   addParam: () => void;
   updateParam: (id: string, updates: Partial<KeyValueField>) => void;
   removeParam: (id: string) => void;
@@ -130,6 +142,27 @@ const defaultAuthConfig: AuthConfig = {
   apiKeyPlacement: "header",
 };
 
+const createNewTab = (name: string): TabState => ({
+  id: genId(),
+  name,
+  method: "GET",
+  url: "https://jsonplaceholder.typicode.com/users",
+  params: [createEmptyField()],
+  headers: [
+    { id: genId(), key: "Content-Type", value: "application/json", enabled: true },
+    createEmptyField(),
+  ],
+  bodyType: "none",
+  bodyValue: '{\n  "name": "John Doe",\n  "email": "john@example.com"\n}',
+  formParams: [createEmptyField()],
+  rawType: "text/plain",
+  authType: "none",
+  authConfig: { ...defaultAuthConfig },
+  response: null,
+  loading: false,
+  error: null,
+});
+
 // Load history from LocalStorage
 const loadStoredHistory = (): HistoryItem[] => {
   try {
@@ -177,377 +210,471 @@ function applyAuth(
   return { headers: h, url: u };
 }
 
-export const useApiTesterStore = create<ApiTesterState>((set, get) => ({
-  method: "GET",
-  url: "https://jsonplaceholder.typicode.com/users",
-  params: [createEmptyField()],
-  headers: [
-    { id: genId(), key: "Content-Type", value: "application/json", enabled: true },
-    createEmptyField(),
-  ],
-  bodyType: "none",
-  bodyValue: '{\n  "name": "John Doe",\n  "email": "john@example.com"\n}',
-  formParams: [createEmptyField()],
-  rawType: "text/plain",
-  authType: "none",
-  authConfig: { ...defaultAuthConfig },
-  response: null,
-  loading: false,
-  error: null,
-  history: loadStoredHistory(),
+export const useApiTesterStore = create<ApiTesterState>((set, get) => {
+  const initialTab = createNewTab("Tab 1");
+  return {
+    tabs: [initialTab],
+    activeTabId: initialTab.id,
+    history: loadStoredHistory(),
 
-  setMethod: (method) => set({ method }),
-  
-  setUrl: (url) => {
-    set({ url });
-    // Also sync the Params table when url changes manually
-    get().syncParamsFromUrl(url);
-  },
-
-  setBodyType: (bodyType) => set({ bodyType }),
-  setBodyValue: (bodyValue) => set({ bodyValue }),
-  setRawType: (rawType) => set({ rawType }),
-  setAuthType: (authType) => set({ authType }),
-  setAuthConfig: (config) =>
-    set((state) => ({
-      authConfig: { ...state.authConfig, ...config },
-    })),
-
-  // Params actions
-  addParam: () => set((state) => ({ params: [...state.params, createEmptyField()] })),
-  updateParam: (id, updates) => {
-    set((state) => ({
-      params: state.params.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-    }));
-    get().syncUrlFromParams();
-  },
-  removeParam: (id) => {
-    set((state) => {
-      const filtered = state.params.filter((p) => p.id !== id);
-      return { params: filtered.length === 0 ? [createEmptyField()] : filtered };
-    });
-    get().syncUrlFromParams();
-  },
-
-  // Headers actions
-  addHeader: () => set((state) => ({ headers: [...state.headers, createEmptyField()] })),
-  updateHeader: (id, updates) =>
-    set((state) => ({
-      headers: state.headers.map((h) => (h.id === id ? { ...h, ...updates } : h)),
-    })),
-  removeHeader: (id) =>
-    set((state) => {
-      const filtered = state.headers.filter((h) => h.id !== id);
-      return { headers: filtered.length === 0 ? [createEmptyField()] : filtered };
-    }),
-
-  // Form Data actions
-  addFormParam: () => set((state) => ({ formParams: [...state.formParams, createEmptyField()] })),
-  updateFormParam: (id, updates) =>
-    set((state) => ({
-      formParams: state.formParams.map((f) => (f.id === id ? { ...f, ...updates } : f)),
-    })),
-  removeFormParam: (id) =>
-    set((state) => {
-      const filtered = state.formParams.filter((f) => f.id !== id);
-      return { formParams: filtered.length === 0 ? [createEmptyField()] : filtered };
-    }),
-
-  // Sync logic: URL -> Params
-  syncParamsFromUrl: (urlStr) => {
-    try {
-      if (!urlStr || !urlStr.includes("?")) return;
-      const queryString = urlStr.substring(urlStr.indexOf("?") + 1);
-      const searchParams = new URLSearchParams(queryString);
-      
-      const newParams: KeyValueField[] = [];
-      searchParams.forEach((value, key) => {
-        newParams.push({ id: genId(), key, value, enabled: true });
-      });
-
-      if (newParams.length > 0) {
-        newParams.push(createEmptyField()); // Extra empty row at end
-        set({ params: newParams });
-      }
-    } catch {
-      // Invalid URL or error parsing search string, fail silently
-    }
-  },
-
-  // Sync logic: Params -> URL
-  syncUrlFromParams: () => {
-    const { url, params } = get();
-    try {
-      let baseUrl = url;
-      if (url.includes("?")) {
-        baseUrl = url.substring(0, url.indexOf("?"));
-      }
-
-      const activeParams = params.filter((p) => p.enabled && p.key.trim() !== "");
-      if (activeParams.length === 0) {
-        set({ url: baseUrl });
-        return;
-      }
-
-      const searchParams = new URLSearchParams();
-      activeParams.forEach((p) => {
-        searchParams.append(p.key.trim(), p.value.trim());
-      });
-
-      set({ url: `${baseUrl}?${searchParams.toString()}` });
-    } catch {
-      // Fail silently
-    }
-  },
-
-  // Generate cURL command from current state
-  generateCurl: () => {
-    const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = get();
-
-    let computedHeaders: Record<string, string> = {};
-    headers.forEach((h) => {
-      if (h.enabled && h.key.trim() !== "") {
-        computedHeaders[h.key.trim()] = h.value.trim();
-      }
-    });
-
-    // Apply auth
-    const authed = applyAuth(authType, authConfig, computedHeaders, url);
-    computedHeaders = authed.headers;
-    const finalUrl = authed.url;
-
-    let parts: string[] = [`curl -X ${method}`];
-
-    // Headers
-    Object.entries(computedHeaders).forEach(([k, v]) => {
-      parts.push(`  -H '${k}: ${v}'`);
-    });
-
-    // Body
-    if (method !== "GET" && method !== "HEAD") {
-      if (bodyType === "json" && bodyValue.trim()) {
-        parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
-      } else if (bodyType === "raw" && bodyValue.trim()) {
-        if (!computedHeaders["Content-Type"]) {
-          parts.push(`  -H 'Content-Type: ${rawType}'`);
-        }
-        parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
-      } else if (bodyType === "form-data") {
-        formParams.forEach((f) => {
-          if (f.enabled && f.key.trim()) {
-            parts.push(`  -F '${f.key.trim()}=${f.value.trim()}'`);
-          }
-        });
-      }
-    }
-
-    parts.push(`  '${finalUrl}'`);
-    return parts.join(" \\\n");
-  },
-
-  // Send request using standard window.fetch (the industry standard for lightweight browser clients)
-  sendRequest: async () => {
-    const { method, url, params, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = get();
-    set({ loading: true, error: null, response: null });
-
-    const startTime = performance.now();
-    let computedHeaders: Record<string, string> = {};
-
-    // Assemble active headers
-    headers.forEach((h) => {
-      if (h.enabled && h.key.trim() !== "") {
-        computedHeaders[h.key.trim()] = h.value.trim();
-      }
-    });
-
-    let fetchBody: any = undefined;
-
-    // Handle Request Body
-    if (method !== "GET" && method !== "HEAD") {
-      if (bodyType === "json") {
-        fetchBody = bodyValue;
-        if (!computedHeaders["Content-Type"]) {
-          computedHeaders["Content-Type"] = "application/json";
-        }
-      } else if (bodyType === "form-data") {
-        const formData = new FormData();
-        formParams.forEach((f) => {
-          if (f.enabled && f.key.trim() !== "") {
-            formData.append(f.key.trim(), f.value.trim());
-          }
-        });
-        fetchBody = formData;
-        // Let the browser set Content-Type header with the boundary
-        delete computedHeaders["Content-Type"];
-      } else if (bodyType === "raw") {
-        fetchBody = bodyValue;
-        if (!computedHeaders["Content-Type"]) {
-          computedHeaders["Content-Type"] = rawType;
-        }
-      }
-    }
-
-    // Apply authentication
-    const authed = applyAuth(authType, authConfig, computedHeaders, url);
-    computedHeaders = authed.headers;
-    const finalUrl = authed.url;
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
-
-      const res = await fetch(finalUrl, {
-        method,
-        headers: computedHeaders,
-        body: fetchBody,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      const endTime = performance.now();
-      const timeMs = Math.round(endTime - startTime);
-
-      // Read response headers
-      const resHeaders: Record<string, string> = {};
-      res.headers.forEach((val, key) => {
-        resHeaders[key] = val;
-      });
-
-      // Read response body text
-      const bodyText = await res.text();
-      const sizeBytes = new Blob([bodyText]).size;
-
-      const responseObj: ApiResponse = {
-        status: res.status,
-        statusText: res.statusText || `HTTP ${res.status}`,
-        time: timeMs,
-        size: sizeBytes,
-        headers: resHeaders,
-        body: bodyText,
-      };
-
-      // Build enriched history item
-      const activeHeaders = headers
-        .filter(h => h.enabled && h.key.trim() !== "")
-        .map(h => ({ key: h.key, value: h.value }));
-
-      const newHistoryItem: HistoryItem = {
-        id: genId(),
-        timestamp: Date.now(),
-        method,
-        url,
-        status: res.status,
-        time: timeMs,
-        headers: activeHeaders,
-        bodyType,
-        bodyValue: bodyType !== "none" ? bodyValue : undefined,
-        authType,
-        authConfig: authType !== "none" ? { ...authConfig } : undefined,
-      };
-
+    // Tab management
+    addTab: () => {
       set((state) => {
-        const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
-        saveStoredHistory(updatedHistory);
+        const newTab = createNewTab(`Tab ${state.tabs.length + 1}`);
         return {
-          response: responseObj,
-          loading: false,
-          history: updatedHistory,
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
         };
       });
-
-    } catch (err: any) {
-      const endTime = performance.now();
-      const timeMs = Math.round(endTime - startTime);
-      const isAbort = err.name === "AbortError";
-      const errorMsg = isAbort
-        ? "⏱ Request timed out after 30 seconds."
-        : err.message || "Failed to complete network request. This could be due to a CORS issue or network disconnect.";
-
-      // Add failed entry to history
-      const newHistoryItem: HistoryItem = {
-        id: genId(),
-        timestamp: Date.now(),
-        method,
-        url,
-        error: true,
-      };
-
+    },
+    removeTab: (id) => {
       set((state) => {
-        const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
-        saveStoredHistory(updatedHistory);
+        if (state.tabs.length === 1) return state; // Don't remove the last tab
+        const newTabs = state.tabs.filter((t) => t.id !== id);
         return {
-          error: errorMsg,
-          loading: false,
-          history: updatedHistory,
+          tabs: newTabs,
+          activeTabId: state.activeTabId === id ? newTabs[newTabs.length - 1].id : state.activeTabId,
         };
       });
-    }
-  },
+    },
+    setActiveTab: (id) => set({ activeTabId: id }),
 
-  // Load request details from a saved history item
-  loadHistoryItem: (item) => {
-    const newState: any = {
-      method: item.method,
-      url: item.url,
-      response: null,
-      error: null,
-    };
+    setMethod: (method) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, method } : t)),
+      }));
+    },
+    
+    setUrl: (url) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, url } : t)),
+      }));
+      get().syncParamsFromUrl(url);
+    },
 
-    // Restore enriched fields if available
-    if (item.headers && item.headers.length > 0) {
-      newState.headers = [
-        ...item.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
-        createEmptyField(),
-      ];
-    }
-    if (item.bodyType) {
-      newState.bodyType = item.bodyType;
-    }
-    if (item.bodyValue) {
-      newState.bodyValue = item.bodyValue;
-    }
-    if (item.authType) {
-      newState.authType = item.authType;
-    }
-    if (item.authConfig) {
-      newState.authConfig = { ...defaultAuthConfig, ...item.authConfig };
-    }
+    setBodyType: (bodyType) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyType } : t)),
+      }));
+    },
+    setBodyValue: (bodyValue) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyValue } : t)),
+      }));
+    },
+    setRawType: (rawType) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, rawType } : t)),
+      }));
+    },
+    setAuthType: (authType) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authType } : t)),
+      }));
+    },
+    setAuthConfig: (config) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authConfig: { ...t.authConfig, ...config } } : t)),
+      }));
+    },
 
-    set(newState);
-    get().syncParamsFromUrl(item.url);
-  },
-
-  // Clear all history
-  clearHistory: () => {
-    saveStoredHistory([]);
-    set({ history: [] });
-  },
-
-  // Load template presets
-  loadPreset: (preset) => {
-    const formattedParams = preset.params && preset.params.length > 0
-      ? [...preset.params.map(p => ({ id: genId(), key: p.key, value: p.value, enabled: true })), createEmptyField()]
-      : [createEmptyField()];
-
-    const formattedHeaders = preset.headers && preset.headers.length > 0
-      ? [...preset.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })), createEmptyField()]
-      : [{ id: genId(), key: "Content-Type", value: "application/json", enabled: true }, createEmptyField()];
-
-    set({
-      method: preset.method,
-      url: preset.url,
-      params: formattedParams,
-      headers: formattedHeaders,
-      bodyType: preset.bodyType || "none",
-      bodyValue: preset.bodyValue || "",
-      authType: "none",
-      authConfig: { ...defaultAuthConfig },
-      response: null,
-      error: null,
-    });
-
-    if (preset.params && preset.params.length > 0) {
+    // Params actions
+    addParam: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: [...t.params, createEmptyField()] } : t)),
+      }));
+    },
+    updateParam: (id, updates) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === state.activeTabId
+            ? { ...t, params: t.params.map((p) => (p.id === id ? { ...p, ...updates } : p)) }
+            : t
+        ),
+      }));
       get().syncUrlFromParams();
-    }
-  },
-}));
+    },
+    removeParam: (id) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (t.id === state.activeTabId) {
+            const filtered = t.params.filter((p) => p.id !== id);
+            return { ...t, params: filtered.length === 0 ? [createEmptyField()] : filtered };
+          }
+          return t;
+        }),
+      }));
+      get().syncUrlFromParams();
+    },
+
+    // Headers actions
+    addHeader: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, headers: [...t.headers, createEmptyField()] } : t)),
+      }));
+    },
+    updateHeader: (id, updates) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === state.activeTabId
+            ? { ...t, headers: t.headers.map((h) => (h.id === id ? { ...h, ...updates } : h)) }
+            : t
+        ),
+      }));
+    },
+    removeHeader: (id) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (t.id === state.activeTabId) {
+            const filtered = t.headers.filter((h) => h.id !== id);
+            return { ...t, headers: filtered.length === 0 ? [createEmptyField()] : filtered };
+          }
+          return t;
+        }),
+      }));
+    },
+
+    // Form Data actions
+    addFormParam: () => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, formParams: [...t.formParams, createEmptyField()] } : t)),
+      }));
+    },
+    updateFormParam: (id, updates) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) =>
+          t.id === state.activeTabId
+            ? { ...t, formParams: t.formParams.map((f) => (f.id === id ? { ...f, ...updates } : f)) }
+            : t
+        ),
+      }));
+    },
+    removeFormParam: (id) => {
+      set((state) => ({
+        tabs: state.tabs.map((t) => {
+          if (t.id === state.activeTabId) {
+            const filtered = t.formParams.filter((f) => f.id !== id);
+            return { ...t, formParams: filtered.length === 0 ? [createEmptyField()] : filtered };
+          }
+          return t;
+        }),
+      }));
+    },
+
+    // Sync logic: URL -> Params
+    syncParamsFromUrl: (urlStr) => {
+      try {
+        if (!urlStr || !urlStr.includes("?")) return;
+        const queryString = urlStr.substring(urlStr.indexOf("?") + 1);
+        const searchParams = new URLSearchParams(queryString);
+        
+        const newParams: KeyValueField[] = [];
+        searchParams.forEach((value, key) => {
+          newParams.push({ id: genId(), key, value, enabled: true });
+        });
+
+        if (newParams.length > 0) {
+          newParams.push(createEmptyField()); // Extra empty row at end
+          set((state) => ({
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: newParams } : t)),
+          }));
+        }
+      } catch {
+        // Invalid URL or error parsing search string, fail silently
+      }
+    },
+
+    // Sync logic: Params -> URL
+    syncUrlFromParams: () => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if (!tab) return;
+      const { url, params } = tab;
+      
+      try {
+        let baseUrl = url;
+        if (url.includes("?")) {
+          baseUrl = url.substring(0, url.indexOf("?"));
+        }
+
+        const activeParams = params.filter((p) => p.enabled && p.key.trim() !== "");
+        if (activeParams.length === 0) {
+          set((state) => ({
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, url: baseUrl } : t)),
+          }));
+          return;
+        }
+
+        const searchParams = new URLSearchParams();
+        activeParams.forEach((p) => {
+          searchParams.append(p.key.trim(), p.value.trim());
+        });
+
+        set((state) => ({
+          tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, url: `${baseUrl}?${searchParams.toString()}` } : t)),
+        }));
+      } catch {
+        // Fail silently
+      }
+    },
+
+    // Generate cURL command from current state
+    generateCurl: () => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if (!tab) return "";
+      const { method, url, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
+
+      let computedHeaders: Record<string, string> = {};
+      headers.forEach((h) => {
+        if (h.enabled && h.key.trim() !== "") {
+          computedHeaders[h.key.trim()] = h.value.trim();
+        }
+      });
+
+      // Apply auth
+      const authed = applyAuth(authType, authConfig, computedHeaders, url);
+      computedHeaders = authed.headers;
+      const finalUrl = authed.url;
+
+      let parts: string[] = [`curl -X ${method}`];
+
+      // Headers
+      Object.entries(computedHeaders).forEach(([k, v]) => {
+        parts.push(`  -H '${k}: ${v}'`);
+      });
+
+      // Body
+      if (method !== "GET" && method !== "HEAD") {
+        if (bodyType === "json" && bodyValue.trim()) {
+          parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+        } else if (bodyType === "raw" && bodyValue.trim()) {
+          if (!computedHeaders["Content-Type"]) {
+            parts.push(`  -H 'Content-Type: ${rawType}'`);
+          }
+          parts.push(`  -d '${bodyValue.replace(/'/g, "\\'")}'`);
+        } else if (bodyType === "form-data") {
+          formParams.forEach((f) => {
+            if (f.enabled && f.key.trim()) {
+              parts.push(`  -F '${f.key.trim()}=${f.value.trim()}'`);
+            }
+          });
+        }
+      }
+
+      parts.push(`  '${finalUrl}'`);
+      return parts.join(" \\\n");
+    },
+
+    // Send request using standard window.fetch
+    sendRequest: async () => {
+      const state = get();
+      const tab = state.tabs.find((t) => t.id === state.activeTabId);
+      if (!tab) return;
+      const { method, url, params, headers, bodyType, bodyValue, formParams, rawType, authType, authConfig } = tab;
+      
+      set((state) => ({
+        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, loading: true, error: null, response: null } : t)),
+      }));
+
+      const startTime = performance.now();
+      let computedHeaders: Record<string, string> = {};
+
+      // Assemble active headers
+      headers.forEach((h) => {
+        if (h.enabled && h.key.trim() !== "") {
+          computedHeaders[h.key.trim()] = h.value.trim();
+        }
+      });
+
+      let fetchBody: any = undefined;
+
+      // Handle Request Body
+      if (method !== "GET" && method !== "HEAD") {
+        if (bodyType === "json") {
+          fetchBody = bodyValue;
+          if (!computedHeaders["Content-Type"]) {
+            computedHeaders["Content-Type"] = "application/json";
+          }
+        } else if (bodyType === "form-data") {
+          const formData = new FormData();
+          formParams.forEach((f) => {
+            if (f.enabled && f.key.trim() !== "") {
+              formData.append(f.key.trim(), f.value.trim());
+            }
+          });
+          fetchBody = formData;
+          // Let the browser set Content-Type header with the boundary
+          delete computedHeaders["Content-Type"];
+        } else if (bodyType === "raw") {
+          fetchBody = bodyValue;
+          if (!computedHeaders["Content-Type"]) {
+            computedHeaders["Content-Type"] = rawType;
+          }
+        }
+      }
+
+      // Apply authentication
+      const authed = applyAuth(authType, authConfig, computedHeaders, url);
+      computedHeaders = authed.headers;
+      const finalUrl = authed.url;
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+        const res = await fetch(finalUrl, {
+          method,
+          headers: computedHeaders,
+          body: fetchBody,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        const endTime = performance.now();
+        const timeMs = Math.round(endTime - startTime);
+
+        // Read response headers
+        const resHeaders: Record<string, string> = {};
+        res.headers.forEach((val, key) => {
+          resHeaders[key] = val;
+        });
+
+        // Read response body text
+        const bodyText = await res.text();
+        const sizeBytes = new Blob([bodyText]).size;
+
+        const responseObj: ApiResponse = {
+          status: res.status,
+          statusText: res.statusText || `HTTP ${res.status}`,
+          time: timeMs,
+          size: sizeBytes,
+          headers: resHeaders,
+          body: bodyText,
+        };
+
+        // Build enriched history item
+        const activeHeaders = headers
+          .filter(h => h.enabled && h.key.trim() !== "")
+          .map(h => ({ key: h.key, value: h.value }));
+
+        const newHistoryItem: HistoryItem = {
+          id: genId(),
+          timestamp: Date.now(),
+          method,
+          url,
+          status: res.status,
+          time: timeMs,
+          headers: activeHeaders,
+          bodyType,
+          bodyValue: bodyType !== "none" ? bodyValue : undefined,
+          authType,
+          authConfig: authType !== "none" ? { ...authConfig } : undefined,
+        };
+
+        set((state) => {
+          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
+          saveStoredHistory(updatedHistory);
+          return {
+            history: updatedHistory,
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, response: responseObj, loading: false } : t)),
+          };
+        });
+
+      } catch (err: any) {
+        const endTime = performance.now();
+        const timeMs = Math.round(endTime - startTime);
+        const isAbort = err.name === "AbortError";
+        const errorMsg = isAbort
+          ? "⏱ Request timed out after 30 seconds."
+          : err.message || "Failed to complete network request. This could be due to a CORS issue or network disconnect.";
+
+        // Add failed entry to history
+        const newHistoryItem: HistoryItem = {
+          id: genId(),
+          timestamp: Date.now(),
+          method,
+          url,
+          error: true,
+        };
+
+        set((state) => {
+          const updatedHistory = [newHistoryItem, ...state.history].slice(0, 50);
+          saveStoredHistory(updatedHistory);
+          return {
+            history: updatedHistory,
+            tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, error: errorMsg, loading: false } : t)),
+          };
+        });
+      }
+    },
+
+    // Load request details from a saved history item into a new tab
+    loadHistoryItem: (item) => {
+      set((state) => {
+        const newTab = createNewTab(`History: ${item.method}`);
+        newTab.method = item.method;
+        newTab.url = item.url;
+        
+        if (item.headers && item.headers.length > 0) {
+          newTab.headers = [
+            ...item.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
+            createEmptyField(),
+          ];
+        }
+        if (item.bodyType) newTab.bodyType = item.bodyType;
+        if (item.bodyValue) newTab.bodyValue = item.bodyValue;
+        if (item.authType) newTab.authType = item.authType;
+        if (item.authConfig) newTab.authConfig = { ...defaultAuthConfig, ...item.authConfig };
+        
+        return {
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
+        };
+      });
+      get().syncParamsFromUrl(item.url);
+    },
+
+    // Clear all history
+    clearHistory: () => {
+      saveStoredHistory([]);
+      set({ history: [] });
+    },
+
+    // Load template presets into a new tab
+    loadPreset: (preset) => {
+      set((state) => {
+        const newTab = createNewTab(preset.method);
+        newTab.method = preset.method;
+        newTab.url = preset.url;
+        newTab.bodyType = preset.bodyType || "none";
+        newTab.bodyValue = preset.bodyValue || "";
+
+        if (preset.params && preset.params.length > 0) {
+          newTab.params = [
+            ...preset.params.map(p => ({ id: genId(), key: p.key, value: p.value, enabled: true })),
+            createEmptyField(),
+          ];
+        }
+
+        if (preset.headers && preset.headers.length > 0) {
+          newTab.headers = [
+            ...preset.headers.map(h => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
+            createEmptyField(),
+          ];
+        } else {
+          newTab.headers = [
+            { id: genId(), key: "Content-Type", value: "application/json", enabled: true },
+            createEmptyField(),
+          ];
+        }
+
+        return {
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
+        };
+      });
+      get().syncUrlFromParams();
+    },
+  };
+});
