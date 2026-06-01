@@ -545,6 +545,45 @@ export function ApiTester() {
     monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
   }, []);
 
+  const handleGraphqlEditorMount: OnMount = useCallback((editor, monaco) => {
+    setupMonacoTheme(monaco);
+    const theme = useAppStore.getState().editorSettings.theme;
+    monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
+
+    // Bind blur event for auto-formatting
+    editor.onDidBlurEditorText(() => {
+      const value = editor.getValue();
+      if (!value || !value.trim()) return;
+      try {
+        let query = value;
+        query = query.replace(/\s+/g, ' ');
+        let indent = 0;
+        let formatted = "";
+        for (let i = 0; i < query.length; i++) {
+          const char = query[i];
+          if (char === '{') {
+            indent += 2;
+            formatted += ' {\n' + ' '.repeat(indent);
+          } else if (char === '}') {
+            indent = Math.max(0, indent - 2);
+            formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
+          } else if (char === ',') {
+            formatted += ',\n' + ' '.repeat(indent);
+          } else {
+            formatted += char;
+          }
+        }
+        formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
+        if (formatted !== value) {
+          editor.setValue(formatted);
+          store.setGraphqlQuery(formatted);
+        }
+      } catch (e) {
+        console.error("Failed to auto-format GraphQL query", e);
+      }
+    });
+  }, [store]);
+
   // Tab states
   const [requestTab, setRequestTab] = useState<string>("params");
   const [wsMessageText, setWsMessageText] = useState('{\n  "type": "ping"\n}');
@@ -854,36 +893,6 @@ export function ApiTester() {
       URL.revokeObjectURL(url);
     } catch (e) {
       console.error("Failed to download response", e);
-    }
-  };
-
-  const formatGraphQLQuery = () => {
-    try {
-      let query = activeTab.graphqlQuery;
-      if (!query || !query.trim()) return;
-      query = query.replace(/\s+/g, ' ');
-      let indent = 0;
-      let formatted = "";
-      for (let i = 0; i < query.length; i++) {
-        const char = query[i];
-        if (char === '{') {
-          indent += 2;
-          formatted += ' {\n' + ' '.repeat(indent);
-        } else if (char === '}') {
-          indent = Math.max(0, indent - 2);
-          formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
-        } else if (char === ',') {
-          formatted += ',\n' + ' '.repeat(indent);
-        } else {
-          formatted += char;
-        }
-      }
-      formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
-      if (formatted !== activeTab.graphqlQuery) {
-        store.setGraphqlQuery(formatted);
-      }
-    } catch (e) {
-      console.error("Failed to format GraphQL query", e);
     }
   };
 
@@ -2047,21 +2056,12 @@ export function ApiTester() {
                           <span>Query</span>
                         </div>
                       </div>
-                      <div className="api-monaco-editor-wrapper" style={{ flex: 1, position: "relative" }}>
-                        <button
-                          type="button"
-                          className="api-editor-format-btn"
-                          onClick={formatGraphQLQuery}
-                          title="Beautify/Format GraphQL query"
-                        >
-                          <Sparkles className="h-3 w-3 text-yellow" />
-                          <span>Format</span>
-                        </button>
+                      <div style={{ flex: 1, position: "relative" }}>
                         <Editor
                           height="100%"
                           language="graphql"
                           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
-                          onMount={handleEditorMount}
+                          onMount={handleGraphqlEditorMount}
                           value={activeTab.graphqlQuery || ""}
                           onChange={(val) => store.setGraphqlQuery(val || "")}
                           options={{
