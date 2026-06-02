@@ -194,14 +194,7 @@ html.light .run-btn:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 18px rgba(2, 132, 199, 0.25);
 }
 
-/* ---- Light: Tabs Run Button ---- */
-html.light .tabs-run-btn {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 8px rgba(34, 197, 94, 0.12);
-}
-
-html.light .tabs-run-btn:hover {
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 0 14px rgba(34, 197, 94, 0.20);
-}
+/* ---- Light: Tabs Run Button overrides removed ---- */
 
 /* ---- Light: Resize Handle ---- */
 html.light .resize-handle-indicator {
@@ -603,10 +596,7 @@ html.light .lib-text-highlight {
   color: #0284c7;
 }
 
-/* ---- Light: Cancel Pulse ---- */
-html.light .tabs-run-btn-stop {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 8px rgba(220, 38, 38, 0.15);
-}
+/* ---- Light: Cancel Pulse overrides removed ---- */
 
 /* ---- Light: Brand Icon Glow ---- */
 html.light .brand-icon-svg {
@@ -1310,7 +1300,7 @@ body {
   gap: 5px;
   height: 26px;
   padding: 0 12px 0 10px;
-  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -1319,35 +1309,27 @@ body {
   font-weight: 600;
   letter-spacing: 0.3px;
   cursor: pointer;
-  transition: all 0.18s ease;
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.25),
-    0 0 12px rgba(34, 197, 94, 0.20),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   white-space: nowrap;
   flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.tabs-run-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 90%, black);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.tabs-run-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .tabs-run-btn svg {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
-}
-
-.tabs-run-btn:hover {
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(34, 197, 94, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  transform: translateY(-0.5px);
-}
-
-.tabs-run-btn:active {
-  transform: translateY(0) scale(0.97);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 0 8px rgba(34, 197, 94, 0.15);
 }
 
 .tabs-run-btn:disabled {
@@ -1359,37 +1341,18 @@ body {
 
 /* Stop variant */
 .tabs-run-btn-stop {
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.25),
-    0 0 12px rgba(239, 68, 68, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  animation: tabs-stop-pulse 1.8s ease-in-out infinite;
+  background: var(--red);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
-.tabs-run-btn-stop:hover {
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(239, 68, 68, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+.tabs-run-btn-stop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 90%, black);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .tabs-run-btn-stop svg {
   width: 9px;
   height: 9px;
-}
-
-@keyframes tabs-stop-pulse {
-
-  0%,
-  100% {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 0 12px rgba(239, 68, 68, 0.25);
-  }
-
-  50% {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 0 22px rgba(239, 68, 68, 0.45);
-  }
 }
 
 /* ── Console Toggle ── */
@@ -7207,7 +7170,7 @@ body {
    LIGHT MODE LANGUAGE ICON OVERRIDES
    ============================================================ */
 
-html.light .tab-icon-javascript, 
+html.light .tab-icon-javascript,
 html.light .lang-badge-js,
 html.light .lang-js {
   background: rgba(202, 138, 4, 0.10);
@@ -7215,7 +7178,7 @@ html.light .lang-js {
   border-color: rgba(202, 138, 4, 0.15);
 }
 
-html.light .tab-icon-typescript, 
+html.light .tab-icon-typescript,
 html.light .lang-badge-ts,
 html.light .lang-ts {
   background: rgba(37, 99, 235, 0.10);
@@ -7223,7 +7186,7 @@ html.light .lang-ts {
   border-color: rgba(37, 99, 235, 0.15);
 }
 
-html.light .tab-icon-python, 
+html.light .tab-icon-python,
 html.light .lang-badge-py,
 html.light .lang-py {
   background: rgba(217, 119, 6, 0.10);
@@ -7231,7 +7194,7 @@ html.light .lang-py {
   border-color: rgba(217, 119, 6, 0.15);
 }
 
-html.light .tab-icon-html, 
+html.light .tab-icon-html,
 html.light .lang-badge-html,
 html.light .lang-html {
   background: rgba(220, 38, 38, 0.10);
@@ -7239,7 +7202,7 @@ html.light .lang-html {
   border-color: rgba(220, 38, 38, 0.15);
 }
 
-html.light .tab-icon-json, 
+html.light .tab-icon-json,
 html.light .lang-badge-json,
 html.light .lang-json {
   background: rgba(5, 150, 105, 0.10);
@@ -7247,7 +7210,7 @@ html.light .lang-json {
   border-color: rgba(5, 150, 105, 0.15);
 }
 
-html.light .tab-icon-xml, 
+html.light .tab-icon-xml,
 html.light .lang-badge-xml,
 html.light .lang-xml {
   background: rgba(234, 88, 12, 0.10);
@@ -7255,7 +7218,7 @@ html.light .lang-xml {
   border-color: rgba(234, 88, 12, 0.15);
 }
 
-html.light .tab-icon-diff, 
+html.light .tab-icon-diff,
 html.light .lang-badge-diff,
 html.light .lang-diff {
   background: rgba(219, 39, 119, 0.10);
