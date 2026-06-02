@@ -7148,21 +7148,39 @@ body {
 }
 
 /* Improve the Revert Arrow buttons */
-.diff-editor-container .monaco-diff-editor .codicon-diff-insert,
-.diff-editor-container .monaco-diff-editor .codicon-diff-remove {
+.diff-editor-container .monaco-diff-editor .arrow-revert-change {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 20px !important;
+  height: 20px !important;
+  margin-top: -3px !important;
+  margin-left: -3px !important;
   color: var(--text-2) !important;
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition: all 0.15s ease;
+  background: var(--bg-1) !important;
+  border: 1px solid var(--border-2) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1) !important;
+  transition: all 0.2s ease !important;
+  cursor: pointer !important;
+  z-index: 50 !important;
+  opacity: 1 !important;
 }
 
-.diff-editor-container .monaco-diff-editor .codicon-diff-insert:hover,
-.diff-editor-container .monaco-diff-editor .codicon-diff-remove:hover {
+.diff-editor-container .monaco-diff-editor .arrow-revert-change:before {
+  font-size: 14px !important;
+}
+
+.diff-editor-container .monaco-diff-editor .arrow-revert-change:hover {
   color: var(--text-1) !important;
-  background: var(--bg-2);
-  border-color: var(--border-2);
+  background: var(--bg-3) !important;
+  border-color: var(--border-accent) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15) !important;
+  transform: scale(1.1) !important;
+}
+
+.diff-editor-container .monaco-diff-editor .arrow-revert-change:active {
+  transform: scale(0.95) !important;
 }
 
 /* ============================================================
