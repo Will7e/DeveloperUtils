@@ -61,14 +61,14 @@ export function DashboardPage() {
             Welcome to <span className="dash-hero-accent">DevUtils</span>
           </h1>
           <p className="dash-hero-subtitle">
-            The elite workspace where your code runs fast, your bugs hide in fear, and "it works on my machine" becomes a universal truth.
+            An all-in-one developer workspace with essential tools for building, debugging, and testing.
           </p>
         </div>
 
         {/* Stats Row */}
         <div className="dash-stats">
           <div className="dash-stat">
-            <span className="dash-stat-value">5</span>
+            <span className="dash-stat-value">4</span>
             <span className="dash-stat-label">Languages</span>
           </div>
           <div className="dash-stat-divider" />
@@ -98,7 +98,7 @@ export function DashboardPage() {
               iconColor="#0ea5e9"
               glowColor="rgba(14, 165, 233, 0.12)"
               title="Cloud Compiler"
-              description="Write and run code in 5+ languages directly in the browser with Monaco editor and live HTML preview."
+              description="Browser-based IDE supporting 4 languages with live HTML preview."
               available
             />
 
@@ -108,7 +108,7 @@ export function DashboardPage() {
               iconColor="#a3e635"
               glowColor="rgba(163, 230, 53, 0.12)"
               title="Formatters"
-              description="Instantly beautify or minify JSON and XML with syntax highlighting and interactive tree views."
+              description="Format, minify, and validate JSON and XML payloads."
               available
             />
             <ToolCard
@@ -117,7 +117,7 @@ export function DashboardPage() {
               iconColor="#38bdf8"
               glowColor="rgba(56, 189, 248, 0.12)"
               title="List Comparator"
-              description="Compare two text lists side by side. Instantly spot unique items, common entries, and differences."
+              description="Compare two text lists to spot unique items and common entries."
               available
             />
             <ToolCard
@@ -126,7 +126,7 @@ export function DashboardPage() {
               iconColor="#f472b6"
               glowColor="rgba(244, 114, 182, 0.12)"
               title="Diff Check"
-              description="Industrial-grade text and code diff viewer powered by Monaco. Side-by-side or inline with syntax highlighting."
+              description="Side-by-side or inline code diff viewer with syntax highlighting."
               available
             />
             <ToolCard
@@ -135,7 +135,7 @@ export function DashboardPage() {
               iconColor="#c084fc"
               glowColor="rgba(192, 132, 252, 0.12)"
               title="API Library"
-              description="Searchable ServiceNow API reference — 129 classes, 741 methods with real-world code examples."
+              description="Searchable ServiceNow API reference with 1,500+ classes and code examples."
               available
             />
             <ToolCard
@@ -144,7 +144,7 @@ export function DashboardPage() {
               iconColor="#2dd4bf"
               glowColor="rgba(45, 212, 191, 0.12)"
               title="Workflow Designer"
-              description="Visual drag-and-drop workflow diagram builder with custom nodes, animated edges, and JSON export."
+              description="Visual drag-and-drop workflow builder with JSON export."
               available
             />
             <ToolCard
@@ -153,7 +153,7 @@ export function DashboardPage() {
               iconColor="#a78bfa"
               glowColor="rgba(167, 139, 250, 0.12)"
               title="API Tester"
-              description="A premium alternative to Postman for rapid client-side API exploration and debugging."
+              description="Lightweight client-side API exploration and debugging."
               available
             />
           </div>
@@ -171,7 +171,7 @@ export function DashboardPage() {
               iconColor="#38bdf8"
               glowColor="rgba(56, 189, 248, 0.12)"
               title="Terminal Shell"
-              description="Direct access to a sandboxed environment for rapid CLI prototyping."
+              description="Sandboxed environment for CLI prototyping."
             />
 
             <ToolCard
@@ -179,7 +179,7 @@ export function DashboardPage() {
               iconColor="#0ea5e9"
               glowColor="rgba(14, 165, 233, 0.12)"
               title="System Monitor"
-              description="Real-time visualization of resource allocation and performance metrics."
+              description="Real-time resource allocation and performance metrics."
             />
           </div>
         </div>
