@@ -104,7 +104,7 @@ export function CommandPalette() {
         label: "Cancel Execution",
         shortcut: "⌘⇧C",
         category: "Actions",
-        icon: <StopCircle style={{ width: 14, height: 14, color: "#f87171" }} />,
+        icon: <StopCircle style={{ width: 14, height: 14, color: "var(--red)" }} />,
         action: async () => {
           await compilerService.cancel();
           cancelExecution();

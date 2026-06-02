@@ -95,8 +95,8 @@ export function DashboardPage() {
             <ToolCard
               to="/compiler"
               icon={<Code2 className="h-5 w-5" />}
-              iconColor="#0ea5e9"
-              glowColor="rgba(14, 165, 233, 0.12)"
+              iconColor="var(--accent)"
+              glowColor="var(--accent-glow)"
               title="Cloud Compiler"
               description="Browser-based IDE supporting 4 languages with live HTML preview."
               available
@@ -105,8 +105,8 @@ export function DashboardPage() {
             <ToolCard
               to="/formatters"
               icon={<FileCode className="h-5 w-5" />}
-              iconColor="#a3e635"
-              glowColor="rgba(163, 230, 53, 0.12)"
+              iconColor="var(--green)"
+              glowColor="var(--green-dim)"
               title="Formatters"
               description="Format, minify, and validate JSON and XML payloads."
               available
@@ -114,8 +114,8 @@ export function DashboardPage() {
             <ToolCard
               to="/comparators"
               icon={<Columns className="h-5 w-5" />}
-              iconColor="#38bdf8"
-              glowColor="rgba(56, 189, 248, 0.12)"
+              iconColor="var(--blue)"
+              glowColor="var(--blue-dim)"
               title="List Comparator"
               description="Compare two text lists to spot unique items and common entries."
               available
@@ -123,8 +123,8 @@ export function DashboardPage() {
             <ToolCard
               to="/diff"
               icon={<FileDiff className="h-5 w-5" />}
-              iconColor="#f472b6"
-              glowColor="rgba(244, 114, 182, 0.12)"
+              iconColor="var(--pink, #f472b6)"
+              glowColor="var(--pink-dim, rgba(244, 114, 182, 0.12))"
               title="Diff Check"
               description="Side-by-side or inline code diff viewer with syntax highlighting."
               available
@@ -132,8 +132,8 @@ export function DashboardPage() {
             <ToolCard
               to="/library"
               icon={<BookOpen className="h-5 w-5" />}
-              iconColor="#c084fc"
-              glowColor="rgba(192, 132, 252, 0.12)"
+              iconColor="var(--purple)"
+              glowColor="var(--purple-dim)"
               title="API Library"
               description="Searchable ServiceNow API reference with 1,500+ classes and code examples."
               available
@@ -141,8 +141,8 @@ export function DashboardPage() {
             <ToolCard
               to="/workflows"
               icon={<GitFork className="h-5 w-5" />}
-              iconColor="#2dd4bf"
-              glowColor="rgba(45, 212, 191, 0.12)"
+              iconColor="var(--teal, #2dd4bf)"
+              glowColor="var(--teal-dim, rgba(45, 212, 191, 0.12))"
               title="Workflow Designer"
               description="Visual drag-and-drop workflow builder with JSON export."
               available
@@ -150,8 +150,8 @@ export function DashboardPage() {
             <ToolCard
               to="/api-tester"
               icon={<Globe className="h-5 w-5" />}
-              iconColor="#a78bfa"
-              glowColor="rgba(167, 139, 250, 0.12)"
+              iconColor="var(--purple)"
+              glowColor="var(--purple-dim)"
               title="API Tester"
               description="Lightweight client-side API exploration and debugging."
               available
@@ -168,16 +168,16 @@ export function DashboardPage() {
           <div className="dash-grid">
             <ToolCard
               icon={<Terminal className="h-5 w-5" />}
-              iconColor="#38bdf8"
-              glowColor="rgba(56, 189, 248, 0.12)"
+              iconColor="var(--blue)"
+              glowColor="var(--blue-dim)"
               title="Terminal Shell"
               description="Sandboxed environment for CLI prototyping."
             />
 
             <ToolCard
               icon={<Cpu className="h-5 w-5" />}
-              iconColor="#0ea5e9"
-              glowColor="rgba(14, 165, 233, 0.12)"
+              iconColor="var(--accent)"
+              glowColor="var(--accent-glow)"
               title="System Monitor"
               description="Real-time resource allocation and performance metrics."
             />

@@ -79,7 +79,7 @@ export function SettingsPanel() {
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <div className="settings-header-title">
-            <Settings style={{ width: 15, height: 15, color: "#0ea5e9" }} />
+            <Settings style={{ width: 15, height: 15, color: "var(--accent)" }} />
             <span>Settings</span>
           </div>
           <ActionTooltip content="Close Settings (Esc)" side="left">
@@ -221,9 +221,9 @@ export function SettingsPanel() {
             <label className="settings-label">
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {editorSettings.theme === "dark" ? (
-                  <Moon style={{ width: 13, height: 13, color: "#0ea5e9" }} />
+                  <Moon style={{ width: 13, height: 13, color: "var(--accent)" }} />
                 ) : (
-                  <Sun style={{ width: 13, height: 13, color: "#f59e0b" }} />
+                  <Sun style={{ width: 13, height: 13, color: "var(--yellow)" }} />
                 )}
                 Theme
               </span>

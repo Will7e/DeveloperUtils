@@ -44,6 +44,10 @@
   --blue-dim: rgba(56, 189, 248, 0.10);
   --purple: #a78bfa;
   --purple-dim: rgba(167, 139, 250, 0.10);
+  --pink: #f472b6;
+  --pink-dim: rgba(244, 114, 182, 0.10);
+  --teal: #2dd4bf;
+  --teal-dim: rgba(45, 212, 191, 0.10);
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
@@ -109,6 +113,10 @@ html.light {
   --blue-dim: rgba(37, 99, 235, 0.10);
   --purple: #7c3aed;
   --purple-dim: rgba(124, 58, 237, 0.10);
+  --pink: #db2777;
+  --pink-dim: rgba(219, 39, 119, 0.10);
+  --teal: #0d9488;
+  --teal-dim: rgba(13, 148, 136, 0.10);
 
   /* shadcn compat */
   --background: var(--bg-0);
@@ -7193,4 +7201,64 @@ body {
 .monaco-editor .margin,
 .monaco-editor-background {
   background-color: var(--bg-1) !important;
+}
+
+/* ============================================================
+   LIGHT MODE LANGUAGE ICON OVERRIDES
+   ============================================================ */
+
+html.light .tab-icon-javascript, 
+html.light .lang-badge-js,
+html.light .lang-js {
+  background: rgba(202, 138, 4, 0.10);
+  color: #ca8a04;
+  border-color: rgba(202, 138, 4, 0.15);
+}
+
+html.light .tab-icon-typescript, 
+html.light .lang-badge-ts,
+html.light .lang-ts {
+  background: rgba(37, 99, 235, 0.10);
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.15);
+}
+
+html.light .tab-icon-python, 
+html.light .lang-badge-py,
+html.light .lang-py {
+  background: rgba(217, 119, 6, 0.10);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.15);
+}
+
+html.light .tab-icon-html, 
+html.light .lang-badge-html,
+html.light .lang-html {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.15);
+}
+
+html.light .tab-icon-json, 
+html.light .lang-badge-json,
+html.light .lang-json {
+  background: rgba(5, 150, 105, 0.10);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.15);
+}
+
+html.light .tab-icon-xml, 
+html.light .lang-badge-xml,
+html.light .lang-xml {
+  background: rgba(234, 88, 12, 0.10);
+  color: #ea580c;
+  border-color: rgba(234, 88, 12, 0.15);
+}
+
+html.light .tab-icon-diff, 
+html.light .lang-badge-diff,
+html.light .lang-diff {
+  background: rgba(219, 39, 119, 0.10);
+  color: #db2777;
+  border-color: rgba(219, 39, 119, 0.15);
 }

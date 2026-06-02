@@ -54,7 +54,7 @@ export function HtmlPreview() {
       {/* Header */}
       <div className="html-preview-header">
         <div className="html-preview-header-left">
-          <Globe style={{ width: 14, height: 14, color: "#0ea5e9" }} />
+          <Globe style={{ width: 14, height: 14, color: "var(--accent)" }} />
           <span className="html-preview-title">Live Preview</span>
           <span className="html-preview-badge">Auto</span>
         </div>

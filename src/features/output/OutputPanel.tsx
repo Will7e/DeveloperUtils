@@ -42,7 +42,7 @@ export function OutputPanel() {
       {/* Header */}
       <div className="output-header">
         <div className="output-header-left">
-          <Terminal style={{ width: 14, height: 14, color: "#0ea5e9" }} />
+          <Terminal style={{ width: 14, height: 14, color: "var(--accent)" }} />
           <span className="output-title">Console</span>
           {isRunning && (
             <div className="running-indicator">

@@ -16,12 +16,12 @@ interface PropertiesPanelProps {
 }
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
-  start: <Play className="h-3.5 w-3.5" style={{ color: "#22c55e" }} />,
-  end: <Square className="h-3.5 w-3.5" style={{ color: "#ef4444" }} />,
-  process: <Cog className="h-3.5 w-3.5" style={{ color: "#0ea5e9" }} />,
-  decision: <GitBranch className="h-3.5 w-3.5" style={{ color: "#f59e0b" }} />,
-  data: <Database className="h-3.5 w-3.5" style={{ color: "#a78bfa" }} />,
-  integration: <Globe className="h-3.5 w-3.5" style={{ color: "#2dd4bf" }} />,
+  start: <Play className="h-3.5 w-3.5" style={{ color: "var(--green)" }} />,
+  end: <Square className="h-3.5 w-3.5" style={{ color: "var(--red)" }} />,
+  process: <Cog className="h-3.5 w-3.5" style={{ color: "var(--accent)" }} />,
+  decision: <GitBranch className="h-3.5 w-3.5" style={{ color: "var(--yellow)" }} />,
+  data: <Database className="h-3.5 w-3.5" style={{ color: "var(--purple)" }} />,
+  integration: <Globe className="h-3.5 w-3.5" style={{ color: "var(--teal)" }} />,
 };
 
 export function PropertiesPanel({ 
