@@ -35,6 +35,7 @@ export function DrawFlowDesigner() {
       elements: activeWorkflow.elements || [],
       appState: {
         theme: isDark ? "dark" : "light",
+        openSidebar: activeWorkflow.appState?.openSidebar ?? null,
         ...(activeWorkflow.appState || {}),
       } as any,
     });
@@ -57,6 +58,7 @@ export function DrawFlowDesigner() {
 
         const savedAppState = {
           theme: isDark ? "dark" : "light",
+          openSidebar: appState.openSidebar || null,
           viewBackgroundColor: appState.viewBackgroundColor,
           gridSize: appState.gridSize,
           zoom: appState.zoom,
@@ -102,6 +104,7 @@ export function DrawFlowDesigner() {
             elements: activeWorkflow?.elements || [],
             appState: {
               theme: isDark ? "dark" : "light",
+              openSidebar: activeWorkflow?.appState?.openSidebar ?? null,
               ...(activeWorkflow?.appState || {}),
             } as any,
             files: activeWorkflow?.files || {},

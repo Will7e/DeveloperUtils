@@ -777,6 +777,14 @@ export const useAppStore = create<AppState>()(
       updateExcalidrawLibraryItems: (items: any[]) => {
         set({ excalidrawLibraryItems: items });
       },
+      excalidrawAddedLibraryIds: [],
+      addExcalidrawAddedLibraryId: (id: string) => {
+        set((state) => ({
+          excalidrawAddedLibraryIds: state.excalidrawAddedLibraryIds?.includes(id)
+            ? state.excalidrawAddedLibraryIds
+            : [...(state.excalidrawAddedLibraryIds || []), id],
+        }));
+      },
     }),
     {
       name: "devutils-app-state",
@@ -800,6 +808,7 @@ export const useAppStore = create<AppState>()(
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
         excalidrawLibraryItems: state.excalidrawLibraryItems,
+        excalidrawAddedLibraryIds: state.excalidrawAddedLibraryIds,
       }),
     }
   )

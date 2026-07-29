@@ -297,7 +297,20 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                   cursor: "pointer",
                   transition: "all 0.15s ease",
                 }}
-                onClick={() => setIsLibraryModalOpen(true)}
+                onClick={() => {
+                  setIsLibraryModalOpen(true);
+                  if (excalidrawAPI) {
+                    try {
+                      excalidrawAPI.updateScene({
+                        appState: {
+                          openSidebar: { name: "library", tab: "libraries" },
+                        } as any,
+                      });
+                    } catch {
+                      // Fallback
+                    }
+                  }
+                }}
               >
                 <Sparkles style={{ width: 14, height: 14, color: "var(--accent)" }} />
                 <span>Community Libraries</span>

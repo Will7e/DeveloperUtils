@@ -51,16 +51,57 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
   const [addedLibIds, setAddedLibIds] = useState<Set<string>>(new Set());
 
   const addToast = useAppStore((s) => s.addToast);
+  const excalidrawAddedLibraryIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+  const addExcalidrawAddedLibraryId = useAppStore((s) => s.addExcalidrawAddedLibraryId);
 
   useEffect(() => {
     if (isOpen) {
+      if (excalidrawAPI) {
+        try {
+          excalidrawAPI.updateScene({
+            appState: {
+              openSidebar: { name: "library", tab: "libraries" },
+            } as any,
+          });
+        } catch {
+          // Fallback
+        }
+      }
       setLoading(true);
       getExcalidrawLibraries().then((data) => {
         setLibraries(data);
         setLoading(false);
       });
     }
-  }, [isOpen]);
+  }, [isOpen, excalidrawAPI]);
+
+  const handleCloseModal = () => {
+    // Ensure Excalidraw library sidebar remains open when closing the community libraries modal
+    if (excalidrawAPI) {
+      try {
+        excalidrawAPI.updateScene({
+          appState: {
+            openSidebar: { name: "library", tab: "libraries" },
+          } as any,
+        });
+      } catch {
+        // Fallback
+      }
+    }
+    onClose();
+  };
+
+  // Close modal on Escape key press
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        handleCloseModal();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, excalidrawAPI]);
 
   const filteredLibraries = useMemo(() => {
     return libraries.filter((lib) => {
@@ -94,10 +135,17 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
       return;
     }
 
+    const isAlreadyAdded = excalidrawAddedLibraryIds.includes(lib.id) || addedLibIds.has(lib.id);
+    if (isAlreadyAdded) {
+      addToast({ message: `"${lib.name}" is already in your library`, type: "info" });
+      return;
+    }
+
     try {
       setLoadingLibId(lib.id);
       const count = await loadLibraryToExcalidraw(lib.source, excalidrawAPI);
       setAddedLibIds((prev) => new Set(prev).add(lib.id));
+      addExcalidrawAddedLibraryId(lib.id);
       addToast({ message: `Added "${lib.name}" (${count} items) to Excalidraw Library!`, type: "success" });
     } catch (err) {
       console.error(err);
@@ -111,6 +159,11 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
 
   return (
     <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleCloseModal();
+        }
+      }}
       style={{
         position: "fixed",
         inset: 0,
@@ -190,7 +243,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
           </div>
 
           <button
-            onClick={onClose}
+            onClick={handleCloseModal}
             style={{
               padding: "6px",
               borderRadius: "8px",
@@ -388,7 +441,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
               }}
             >
               {filteredLibraries.map((lib) => {
-                const isAdded = addedLibIds.has(lib.id);
+                const isAdded = excalidrawAddedLibraryIds.includes(lib.id) || addedLibIds.has(lib.id);
                 const isLoadingThis = loadingLibId === lib.id;
                 const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
                 const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
@@ -514,7 +567,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                     {/* Action Button */}
                     <button
                       onClick={() => handleAddLibrary(lib)}
-                      disabled={isLoadingThis}
+                      disabled={isLoadingThis || isAdded}
                       style={{
                         width: "100%",
                         padding: "7px 12px",
@@ -525,11 +578,12 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                         alignItems: "center",
                         justifyContent: "center",
                         gap: "6px",
-                        cursor: "pointer",
+                        cursor: isLoadingThis ? "wait" : isAdded ? "not-allowed" : "pointer",
                         border: "none",
                         transition: "all 0.15s ease",
                         backgroundColor: isAdded ? "rgba(16, 185, 129, 0.15)" : "var(--accent)",
                         color: isAdded ? "#34d399" : "#ffffff",
+                        opacity: isAdded ? 0.85 : 1,
                       }}
                     >
                       {isLoadingThis ? (
