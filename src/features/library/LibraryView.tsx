@@ -58,6 +58,7 @@ function getTypeBadge(type: string) {
 export function LibraryView() {
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
   const searchQuery = useAppStore((s) => s.librarySearchQuery);
+  const libraryTab = useAppStore((s) => s.libraryTab);
   const addToast = useAppStore((s) => s.addToast);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +73,10 @@ export function LibraryView() {
       contentRef.current.scrollTo({ top: 0, behavior: "smooth" });
     }
   }, [selectedId]);
+
+  if (libraryTab === "excalidraw") {
+    return <ExcalidrawLibraryGallery searchQuery={searchQuery} addToast={addToast} />;
+  }
 
   if (!selectedApi) {
     return (
@@ -466,3 +471,168 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
     </span>
   );
 });
+
+import { useNavigate } from "react-router-dom";
+import { getExcalidrawLibraries, type ExcalidrawLibraryItem } from "@/utils/excalidrawLibrary";
+
+function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: string; addToast: any }) {
+  const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState("all");
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    getExcalidrawLibraries().then((data) => {
+      setLibraries(data);
+      setLoading(false);
+    });
+  }, []);
+
+  const categories = [
+    { id: "all", label: "All Libraries" },
+    { id: "system", label: "System Design", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
+    { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
+    { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
+    { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
+  ];
+
+  const filteredLibraries = useMemo(() => {
+    return libraries.filter((lib) => {
+      if (activeCategory !== "all") {
+        const cat = categories.find((c) => c.id === activeCategory);
+        if (cat?.keywords) {
+          const matchCat = cat.keywords.some((kw) =>
+            lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw)
+          );
+          if (!matchCat) return false;
+        }
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = lib.name.toLowerCase().includes(q);
+        const matchDesc = lib.description.toLowerCase().includes(q);
+        const matchAuthor = lib.authors.some((a) => a.name.toLowerCase().includes(q));
+        return matchName || matchDesc || matchAuthor;
+      }
+
+      return true;
+    });
+  }, [libraries, activeCategory, searchQuery]);
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-bg-0 overflow-hidden">
+      {/* Header */}
+      <div className="p-6 border-b border-border/40 bg-bg-1/50 shrink-0">
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <div>
+            <h1 className="text-xl font-bold text-text-0 flex items-center gap-2.5">
+              Excalidraw Community Libraries
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-accent/15 text-accent font-semibold">
+                {libraries.length} Libraries
+              </span>
+            </h1>
+            <p className="text-xs text-text-2 mt-1">
+              Explore 200+ offline community shape collections downloaded into your DeveloperUtils workspace.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/workflows")}
+            className="px-3.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium flex items-center gap-1.5 shadow-sm hover:bg-accent/90 transition-colors"
+          >
+            <span>Open Workflow Studio</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Category Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
+              className={`text-xs px-3 py-1 rounded-md transition-colors whitespace-nowrap ${
+                activeCategory === cat.id
+                  ? "bg-accent text-white font-medium shadow-sm"
+                  : "bg-bg-2 text-text-2 hover:text-text-0 hover:bg-bg-3"
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Grid */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="h-full flex flex-col items-center justify-center text-text-2 gap-2">
+            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            <span className="text-xs">Loading library catalog...</span>
+          </div>
+        ) : filteredLibraries.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-text-3 py-12 gap-2">
+            <p className="text-sm font-medium text-text-2">No libraries match your search</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filteredLibraries.map((lib) => {
+              const previewUrl = `/excalidraw-libraries/libraries/${lib.preview}`;
+              return (
+                <div
+                  key={lib.id}
+                  className="group bg-bg-1 border border-border/40 hover:border-accent/40 rounded-xl p-3.5 flex flex-col justify-between transition-all hover:shadow-lg hover:bg-bg-1/90"
+                >
+                  <div>
+                    <div className="w-full h-32 rounded-lg bg-bg-2/80 border border-border/30 overflow-hidden flex items-center justify-center mb-3 relative group-hover:bg-bg-2 transition-colors">
+                      <img
+                        src={previewUrl}
+                        alt={lib.name}
+                        className="max-h-full max-w-full object-contain p-2 filter dark:invert-[0.1]"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = "none";
+                        }}
+                      />
+                    </div>
+
+                    <h3 className="text-xs font-semibold text-text-0 line-clamp-1 group-hover:text-accent transition-colors">
+                      {lib.name}
+                    </h3>
+                    <p className="text-[11px] text-text-2 line-clamp-2 my-1 min-h-[32px]">
+                      {lib.description}
+                    </p>
+
+                    {lib.authors.length > 0 && (
+                      <div className="text-[10px] text-text-3 mb-3 flex items-center gap-1">
+                        <span>by</span>
+                        <a
+                          href={lib.authors[0]!.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text-2 hover:text-accent underline flex items-center gap-0.5 truncate"
+                        >
+                          {lib.authors[0]!.name}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      navigate("/workflows");
+                      addToast({ message: `Open /workflows and click "Libraries" to import "${lib.name}"`, type: "info" });
+                    }}
+                    className="w-full py-1.5 px-3 rounded-lg bg-bg-2 hover:bg-accent hover:text-white border border-border/40 text-text-0 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <span>Use in Workflow</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

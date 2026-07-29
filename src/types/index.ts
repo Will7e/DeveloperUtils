@@ -141,6 +141,7 @@ export interface AppState {
   diffSettings: DiffSettings;
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
+  libraryTab: "servicenow" | "excalidraw";
 
   // Actions
   createFile: (name: string, language: Language) => void;
@@ -199,6 +200,7 @@ export interface AppState {
   
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
+  setLibraryTab: (tab: "servicenow" | "excalidraw") => void;
 
   // Workflow UI & State
   workflows: Workflow[];

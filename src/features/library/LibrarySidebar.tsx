@@ -170,6 +170,9 @@ export function LibrarySidebar() {
   const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
   const searchQuery = useAppStore((s) => s.librarySearchQuery);
   const setSearchQuery = useAppStore((s) => s.setLibrarySearchQuery);
+  const libraryTab = useAppStore((s) => s.libraryTab);
+  const setLibraryTab = useAppStore((s) => s.setLibraryTab);
+
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(libraryData.apis.map((a) => a.type)));
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
@@ -182,7 +185,6 @@ export function LibrarySidebar() {
     const groups: Record<string, typeof libraryData.apis> = {};
     const seen = new Set<string>();
     for (const api of libraryData.apis) {
-      // Skip duplicates
       if (seen.has(api.name)) continue;
       seen.add(api.name);
       
@@ -191,7 +193,6 @@ export function LibrarySidebar() {
       groups[key].push(api);
     }
 
-    // Sort APIs within each group: Glide classes first, then alphabetical
     for (const type in groups) {
       const apis = groups[type];
       if (apis) {
@@ -208,11 +209,8 @@ export function LibrarySidebar() {
   }, []);
 
   const categoryOrder = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"];
-
-  // Compute search results
   const searchResults = useMemo(() => computeSearchResults(searchQuery), [searchQuery]);
 
-  // Switch in/out of search mode
   useEffect(() => {
     const hasQuery = searchQuery.trim().length > 0;
     setIsSearchMode(hasQuery);
@@ -221,14 +219,12 @@ export function LibrarySidebar() {
     }
   }, [searchQuery]);
 
-  // Auto-select first result when searching
   useEffect(() => {
     if (isSearchMode && searchResults.length > 0 && selectedResultIndex === -1) {
       setSelectedResultIndex(0);
     }
   }, [isSearchMode, searchResults, selectedResultIndex]);
 
-  // "/" keyboard shortcut to focus search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
@@ -242,7 +238,6 @@ export function LibrarySidebar() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Keyboard navigation within search results
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isSearchMode || searchResults.length === 0) return;
 
@@ -250,7 +245,6 @@ export function LibrarySidebar() {
       e.preventDefault();
       setSelectedResultIndex((prev) => {
         const next = Math.min(prev + 1, searchResults.length - 1);
-        // Scroll into view
         resultRefs.current.get(next)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
         return next;
       });
@@ -282,14 +276,12 @@ export function LibrarySidebar() {
     searchRef.current?.focus();
   }, [setSearchQuery]);
 
-  // Scroll active item into view in browse mode
   useEffect(() => {
     if (!isSearchMode && activeRef.current) {
       activeRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [selectedId, isSearchMode]);
 
-  // Get categories for browse mode
   const displayedCategories = useMemo(() => {
     const existing = Object.keys(grouped);
     const sorted = categoryOrder.filter(c => existing.includes(c));
@@ -308,7 +300,6 @@ export function LibrarySidebar() {
     });
   };
 
-  // Total unique API count
   const totalApis = useMemo(() => {
     const seen = new Set<string>();
     libraryData.apis.forEach(a => seen.add(a.name));
@@ -336,9 +327,33 @@ export function LibrarySidebar() {
             <Database className="lib-db-icon" />
           </div>
           <div className="lib-sidebar-title-text">
-            <span className="lib-sidebar-title">API Library</span>
-            <span className="lib-sidebar-subtitle">ServiceNow Reference</span>
+            <span className="lib-sidebar-title">Developer Library</span>
+            <span className="lib-sidebar-subtitle">
+              {libraryTab === "servicenow" ? "ServiceNow API Reference" : "Excalidraw Community Shapes"}
+            </span>
           </div>
+        </div>
+
+        {/* Tab Toggle */}
+        <div className="flex border border-border/40 p-0.5 bg-bg-2/60 rounded-lg text-[11px] font-medium my-2">
+          <button
+            className={cn(
+              "flex-1 py-1 px-2 rounded-md text-center transition-colors",
+              libraryTab === "servicenow" ? "bg-bg-0 text-text-0 shadow-sm font-semibold" : "text-text-2 hover:text-text-0"
+            )}
+            onClick={() => setLibraryTab("servicenow")}
+          >
+            ServiceNow APIs
+          </button>
+          <button
+            className={cn(
+              "flex-1 py-1 px-2 rounded-md text-center transition-colors flex items-center justify-center gap-1",
+              libraryTab === "excalidraw" ? "bg-bg-0 text-accent shadow-sm font-semibold" : "text-text-2 hover:text-text-0"
+            )}
+            onClick={() => setLibraryTab("excalidraw")}
+          >
+            Excalidraw Libraries
+          </button>
         </div>
 
         {/* Search */}
@@ -347,7 +362,7 @@ export function LibrarySidebar() {
           <input
             ref={searchRef}
             type="text"
-            placeholder="Search APIs, methods..."
+            placeholder={libraryTab === "servicenow" ? "Search APIs, methods..." : "Search Excalidraw shapes..."}
             className="lib-search-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -362,7 +377,7 @@ export function LibrarySidebar() {
           )}
         </div>
 
-        {isSearchMode && (
+        {isSearchMode && libraryTab === "servicenow" && (
           <div className="lib-search-status">
             <Zap size={10} className="lib-search-status-icon" />
             <span>
@@ -377,7 +392,17 @@ export function LibrarySidebar() {
 
       {/* Content: Search mode or Browse mode */}
       <div className="lib-sidebar-content">
-        {isSearchMode ? (
+        {libraryTab === "excalidraw" ? (
+          <div className="p-3 text-xs text-text-2 space-y-2">
+            <div className="p-2.5 rounded-lg bg-accent/10 border border-accent/20 text-accent font-medium flex items-center gap-2">
+              <Zap className="w-4 h-4 shrink-0" />
+              <span>Browse 200+ downloaded Excalidraw libraries on the right panel.</span>
+            </div>
+            <p className="text-[11px] text-text-3">
+              Features System Design, AWS Architecture, UI Wireframes, Icons, Flowcharts, and Diagram Shapes.
+            </p>
+          </div>
+        ) : isSearchMode ? (
           // ---- SEARCH RESULTS ----
           searchResults.length > 0 ? (
             <div className="lib-search-results">

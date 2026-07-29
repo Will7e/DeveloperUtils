@@ -320,6 +320,7 @@ export const useAppStore = create<AppState>()(
       diffSettings: initialDiffSettings,
       librarySelectedItemId: null,
       librarySearchQuery: "",
+      libraryTab: "servicenow",
       workflows: [initialWorkflow],
       activeWorkflowId: initialWorkflow.id,
 
@@ -695,6 +696,10 @@ export const useAppStore = create<AppState>()(
       
       setLibrarySearchQuery: (query) => {
         set({ librarySearchQuery: query });
+      },
+
+      setLibraryTab: (tab) => {
+        set({ libraryTab: tab, librarySelectedItemId: null, librarySearchQuery: "" });
       },
 
       // Workflow actions

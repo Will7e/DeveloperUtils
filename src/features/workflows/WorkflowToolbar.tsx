@@ -13,6 +13,7 @@ import {
   Trash2,
   FileImage,
   FileCode,
+  Library,
 } from "lucide-react";
 import {
   Tooltip,
@@ -22,12 +23,14 @@ import {
 import { useAppStore } from "@/stores/app.store";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
+import { ExcalidrawLibraryModal } from "./ExcalidrawLibraryModal";
 
 interface WorkflowToolbarProps {
   excalidrawAPI: ExcalidrawImperativeAPI | null;
 }
 
 export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
   const createWorkflow = useAppStore((s) => s.createWorkflow);
@@ -53,7 +56,7 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
     if (!activeWorkflow || !excalidrawAPI) return;
     const elements = excalidrawAPI.getSceneElements();
     const appState = excalidrawAPI.getAppState();
-    
+
     const data = JSON.stringify(
       {
         type: "excalidraw",
@@ -190,123 +193,147 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
   }, [createWorkflow]);
 
   return (
-    <div className="wf-toolbar border-b border-border/40 bg-bg-1/90 backdrop-blur-md px-3 py-1.5 flex items-center justify-between gap-3 shrink-0">
-      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto">
-        {/* Workflow Tabs */}
-        <div className="wf-toolbar-tabs flex items-center gap-1">
-          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={workflows.map((w) => w.id)} strategy={horizontalListSortingStrategy}>
-              {workflows.map((w) => (
-                <SortableTab key={w.id} id={w.id}>
-                  <button
-                    className={`wf-toolbar-tab ${w.id === activeWorkflowId ? "wf-toolbar-tab-active" : ""}`}
-                    onClick={() => setActiveWorkflow(w.id)}
-                    onDoubleClick={() => {
-                      setRenamingId(w.id);
-                      setRenameValue(w.name);
-                    }}
-                  >
-                    {renamingId === w.id ? (
-                      <input
-                        type="text"
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => {
-                          if (renameValue.trim()) renameWorkflow(w.id, renameValue.trim());
-                          setRenamingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
+    <>
+      <div className="wf-toolbar border-b border-border/40 bg-bg-1/90 backdrop-blur-md px-3 py-1.5 flex items-center justify-between gap-3 shrink-0">
+        <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto">
+          {/* Workflow Tabs */}
+          <div className="wf-toolbar-tabs flex items-center gap-1">
+            <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={workflows.map((w) => w.id)} strategy={horizontalListSortingStrategy}>
+                {workflows.map((w) => (
+                  <SortableTab key={w.id} id={w.id}>
+                    <button
+                      className={`wf-toolbar-tab ${w.id === activeWorkflowId ? "wf-toolbar-tab-active" : ""}`}
+                      onClick={() => setActiveWorkflow(w.id)}
+                      onDoubleClick={() => {
+                        setRenamingId(w.id);
+                        setRenameValue(w.name);
+                      }}
+                    >
+                      {renamingId === w.id ? (
+                        <input
+                          type="text"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => {
                             if (renameValue.trim()) renameWorkflow(w.id, renameValue.trim());
                             setRenamingId(null);
-                          }
-                          if (e.key === "Escape") setRenamingId(null);
-                        }}
-                        autoFocus
-                        className="wf-tab-rename-input"
-                      />
-                    ) : (
-                      <span className="wf-tab-name">{w.name}</span>
-                    )}
-                    {workflows.length > 1 && (
-                      <span
-                        className="wf-tab-close"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteWorkflow(w.id);
-                        }}
-                      >
-                        ×
-                      </span>
-                    )}
-                  </button>
-                </SortableTab>
-              ))}
-            </SortableContext>
-          </DndContext>
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              if (renameValue.trim()) renameWorkflow(w.id, renameValue.trim());
+                              setRenamingId(null);
+                            }
+                            if (e.key === "Escape") setRenamingId(null);
+                          }}
+                          autoFocus
+                          className="wf-tab-rename-input"
+                        />
+                      ) : (
+                        <span className="wf-tab-name">{w.name}</span>
+                      )}
+                      {workflows.length > 1 && (
+                        <span
+                          className="wf-tab-close"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteWorkflow(w.id);
+                          }}
+                        >
+                          ×
+                        </span>
+                      )}
+                    </button>
+                  </SortableTab>
+                ))}
+              </SortableContext>
+            </DndContext>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button className="wf-toolbar-btn wf-add-tab-btn" onClick={handleAddWorkflow}>
+                  <Plus className="w-4 h-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>New Workflow Tab</TooltipContent>
+            </Tooltip>
+          </div>
+        </div>
+
+        {/* Right side actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className="wf-toolbar-btn text-accent font-medium flex items-center gap-1.5 px-2 bg-accent/10 hover:bg-accent/20 border border-accent/20 rounded transition-colors"
+                onClick={() => setIsLibraryModalOpen(true)}
+              >
+                <Library className="w-3.5 h-3.5 text-accent" />
+                <span className="text-xs text-accent">Libraries</span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Browse & Download Excalidraw Community Libraries</TooltipContent>
+          </Tooltip>
+
+          <div className="wf-toolbar-divider" />
 
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn wf-add-tab-btn" onClick={handleAddWorkflow}>
-                <Plus className="w-4 h-4" />
+              <button className="wf-toolbar-btn" onClick={handleExportPNG}>
+                <FileImage className="w-4 h-4 text-emerald-400" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>New Workflow Tab</TooltipContent>
+            <TooltipContent>Export PNG Image</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="wf-toolbar-btn" onClick={handleExportSVG}>
+                <FileCode className="w-4 h-4 text-cyan-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Export Vector SVG</TooltipContent>
+          </Tooltip>
+
+          <div className="wf-toolbar-divider" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="wf-toolbar-btn" onClick={handleExportJSON}>
+                <Download className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Export Excalidraw JSON</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="wf-toolbar-btn" onClick={handleImportJSON}>
+                <Upload className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Import JSON Canvas</TooltipContent>
+          </Tooltip>
+
+          <div className="wf-toolbar-divider" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button className="wf-toolbar-btn text-rose-400 hover:bg-rose-500/10" onClick={handleClearCanvas}>
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Clear Canvas</TooltipContent>
           </Tooltip>
         </div>
       </div>
 
-      {/* Right side actions */}
-      <div className="flex items-center gap-1 shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={handleExportPNG}>
-              <FileImage className="w-4 h-4 text-emerald-400" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Export PNG Image</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={handleExportSVG}>
-              <FileCode className="w-4 h-4 text-cyan-400" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Export Vector SVG</TooltipContent>
-        </Tooltip>
-
-        <div className="wf-toolbar-divider" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={handleExportJSON}>
-              <Download className="w-4 h-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Export Excalidraw JSON</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={handleImportJSON}>
-              <Upload className="w-4 h-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Import JSON Canvas</TooltipContent>
-        </Tooltip>
-
-        <div className="wf-toolbar-divider" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn text-rose-400 hover:bg-rose-500/10" onClick={handleClearCanvas}>
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Clear Canvas</TooltipContent>
-        </Tooltip>
-      </div>
-    </div>
+      {/* Library Catalog Modal */}
+      <ExcalidrawLibraryModal
+        isOpen={isLibraryModalOpen}
+        onClose={() => setIsLibraryModalOpen(false)}
+        excalidrawAPI={excalidrawAPI}
+      />
+    </>
   );
 }
