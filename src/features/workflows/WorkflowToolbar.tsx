@@ -1,5 +1,5 @@
 // ============================================================
-// WorkflowToolbar — Top toolbar for Excalidraw workflow actions
+// WorkflowToolbar — Clean top tab bar & actions for Workflows
 // ============================================================
 
 import { useCallback, useState } from "react";
@@ -10,7 +10,7 @@ import {
   Download,
   Upload,
   Plus,
-  Trash,
+  Trash2,
   FileImage,
   FileCode,
 } from "lucide-react";
@@ -187,14 +187,11 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
 
   const handleAddWorkflow = useCallback(() => {
     createWorkflow();
-    const newId = useAppStore.getState().activeWorkflowId;
-    setRenamingId(newId);
-    setRenameValue("Untitled Workflow");
   }, [createWorkflow]);
 
   return (
-    <div className="wf-toolbar border-b border-border/40 bg-bg-1/80 backdrop-blur-sm px-3 py-2 flex items-center justify-between gap-3">
-      <div className="wf-toolbar-left flex items-center gap-2 overflow-x-auto">
+    <div className="wf-toolbar border-b border-border/40 bg-bg-1/90 backdrop-blur-md px-3 py-1.5 flex items-center justify-between gap-3 shrink-0">
+      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto">
         {/* Workflow Tabs */}
         <div className="wf-toolbar-tabs flex items-center gap-1">
           <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -254,12 +251,13 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
                 <Plus className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>New Workflow Canvas</TooltipContent>
+            <TooltipContent>New Workflow Tab</TooltipContent>
           </Tooltip>
         </div>
       </div>
 
-      <div className="wf-toolbar-right flex items-center gap-1">
+      {/* Right side actions */}
+      <div className="flex items-center gap-1 shrink-0">
         <Tooltip>
           <TooltipTrigger asChild>
             <button className="wf-toolbar-btn" onClick={handleExportPNG}>
@@ -303,7 +301,7 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <button className="wf-toolbar-btn text-rose-400 hover:bg-rose-500/10" onClick={handleClearCanvas}>
-              <Trash className="w-4 h-4" />
+              <Trash2 className="w-4 h-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent>Clear Canvas</TooltipContent>

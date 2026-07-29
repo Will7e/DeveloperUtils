@@ -5813,9 +5813,10 @@ body {
 .wf-toolbar-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
-  max-width: 500px;
+  flex: 1;
+  max-width: 100%;
 }
 
 .wf-toolbar-tab {
@@ -5848,10 +5849,12 @@ body {
   color: var(--text-1);
 }
 
-.wf-toolbar-tab-name {
-  max-width: 120px;
+.wf-toolbar-tab-name,
+.wf-tab-name {
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wf-tab-rename-input {
