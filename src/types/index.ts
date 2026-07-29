@@ -205,12 +205,14 @@ export interface AppState {
   // Workflow UI & State
   workflows: Workflow[];
   activeWorkflowId: string;
+  excalidrawLibraryItems?: any[];
   createWorkflow: (name?: string) => void;
   deleteWorkflow: (id: string) => void;
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;
   reorderWorkflows: (fromIndex: number, toIndex: number) => void;
-  updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => void;
+  updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>, files?: Record<string, any>) => void;
+  updateExcalidrawLibraryItems: (libraryItems: any[]) => void;
 }
 
 // ============================================================
@@ -222,6 +224,7 @@ export interface Workflow {
   name: string;
   elements?: any[];
   appState?: Record<string, any>;
+  files?: Record<string, any>;
   createdAt: number;
   updatedAt: number;
 }

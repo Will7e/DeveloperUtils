@@ -16,6 +16,8 @@ export function WorkflowDesigner() {
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
   const updateWorkflowExcalidraw = useAppStore((s) => s.updateWorkflowExcalidraw);
+  const excalidrawLibraryItems = useAppStore((s) => s.excalidrawLibraryItems);
+  const updateExcalidrawLibraryItems = useAppStore((s) => s.updateExcalidrawLibraryItems);
   const appTheme = useAppStore((s) => s.editorSettings.theme);
 
   const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
@@ -44,21 +46,46 @@ export function WorkflowDesigner() {
     return () => clearTimeout(timer);
   }, [activeWorkflowId, excalidrawAPI, isDark]);
 
-  // Debounced handler for canvas changes
+  // Debounced handler for canvas changes (elements, appState, files)
   const handleChange = useCallback(
-    (elements: readonly any[], appState: any) => {
+    (elements: readonly any[], appState: any, files: any) => {
       if (!activeWorkflowId || isUpdatingSceneRef.current) return;
 
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
         if (isUpdatingSceneRef.current) return;
-        updateWorkflowExcalidraw(activeWorkflowId, [...elements], {
-          gridSize: appState.gridSize,
+
+        const savedAppState = {
+          theme: isDark ? "dark" : "light",
           viewBackgroundColor: appState.viewBackgroundColor,
-        });
-      }, 300);
+          gridSize: appState.gridSize,
+          zoom: appState.zoom,
+          scrollX: appState.scrollX,
+          scrollY: appState.scrollY,
+          currentItemStrokeColor: appState.currentItemStrokeColor,
+          currentItemBackgroundColor: appState.currentItemBackgroundColor,
+          currentItemFillStyle: appState.currentItemFillStyle,
+          currentItemStrokeWidth: appState.currentItemStrokeWidth,
+          currentItemStrokeStyle: appState.currentItemStrokeStyle,
+          currentItemRoughness: appState.currentItemRoughness,
+          currentItemOpacity: appState.currentItemOpacity,
+          currentItemFontFamily: appState.currentItemFontFamily,
+          currentItemFontSize: appState.currentItemFontSize,
+          currentItemTextAlign: appState.currentItemTextAlign,
+        };
+
+        updateWorkflowExcalidraw(activeWorkflowId, [...elements], savedAppState, files);
+      }, 250);
     },
-    [activeWorkflowId, updateWorkflowExcalidraw]
+    [activeWorkflowId, updateWorkflowExcalidraw, isDark]
+  );
+
+  // Handle library changes and persist globally
+  const handleLibraryChange = useCallback(
+    (libraryItems: readonly any[]) => {
+      updateExcalidrawLibraryItems([...libraryItems]);
+    },
+    [updateExcalidrawLibraryItems]
   );
 
   return (
@@ -69,6 +96,7 @@ export function WorkflowDesigner() {
           key={activeWorkflowId}
           excalidrawAPI={(api) => setExcalidrawAPI(api)}
           onChange={handleChange}
+          onLibraryChange={handleLibraryChange}
           theme={isDark ? "dark" : "light"}
           initialData={{
             elements: activeWorkflow?.elements || [],
@@ -76,6 +104,8 @@ export function WorkflowDesigner() {
               theme: isDark ? "dark" : "light",
               ...(activeWorkflow?.appState || {}),
             } as any,
+            files: activeWorkflow?.files || {},
+            libraryItems: excalidrawLibraryItems || [],
           }}
         >
           <MainMenu>

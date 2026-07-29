@@ -765,12 +765,17 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => {
+      updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>, files?: Record<string, any>) => {
         set((state) => ({
           workflows: state.workflows.map((w) =>
-            w.id === workflowId ? { ...w, elements, appState, updatedAt: Date.now() } : w
+            w.id === workflowId ? { ...w, elements, appState, files, updatedAt: Date.now() } : w
           ),
         }));
+      },
+
+      excalidrawLibraryItems: [],
+      updateExcalidrawLibraryItems: (items: any[]) => {
+        set({ excalidrawLibraryItems: items });
       },
     }),
     {
@@ -794,6 +799,7 @@ export const useAppStore = create<AppState>()(
         librarySearchQuery: state.librarySearchQuery,
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
+        excalidrawLibraryItems: state.excalidrawLibraryItems,
       }),
     }
   )
