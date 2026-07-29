@@ -281,11 +281,8 @@ const createDefaultWorkflowElements = (): any[] => [
 const initialWorkflow: Workflow = {
   id: generateId(),
   name: "My Workflow",
-  elements: createDefaultWorkflowElements(),
-  appState: {
-    viewBackgroundColor: "#ffffff",
-    theme: "dark",
-  },
+  elements: [],
+  appState: {},
   createdAt: Date.now(),
   updatedAt: Date.now(),
 };
@@ -713,10 +710,7 @@ export const useAppStore = create<AppState>()(
           id,
           name: name || `Workflow ${state.workflows.length + 1}`,
           elements: [],
-          appState: {
-            viewBackgroundColor: "#ffffff",
-            theme: "dark",
-          },
+          appState: {},
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -734,10 +728,7 @@ export const useAppStore = create<AppState>()(
               id: generateId(),
               name: "My Workflow",
               elements: [],
-              appState: {
-                viewBackgroundColor: "#ffffff",
-                theme: "dark",
-              },
+              appState: {},
               createdAt: Date.now(),
               updatedAt: Date.now(),
             };
@@ -828,19 +819,6 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "devutils-app-state",
-      onRehydrateStorage: () => (state) => {
-        if (state && state.workflows && Array.isArray(state.workflows)) {
-          const isDark = state.editorSettings?.theme !== "light";
-          state.workflows = state.workflows.map((w) => ({
-            ...w,
-            appState: {
-              ...w.appState,
-              viewBackgroundColor: "#ffffff",
-              theme: isDark ? "dark" : "light",
-            },
-          }));
-        }
-      },
       // Only persist files, activeFileId, and editor settings — NOT runtime state
       partialize: (state) => ({
         files: state.files,

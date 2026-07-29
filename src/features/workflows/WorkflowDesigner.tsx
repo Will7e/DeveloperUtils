@@ -1,6 +1,5 @@
 // ============================================================
-// WorkflowDesigner — Excalidraw Canvas Integration
-// Dynamic Light/Dark Theme Synchronization
+// WorkflowDesigner — Standard Excalidraw Integration
 // ============================================================
 
 import { useCallback, useState, useEffect, useRef } from "react";
@@ -25,40 +24,27 @@ export function WorkflowDesigner() {
 
   const isDark = appTheme !== "light";
 
-  // Dynamic theme sync helper (synced with DevUtils website theme)
-  const syncSceneToApi = useCallback(
-    (api: ExcalidrawImperativeAPI, workflowId: string) => {
-      const targetWorkflow = useAppStore.getState().workflows.find((w) => w.id === workflowId);
-      if (!targetWorkflow) return;
-
-      isUpdatingSceneRef.current = true;
-      const currentIsDark = useAppStore.getState().editorSettings.theme !== "light";
-
-      api.updateScene({
-        elements: targetWorkflow.elements || [],
-        appState: {
-          viewBackgroundColor: "#ffffff",
-          theme: currentIsDark ? "dark" : "light",
-        } as any,
-      });
-
-      const timer = setTimeout(() => {
-        isUpdatingSceneRef.current = false;
-      }, 150);
-
-      return () => clearTimeout(timer);
-    },
-    []
-  );
-
-  // Sync scene when excalidrawAPI is ready, active tab changes, or app theme toggles
+  // Sync scene elements when active tab changes
   useEffect(() => {
-    if (excalidrawAPI && activeWorkflowId) {
-      syncSceneToApi(excalidrawAPI, activeWorkflowId);
-    }
-  }, [activeWorkflowId, excalidrawAPI, appTheme, syncSceneToApi]);
+    if (!excalidrawAPI || !activeWorkflow) return;
 
-  // Debounced handler for canvas changes (saves to store 500ms after drawing stops)
+    isUpdatingSceneRef.current = true;
+    excalidrawAPI.updateScene({
+      elements: activeWorkflow.elements || [],
+      appState: {
+        theme: isDark ? "dark" : "light",
+        ...(activeWorkflow.appState || {}),
+      } as any,
+    });
+
+    const timer = setTimeout(() => {
+      isUpdatingSceneRef.current = false;
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [activeWorkflowId, excalidrawAPI, isDark]);
+
+  // Debounced handler for canvas changes
   const handleChange = useCallback(
     (elements: readonly any[], appState: any) => {
       if (!activeWorkflowId || isUpdatingSceneRef.current) return;
@@ -66,14 +52,11 @@ export function WorkflowDesigner() {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(() => {
         if (isUpdatingSceneRef.current) return;
-        const currentIsDark = useAppStore.getState().editorSettings.theme !== "light";
-
         updateWorkflowExcalidraw(activeWorkflowId, [...elements], {
-          viewBackgroundColor: "#ffffff",
           gridSize: appState.gridSize,
-          theme: currentIsDark ? "dark" : "light",
+          viewBackgroundColor: appState.viewBackgroundColor,
         });
-      }, 500);
+      }, 300);
     },
     [activeWorkflowId, updateWorkflowExcalidraw]
   );
@@ -83,29 +66,15 @@ export function WorkflowDesigner() {
       <WorkflowToolbar excalidrawAPI={excalidrawAPI} />
       <div className="flex-1 w-full relative overflow-hidden">
         <Excalidraw
-          excalidrawAPI={(api) => {
-            setExcalidrawAPI(api);
-            if (activeWorkflowId) {
-              syncSceneToApi(api, activeWorkflowId);
-            }
-          }}
+          excalidrawAPI={(api) => setExcalidrawAPI(api)}
           onChange={handleChange}
           theme={isDark ? "dark" : "light"}
           initialData={{
             elements: activeWorkflow?.elements || [],
             appState: {
-              viewBackgroundColor: "#ffffff",
               theme: isDark ? "dark" : "light",
+              ...(activeWorkflow?.appState || {}),
             } as any,
-          }}
-          UIOptions={{
-            canvasActions: {
-              changeViewBackgroundColor: true,
-              clearCanvas: true,
-              loadScene: true,
-              saveToActiveFile: false,
-              toggleTheme: false,
-            },
           }}
         >
           <MainMenu>
@@ -113,6 +82,7 @@ export function WorkflowDesigner() {
             <MainMenu.DefaultItems.Export />
             <MainMenu.DefaultItems.SaveAsImage />
             <MainMenu.DefaultItems.ClearCanvas />
+            <MainMenu.DefaultItems.ToggleTheme />
             <MainMenu.DefaultItems.ChangeCanvasBackground />
           </MainMenu>
         </Excalidraw>
