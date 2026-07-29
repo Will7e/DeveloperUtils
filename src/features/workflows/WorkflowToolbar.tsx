@@ -1,5 +1,5 @@
 // ============================================================
-// WorkflowToolbar — Top toolbar for workflow actions
+// WorkflowToolbar — Top toolbar for Excalidraw workflow actions
 // ============================================================
 
 import { useCallback, useState } from "react";
@@ -10,13 +10,9 @@ import {
   Download,
   Upload,
   Plus,
-  Trash2,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  Map,
-  MapPinOff,
-  Wand2,
+  Trash,
+  FileImage,
+  FileCode,
 } from "lucide-react";
 import {
   Tooltip,
@@ -24,65 +20,125 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
 
 interface WorkflowToolbarProps {
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onFitView: () => void;
-  onClearCanvas: () => void;
-  onBeautify: () => void;
-  showMinimap: boolean;
-  onToggleMinimap: () => void;
+  excalidrawAPI: ExcalidrawImperativeAPI | null;
 }
 
-export function WorkflowToolbar({
-  onZoomIn,
-  onZoomOut,
-  onFitView,
-  onClearCanvas,
-  onBeautify,
-  showMinimap,
-  onToggleMinimap,
-}: WorkflowToolbarProps) {
+export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
   const createWorkflow = useAppStore((s) => s.createWorkflow);
   const deleteWorkflow = useAppStore((s) => s.deleteWorkflow);
   const setActiveWorkflow = useAppStore((s) => s.setActiveWorkflow);
   const renameWorkflow = useAppStore((s) => s.renameWorkflow);
-  const updateWorkflowNodes = useAppStore((s) => s.updateWorkflowNodes);
-  const updateWorkflowEdges = useAppStore((s) => s.updateWorkflowEdges);
+  const updateWorkflowExcalidraw = useAppStore((s) => s.updateWorkflowExcalidraw);
   const addToast = useAppStore((s) => s.addToast);
   const reorderWorkflows = useAppStore((s) => s.reorderWorkflows);
 
   const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
 
+  const handleClearCanvas = useCallback(() => {
+    if (!excalidrawAPI) return;
+    excalidrawAPI.resetScene();
+    if (activeWorkflowId) {
+      updateWorkflowExcalidraw(activeWorkflowId, []);
+    }
+    addToast({ message: "Canvas cleared", type: "info" });
+  }, [excalidrawAPI, activeWorkflowId, updateWorkflowExcalidraw, addToast]);
+
   const handleExportJSON = useCallback(() => {
-    if (!activeWorkflow) return;
+    if (!activeWorkflow || !excalidrawAPI) return;
+    const elements = excalidrawAPI.getSceneElements();
+    const appState = excalidrawAPI.getAppState();
+    
     const data = JSON.stringify(
       {
+        type: "excalidraw",
+        version: 2,
+        source: "DeveloperUtils Workflow",
+        elements,
+        appState: {
+          viewBackgroundColor: appState.viewBackgroundColor,
+          gridSize: appState.gridSize,
+        },
         name: activeWorkflow.name,
-        nodes: activeWorkflow.nodes,
-        edges: activeWorkflow.edges,
-        exportedAt: new Date().toISOString(),
       },
       null,
       2
     );
+
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.json`;
+    link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.excalidraw`;
     link.click();
     URL.revokeObjectURL(url);
-    addToast({ message: "Workflow exported as JSON", type: "success" });
-  }, [activeWorkflow, addToast]);
+    addToast({ message: "Workflow exported as Excalidraw JSON", type: "success" });
+  }, [activeWorkflow, excalidrawAPI, addToast]);
+
+  const handleExportPNG = useCallback(async () => {
+    if (!excalidrawAPI || !activeWorkflow) return;
+    const elements = excalidrawAPI.getSceneElements();
+    const appState = excalidrawAPI.getAppState();
+    if (elements.length === 0) {
+      addToast({ message: "Canvas is empty", type: "error" });
+      return;
+    }
+    try {
+      const blob = await exportToBlob({
+        elements,
+        appState,
+        files: excalidrawAPI.getFiles(),
+        mimeType: "image/png",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.png`;
+      link.click();
+      URL.revokeObjectURL(url);
+      addToast({ message: "Exported PNG image", type: "success" });
+    } catch {
+      addToast({ message: "Failed to export PNG", type: "error" });
+    }
+  }, [excalidrawAPI, activeWorkflow, addToast]);
+
+  const handleExportSVG = useCallback(async () => {
+    if (!excalidrawAPI || !activeWorkflow) return;
+    const elements = excalidrawAPI.getSceneElements();
+    const appState = excalidrawAPI.getAppState();
+    if (elements.length === 0) {
+      addToast({ message: "Canvas is empty", type: "error" });
+      return;
+    }
+    try {
+      const svg = await exportToSvg({
+        elements,
+        appState,
+        files: excalidrawAPI.getFiles(),
+      });
+      const svgString = new XMLSerializer().serializeToString(svg);
+      const blob = new Blob([svgString], { type: "image/svg+xml" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.svg`;
+      link.click();
+      URL.revokeObjectURL(url);
+      addToast({ message: "Exported SVG vector image", type: "success" });
+    } catch {
+      addToast({ message: "Failed to export SVG", type: "error" });
+    }
+  }, [excalidrawAPI, activeWorkflow, addToast]);
 
   const handleImportJSON = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".json";
+    input.accept = ".json,.excalidraw";
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -90,30 +146,31 @@ export function WorkflowToolbar({
       reader.onload = (ev) => {
         try {
           const data = JSON.parse(ev.target?.result as string);
-          if (data.nodes && data.edges) {
-            createWorkflow(data.name || "Imported Workflow");
-            // Wait for state update, then set nodes/edges
+          const elements = data.elements || (Array.isArray(data) ? data : []);
+          if (Array.isArray(elements)) {
+            createWorkflow(data.name || file.name.replace(/\.(json|excalidraw)$/i, ""));
             setTimeout(() => {
               const state = useAppStore.getState();
               const newId = state.activeWorkflowId;
-              updateWorkflowNodes(newId, data.nodes);
-              updateWorkflowEdges(newId, data.edges);
+              updateWorkflowExcalidraw(newId, elements, data.appState);
+              if (excalidrawAPI) {
+                excalidrawAPI.updateScene({ elements, appState: data.appState });
+              }
               addToast({ message: "Workflow imported successfully", type: "success" });
             }, 50);
           }
         } catch {
-          addToast({ message: "Invalid JSON file", type: "error" });
+          addToast({ message: "Invalid JSON file format", type: "error" });
         }
       };
       reader.readAsText(file);
     };
     input.click();
-  }, [createWorkflow, updateWorkflowNodes, updateWorkflowEdges, addToast]);
+  }, [createWorkflow, updateWorkflowExcalidraw, excalidrawAPI, addToast]);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
-  // DnD sensor with activation constraint to allow clicks without triggering drag
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
@@ -130,17 +187,16 @@ export function WorkflowToolbar({
 
   const handleAddWorkflow = useCallback(() => {
     createWorkflow();
-    // Zustand updates are synchronous, so we can grab the new ID immediately
     const newId = useAppStore.getState().activeWorkflowId;
     setRenamingId(newId);
     setRenameValue("Untitled Workflow");
   }, [createWorkflow]);
 
   return (
-    <div className="wf-toolbar">
-      <div className="wf-toolbar-left">
+    <div className="wf-toolbar border-b border-border/40 bg-bg-1/80 backdrop-blur-sm px-3 py-2 flex items-center justify-between gap-3">
+      <div className="wf-toolbar-left flex items-center gap-2 overflow-x-auto">
         {/* Workflow Tabs */}
-        <div className="wf-toolbar-tabs">
+        <div className="wf-toolbar-tabs flex items-center gap-1">
           <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={workflows.map((w) => w.id)} strategy={horizontalListSortingStrategy}>
               {workflows.map((w) => (
@@ -155,138 +211,99 @@ export function WorkflowToolbar({
                   >
                     {renamingId === w.id ? (
                       <input
-                        autoFocus
-                        onFocus={(e) => e.target.select()}
-                        className="wf-tab-rename-input"
+                        type="text"
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.target.value)}
                         onBlur={() => {
-                          if (renameValue.trim() && renameValue !== w.name) {
-                            renameWorkflow(w.id, renameValue.trim());
-                          }
+                          if (renameValue.trim()) renameWorkflow(w.id, renameValue.trim());
                           setRenamingId(null);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
-                            if (renameValue.trim() && renameValue !== w.name) {
-                              renameWorkflow(w.id, renameValue.trim());
-                            }
-                            setRenamingId(null);
-                          } else if (e.key === "Escape") {
+                            if (renameValue.trim()) renameWorkflow(w.id, renameValue.trim());
                             setRenamingId(null);
                           }
+                          if (e.key === "Escape") setRenamingId(null);
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        autoFocus
+                        className="wf-tab-rename-input"
                       />
                     ) : (
-                      <span className="wf-toolbar-tab-name">{w.name}</span>
+                      <span className="wf-tab-name">{w.name}</span>
                     )}
                     {workflows.length > 1 && (
-                      <button
-                        className="wf-toolbar-tab-close"
+                      <span
+                        className="wf-tab-close"
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteWorkflow(w.id);
                         }}
                       >
                         ×
-                      </button>
+                      </span>
                     )}
                   </button>
                 </SortableTab>
               ))}
             </SortableContext>
           </DndContext>
+
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="wf-toolbar-tab-add" onClick={handleAddWorkflow}>
-                <Plus className="h-3.5 w-3.5" />
+              <button className="wf-toolbar-btn wf-add-tab-btn" onClick={handleAddWorkflow}>
+                <Plus className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>New Workflow</TooltipContent>
+            <TooltipContent>New Workflow Canvas</TooltipContent>
           </Tooltip>
         </div>
       </div>
 
-      <div className="wf-toolbar-right">
+      <div className="wf-toolbar-right flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={onZoomIn}>
-              <ZoomIn className="h-4 w-4" />
+            <button className="wf-toolbar-btn" onClick={handleExportPNG}>
+              <FileImage className="w-4 h-4 text-emerald-400" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Zoom In</TooltipContent>
+          <TooltipContent>Export PNG Image</TooltipContent>
         </Tooltip>
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={onZoomOut}>
-              <ZoomOut className="h-4 w-4" />
+            <button className="wf-toolbar-btn" onClick={handleExportSVG}>
+              <FileCode className="w-4 h-4 text-cyan-400" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Zoom Out</TooltipContent>
+          <TooltipContent>Export Vector SVG</TooltipContent>
         </Tooltip>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={onFitView}>
-              <Maximize2 className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Fit View</TooltipContent>
-        </Tooltip>
-
-        <div className="wf-toolbar-sep" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={onBeautify}>
-              <Wand2 className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Beautify Nodes</TooltipContent>
-        </Tooltip>
-
-        <div className="wf-toolbar-sep" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              className={`wf-toolbar-btn ${showMinimap ? 'wf-toolbar-btn-active' : ''}`}
-              onClick={onToggleMinimap}
-            >
-              {showMinimap ? <Map className="h-4 w-4" /> : <MapPinOff className="h-4 w-4" />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{showMinimap ? 'Hide Minimap' : 'Show Minimap'}</TooltipContent>
-        </Tooltip>
-
-        <div className="wf-toolbar-sep" />
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn" onClick={handleImportJSON}>
-              <Upload className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Import JSON</TooltipContent>
-        </Tooltip>
+        <div className="wf-toolbar-divider" />
 
         <Tooltip>
           <TooltipTrigger asChild>
             <button className="wf-toolbar-btn" onClick={handleExportJSON}>
-              <Download className="h-4 w-4" />
+              <Download className="w-4 h-4" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Export JSON</TooltipContent>
+          <TooltipContent>Export Excalidraw JSON</TooltipContent>
         </Tooltip>
-
-        <div className="wf-toolbar-sep" />
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <button className="wf-toolbar-btn wf-toolbar-btn-danger" onClick={onClearCanvas}>
-              <Trash2 className="h-4 w-4" />
+            <button className="wf-toolbar-btn" onClick={handleImportJSON}>
+              <Upload className="w-4 h-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Import JSON Canvas</TooltipContent>
+        </Tooltip>
+
+        <div className="wf-toolbar-divider" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button className="wf-toolbar-btn text-rose-400 hover:bg-rose-500/10" onClick={handleClearCanvas}>
+              <Trash className="w-4 h-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent>Clear Canvas</TooltipContent>

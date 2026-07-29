@@ -552,6 +552,14 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => {
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === workflowId ? { ...w, elements, appState, updatedAt: Date.now() } : w
+          ),
+        }));
+      },
+
       updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => {
         set((state) => ({
           workflows: state.workflows.map((w) =>

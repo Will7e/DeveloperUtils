@@ -216,6 +216,7 @@ export interface AppState {
   renameWorkflow: (id: string, name: string) => void;
   reorderWorkflows: (fromIndex: number, toIndex: number) => void;
   updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => void;
+  updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => void;
   updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => void;
   updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => void;
   setWorkflowSelectedNodeId: (id: string | null) => void;
@@ -268,9 +269,11 @@ export interface WorkflowEdgeData {
 export interface Workflow {
   id: string;
   name: string;
-  nodes: WorkflowNodeData[];
-  edges: WorkflowEdgeData[];
-  viewport: { x: number; y: number; zoom: number };
+  elements?: any[];
+  appState?: Record<string, any>;
+  nodes?: WorkflowNodeData[];
+  edges?: WorkflowEdgeData[];
+  viewport?: { x: number; y: number; zoom: number };
   createdAt: number;
   updatedAt: number;
 }
