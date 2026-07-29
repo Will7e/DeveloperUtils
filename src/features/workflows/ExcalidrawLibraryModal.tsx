@@ -7,7 +7,13 @@ import { Search, Library, Plus, Check, Loader2, X, ExternalLink, Sparkles, Layou
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAppStore } from "@/stores/app.store";
-import { getExcalidrawLibraries, loadLibraryToExcalidraw, type ExcalidrawLibraryItem } from "@/utils/excalidrawLibrary";
+import {
+  getExcalidrawLibraries,
+  loadLibraryToExcalidraw,
+  getExcalidrawLibraryPreviewUrl,
+  getExcalidrawLibraryCdnPreviewUrl,
+  type ExcalidrawLibraryItem,
+} from "@/utils/excalidrawLibrary";
 
 interface ExcalidrawLibraryModalProps {
   isOpen: boolean;
@@ -175,7 +181,8 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
               {filteredLibraries.map((lib) => {
                 const isAdded = addedLibIds.has(lib.id);
                 const isLoadingThis = loadingLibId === lib.id;
-                const previewUrl = `/excalidraw-libraries/libraries/${lib.preview}`;
+                const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
+                const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
 
                 return (
                   <div
@@ -190,8 +197,12 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                           alt={lib.name}
                           className="max-h-full max-w-full object-contain p-2 filter dark:invert-[0.1]"
                           onError={(e) => {
-                            // Fallback if preview image not found
-                            (e.target as HTMLElement).style.display = "none";
+                            const img = e.currentTarget;
+                            if (img.src !== cdnPreviewUrl) {
+                              img.src = cdnPreviewUrl;
+                            } else {
+                              img.style.display = "none";
+                            }
                           }}
                         />
                       </div>

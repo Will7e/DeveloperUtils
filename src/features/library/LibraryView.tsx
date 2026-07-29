@@ -473,7 +473,12 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
 });
 
 import { useNavigate } from "react-router-dom";
-import { getExcalidrawLibraries, type ExcalidrawLibraryItem } from "@/utils/excalidrawLibrary";
+import {
+  getExcalidrawLibraries,
+  getExcalidrawLibraryPreviewUrl,
+  getExcalidrawLibraryCdnPreviewUrl,
+  type ExcalidrawLibraryItem,
+} from "@/utils/excalidrawLibrary";
 
 function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: string; addToast: any }) {
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
@@ -577,7 +582,9 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: stri
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredLibraries.map((lib) => {
-              const previewUrl = `/excalidraw-libraries/libraries/${lib.preview}`;
+              const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
+              const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+
               return (
                 <div
                   key={lib.id}
@@ -590,7 +597,12 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: stri
                         alt={lib.name}
                         className="max-h-full max-w-full object-contain p-2 filter dark:invert-[0.1]"
                         onError={(e) => {
-                          (e.target as HTMLElement).style.display = "none";
+                          const img = e.currentTarget;
+                          if (img.src !== cdnPreviewUrl) {
+                            img.src = cdnPreviewUrl;
+                          } else {
+                            img.style.display = "none";
+                          }
                         }}
                       />
                     </div>
