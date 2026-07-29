@@ -48,7 +48,8 @@ function AppContent() {
           <Route path="/comparators" element={<ComparatorsPage />} />
           <Route path="/diff" element={<DiffCheckerPage />} />
           <Route path="/library" element={<LibraryPage />} />
-          <Route path="/workflows" element={<WorkflowPage />} />
+          <Route path="/drawflows" element={<WorkflowPage />} />
+          <Route path="/workflows" element={<Navigate to="/drawflows" replace />} />
           <Route path="/api-tester" element={<ApiTesterPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

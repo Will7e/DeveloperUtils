@@ -282,13 +282,13 @@ export function CommandPalette() {
       },
       {
         id: "new-workflow",
-        label: "New Workflow Diagram",
+        label: "New DrawFlow Diagram",
         shortcut: "⌘⌥W",
         category: "File",
         icon: <FilePlus style={{ width: 14, height: 14 }} />,
         action: () => {
           createWorkflow();
-          navigate("/workflows");
+          navigate("/drawflows");
         },
       },
       {
@@ -360,11 +360,11 @@ export function CommandPalette() {
       },
       {
         id: "nav-workflows",
-        label: "Go to Workflows",
+        label: "Go to DrawFlows",
         shortcut: "⌘⌥8",
         category: "Navigation",
         icon: <Network style={{ width: 14, height: 14 }} />,
-        action: () => navigate("/workflows"),
+        action: () => navigate("/drawflows"),
       }
     );
 

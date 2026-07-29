@@ -139,12 +139,12 @@ export function DashboardPage() {
               available
             />
             <ToolCard
-              to="/workflows"
+              to="/drawflows"
               icon={<GitFork className="h-5 w-5" />}
               iconColor="var(--teal, #2dd4bf)"
               glowColor="var(--teal-dim, rgba(45, 212, 191, 0.12))"
-              title="Workflow Designer"
-              description="Visual drag-and-drop workflow builder with JSON export."
+              title="DrawFlow Studio"
+              description="Visual drag-and-drop diagramming and workflow builder."
               available
             />
             <ToolCard

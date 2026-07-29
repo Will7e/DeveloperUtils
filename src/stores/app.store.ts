@@ -68,14 +68,14 @@ const createDefaultWorkflowElements = (): any[] => [
     updated: 1,
     link: null,
     locked: false,
-    text: "DevUtils Workflow Designer",
+    text: "DevUtils DrawFlow Studio",
     fontSize: 24,
     fontFamily: 1,
     textAlign: "left",
     verticalAlign: "top",
     baseline: 20,
     containerId: null,
-    originalText: "DevUtils Workflow Designer",
+    originalText: "DevUtils DrawFlow Studio",
     lineHeight: 1.25,
   },
   {
@@ -708,7 +708,7 @@ export const useAppStore = create<AppState>()(
         const state = get();
         const newWorkflow: Workflow = {
           id,
-          name: name || `Workflow ${state.workflows.length + 1}`,
+          name: name || `DrawFlow ${state.workflows.length + 1}`,
           elements: [],
           appState: {},
           createdAt: Date.now(),
@@ -726,7 +726,7 @@ export const useAppStore = create<AppState>()(
           if (remaining.length === 0) {
             const newWorkflow: Workflow = {
               id: generateId(),
-              name: "My Workflow",
+              name: "My DrawFlow",
               elements: createDefaultWorkflowElements(),
               appState: {},
               createdAt: Date.now(),

@@ -167,10 +167,10 @@ export function MainLayout() {
           />
 
           <NavItem
-            to="/workflows"
+            to="/drawflows"
             icon={<GitFork className="h-[18px] w-[18px]" />}
-            label="Workflows"
-            active={location.pathname === "/workflows"}
+            label="DrawFlows"
+            active={location.pathname === "/drawflows" || location.pathname === "/workflows"}
             collapsed={sidebarCollapsed}
           />
 

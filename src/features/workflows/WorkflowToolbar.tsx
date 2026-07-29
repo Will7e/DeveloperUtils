@@ -61,7 +61,7 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
       {
         type: "excalidraw",
         version: 2,
-        source: "DeveloperUtils Workflow",
+        source: "DeveloperUtils DrawFlow",
         elements,
         appState: {
           viewBackgroundColor: appState.viewBackgroundColor,
@@ -80,7 +80,7 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
     link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.excalidraw`;
     link.click();
     URL.revokeObjectURL(url);
-    addToast({ message: "Workflow exported as Excalidraw JSON", type: "success" });
+    addToast({ message: "DrawFlow exported as JSON", type: "success" });
   }, [activeWorkflow, excalidrawAPI, addToast]);
 
   const handleExportPNG = useCallback(async () => {
@@ -159,7 +159,7 @@ export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
               if (excalidrawAPI) {
                 excalidrawAPI.updateScene({ elements, appState: data.appState });
               }
-              addToast({ message: "Workflow imported successfully", type: "success" });
+              addToast({ message: "DrawFlow imported successfully", type: "success" });
             }, 50);
           }
         } catch {

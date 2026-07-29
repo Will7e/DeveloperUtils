@@ -123,7 +123,7 @@ export function WorkflowDesigner() {
             <WelcomeScreen.Hints.HelpHint />
             <WelcomeScreen.Center>
               <WelcomeScreen.Center.Heading>
-                DevUtils Workflow & Diagram Studio
+                DevUtils DrawFlow Studio
               </WelcomeScreen.Center.Heading>
               <WelcomeScreen.Center.Menu>
                 <WelcomeScreen.Center.MenuItemLoadScene />

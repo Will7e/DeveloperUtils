@@ -542,10 +542,10 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: stri
             </p>
           </div>
           <button
-            onClick={() => navigate("/workflows")}
+            onClick={() => navigate("/drawflows")}
             className="px-3.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium flex items-center gap-1.5 shadow-sm hover:bg-accent/90 transition-colors"
           >
-            <span>Open Workflow Studio</span>
+            <span>Open DrawFlow Studio</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </button>
         </div>

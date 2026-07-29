@@ -207,7 +207,7 @@ export function useKeyboardShortcuts() {
             return;
           case "8":
             e.preventDefault();
-            navigate("/workflows");
+            navigate("/drawflows");
             return;
           
           // Quick creators
@@ -224,7 +224,7 @@ export function useKeyboardShortcuts() {
           case "w":
             e.preventDefault();
             useAppStore.getState().createWorkflow();
-            navigate("/workflows");
+            navigate("/drawflows");
             return;
         }
       }
