@@ -2,7 +2,7 @@
 // DrawFlowToolbar — Clean top tab bar & actions for DrawFlows
 // ============================================================
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
 import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableTab } from "@/components/ui/SortableTab";
@@ -14,6 +14,9 @@ import {
   FileImage,
   FileCode,
   Library,
+  Sparkles,
+  ChevronDown,
+  FileJson,
 } from "lucide-react";
 import {
   Tooltip,
@@ -31,6 +34,9 @@ interface DrawFlowToolbarProps {
 
 export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
   const createWorkflow = useAppStore((s) => s.createWorkflow);
@@ -42,6 +48,17 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const reorderWorkflows = useAppStore((s) => s.reorderWorkflows);
 
   const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(event.target as Node)) {
+        setIsExportOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleClearCanvas = useCallback(() => {
     if (!excalidrawAPI) return;
@@ -255,72 +272,181 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                   <Plus className="w-4 h-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent>New Workflow Tab</TooltipContent>
+              <TooltipContent>New DrawFlow Tab</TooltipContent>
             </Tooltip>
           </div>
         </div>
 
         {/* Right side actions */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+          {/* Community Libraries Button */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                className="wf-toolbar-btn text-accent font-medium flex items-center gap-1.5 px-2 bg-accent/10 hover:bg-accent/20 border border-accent/20 rounded transition-colors"
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(14, 165, 233, 0.12)",
+                  color: "var(--accent)",
+                  border: "1px solid rgba(14, 165, 233, 0.3)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
                 onClick={() => setIsLibraryModalOpen(true)}
               >
-                <Library className="w-3.5 h-3.5 text-accent" />
-                <span className="text-xs text-accent">Libraries</span>
+                <Sparkles style={{ width: 14, height: 14, color: "var(--accent)" }} />
+                <span>Community Libraries</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent>Browse & Download Excalidraw Community Libraries</TooltipContent>
+            <TooltipContent>Browse & Download Official Excalidraw Shapes</TooltipContent>
           </Tooltip>
 
-          <div className="wf-toolbar-divider" />
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border-1)", margin: "0 2px" }} />
 
+          {/* Import Button */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn" onClick={handleExportPNG}>
-                <FileImage className="w-4 h-4 text-emerald-400" />
+              <button
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  backgroundColor: "var(--bg-2)",
+                  color: "var(--text-1)",
+                  border: "1px solid var(--border-1)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+                onClick={handleImportJSON}
+              >
+                <Upload style={{ width: 14, height: 14, color: "var(--text-2)" }} />
+                <span>Import</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent>Export PNG Image</TooltipContent>
+            <TooltipContent>Import .excalidraw or JSON file</TooltipContent>
           </Tooltip>
 
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border-1)", margin: "0 2px" }} />
+
+          {/* Export Group (PNG, SVG, JSON) */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(16, 185, 129, 0.12)",
+                    color: "#10b981",
+                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                  onClick={handleExportPNG}
+                >
+                  <FileImage style={{ width: 13, height: 13 }} />
+                  <span>PNG</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Export PNG Image</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(6, 182, 212, 0.12)",
+                    color: "#06b6d4",
+                    border: "1px solid rgba(6, 182, 212, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                  onClick={handleExportSVG}
+                >
+                  <FileCode style={{ width: 13, height: 13 }} />
+                  <span>SVG</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Export Vector SVG</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    padding: "5px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(14, 165, 233, 0.12)",
+                    color: "#0ea5e9",
+                    border: "1px solid rgba(14, 165, 233, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                  onClick={handleExportJSON}
+                >
+                  <Download style={{ width: 13, height: 13 }} />
+                  <span>JSON</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Export .excalidraw JSON</TooltipContent>
+            </Tooltip>
+          </div>
+
+          <div style={{ width: "1px", height: "16px", backgroundColor: "var(--border-1)", margin: "0 2px" }} />
+
+          {/* Clear Canvas Button */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn" onClick={handleExportSVG}>
-                <FileCode className="w-4 h-4 text-cyan-400" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Export Vector SVG</TooltipContent>
-          </Tooltip>
-
-          <div className="wf-toolbar-divider" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn" onClick={handleExportJSON}>
-                <Download className="w-4 h-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Export Excalidraw JSON</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn" onClick={handleImportJSON}>
-                <Upload className="w-4 h-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Import JSON Canvas</TooltipContent>
-          </Tooltip>
-
-          <div className="wf-toolbar-divider" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="wf-toolbar-btn text-rose-400 hover:bg-rose-500/10" onClick={handleClearCanvas}>
-                <Trash2 className="w-4 h-4" />
+              <button
+                style={{
+                  padding: "6px",
+                  borderRadius: "8px",
+                  color: "var(--text-3)",
+                  backgroundColor: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+                onClick={handleClearCanvas}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "#f43f5e";
+                  e.currentTarget.style.backgroundColor = "rgba(244, 63, 94, 0.1)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--text-3)";
+                  e.currentTarget.style.backgroundColor = "transparent";
+                }}
+              >
+                <Trash2 style={{ width: 16, height: 16 }} />
               </button>
             </TooltipTrigger>
             <TooltipContent>Clear Canvas</TooltipContent>

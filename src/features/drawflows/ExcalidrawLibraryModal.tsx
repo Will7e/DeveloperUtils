@@ -3,7 +3,20 @@
 // ============================================================
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Search, Library, Plus, Check, Loader2, X, ExternalLink, Sparkles, LayoutGrid } from "lucide-react";
+import {
+  Search,
+  Library,
+  Plus,
+  Check,
+  Loader2,
+  X,
+  Sparkles,
+  LayoutGrid,
+  Layers,
+  Compass,
+  ArrowUpRight,
+  RotateCcw,
+} from "lucide-react";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAppStore } from "@/stores/app.store";
@@ -22,11 +35,11 @@ interface ExcalidrawLibraryModalProps {
 }
 
 const CATEGORIES = [
-  { id: "all", label: "All Libraries" },
-  { id: "system", label: "System Design", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
-  { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
-  { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
-  { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
+  { id: "all", label: "All Collections", icon: LayoutGrid },
+  { id: "system", label: "System Architecture", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"], icon: Layers },
+  { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"], icon: Compass },
+  { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"], icon: Sparkles },
+  { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"], icon: Library },
 ];
 
 export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: ExcalidrawLibraryModalProps) {
@@ -97,87 +110,283 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-5xl h-[85vh] bg-bg-1 border border-border/60 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Modal Header */}
-        <div className="p-4 border-b border-border/40 bg-bg-2/50 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-accent/10 text-accent">
-              <Library className="w-5 h-5" />
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+        backgroundColor: "rgba(0, 0, 0, 0.75)",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "1100px",
+          height: "85vh",
+          backgroundColor: "var(--bg-1)",
+          border: "1px solid var(--border-2)",
+          borderRadius: "16px",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.6)",
+        }}
+      >
+        {/* ROW 1: Modal Header (Title + Collections Badge + Close) */}
+        <div
+          style={{
+            padding: "16px 24px",
+            borderBottom: "1px solid var(--border-1)",
+            backgroundColor: "var(--bg-2)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "16px",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div
+              style={{
+                padding: "8px",
+                borderRadius: "8px",
+                backgroundColor: "var(--accent-glow)",
+                color: "var(--accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Library style={{ width: 20, height: 20 }} />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-text-0 flex items-center gap-2">
-                Excalidraw Community Libraries
-                <span className="text-xs px-2 py-0.5 rounded-full bg-accent/15 text-accent font-medium">
-                  {libraries.length} Available
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h2 style={{ fontSize: "15px", fontWeight: 600, color: "var(--text-1)", margin: 0 }}>
+                  Excalidraw Community Libraries
+                </h2>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    padding: "2px 8px",
+                    borderRadius: "12px",
+                    backgroundColor: "var(--accent-glow)",
+                    color: "var(--accent)",
+                    fontWeight: 500,
+                    border: "1px solid var(--border-accent)",
+                  }}
+                >
+                  {libraries.length} Collections
                 </span>
-              </h2>
-              <p className="text-xs text-text-2">
-                Browse, search, and download official Excalidraw library shapes directly into your workspace.
+              </div>
+              <p style={{ fontSize: "12px", color: "var(--text-2)", margin: "2px 0 0 0" }}>
+                Discover and import official community shape packs directly into your DrawFlow canvas.
               </p>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-text-2 hover:text-text-0 hover:bg-bg-3 transition-colors"
+            style={{
+              padding: "6px",
+              borderRadius: "8px",
+              color: "var(--text-2)",
+              backgroundColor: "transparent",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            title="Close modal"
           >
-            <X className="w-5 h-5" />
+            <X style={{ width: 18, height: 18 }} />
           </button>
         </div>
 
-        {/* Toolbar: Search & Category Pills */}
-        <div className="px-4 py-3 border-b border-border/30 bg-bg-1 flex flex-wrap items-center justify-between gap-3">
-          <div className="relative flex-1 min-w-[240px]">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-2" />
+        {/* ROW 2: Search Input & Category Pills */}
+        <div
+          style={{
+            padding: "12px 24px",
+            borderBottom: "1px solid var(--border-1)",
+            backgroundColor: "var(--bg-1)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "16px",
+            flexShrink: 0,
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Search Box */}
+          <div style={{ position: "relative", flex: "1 1 280px", maxWidth: "360px" }}>
+            <Search
+              style={{
+                width: 14,
+                height: 14,
+                position: "absolute",
+                left: 12,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "var(--text-3)",
+              }}
+            />
             <input
               type="text"
-              placeholder="Search libraries (System Design, AWS, Icons, Flowcharts...)"
+              placeholder="Search libraries (AWS, GCP, Icons...)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-1.5 text-xs bg-bg-2 border border-border/50 rounded-lg text-text-0 placeholder:text-text-3 focus:outline-none focus:border-accent"
+              style={{
+                width: "100%",
+                paddingLeft: "34px",
+                paddingRight: "28px",
+                paddingTop: "7px",
+                paddingBottom: "7px",
+                fontSize: "12px",
+                backgroundColor: "var(--bg-2)",
+                border: "1px solid var(--border-1)",
+                borderRadius: "8px",
+                color: "var(--text-1)",
+                outline: "none",
+              }}
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-1"
+                style={{
+                  position: "absolute",
+                  right: 10,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--text-3)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                }}
               >
-                <X className="w-3.5 h-3.5" />
+                <X style={{ width: 12, height: 12 }} />
               </button>
             )}
           </div>
 
           {/* Category Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto py-0.5">
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={`text-xs px-3 py-1 rounded-md transition-colors whitespace-nowrap ${activeCategory === cat.id
-                  ? "bg-accent text-white font-medium"
-                  : "bg-bg-2 text-text-2 hover:text-text-0 hover:bg-bg-3"
-                  }`}
-              >
-                {cat.label}
-              </button>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", overflowX: "auto", padding: "2px 0" }}>
+            {CATEGORIES.map((cat) => {
+              const Icon = cat.icon;
+              const isActive = activeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategory(cat.id)}
+                  style={{
+                    fontSize: "12px",
+                    padding: "5px 12px",
+                    borderRadius: "6px",
+                    fontWeight: 500,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    whiteSpace: "nowrap",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    backgroundColor: isActive ? "var(--accent)" : "var(--bg-2)",
+                    color: isActive ? "#ffffff" : "var(--text-2)",
+                    border: isActive ? "none" : "1px solid var(--border-1)",
+                  }}
+                >
+                  <Icon style={{ width: 12, height: 12 }} />
+                  <span>{cat.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Library Grid Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* ROW 3: Scrollable Card Grid */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 24px",
+            backgroundColor: "var(--bg-0)",
+          }}
+        >
           {loading ? (
-            <div className="h-full flex flex-col items-center justify-center text-text-2 gap-2">
-              <Loader2 className="w-6 h-6 animate-spin text-accent" />
-              <span className="text-xs">Loading library catalog...</span>
+            /* Skeleton Loading Grid */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "16px" }}>
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  style={{
+                    backgroundColor: "var(--bg-1)",
+                    border: "1px solid var(--border-1)",
+                    borderRadius: "12px",
+                    padding: "12px",
+                    height: "220px",
+                    opacity: 0.6,
+                  }}
+                />
+              ))}
             </div>
           ) : filteredLibraries.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-text-3 py-12 gap-2">
-              <LayoutGrid className="w-10 h-10 stroke-1" />
-              <p className="text-sm font-medium text-text-2">No libraries found</p>
-              <p className="text-xs">Try adjusting your search filter or category selection.</p>
+            /* Empty State */
+            <div
+              style={{
+                height: "100%",
+                minHeight: "260px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--text-3)",
+                gap: "12px",
+              }}
+            >
+              <LayoutGrid style={{ width: 32, height: 32 }} />
+              <p style={{ fontSize: "13px", fontWeight: 500, color: "var(--text-2)", margin: 0 }}>
+                No matching libraries found
+              </p>
+              <p style={{ fontSize: "11px", color: "var(--text-3)", margin: 0 }}>
+                Try clearing your search or selecting a different category.
+              </p>
+              {(searchQuery || activeCategory !== "all") && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setActiveCategory("all");
+                  }}
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    backgroundColor: "var(--bg-2)",
+                    border: "1px solid var(--border-1)",
+                    color: "var(--text-2)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <RotateCcw style={{ width: 12, height: 12 }} />
+                  <span>Reset Filters</span>
+                </button>
+              )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            /* Cards Grid */
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+                gap: "16px",
+              }}
+            >
               {filteredLibraries.map((lib) => {
                 const isAdded = addedLibIds.has(lib.id);
                 const isLoadingThis = loadingLibId === lib.id;
@@ -187,15 +396,45 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                 return (
                   <div
                     key={lib.id}
-                    className="group bg-bg-2/70 border border-border/40 hover:border-accent/40 rounded-lg p-3 flex flex-col justify-between transition-all hover:shadow-md hover:bg-bg-2"
+                    style={{
+                      backgroundColor: "var(--bg-1)",
+                      border: "1px solid var(--border-1)",
+                      borderRadius: "12px",
+                      padding: "14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      transition: "all 0.15s ease",
+                    }}
                   >
                     <div>
-                      {/* Image Preview Container */}
-                      <div className="w-full h-28 rounded-md bg-bg-0/60 border border-border/20 overflow-hidden flex items-center justify-center mb-2.5 relative group-hover:bg-bg-0 transition-colors">
+                      {/* Image Preview Box */}
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "125px",
+                          backgroundColor: "#ffffff",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-1)",
+                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "8px",
+                          marginBottom: "12px",
+                          flexShrink: 0,
+                        }}
+                      >
                         <img
                           src={previewUrl}
                           alt={lib.name}
-                          className="max-h-full max-w-full object-contain p-2 filter dark:invert-[0.1]"
+                          style={{
+                            maxWidth: "100%",
+                            maxHeight: "100%",
+                            objectFit: "contain",
+                            display: "block",
+                            margin: "0 auto",
+                          }}
                           onError={(e) => {
                             const img = e.currentTarget;
                             if (img.src !== cdnPreviewUrl) {
@@ -207,26 +446,66 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                         />
                       </div>
 
-                      <h3 className="text-xs font-semibold text-text-0 line-clamp-1 group-hover:text-accent transition-colors">
+                      {/* Title & Description */}
+                      <h3
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: 600,
+                          color: "var(--text-1)",
+                          margin: "0 0 4px 0",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {lib.name}
                       </h3>
-                      <p className="text-[11px] text-text-2 line-clamp-2 my-1 min-h-[32px]">
+                      <p
+                        style={{
+                          fontSize: "11px",
+                          color: "var(--text-2)",
+                          margin: "0 0 10px 0",
+                          lineHeight: "1.4",
+                          height: "30px",
+                          overflow: "hidden",
+                        }}
+                      >
                         {lib.description}
                       </p>
 
-                      {/* Author Info */}
+                      {/* Author Link */}
                       {lib.authors.length > 0 && (
-                        <div className="text-[10px] text-text-3 mb-3 flex items-center gap-1">
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "var(--text-3)",
+                            marginBottom: "12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          }}
+                        >
                           <span>by</span>
                           <a
                             href={lib.authors[0]!.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-text-2 hover:text-accent underline flex items-center gap-0.5 truncate max-w-[140px]"
+                            style={{
+                              color: "var(--text-2)",
+                              fontWeight: 500,
+                              textDecoration: "none",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "2px",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              maxWidth: "140px",
+                            }}
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {lib.authors[0]!.name}
-                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            <span>{lib.authors[0]!.name}</span>
+                            <ArrowUpRight style={{ width: 10, height: 10, opacity: 0.6 }} />
                           </a>
                         </div>
                       )}
@@ -236,25 +515,37 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
                     <button
                       onClick={() => handleAddLibrary(lib)}
                       disabled={isLoadingThis}
-                      className={`w-full py-1.5 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${isAdded
-                        ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                        : "bg-accent hover:bg-accent/90 text-white shadow-sm"
-                        }`}
+                      style={{
+                        width: "100%",
+                        padding: "7px 12px",
+                        borderRadius: "8px",
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "6px",
+                        cursor: "pointer",
+                        border: "none",
+                        transition: "all 0.15s ease",
+                        backgroundColor: isAdded ? "rgba(16, 185, 129, 0.15)" : "var(--accent)",
+                        color: isAdded ? "#34d399" : "#ffffff",
+                      }}
                     >
                       {isLoadingThis ? (
                         <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" />
                           <span>Downloading...</span>
                         </>
                       ) : isAdded ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Added to Library</span>
+                          <Check style={{ width: 14, height: 14 }} />
+                          <span>Added to DrawFlow</span>
                         </>
                       ) : (
                         <>
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add to Excalidraw</span>
+                          <Plus style={{ width: 14, height: 14 }} />
+                          <span>Add to DrawFlow</span>
                         </>
                       )}
                     </button>
