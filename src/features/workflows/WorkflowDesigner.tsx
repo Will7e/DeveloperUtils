@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useCallback, useState, useEffect, useRef } from "react";
-import { Excalidraw, MainMenu } from "@excalidraw/excalidraw";
+import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
@@ -66,6 +66,7 @@ export function WorkflowDesigner() {
       <WorkflowToolbar excalidrawAPI={excalidrawAPI} />
       <div className="flex-1 w-full relative overflow-hidden">
         <Excalidraw
+          key={activeWorkflowId}
           excalidrawAPI={(api) => setExcalidrawAPI(api)}
           onChange={handleChange}
           theme={isDark ? "dark" : "light"}
@@ -82,9 +83,24 @@ export function WorkflowDesigner() {
             <MainMenu.DefaultItems.Export />
             <MainMenu.DefaultItems.SaveAsImage />
             <MainMenu.DefaultItems.ClearCanvas />
+            <MainMenu.Separator />
             <MainMenu.DefaultItems.ToggleTheme />
             <MainMenu.DefaultItems.ChangeCanvasBackground />
           </MainMenu>
+          <WelcomeScreen>
+            <WelcomeScreen.Hints.MenuHint />
+            <WelcomeScreen.Hints.ToolbarHint />
+            <WelcomeScreen.Hints.HelpHint />
+            <WelcomeScreen.Center>
+              <WelcomeScreen.Center.Heading>
+                DevUtils Workflow & Diagram Studio
+              </WelcomeScreen.Center.Heading>
+              <WelcomeScreen.Center.Menu>
+                <WelcomeScreen.Center.MenuItemLoadScene />
+                <WelcomeScreen.Center.MenuItemHelp />
+              </WelcomeScreen.Center.Menu>
+            </WelcomeScreen.Center>
+          </WelcomeScreen>
         </Excalidraw>
       </div>
     </div>

@@ -142,11 +142,6 @@ export interface AppState {
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
 
-  // Workflow UI
-  workflowMinimapVisible: boolean;
-  workflowPaletteCollapsed: boolean;
-  workflowPropertiesCollapsed: boolean;
-
   // Actions
   createFile: (name: string, language: Language) => void;
   deleteFile: (id: string) => void;
@@ -205,75 +200,26 @@ export interface AppState {
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
 
-  // Workflow actions
+  // Workflow UI & State
   workflows: Workflow[];
   activeWorkflowId: string;
-  workflowSelectedNodeId: string | null;
-  workflowSelectedEdgeId: string | null;
   createWorkflow: (name?: string) => void;
   deleteWorkflow: (id: string) => void;
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;
   reorderWorkflows: (fromIndex: number, toIndex: number) => void;
-  updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => void;
   updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => void;
-  updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => void;
-  updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => void;
-  setWorkflowSelectedNodeId: (id: string | null) => void;
-  setWorkflowSelectedEdgeId: (id: string | null) => void;
-  toggleWorkflowMinimap: () => void;
-  setWorkflowPaletteCollapsed: (collapsed: boolean) => void;
-  setWorkflowPropertiesCollapsed: (collapsed: boolean) => void;
 }
 
 // ============================================================
-// Workflow Types
+// Workflow Types (Excalidraw)
 // ============================================================
-
-export type WorkflowNodeType = 'start' | 'end' | 'process' | 'decision' | 'data' | 'integration';
-
-export interface WorkflowNodeData {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: {
-    label: string;
-    description?: string;
-    nodeType: WorkflowNodeType;
-    color?: string;
-    icon?: string;
-    properties?: Record<string, string>;
-  };
-  measured?: { width: number; height: number };
-  style?: Record<string, any>;
-  width?: number;
-  height?: number;
-}
-
-export interface WorkflowEdgeData {
-  id: string;
-  source: string;
-  target: string;
-  sourceHandle?: string | null;
-  targetHandle?: string | null;
-  label?: string;
-  animated?: boolean;
-  type?: string;
-  data?: { 
-    color?: string;
-    edgeStyle?: "smoothstep" | "straight" | "bezier";
-    lineStyle?: "solid" | "animated" | "dashed";
-  };
-}
 
 export interface Workflow {
   id: string;
   name: string;
   elements?: any[];
   appState?: Record<string, any>;
-  nodes?: WorkflowNodeData[];
-  edges?: WorkflowEdgeData[];
-  viewport?: { x: number; y: number; zoom: number };
   createdAt: number;
   updatedAt: number;
 }

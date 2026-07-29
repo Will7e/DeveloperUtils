@@ -4,7 +4,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, Language, EditorFile, Workflow, WorkflowNodeData, WorkflowEdgeData, DiffSession, DiffSettings } from "@/types";
+import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
@@ -281,7 +281,7 @@ const createDefaultWorkflowElements = (): any[] => [
 const initialWorkflow: Workflow = {
   id: generateId(),
   name: "My Workflow",
-  elements: [],
+  elements: createDefaultWorkflowElements(),
   appState: {},
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -322,11 +322,6 @@ export const useAppStore = create<AppState>()(
       librarySearchQuery: "",
       workflows: [initialWorkflow],
       activeWorkflowId: initialWorkflow.id,
-      workflowSelectedNodeId: null,
-      workflowSelectedEdgeId: null,
-      workflowMinimapVisible: true,
-      workflowPaletteCollapsed: false,
-      workflowPropertiesCollapsed: false,
 
       // File actions
       createFile: (name: string, language: Language) => {
@@ -727,7 +722,7 @@ export const useAppStore = create<AppState>()(
             const newWorkflow: Workflow = {
               id: generateId(),
               name: "My Workflow",
-              elements: [],
+              elements: createDefaultWorkflowElements(),
               appState: {},
               createdAt: Date.now(),
               updatedAt: Date.now(),
@@ -765,14 +760,6 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      updateWorkflowNodes: (workflowId: string, nodes: WorkflowNodeData[]) => {
-        set((state) => ({
-          workflows: state.workflows.map((w) =>
-            w.id === workflowId ? { ...w, nodes, updatedAt: Date.now() } : w
-          ),
-        }));
-      },
-
       updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>) => {
         set((state) => ({
           workflows: state.workflows.map((w) =>
@@ -780,46 +767,9 @@ export const useAppStore = create<AppState>()(
           ),
         }));
       },
-
-      updateWorkflowEdges: (workflowId: string, edges: WorkflowEdgeData[]) => {
-        set((state) => ({
-          workflows: state.workflows.map((w) =>
-            w.id === workflowId ? { ...w, edges, updatedAt: Date.now() } : w
-          ),
-        }));
-      },
-
-      updateWorkflowViewport: (workflowId: string, viewport: { x: number; y: number; zoom: number }) => {
-        set((state) => ({
-          workflows: state.workflows.map((w) =>
-            w.id === workflowId ? { ...w, viewport } : w
-          ),
-        }));
-      },
-
-      setWorkflowSelectedNodeId: (id) => {
-        set({ workflowSelectedNodeId: id, workflowSelectedEdgeId: null });
-      },
-
-      setWorkflowSelectedEdgeId: (id) => {
-        set({ workflowSelectedEdgeId: id, workflowSelectedNodeId: null });
-      },
-
-      toggleWorkflowMinimap: () => {
-        set((state) => ({ workflowMinimapVisible: !state.workflowMinimapVisible }));
-      },
-
-      setWorkflowPaletteCollapsed: (collapsed) => {
-        set({ workflowPaletteCollapsed: collapsed });
-      },
-
-      setWorkflowPropertiesCollapsed: (collapsed) => {
-        set({ workflowPropertiesCollapsed: collapsed });
-      },
     }),
     {
       name: "devutils-app-state",
-      // Only persist files, activeFileId, and editor settings — NOT runtime state
       partialize: (state) => ({
         files: state.files,
         activeFileId: state.activeFileId,
@@ -839,9 +789,6 @@ export const useAppStore = create<AppState>()(
         librarySearchQuery: state.librarySearchQuery,
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
-        workflowMinimapVisible: state.workflowMinimapVisible,
-        workflowPaletteCollapsed: state.workflowPaletteCollapsed,
-        workflowPropertiesCollapsed: state.workflowPropertiesCollapsed,
       }),
     }
   )
