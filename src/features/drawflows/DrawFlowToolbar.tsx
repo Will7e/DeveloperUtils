@@ -1,5 +1,5 @@
 // ============================================================
-// WorkflowToolbar — Clean top tab bar & actions for Workflows
+// DrawFlowToolbar — Clean top tab bar & actions for DrawFlows
 // ============================================================
 
 import { useCallback, useState } from "react";
@@ -25,11 +25,11 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
 import { ExcalidrawLibraryModal } from "./ExcalidrawLibraryModal";
 
-interface WorkflowToolbarProps {
+interface DrawFlowToolbarProps {
   excalidrawAPI: ExcalidrawImperativeAPI | null;
 }
 
-export function WorkflowToolbar({ excalidrawAPI }: WorkflowToolbarProps) {
+export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);

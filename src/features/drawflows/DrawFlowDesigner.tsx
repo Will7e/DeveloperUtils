@@ -1,5 +1,5 @@
 // ============================================================
-// WorkflowDesigner — Standard Excalidraw Integration
+// DrawFlowDesigner — Standard Excalidraw Integration
 // ============================================================
 
 import { useCallback, useState, useEffect, useRef } from "react";
@@ -8,9 +8,9 @@ import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 import { useAppStore } from "@/stores/app.store";
-import { WorkflowToolbar } from "./WorkflowToolbar";
+import { DrawFlowToolbar } from "./DrawFlowToolbar";
 
-export function WorkflowDesigner() {
+export function DrawFlowDesigner() {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null);
 
   const workflows = useAppStore((s) => s.workflows);
@@ -90,7 +90,7 @@ export function WorkflowDesigner() {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg-0">
-      <WorkflowToolbar excalidrawAPI={excalidrawAPI} />
+      <DrawFlowToolbar excalidrawAPI={excalidrawAPI} />
       <div className="flex-1 w-full relative overflow-hidden">
         <Excalidraw
           key={activeWorkflowId}
@@ -137,4 +137,4 @@ export function WorkflowDesigner() {
   );
 }
 
-export default WorkflowDesigner;
+export default DrawFlowDesigner;

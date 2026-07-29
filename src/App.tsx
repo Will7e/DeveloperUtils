@@ -13,7 +13,7 @@ import { FormattersPage } from "@/pages/FormattersPage";
 import { ComparatorsPage } from "@/pages/ComparatorsPage";
 import { DiffCheckerPage } from "@/pages/DiffCheckerPage";
 import { LibraryPage } from "@/pages/LibraryPage";
-import { WorkflowPage } from "@/pages/WorkflowPage";
+import { DrawFlowPage } from "@/pages/DrawFlowPage";
 import { ApiTesterPage } from "@/pages/ApiTesterPage";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
@@ -48,7 +48,7 @@ function AppContent() {
           <Route path="/comparators" element={<ComparatorsPage />} />
           <Route path="/diff" element={<DiffCheckerPage />} />
           <Route path="/library" element={<LibraryPage />} />
-          <Route path="/drawflows" element={<WorkflowPage />} />
+          <Route path="/drawflows" element={<DrawFlowPage />} />
           <Route path="/workflows" element={<Navigate to="/drawflows" replace />} />
           <Route path="/api-tester" element={<ApiTesterPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
