@@ -4,7 +4,7 @@ import { Book, Copy, Check, Code2, Server, Monitor, ArrowLeftRight, FileCode2, C
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
-import { ServiceNowLibrary, ServiceNowMethod } from "@/types";
+import { ServiceNowLibrary, ServiceNowMethod, Toast } from "@/types";
 import {
   getExcalidrawLibraries,
   getExcalidrawLibraryPreviewUrl,
@@ -208,7 +208,7 @@ export function LibraryView() {
 function MethodCard({ method, index, addToast, badgeColor, isHighlighted, searchQuery }: {
   method: ServiceNowMethod;
   index: number;
-  addToast: (toast: { message: string; type?: "info" | "success" | "warning" | "error" }) => void;
+  addToast: (toast: Omit<Toast, "id">) => void;
   badgeColor: string;
   isHighlighted?: boolean;
   searchQuery?: string;
@@ -487,7 +487,7 @@ const EXCALIDRAW_CATEGORIES = [
 
 function ExcalidrawLibraryGallery({ searchQuery, addToast }: { 
   searchQuery: string; 
-  addToast: (toast: { message: string; type?: "info" | "success" | "warning" | "error" }) => void; 
+  addToast: (toast: Omit<Toast, "id">) => void; 
 }) {
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -505,8 +505,9 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: {
     return libraries.filter((lib) => {
       if (activeCategory !== "all") {
         const cat = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
-        if (cat?.keywords) {
-          const matchCat = cat.keywords.some((kw) =>
+        if (cat && "keywords" in cat) {
+          const keywords = cat.keywords as readonly string[];
+          const matchCat = keywords.some((kw: string) =>
             lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw)
           );
           if (!matchCat) return false;

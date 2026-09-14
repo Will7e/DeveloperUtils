@@ -2,7 +2,8 @@
 // Sound Effects — Subtle audio feedback for code execution
 // ============================================================
 
-const audioContext = typeof window !== "undefined" ? new (window.AudioContext || (window as any).webkitAudioContext)() : null;
+const AudioContextClass = typeof window !== "undefined" ? (window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) : null;
+const audioContext = AudioContextClass ? new AudioContextClass() : null;
 
 type SoundType = "run" | "success" | "error";
 

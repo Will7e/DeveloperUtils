@@ -596,8 +596,6 @@ export function DiffChecker() {
     addToast({ message: "Both sides cleared", type: "info" });
   }, [activeSession.id, updateSessionInput, updateSessionLanguage, addToast]);
 
-  if (!isHydrated) return null;
-
   const currentLang = DIFF_LANGUAGES.find((l) => l.id === activeSession.language) || DIFF_LANGUAGES[0]!;
 
   return (

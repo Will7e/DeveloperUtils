@@ -13,6 +13,12 @@ import { DrawFlowToolbar } from "./DrawFlowToolbar";
 type ExcalidrawProps = React.ComponentProps<typeof Excalidraw>;
 type ExcalidrawOnChange = NonNullable<ExcalidrawProps["onChange"]>;
 type ExcalidrawOnLibraryChange = NonNullable<ExcalidrawProps["onLibraryChange"]>;
+type UnwrapInitialData<T> = T extends (...args: never[]) => infer R
+  ? UnwrapInitialData<R>
+  : T extends Promise<infer U>
+  ? UnwrapInitialData<U>
+  : NonNullable<T>;
+type ExcalidrawInitialData = UnwrapInitialData<ExcalidrawProps["initialData"]>;
 
 export function DrawFlowDesigner() {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null);
@@ -36,7 +42,7 @@ export function DrawFlowDesigner() {
 
     isUpdatingSceneRef.current = true;
     excalidrawAPI.updateScene({
-      elements: activeWorkflow.elements || [],
+      elements: (activeWorkflow.elements || []) as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["elements"],
       appState: {
         theme: isDark ? "dark" : "light",
         openSidebar: activeWorkflow.appState?.openSidebar ?? null,
@@ -105,14 +111,14 @@ export function DrawFlowDesigner() {
           onLibraryChange={handleLibraryChange}
           theme={isDark ? "dark" : "light"}
           initialData={{
-            elements: activeWorkflow?.elements || [],
+            elements: (activeWorkflow?.elements || []) as ExcalidrawInitialData["elements"],
             appState: {
               theme: isDark ? "dark" : "light",
               openSidebar: activeWorkflow?.appState?.openSidebar ?? null,
               ...(activeWorkflow?.appState || {}),
             } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
-            files: activeWorkflow?.files || {},
-            libraryItems: excalidrawLibraryItems || [],
+            files: (activeWorkflow?.files || {}) as ExcalidrawInitialData["files"],
+            libraryItems: (excalidrawLibraryItems || []) as ExcalidrawInitialData["libraryItems"],
           }}
         >
           <MainMenu>

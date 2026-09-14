@@ -16,14 +16,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-interface SettingsDropdownProps {
-  value: string | number;
-  options: { label: string; value: string | number }[];
-  onChange: (value: any) => void;
+interface SettingsDropdownProps<T extends string | number> {
+  value: T;
+  options: { label: string; value: T }[];
+  onChange: (value: T) => void;
   className?: string;
 }
 
-function SettingsDropdown({ value, options, onChange, className = "w-[120px]" }: SettingsDropdownProps) {
+function SettingsDropdown<T extends string | number>({ value, options, onChange, className = "w-[120px]" }: SettingsDropdownProps<T>) {
   const selectedOption = options.find((o) => o.value === value) || options[0];
   
   return (
@@ -183,7 +183,7 @@ export function SettingsPanel() {
             <div className="settings-control">
               <SettingsDropdown
                 value={editorSettings.lineNumbers}
-                onChange={(v) => updateEditorSettings({ lineNumbers: v as any })}
+                onChange={(v) => updateEditorSettings({ lineNumbers: v as "on" | "off" | "relative" })}
                 options={[
                   { label: "On", value: "on" },
                   { label: "Off", value: "off" },
@@ -283,7 +283,7 @@ export function SettingsPanel() {
             <div className="settings-control">
               <SettingsDropdown
                 value={editorSettings.cursorStyle}
-                onChange={(v) => updateEditorSettings({ cursorStyle: v as any })}
+                onChange={(v) => updateEditorSettings({ cursorStyle: v as "line" | "block" | "underline" })}
                 options={[
                   { label: "Line", value: "line" },
                   { label: "Block", value: "block" },

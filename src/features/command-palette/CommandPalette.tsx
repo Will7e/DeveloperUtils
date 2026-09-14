@@ -29,6 +29,7 @@ import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 
 
 interface PaletteAction {
@@ -453,11 +454,11 @@ export function CommandPalette() {
             }}
             onKeyDown={handleKeyDown}
           />
-          <ActionTooltip content="Close Palette (Esc)" side="left">
+          <SimpleTooltip content="Close Palette (Esc)" side="left">
             <button className="palette-close" onClick={toggleCommandPalette}>
               <X style={{ width: 14, height: 14 }} />
             </button>
-          </ActionTooltip>
+          </SimpleTooltip>
         </div>
 
         <div className="palette-list" ref={listRef}>

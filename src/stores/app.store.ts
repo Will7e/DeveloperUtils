@@ -41,7 +41,7 @@ const initialComparatorSession = { id: generateId(), name: "List Compare", a: ""
 const initialDiffSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext" };
 const initialDiffSettings: DiffSettings = { renderSideBySide: true, ignoreTrimWhitespace: true, enableSplitViewResizing: true };
 
-const createDefaultWorkflowElements = (): any[] => [
+const createDefaultWorkflowElements = (): unknown[] => [
   {
     type: "text",
     version: 1,
@@ -765,7 +765,7 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      updateWorkflowExcalidraw: (workflowId: string, elements: any[], appState?: Record<string, any>, files?: Record<string, any>) => {
+      updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
         set((state) => ({
           workflows: state.workflows.map((w) =>
             w.id === workflowId ? { ...w, elements, appState, files, updatedAt: Date.now() } : w
@@ -774,7 +774,7 @@ export const useAppStore = create<AppState>()(
       },
 
       excalidrawLibraryItems: [],
-      updateExcalidrawLibraryItems: (items: any[]) => {
+      updateExcalidrawLibraryItems: (items: unknown[]) => {
         set({ excalidrawLibraryItems: items });
       },
       excalidrawAddedLibraryIds: [],

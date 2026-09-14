@@ -10,7 +10,6 @@ import {
   Search, 
   Download,
   Info,
-  Play,
   Settings2,
   AlignLeft,
   ChevronDown,
@@ -157,10 +156,6 @@ export function ListComparator() {
     return { aOnly, bOnly, both };
   }, [inputA, inputB, caseSensitive, sortAlpha, processList]);
 
-  const handleCompare = useCallback(() => {
-    addToast({ message: "Lists compared", type: "success" });
-  }, [addToast]);
-
   const hasCompared = Boolean(inputA.trim() || inputB.trim());
 
   const filteredResults = useMemo(() => {
@@ -189,9 +184,6 @@ export function ListComparator() {
     a.click();
     URL.revokeObjectURL(url);
   };
-
-  // Only render once hydrated to avoid mismatch and ensure persistence is loaded
-  if (!isHydrated) return null;
 
   return (
     <div className="list-comparator-container">
@@ -306,8 +298,6 @@ export function ListComparator() {
             <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
               updateSessionInput(activeSession.id, "a", ""); 
               updateSessionInput(activeSession.id, "b", ""); 
-              setHasCompared(false); 
-              setLastResults({ aOnly: [], bOnly: [], both: [] });
             }}>
               <Trash2 className="h-3.5 w-3.5" />
               Clear
@@ -316,11 +306,11 @@ export function ListComparator() {
 
           <div className="tabs-toolbar-sep" />
 
-          <ActionTooltip content="Analyze differences between List A and B">
-            <button className="tabs-run-btn" onClick={handleCompare}>
-              <Play className="h-3 w-3 fill-current" />
-              <span>Compare Now</span>
-            </button>
+          <ActionTooltip content="Results update automatically as you type">
+            <div className="tabs-run-btn opacity-80 cursor-default">
+              <Check className="h-3 w-3" />
+              <span>Live Synced</span>
+            </div>
           </ActionTooltip>
         </div>
       </div>
@@ -400,21 +390,21 @@ export function ListComparator() {
                   onClick={() => setActiveTab("aOnly")}
                 >
                   Only in A
-                  <span className="tab-badge">{lastResults.aOnly.length}</span>
+                  <span className="tab-badge">{comparisonResults.aOnly.length}</span>
                 </button>
                 <button 
                   className={cn("results-tab", activeTab === "bOnly" && "active")}
                   onClick={() => setActiveTab("bOnly")}
                 >
                   Only in B
-                  <span className="tab-badge">{lastResults.bOnly.length}</span>
+                  <span className="tab-badge">{comparisonResults.bOnly.length}</span>
                 </button>
                 <button 
                   className={cn("results-tab", activeTab === "both" && "active")}
                   onClick={() => setActiveTab("both")}
                 >
                   Common
-                  <span className="tab-badge">{lastResults.both.length}</span>
+                  <span className="tab-badge">{comparisonResults.both.length}</span>
                 </button>
 
                 <div className="ml-auto flex items-center gap-2 px-2">

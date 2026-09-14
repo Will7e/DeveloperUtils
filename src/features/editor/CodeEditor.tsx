@@ -57,8 +57,7 @@ export function CodeEditor() {
             ed.setValue(formatted);
           } else {
             useAppStore.getState().addToast({
-              title: "Formatting Not Supported",
-              description: `Formatting is not supported for ${file.language}`,
+              message: `Formatting is not supported for ${file.language}`,
               type: "info",
               duration: 1500,
             });
@@ -100,7 +99,7 @@ export function CodeEditor() {
         }
       });
     },
-    []
+    [editorSettings.theme]
   );
 
   // Dynamically switch Monaco theme when settings change

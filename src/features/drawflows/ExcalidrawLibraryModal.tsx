@@ -23,7 +23,8 @@ import { useAppStore } from "@/stores/app.store";
 import {
   getExcalidrawLibraries,
   loadLibraryToExcalidraw,
-  isLibraryAlreadyAdded,
+  getExcalidrawLibraryPreviewUrl,
+  getExcalidrawLibraryCdnPreviewUrl,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
 

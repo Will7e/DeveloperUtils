@@ -17,6 +17,8 @@ import {
   Minimize2,
   Maximize2,
   Code2,
+  ChevronDown,
+  Braces,
   Expand,
   Shrink,
   Plus,
@@ -45,20 +47,16 @@ interface ActionTooltipProps {
 
 const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
   <Tooltip>
-    <TooltipTrigger asChild>
-      {children}
-    </TooltipTrigger>
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
     <TooltipContent side={side}>
       <p>{content}</p>
     </TooltipContent>
   </Tooltip>
 );
 
-interface FormatterToolProps {
-  type: "json" | "xml";
-}
-
-export function FormatterTool({ type }: FormatterToolProps) {
+export function FormatterTool() {
+  const type = useAppStore((s) => s.formatterType);
+  const setType = useAppStore((s) => s.setFormatterType);
   const formatterFiles = useAppStore((s) => s.formatterFiles);
   const activeFileId = useAppStore((s) => s.activeFormatterFileId[type]);
   const setActiveFile = useAppStore((s) => s.setActiveFormatterFile);
@@ -605,7 +603,7 @@ export function FormatterTool({ type }: FormatterToolProps) {
             </div>
             
             <div className="flex items-center gap-2">
-              {type === "json" && !error && data && (
+              {type === "json" && !error && Boolean(data) && (
                 <div className="flex items-center bg-[var(--bg-1)] border border-[var(--border-1)] rounded-[6px] p-0.5 shadow-sm">
                   <ActionTooltip content="Expand All" side="top">
                     <button className="preview-action-btn" onClick={handleExpandAll}>

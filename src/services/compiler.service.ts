@@ -19,10 +19,11 @@ import type { Language, ExecutionResult, ExecutionOptions, ICompilerService } fr
 // ============================================================
 // TypeScript Compiler (loaded from CDN on demand)
 // ============================================================
-let tsModule: any = null;
-let tsLoadPromise: Promise<any> | null = null;
+type TSModule = typeof import("typescript");
+let tsModule: TSModule | null = null;
+let tsLoadPromise: Promise<TSModule> | null = null;
 
-async function loadTypeScriptCompiler(): Promise<any> {
+async function loadTypeScriptCompiler(): Promise<TSModule> {
   if (tsModule) return tsModule;
   if (tsLoadPromise) return tsLoadPromise;
 
@@ -34,7 +35,7 @@ async function loadTypeScriptCompiler(): Promise<any> {
 
       script.onload = () => {
         // TypeScript attaches itself to the global `ts` variable
-        tsModule = (window as any).ts;
+        tsModule = (window as unknown as { ts?: TSModule }).ts || null;
         if (tsModule) {
           resolve(tsModule);
         } else {
@@ -77,8 +78,8 @@ async function transpileTypeScript(
     reportDiagnostics: true,
   });
 
-  const diagnostics = (result.diagnostics || []).map((d: any) =>
-    ts.flattenDiagnosticMessageText(d.messageText, "\n")
+  const diagnostics = (result.diagnostics || []).map((d) =>
+    typeof d.messageText === "string" ? d.messageText : ts.flattenDiagnosticMessageText(d.messageText, "\n")
   );
 
   return { js: result.outputText, diagnostics };
@@ -361,10 +362,15 @@ async function executeTypeScript(
 // ============================================================
 // Pyodide (Python WASM) Engine
 // ============================================================
-let pyodideInstance: any = null;
-let pyodideLoadPromise: Promise<any> | null = null;
+interface PyodideInterface {
+  runPython: (code: string) => unknown;
+  runPythonAsync: (code: string) => Promise<unknown>;
+}
 
-async function loadPyodide(): Promise<any> {
+let pyodideInstance: PyodideInterface | null = null;
+let pyodideLoadPromise: Promise<PyodideInterface> | null = null;
+
+async function loadPyodide(): Promise<PyodideInterface> {
   if (pyodideInstance) return pyodideInstance;
 
   if (pyodideLoadPromise) return pyodideLoadPromise;
@@ -377,16 +383,15 @@ async function loadPyodide(): Promise<any> {
       script.async = true;
 
       script.onload = () => {
-        // @ts-expect-error - Pyodide is loaded globally
-        window
+        (window as unknown as { loadPyodide: (opts: { indexURL: string }) => Promise<PyodideInterface> })
           .loadPyodide({
             indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/",
           })
-          .then((pyodide: any) => {
+          .then((pyodide: PyodideInterface) => {
             pyodideInstance = pyodide;
             resolve(pyodide);
           })
-          .catch((err: any) => {
+          .catch((err: unknown) => {
             pyodideLoadPromise = null;
             reject(err);
           });
@@ -429,9 +434,9 @@ sys.stderr = StringIO()
     const executionPromise = (async () => {
       try {
         await pyodide.runPythonAsync(code);
-      } catch (err: any) {
-        const stdout = pyodide.runPython("sys.stdout.getvalue()");
-        const stderr = err.message || String(err);
+      } catch (err: unknown) {
+        const stdout = String(pyodide.runPython("sys.stdout.getvalue()"));
+        const stderr = err instanceof Error ? err.message : String(err);
         const duration = performance.now() - startTime;
 
         // Reset stdout/stderr
@@ -449,8 +454,8 @@ sys.stderr = sys.__stderr__
         };
       }
 
-      const stdout = pyodide.runPython("sys.stdout.getvalue()");
-      const stderr = pyodide.runPython("sys.stderr.getvalue()");
+      const stdout = String(pyodide.runPython("sys.stdout.getvalue()") ?? "");
+      const stderr = String(pyodide.runPython("sys.stderr.getvalue()") ?? "");
       const duration = performance.now() - startTime;
 
       // Reset stdout/stderr
@@ -460,8 +465,8 @@ sys.stderr = sys.__stderr__
 `);
 
       return {
-        stdout: (stdout || "").trimEnd(),
-        stderr: (stderr || "").trimEnd(),
+        stdout: stdout.trimEnd(),
+        stderr: stderr.trimEnd(),
         exitCode: 0,
         duration,
         timestamp: Date.now(),

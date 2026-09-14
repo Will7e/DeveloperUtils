@@ -26,8 +26,6 @@ import {
   Activity,
   Terminal,
   Lock,
-  Key,
-  User,
   Eye,
   EyeOff,
   ChevronDown,
@@ -52,7 +50,7 @@ import {
   HttpMethod,
   BodyType,
   AuthType,
-  HistoryItem,
+  ImportedRequest,
 } from "@/stores/api-tester.store";
 import { useAppStore } from "@/stores/app.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -513,7 +511,9 @@ function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispat
   useEffect(() => {
     try {
       window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
+    } catch {
+      // Ignore localStorage write errors
+    }
   }, [key, value]);
 
   return [value, setValue];
@@ -595,7 +595,6 @@ export function ApiTester() {
   >("pretty");
   const [headerSearch, setHeaderSearch] = useState("");
   const [copied, setCopied] = useState(false);
-  const [curlCopied, setCurlCopied] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showImportCurl, setShowImportCurl] = useState(false);
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
@@ -634,6 +633,7 @@ export function ApiTester() {
   const [requestPaneHeight, setRequestPaneHeight] = useState(280);
   const splitRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
+  const [isDraggingActive, setIsDraggingActive] = useState(false);
   const dragStartY = useRef(0);
   const dragStartHeight = useRef(0);
 
@@ -641,6 +641,7 @@ export function ApiTester() {
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       isDragging.current = true;
+      setIsDraggingActive(true);
       dragStartY.current = e.clientY;
       dragStartHeight.current = requestPaneHeight;
       document.body.style.cursor = "row-resize";
@@ -658,6 +659,7 @@ export function ApiTester() {
 
       const handleUp = () => {
         isDragging.current = false;
+        setIsDraggingActive(false);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
         window.removeEventListener("mousemove", handleMove);
@@ -710,12 +712,20 @@ export function ApiTester() {
 
   const hasBody = activeTab ? (activeTab.method !== "GET" && activeTab.method !== "HEAD") : false;
 
-  // ── Reset requestTab when body becomes unavailable ──────────
-  useEffect(() => {
-    if (!hasBody && requestTab === "body") {
+  // ── Synchronize requestTab when switching tabs or when body becomes unavailable ──
+  const [prevActiveTabId, setPrevActiveTabId] = useState(activeTab?.id);
+  if (activeTab && activeTab.id !== prevActiveTabId) {
+    setPrevActiveTabId(activeTab.id);
+    if (activeTab.protocol === "graphql") {
+      setRequestTab("graphql");
+    } else if (activeTab.protocol === "websocket") {
+      setRequestTab("ws-message");
+    } else {
       setRequestTab("params");
     }
-  }, [hasBody, requestTab]);
+  } else if (!hasBody && requestTab === "body") {
+    setRequestTab("params");
+  }
 
   // ── Focus tab rename input when editing ─────────────────────
   useEffect(() => {
@@ -732,18 +742,6 @@ export function ApiTester() {
     }
   }, [activeTab?.wsMessages]);
 
-  // ── Auto-switch request tab based on protocol ───────────────
-  useEffect(() => {
-    if (!activeTab) return;
-    if (activeTab.protocol === "graphql") {
-      setRequestTab("graphql");
-    } else if (activeTab.protocol === "websocket") {
-      setRequestTab("ws-message");
-    } else {
-      setRequestTab("params");
-    }
-  }, [activeTab?.protocol, activeTab?.id]);
-
   // Issue 19: Detect Mac vs Windows/Linux platform for shortcuts
   const isMac = typeof window !== "undefined" && /macintosh|mac os x/i.test(navigator.userAgent);
 
@@ -751,17 +749,19 @@ export function ApiTester() {
     ? getLanguageFromContentType(activeTab.response.headers?.["content-type"])
     : "text";
 
-  const prettyBody = React.useMemo(() => {
-    if (!activeTab?.response?.body) return "";
+  const responseBody = activeTab?.response?.body;
+  let prettyBody = "";
+  if (responseBody) {
     if (responseLang === "json") {
       try {
-        return JSON.stringify(JSON.parse(activeTab.response.body), null, 2);
+        prettyBody = JSON.stringify(JSON.parse(responseBody), null, 2);
       } catch {
-        return activeTab.response.body;
+        prettyBody = responseBody;
       }
+    } else {
+      prettyBody = responseBody;
     }
-    return activeTab.response.body;
-  }, [activeTab?.response?.body, responseLang]);
+  }
 
   // Issue 28 & Bug 1: Loading state during store initialization or when no active tab exists
   if (!store.isInitialized || !activeTab) {
@@ -780,7 +780,7 @@ export function ApiTester() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     
-    const requests: any[] = [];
+    const requests: ImportedRequest[] = [];
     let folderName = "Imported Files";
     let skippedCount = 0;
     
@@ -807,7 +807,7 @@ export function ApiTester() {
         } else {
           skippedCount++;
         }
-      } catch (err) {
+      } catch {
         console.error("Failed to parse", file.name);
         skippedCount++;
       }
@@ -855,19 +855,6 @@ export function ApiTester() {
     } catch (err) {
       console.error("Failed to copy response: ", err);
       addToast({ message: "Failed to copy response to clipboard.", type: "error", duration: 3000 });
-    }
-  };
-
-  const handleCopyCurl = async () => {
-    try {
-      const curl = store.generateCurl();
-      await navigator.clipboard.writeText(curl);
-      setCurlCopied(true);
-      setTimeout(() => setCurlCopied(false), 2000);
-      addToast({ message: "cURL command copied!", type: "success", duration: 2000 });
-    } catch (err) {
-      console.error("Failed to copy cURL: ", err);
-      addToast({ message: "Failed to copy cURL command.", type: "error", duration: 3000 });
     }
   };
 
@@ -963,7 +950,7 @@ export function ApiTester() {
           type="file" 
           ref={folderInputRef} 
           style={{ display: "none" }} 
-          {...({ webkitdirectory: "", directory: "" } as any)} 
+          {...({ webkitdirectory: "", directory: "" } as unknown as Record<string, string>)} 
           onChange={handleImportFiles} 
         />
 
@@ -2402,7 +2389,7 @@ export function ApiTester() {
 
           {/* ── Resizable Divider ──────────────────────────── */}
           <div
-            className={`api-resize-handle ${isDragging.current ? "api-resize-handle-active" : ""}`}
+            className={`api-resize-handle ${isDraggingActive ? "api-resize-handle-active" : ""}`}
             onMouseDown={handleResizeStart}
           />
 
@@ -3019,8 +3006,7 @@ export function ApiTester() {
             
             {/* Ultra-Premium Content Area */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-1)' }}>
-              {true && (
-                <>
+              <>
                   {/* Header */}
                   <div style={{ padding: '32px 36px 24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', background: 'var(--bg-1)' }}>
                     <div>
@@ -3210,7 +3196,6 @@ export function ApiTester() {
                     </div>
                   </div>
                 </>
-              )}
             </div>
           </div>
         </div>

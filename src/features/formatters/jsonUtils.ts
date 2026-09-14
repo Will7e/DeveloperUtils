@@ -16,11 +16,12 @@ export function parseJsonRobust(input: string): { data: unknown; error: string |
 
     // Attempt to extract position info from standard JSON errors
     const match = errorMsg.match(/at position (\d+)/);
-    if (match) {
+    if (match && match[1]) {
       const pos = parseInt(match[1], 10);
       const lines = input.slice(0, pos).split('\n');
       errorLine = lines.length;
-      errorCol = lines[lines.length - 1]!.length + 1;
+      const lastLine = lines[lines.length - 1] ?? '';
+      errorCol = lastLine.length + 1;
       errorMsg = `${errorMsg.replace(/ at position \d+/, '')} (Line ${errorLine}, Col ${errorCol})`;
     }
 
@@ -52,7 +53,7 @@ export function formatJsonRobust(input: string, options: JsonFormatOptions): str
     throw new Error(error || "Invalid JSON");
   }
 
-  let formattedData = data;
+  let formattedData: unknown = data;
   if (options.sortKeys) {
     formattedData = sortObjectKeys(formattedData);
   }

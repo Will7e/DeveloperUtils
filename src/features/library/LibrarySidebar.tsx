@@ -278,8 +278,8 @@ export function LibrarySidebar() {
 
   const displayedCategories = useMemo(() => {
     const existing = Object.keys(grouped);
-    const sorted = CATEGORY_ORDER.filter(c => existing.includes(c));
-    existing.forEach(c => {
+    const sorted: string[] = CATEGORY_ORDER.filter((c) => existing.includes(c));
+    existing.forEach((c) => {
       if (!sorted.includes(c)) sorted.push(c);
     });
     return sorted;

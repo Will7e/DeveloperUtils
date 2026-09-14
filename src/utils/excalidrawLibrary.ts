@@ -88,7 +88,7 @@ export async function loadLibraryToExcalidraw(
   const localUrl = `${baseUrl}excalidraw-libraries/libraries/${cleanPath}`;
   const cdnUrl = `${CDN_BASE_URL}/${cleanPath}`;
 
-  let data: any = null;
+  let data: Record<string, unknown> | unknown[] | null = null;
 
   // Try local fetch first
   try {
@@ -109,29 +109,37 @@ export async function loadLibraryToExcalidraw(
     data = await res.json();
   }
 
-  const rawItems = data.libraryItems || data.library || (Array.isArray(data) ? data : []);
+  const rawRecord = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
+  const rawItems: unknown[] = rawRecord?.libraryItems && Array.isArray(rawRecord.libraryItems)
+    ? (rawRecord.libraryItems as unknown[])
+    : rawRecord?.library && Array.isArray(rawRecord.library)
+    ? (rawRecord.library as unknown[])
+    : Array.isArray(data)
+    ? data
+    : [];
 
-  const formattedItems = rawItems.map((item: any, idx: number) => {
+  const formattedItems = rawItems.map((item: unknown, idx: number) => {
     if (Array.isArray(item)) {
       return {
         id: `lib-item-${Date.now()}-${idx}`,
-        status: "published",
+        status: "published" as const,
         elements: item,
         created: Date.now(),
       };
-    } else if (item?.elements) {
+    } else if (typeof item === "object" && item !== null && "elements" in item) {
+      const obj = item as Record<string, unknown>;
       return {
-        id: item.id || `lib-item-${Date.now()}-${idx}`,
-        status: item.status || "published",
-        elements: item.elements,
-        created: item.created || Date.now(),
+        id: (obj.id as string) || `lib-item-${Date.now()}-${idx}`,
+        status: ((obj.status as string) || "published") as "published" | "unpublished",
+        elements: obj.elements,
+        created: (obj.created as number) || Date.now(),
       };
     }
     return item;
   });
 
   await excalidrawAPI.updateLibrary({
-    libraryItems: formattedItems,
+    libraryItems: formattedItems as Parameters<ExcalidrawImperativeAPI["updateLibrary"]>[0]["libraryItems"],
     merge: true,
     openLibraryMenu: true,
   });

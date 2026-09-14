@@ -88,7 +88,7 @@ export function generateCodeSnippet(
   }
 }
 
-function generateFetch(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: any[]): string {
+function generateFetch(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: KeyValueField[]): string {
   let snippet = `const url = ${JSON.stringify(url)};\n`;
   snippet += `const options = {\n`;
   snippet += `  method: "${method}",\n`;
@@ -134,7 +134,7 @@ function generateFetch(method: string, url: string, headers: Record<string, stri
   return snippet;
 }
 
-function generateAxios(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: any[]): string {
+function generateAxios(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: KeyValueField[]): string {
   let snippet = `import axios from "axios";\n\n`;
   snippet += `const options = {\n`;
   snippet += `  method: "${method}",\n`;
@@ -149,21 +149,25 @@ function generateAxios(method: string, url: string, headers: Record<string, stri
   }
 
   if (method !== "GET" && method !== "HEAD") {
-    if (bodyType === "json") {
-      try {
-        const parsed = JSON.parse(bodyStr);
-        snippet += `  data: ${JSON.stringify(parsed, null, 2).replace(/\n/g, '\n  ')},\n`;
-      } catch {
-        snippet += `  data: ${JSON.stringify(bodyStr)},\n`;
+    if (bodyType === "json" || bodyType === "raw") {
+      if (bodyStr.trim()) {
+        if (bodyType === "json") {
+          try {
+            const parsed = JSON.parse(bodyStr);
+            snippet += `  data: ${JSON.stringify(parsed, null, 2).replace(/\n/g, '\n  ')},\n`;
+          } catch {
+            snippet += `  data: ${JSON.stringify(bodyStr)},\n`;
+          }
+        } else {
+          snippet += `  data: ${JSON.stringify(bodyStr)},\n`;
+        }
       }
-    } else if (bodyType === "raw") {
-        snippet += `  data: ${JSON.stringify(bodyStr)},\n`;
     } else if (bodyType === "form-data") {
-      snippet += `  data: {\n`;
+      snippet += `  data: new URLSearchParams({\n`;
       formParams.filter(f => f.enabled && f.key.trim()).forEach(f => {
         snippet += `    "${f.key.trim()}": ${JSON.stringify(f.value)},\n`;
       });
-      snippet += `  },\n`;
+      snippet += `  }),\n`;
     }
   }
   
@@ -175,7 +179,7 @@ function generateAxios(method: string, url: string, headers: Record<string, stri
   return snippet;
 }
 
-function generatePython(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: any[]): string {
+function generatePython(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: KeyValueField[]): string {
   let snippet = `import requests\n`;
   if (bodyType === "json" && method !== "GET" && method !== "HEAD") {
     snippet += `import json\n`;
@@ -224,7 +228,7 @@ function generatePython(method: string, url: string, headers: Record<string, str
   return snippet;
 }
 
-function generateGo(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: any[]): string {
+function generateGo(method: string, url: string, headers: Record<string, string>, bodyType: string, bodyStr: string, formParams: KeyValueField[]): string {
   let snippet = `package main\n\nimport (\n\t"fmt"\n\t"net/http"\n\t"io"\n`;
   if (method !== "GET" && method !== "HEAD" && bodyStr.trim()) {
       snippet += `\t"strings"\n`;
