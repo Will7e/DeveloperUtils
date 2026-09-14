@@ -134,7 +134,7 @@ interface LangRule {
 
 const LANG_RULES: LangRule[] = [
   // ---- JSON ----
-  { lang: "json", weight: 20, patterns: [/^\s*[\[{]/] },
+  { lang: "json", weight: 20, patterns: [/^\s*[[{]/] },
   { lang: "json", weight: 15, patterns: [/"[^"]+"\s*:/] },
   // ---- HTML ----
   { lang: "html", weight: 20, patterns: [/<!DOCTYPE\s+html/i] },
@@ -260,7 +260,6 @@ export function DiffChecker() {
   const [localOriginal, setLocalOriginal] = useState("");
   const [localModified, setLocalModified] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
-  const [isHydrated, setIsHydrated] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
@@ -290,17 +289,17 @@ export function DiffChecker() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
 
-  // Hydration — load persisted content into local state on mount and session switch
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
-
-  useEffect(() => {
+  // Load persisted content into local state on session switch
+  const [prevSessionId, setPrevSessionId] = useState(activeSession.id);
+  if (prevSessionId !== activeSession.id) {
+    setPrevSessionId(activeSession.id);
     setLocalOriginal(activeSession.original);
     setLocalModified(activeSession.modified);
-    // Reset detection tracking on session switch
+  }
+
+  useEffect(() => {
     lastDetectedContentRef.current = "";
-  }, [activeSession.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeSession.id]);
 
   // Resize observer for diff editor layout
   useEffect(() => {
@@ -326,92 +325,74 @@ export function DiffChecker() {
   }, [activeSession.language]);
 
   // ================================================================
-  // Content sync + auto-detection — polling-based (guaranteed to work)
-  // Reads directly from Monaco editor refs every 300ms.
-  // Handles: stats bar updates, store persistence, language detection.
-  // Re-detects whenever content changes significantly from last detection.
+  // Content sync + auto-detection — event-based on Monaco change
   // ================================================================
   useEffect(() => {
-    if (!isHydrated) return;
+    const origEditor = originalEditorRef.current;
+    const modEditor = modifiedEditorRef.current;
+    if (!origEditor || !modEditor) return;
 
-    const interval = setInterval(() => {
-      const origEditor = originalEditorRef.current;
-      const modEditor = modifiedEditorRef.current;
-      if (!origEditor || !modEditor) return;
+    let syncTimer: ReturnType<typeof setTimeout>;
 
-      let origValue: string;
-      let modValue: string;
-      try {
-        origValue = origEditor.getValue();
-        modValue = modEditor.getValue();
-      } catch {
-        return;
-      }
-
-      // Sync original to local state + store (only if changed)
-      setLocalOriginal((prev) => {
-        if (prev !== origValue) {
-          const s = useAppStore.getState();
-          s.updateDiffSessionInput(s.activeDiffSessionId, "original", origValue);
-          return origValue;
+    const handleContentChange = () => {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        let origValue: string;
+        let modValue: string;
+        try {
+          origValue = origEditor.getValue();
+          modValue = modEditor.getValue();
+        } catch {
+          return;
         }
-        return prev;
-      });
 
-      // Sync modified to local state + store (only if changed)
-      setLocalModified((prev) => {
-        if (prev !== modValue) {
-          const s = useAppStore.getState();
-          s.updateDiffSessionInput(s.activeDiffSessionId, "modified", modValue);
-          return modValue;
+        setLocalOriginal(origValue);
+        setLocalModified(modValue);
+
+        const s = useAppStore.getState();
+        s.updateDiffSessionInput(s.activeDiffSessionId, "original", origValue);
+        s.updateDiffSessionInput(s.activeDiffSessionId, "modified", modValue);
+
+        const content = origValue.trim().length >= 10
+          ? origValue
+          : modValue.trim().length >= 10
+            ? modValue
+            : null;
+
+        if (!content) {
+          if (lastDetectedContentRef.current !== "") {
+            lastDetectedContentRef.current = "";
+            s.updateDiffSessionLanguage(s.activeDiffSessionId, "plaintext");
+          }
+          return;
         }
-        return prev;
-      });
 
-      // --- Continuous language detection ---
-      // Pick whichever side has substantial content (prefer original)
-      const content = origValue.trim().length >= 10
-        ? origValue
-        : modValue.trim().length >= 10
-          ? modValue
-          : null;
+        const lastLen = lastDetectedContentRef.current.length;
+        const curLen = content.length;
+        const lenRatio = lastLen > 0 ? Math.abs(curLen - lastLen) / Math.max(lastLen, 1) : 1;
+        const contentChanged = lastDetectedContentRef.current !== content && lenRatio > 0.3;
 
-      if (!content) {
-        // Both sides empty — reset detection and language to plaintext
-        if (lastDetectedContentRef.current !== "") {
-          lastDetectedContentRef.current = "";
-          const state = useAppStore.getState();
-          state.updateDiffSessionLanguage(state.activeDiffSessionId, "plaintext");
+        if (lastDetectedContentRef.current === "" || contentChanged) {
+          lastDetectedContentRef.current = content;
+          const detected = detectLanguage(content);
+          const newLang = detected ?? "plaintext";
+          const currentLang = s.diffSessions.find(sess => sess.id === s.activeDiffSessionId)?.language;
+          if (newLang !== currentLang) {
+            s.updateDiffSessionLanguage(s.activeDiffSessionId, newLang);
+          }
         }
-        return;
-      }
+      }, 150);
+    };
 
-      // Check if content has changed enough to warrant re-detection.
-      // Compare by length ratio — if content changed by >30%, re-detect.
-      const lastLen = lastDetectedContentRef.current.length;
-      const curLen = content.length;
-      const lenRatio = lastLen > 0 ? Math.abs(curLen - lastLen) / Math.max(lastLen, 1) : 1;
-      const contentChanged = lastDetectedContentRef.current !== content && lenRatio > 0.3;
+    const d1 = origEditor.onDidChangeModelContent(handleContentChange);
+    const d2 = modEditor.onDidChangeModelContent(handleContentChange);
 
-      if (lastDetectedContentRef.current === "" || contentChanged) {
-        lastDetectedContentRef.current = content;
-        const detected = detectLanguage(content);
-        const state = useAppStore.getState();
-        const sessionId = state.activeDiffSessionId;
-        const currentLang = state.diffSessions.find(s => s.id === sessionId)?.language;
-        const newLang = detected ?? "plaintext";
-
-        // Only update if language actually changed
-        if (newLang !== currentLang) {
-          state.updateDiffSessionLanguage(sessionId, newLang);
-          const label = DIFF_LANGUAGES.find((l) => l.id === newLang)?.label ?? newLang;
-          state.addToast({ message: `Detected: ${label}`, type: "info" });
-        }
-      }
-    }, 300);
-
-    return () => clearInterval(interval);
-  }, [isHydrated]);
+    return () => {
+      clearTimeout(syncTimer);
+      d1.dispose();
+      d2.dispose();
+    };
+  }, [activeSession.id]);
 
   const handleDiffEditorMount: DiffOnMount = useCallback((diffEditor, monaco) => {
     diffEditorRef.current = diffEditor;

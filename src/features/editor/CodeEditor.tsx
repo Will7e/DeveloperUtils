@@ -12,11 +12,11 @@ import type { editor } from "monaco-editor";
 
 export function CodeEditor() {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const activeFileId = useAppStore((s) => s.activeFileId);
   const files = useAppStore((s) => s.files);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
-  const addToast = useAppStore((s) => s.addToast);
   const editorSettings = useAppStore((s) => s.editorSettings);
 
   const activeFile = files.find((f) => f.id === activeFileId);
@@ -24,16 +24,47 @@ export function CodeEditor() {
   const handleEditorMount: OnMount = useCallback(
     (editor, monaco) => {
       editorRef.current = editor;
+      monacoRef.current = monaco;
 
       // Setup custom themes and defaults
       setupMonacoTheme(monaco);
 
       // Set initial theme based on settings
-      const currentTheme = useAppStore.getState().editorSettings.theme;
-      monaco.editor.setTheme(currentTheme === "light" ? "devutils-light" : "devutils-dark");
+      monaco.editor.setTheme(
+        editorSettings.theme === "light" ? "devutils-light" : "devutils-dark"
+      );
 
       // Focus editor
       editor.focus();
+
+      // Add format document action
+      editor.addAction({
+        id: "format-code",
+        label: "Format Document",
+        keybindings: [
+          // Shift + Alt + F (standard VS Code formatting shortcut)
+          monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+        ],
+        run: async (ed) => {
+          const content = ed.getValue();
+          const file = useAppStore.getState().files.find(
+            (f) => f.id === useAppStore.getState().activeFileId
+          );
+          if (!file) return;
+
+          if (supportsFormatting(file.language)) {
+            const formatted = await formatCode(content, file.language);
+            ed.setValue(formatted);
+          } else {
+            useAppStore.getState().addToast({
+              title: "Formatting Not Supported",
+              description: `Formatting is not supported for ${file.language}`,
+              type: "info",
+              duration: 1500,
+            });
+          }
+        },
+      });
 
       // Add Cmd+S / Ctrl+S support for formatting
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
@@ -74,11 +105,8 @@ export function CodeEditor() {
 
   // Dynamically switch Monaco theme when settings change
   useEffect(() => {
-    if (editorRef.current) {
-      const monaco = (window as any).monaco;
-      if (monaco) {
-        monaco.editor.setTheme(editorSettings.theme === "light" ? "devutils-light" : "devutils-dark");
-      }
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(editorSettings.theme === "light" ? "devutils-light" : "devutils-dark");
     }
   }, [editorSettings.theme]);
 

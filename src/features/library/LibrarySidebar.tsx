@@ -165,6 +165,8 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   }
 }
 
+const CATEGORY_ORDER = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"] as const;
+
 export function LibrarySidebar() {
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
   const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
@@ -174,8 +176,15 @@ export function LibrarySidebar() {
   const setLibraryTab = useAppStore((s) => s.setLibraryTab);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(libraryData.apis.map((a) => a.type)));
-  const [isSearchMode, setIsSearchMode] = useState(false);
-  const [selectedResultIndex, setSelectedResultIndex] = useState(-1);
+  const isSearchMode = searchQuery.trim().length > 0;
+  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+
+  if (searchQuery !== prevSearchQuery) {
+    setPrevSearchQuery(searchQuery);
+    setSelectedResultIndex(0);
+  }
+
   const searchRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
   const resultRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
@@ -208,22 +217,7 @@ export function LibrarySidebar() {
     return groups;
   }, []);
 
-  const categoryOrder = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"];
   const searchResults = useMemo(() => computeSearchResults(searchQuery), [searchQuery]);
-
-  useEffect(() => {
-    const hasQuery = searchQuery.trim().length > 0;
-    setIsSearchMode(hasQuery);
-    if (hasQuery) {
-      setSelectedResultIndex(-1);
-    }
-  }, [searchQuery]);
-
-  useEffect(() => {
-    if (isSearchMode && searchResults.length > 0 && selectedResultIndex === -1) {
-      setSelectedResultIndex(0);
-    }
-  }, [isSearchMode, searchResults, selectedResultIndex]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -284,7 +278,7 @@ export function LibrarySidebar() {
 
   const displayedCategories = useMemo(() => {
     const existing = Object.keys(grouped);
-    const sorted = categoryOrder.filter(c => existing.includes(c));
+    const sorted = CATEGORY_ORDER.filter(c => existing.includes(c));
     existing.forEach(c => {
       if (!sorted.includes(c)) sorted.push(c);
     });

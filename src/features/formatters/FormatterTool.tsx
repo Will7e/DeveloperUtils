@@ -3,10 +3,9 @@ import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor,
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableTab } from "@/components/ui/SortableTab";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
-import { formatXml, minifyXml, xmlToTreeData } from "./xmlUtils";
+import { formatXml, minifyXml, xmlToTreeData, type XmlTreeNode } from "./xmlUtils";
 import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtils";
 import { 
   FileJson, 
@@ -18,16 +17,12 @@ import {
   Minimize2,
   Maximize2,
   Code2,
-  ChevronDown,
-  Braces,
   Expand,
   Shrink,
   Plus,
   Minus,
   X,
-  FileText,
-  Settings2,
-  AlignLeft
+  Settings2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -38,8 +33,8 @@ import {
 } from "react-resizable-panels";
 import { 
   Tooltip, 
-  TooltipTrigger, 
-  TooltipContent 
+  TooltipContent, 
+  TooltipTrigger 
 } from "@/components/ui/tooltip";
 
 interface ActionTooltipProps {
@@ -59,9 +54,11 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
   </Tooltip>
 );
 
-export function FormatterTool() {
-  const type = useAppStore((s) => s.formatterType);
-  const setType = useAppStore((s) => s.setFormatterType);
+interface FormatterToolProps {
+  type: "json" | "xml";
+}
+
+export function FormatterTool({ type }: FormatterToolProps) {
   const formatterFiles = useAppStore((s) => s.formatterFiles);
   const activeFileId = useAppStore((s) => s.activeFormatterFileId[type]);
   const setActiveFile = useAppStore((s) => s.setActiveFormatterFile);
@@ -73,13 +70,6 @@ export function FormatterTool() {
   const addToast = useAppStore((s) => s.addToast);
   const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
   
-  // Migration: Ensure we're not stuck in 'html' type from stale localStorage
-  useEffect(() => {
-    if ((type as string) === "html") {
-      setType("json");
-    }
-  }, [type, setType]);
-  
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
@@ -88,10 +78,12 @@ export function FormatterTool() {
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const handleFormatRef = React.useRef<(() => void) | null>(null);
 
-  const formatterEditorRef = React.useRef<any>(null);
+  const formatterEditorRef = React.useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = React.useRef<Parameters<OnMount>[1] | null>(null);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     formatterEditorRef.current = editor;
+    monacoRef.current = monaco;
     monaco.editor.defineTheme("devutils-dark", {
       base: "vs-dark",
       inherit: true,
@@ -116,14 +108,14 @@ export function FormatterTool() {
       rules: [
         { token: "comment", foreground: "94a3b8", fontStyle: "italic" },
         { token: "keyword", foreground: "7c3aed" },
-        { token: "string", foreground: "059669" },
+        { token: "string", foreground: "16a34a" },
         { token: "number", foreground: "d97706" },
         { token: "type", foreground: "2563eb" },
         { token: "variable", foreground: "1e293b" },
       ],
       colors: {
         "editor.background": "#ffffff00",
-        "editor.lineHighlightBackground": "#0000000a",
+        "editor.lineHighlightBackground": "#00000005",
         "editorLineNumber.foreground": "#cbd5e1",
       },
     });
@@ -131,7 +123,8 @@ export function FormatterTool() {
     const initTheme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");
 
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    // Add format shortcut (Ctrl+Enter or Cmd+Enter)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       if (handleFormatRef.current) {
         handleFormatRef.current();
       }
@@ -140,11 +133,8 @@ export function FormatterTool() {
 
   // Switch Monaco theme dynamically
   useEffect(() => {
-    if (formatterEditorRef.current) {
-      const monaco = (window as any).monaco;
-      if (monaco) {
-        monaco.editor.setTheme(currentThemeSetting === "light" ? "devutils-light" : "devutils-dark");
-      }
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(currentThemeSetting === "light" ? "devutils-light" : "devutils-dark");
     }
   }, [currentThemeSetting]);
 
@@ -186,8 +176,8 @@ export function FormatterTool() {
       } else {
         return { data: xmlToTreeData(currentInput), error: null };
       }
-    } catch (e: any) {
-      return { data: null, error: e.message };
+    } catch (e: unknown) {
+      return { data: null, error: e instanceof Error ? e.message : String(e) };
     }
   }, [currentInput, type]);
 
@@ -224,7 +214,7 @@ export function FormatterTool() {
       } else {
         updateContent("xml", activeFile.id, minifyXml(currentInput));
       }
-    } catch (e: any) {
+    } catch {
       // Error handled by useMemo
     }
   };
@@ -245,7 +235,7 @@ export function FormatterTool() {
         type: "success",
         duration: 2000
       });
-    } catch (e: any) {
+    } catch {
       // Error handled by useMemo
     }
   };
@@ -666,7 +656,7 @@ export function FormatterTool() {
                     expandTarget={expandTarget} 
                   />
                 ) : (
-                  <XmlTreeView data={data as any} />
+                  <XmlTreeView data={data as XmlTreeNode | string} />
                 )}
               </div>
             ) : (

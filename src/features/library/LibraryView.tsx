@@ -1,10 +1,16 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Book, Copy, Check, Code2, Server, Monitor, ArrowLeftRight, FileCode2, ChevronDown, ExternalLink, Sparkles, Hash, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
-import { ServiceNowLibrary, ServiceNowAPI, ServiceNowMethod } from "@/types";
-
+import { ServiceNowLibrary, ServiceNowMethod } from "@/types";
+import {
+  getExcalidrawLibraries,
+  getExcalidrawLibraryPreviewUrl,
+  getExcalidrawLibraryCdnPreviewUrl,
+  type ExcalidrawLibraryItem,
+} from "@/utils/excalidrawLibrary";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
@@ -202,7 +208,7 @@ export function LibraryView() {
 function MethodCard({ method, index, addToast, badgeColor, isHighlighted, searchQuery }: {
   method: ServiceNowMethod;
   index: number;
-  addToast: any;
+  addToast: (toast: { message: string; type?: "info" | "success" | "warning" | "error" }) => void;
   badgeColor: string;
   isHighlighted?: boolean;
   searchQuery?: string;
@@ -228,7 +234,7 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
           ? <mark key={i} className="lib-text-highlight">{part}</mark> 
           : part
       );
-    } catch (e) {
+    } catch {
       return text;
     }
   };
@@ -345,7 +351,6 @@ function tokenizeLine(line: string): Token[] {
 
   while (i < line.length) {
     const ch = line[i] as string;
-    const rest = line.slice(i);
 
     // Inline comment
     if (ch === '/' && line[i + 1] === '/') {
@@ -368,7 +373,7 @@ function tokenizeLine(line: string): Token[] {
     }
 
     // Numbers
-    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;\[]/.test(line[i - 1] as string))) {
+    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;[]/.test(line[i - 1] as string))) {
       let j = i;
       while (j < line.length && /[0-9._xXa-fA-F]/.test(line[j] as string)) j++;
       tokens.push({ type: 'number', value: line.slice(i, j) });
@@ -386,7 +391,7 @@ function tokenizeLine(line: string): Token[] {
     }
 
     // Punctuation
-    if (/[(){}\[\];,.]/.test(ch)) {
+    if (/[(){}[\];,.]/.test(ch)) {
       tokens.push({ type: 'punctuation', value: ch });
       i++;
       continue;
@@ -472,15 +477,18 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
   );
 });
 
-import { useNavigate } from "react-router-dom";
-import {
-  getExcalidrawLibraries,
-  getExcalidrawLibraryPreviewUrl,
-  getExcalidrawLibraryCdnPreviewUrl,
-  type ExcalidrawLibraryItem,
-} from "@/utils/excalidrawLibrary";
+const EXCALIDRAW_CATEGORIES = [
+  { id: "all", label: "All Libraries" },
+  { id: "system", label: "System Design", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
+  { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
+  { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
+  { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
+] as const;
 
-function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: string; addToast: any }) {
+function ExcalidrawLibraryGallery({ searchQuery, addToast }: { 
+  searchQuery: string; 
+  addToast: (toast: { message: string; type?: "info" | "success" | "warning" | "error" }) => void; 
+}) {
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState("all");
@@ -493,18 +501,10 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: stri
     });
   }, []);
 
-  const categories = [
-    { id: "all", label: "All Libraries" },
-    { id: "system", label: "System Design", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
-    { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
-    { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
-    { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
-  ];
-
   const filteredLibraries = useMemo(() => {
     return libraries.filter((lib) => {
       if (activeCategory !== "all") {
-        const cat = categories.find((c) => c.id === activeCategory);
+        const cat = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
         if (cat?.keywords) {
           const matchCat = cat.keywords.some((kw) =>
             lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw)
@@ -552,7 +552,7 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: { searchQuery: stri
 
         {/* Category Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-          {categories.map((cat) => (
+          {EXCALIDRAW_CATEGORIES.map((cat) => (
             <button
               key={cat.id}
               onClick={() => setActiveCategory(cat.id)}

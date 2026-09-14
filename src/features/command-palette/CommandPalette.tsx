@@ -4,7 +4,6 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
-  Play,
   Terminal,
   Settings,
   FilePlus,
@@ -30,28 +29,7 @@ import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
-import { 
-  Tooltip, 
-  TooltipTrigger, 
-  TooltipContent 
-} from "@/components/ui/tooltip";
 
-interface ActionTooltipProps {
-  children: React.ReactNode;
-  content: string;
-  side?: "top" | "bottom" | "left" | "right";
-}
-
-const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      {children}
-    </TooltipTrigger>
-    <TooltipContent side={side}>
-      <p>{content}</p>
-    </TooltipContent>
-  </Tooltip>
-);
 
 interface PaletteAction {
   id: string;
@@ -406,9 +384,12 @@ export function CommandPalette() {
   // Reset on open
   useEffect(() => {
     if (commandPaletteOpen) {
-      setQuery("");
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      const timer = setTimeout(() => {
+        setQuery("");
+        setSelectedIndex(0);
+        inputRef.current?.focus();
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [commandPaletteOpen]);
 

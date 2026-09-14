@@ -2,7 +2,7 @@
 // DrawFlowToolbar — Clean top tab bar & actions for DrawFlows
 // ============================================================
 
-import { useCallback, useState, useRef, useEffect } from "react";
+import { useCallback, useState } from "react";
 import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableTab } from "@/components/ui/SortableTab";
@@ -13,10 +13,7 @@ import {
   Trash2,
   FileImage,
   FileCode,
-  Library,
   Sparkles,
-  ChevronDown,
-  FileJson,
 } from "lucide-react";
 import {
   Tooltip,
@@ -34,8 +31,6 @@ interface DrawFlowToolbarProps {
 
 export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
-  const [isExportOpen, setIsExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
 
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
@@ -48,17 +43,6 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const reorderWorkflows = useAppStore((s) => s.reorderWorkflows);
 
   const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
-
-  // Close export dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(event.target as Node)) {
-        setIsExportOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const handleClearCanvas = useCallback(() => {
     if (!excalidrawAPI) return;
@@ -304,7 +288,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                       excalidrawAPI.updateScene({
                         appState: {
                           openSidebar: { name: "library", tab: "libraries" },
-                        } as any,
+                        } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
                       });
                     } catch {
                       // Fallback

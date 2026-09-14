@@ -2,7 +2,7 @@
 // ExcalidrawLibraryModal — Browse & Add Community Libraries
 // ============================================================
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Search,
   Library,
@@ -23,8 +23,7 @@ import { useAppStore } from "@/stores/app.store";
 import {
   getExcalidrawLibraries,
   loadLibraryToExcalidraw,
-  getExcalidrawLibraryPreviewUrl,
-  getExcalidrawLibraryCdnPreviewUrl,
+  isLibraryAlreadyAdded,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
 
@@ -35,8 +34,8 @@ interface ExcalidrawLibraryModalProps {
 }
 
 const CATEGORIES = [
-  { id: "all", label: "All Collections", icon: LayoutGrid },
-  { id: "system", label: "System Architecture", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"], icon: Layers },
+  { id: "all", label: "All Items", icon: LayoutGrid },
+  { id: "system-design", label: "System & Architecture", keywords: ["architecture", "aws", "gcp", "azure", "cloud", "system", "c4", "network", "kubernetes"], icon: Layers },
   { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"], icon: Compass },
   { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"], icon: Sparkles },
   { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"], icon: Library },
@@ -55,41 +54,49 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
   const addExcalidrawAddedLibraryId = useAppStore((s) => s.addExcalidrawAddedLibraryId);
 
   useEffect(() => {
-    if (isOpen) {
-      if (excalidrawAPI) {
-        try {
-          excalidrawAPI.updateScene({
-            appState: {
-              openSidebar: { name: "library", tab: "libraries" },
-            } as any,
-          });
-        } catch {
-          // Fallback
-        }
+    if (!isOpen) return;
+    if (excalidrawAPI) {
+      try {
+        excalidrawAPI.updateScene({
+          appState: {
+            openSidebar: { name: "library", tab: "libraries" },
+          } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
+        });
+      } catch {
+        // Fallback
       }
-      setLoading(true);
-      getExcalidrawLibraries().then((data) => {
+    }
+    let cancelled = false;
+    getExcalidrawLibraries().then((data) => {
+      if (!cancelled) {
         setLibraries(data);
         setLoading(false);
-      });
-    }
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, excalidrawAPI]);
 
-  const handleCloseModal = () => {
+  const handleCloseModal = useCallback(() => {
     // Ensure Excalidraw library sidebar remains open when closing the community libraries modal
     if (excalidrawAPI) {
       try {
         excalidrawAPI.updateScene({
           appState: {
             openSidebar: { name: "library", tab: "libraries" },
-          } as any,
+          } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
         });
       } catch {
         // Fallback
       }
     }
     onClose();
-  };
+  }, [excalidrawAPI, onClose]);
 
   // Close modal on Escape key press
   useEffect(() => {
@@ -101,7 +108,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Excal
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, excalidrawAPI]);
+  }, [isOpen, handleCloseModal]);
 
   const filteredLibraries = useMemo(() => {
     return libraries.filter((lib) => {

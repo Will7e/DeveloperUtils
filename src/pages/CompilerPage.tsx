@@ -16,21 +16,19 @@ import { formatDuration } from "@/lib/utils";
 function useExecutionTimer() {
   const isRunning = useAppStore((s) => s.isRunning);
   const executionStartTime = useAppStore((s) => s.executionStartTime);
-  const [elapsed, setElapsed] = useState(0);
+  const [now, setNow] = useState(() => 0);
 
   useEffect(() => {
-    if (!isRunning || !executionStartTime) {
-      setElapsed(0);
-      return;
-    }
+    if (!isRunning || !executionStartTime) return;
 
     const interval = setInterval(() => {
-      setElapsed(Date.now() - executionStartTime);
+      setNow(Date.now());
     }, 50);
 
     return () => clearInterval(interval);
   }, [isRunning, executionStartTime]);
 
+  const elapsed = isRunning && executionStartTime ? Math.max(0, now - executionStartTime) : 0;
   return { isRunning, elapsed };
 }
 
@@ -42,7 +40,11 @@ export function CompilerPage() {
 
   const { isRunning, elapsed } = useExecutionTimer();
 
-  const resizable = useResizable({
+  const {
+    size: editorSize,
+    containerRef,
+    handleMouseDown,
+  } = useResizable({
     direction: "horizontal",
     initialSize: 65,
     minSize: 30,
@@ -52,7 +54,6 @@ export function CompilerPage() {
 
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
-  const editorSize = resizable.size;
 
   const lastResult = executionResults.length > 0 ? executionResults[executionResults.length - 1] : null;
 
@@ -64,7 +65,7 @@ export function CompilerPage() {
         {/* Main content area — horizontal split */}
         <div 
           className="app-main" 
-          ref={resizable.containerRef}
+          ref={containerRef}
           style={{
             display: "grid",
             gridTemplateColumns: (outputPanelOpen || isHtml) 
@@ -86,7 +87,7 @@ export function CompilerPage() {
           {(outputPanelOpen || isHtml) && (
             <div
               className="resize-handle resize-handle-horizontal"
-              onMouseDown={resizable.handleMouseDown}
+              onMouseDown={handleMouseDown}
             >
               <div className="resize-handle-indicator" />
             </div>

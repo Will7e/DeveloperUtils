@@ -26,7 +26,7 @@ async function loadTypeScriptCompiler(): Promise<any> {
   if (tsModule) return tsModule;
   if (tsLoadPromise) return tsLoadPromise;
 
-  tsLoadPromise = new Promise(async (resolve, reject) => {
+  tsLoadPromise = new Promise((resolve, reject) => {
     try {
       const script = document.createElement("script");
       script.src = "https://cdn.jsdelivr.net/npm/typescript@5.5.4/lib/typescript.min.js";
@@ -362,7 +362,6 @@ async function executeTypeScript(
 // Pyodide (Python WASM) Engine
 // ============================================================
 let pyodideInstance: any = null;
-let pyodideLoading = false;
 let pyodideLoadPromise: Promise<any> | null = null;
 
 async function loadPyodide(): Promise<any> {
@@ -370,38 +369,37 @@ async function loadPyodide(): Promise<any> {
 
   if (pyodideLoadPromise) return pyodideLoadPromise;
 
-  pyodideLoading = true;
-  pyodideLoadPromise = new Promise(async (resolve, reject) => {
+  pyodideLoadPromise = new Promise((resolve, reject) => {
     try {
       // Load Pyodide from CDN
       const script = document.createElement("script");
       script.src = "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js";
       script.async = true;
 
-      script.onload = async () => {
-        try {
-          // @ts-expect-error - Pyodide is loaded globally
-          const pyodide = await window.loadPyodide({
-            indexURL:
-              "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/",
+      script.onload = () => {
+        // @ts-expect-error - Pyodide is loaded globally
+        window
+          .loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/",
+          })
+          .then((pyodide: any) => {
+            pyodideInstance = pyodide;
+            resolve(pyodide);
+          })
+          .catch((err: any) => {
+            pyodideLoadPromise = null;
+            reject(err);
           });
-          pyodideInstance = pyodide;
-          pyodideLoading = false;
-          resolve(pyodide);
-        } catch (err) {
-          pyodideLoading = false;
-          reject(err);
-        }
       };
 
       script.onerror = () => {
-        pyodideLoading = false;
+        pyodideLoadPromise = null;
         reject(new Error("Failed to load Pyodide"));
       };
 
       document.head.appendChild(script);
     } catch (err) {
-      pyodideLoading = false;
+      pyodideLoadPromise = null;
       reject(err);
     }
   });

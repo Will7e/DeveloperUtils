@@ -1,10 +1,9 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableTab } from "@/components/ui/SortableTab";
 import { 
   Columns, 
-  ArrowRight, 
   Trash2, 
   Copy, 
   Check, 
@@ -15,7 +14,6 @@ import {
   Settings2,
   AlignLeft,
   ChevronDown,
-  FileText,
   Plus,
   X
 } from "lucide-react";
@@ -84,9 +82,6 @@ export function ListComparator() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ComparisonType>("aOnly");
   const [copied, setCopied] = useState<string | null>(null);
-  const [lastResults, setLastResults] = useState<ComparisonResults>({ aOnly: [], bOnly: [], both: [] });
-  const [hasCompared, setHasCompared] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
 
@@ -111,11 +106,6 @@ export function ListComparator() {
 
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
-  // Hydration check to ensure we use persisted state
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
-
   // Helper to process list
   const processList = useCallback((input: string) => {
     if (!input) return [];
@@ -130,16 +120,16 @@ export function ListComparator() {
     addToast({ message: "List formatted with newlines", type: "info" });
   }, [processList, updateSessionInput, activeSession.id, addToast]);
 
-  const handleCompare = useCallback(() => {
+  const comparisonResults = useMemo<ComparisonResults>(() => {
     const listA = processList(inputA);
     const listB = processList(inputB);
 
     const setA = new Set(caseSensitive ? listA : listA.map(s => s.toLowerCase()));
     const setB = new Set(caseSensitive ? listB : listB.map(s => s.toLowerCase()));
 
-    let aOnly: string[] = [];
-    let bOnly: string[] = [];
-    let both: string[] = [];
+    const aOnly: string[] = [];
+    const bOnly: string[] = [];
+    const both: string[] = [];
 
     listA.forEach(item => {
       const checkItem = caseSensitive ? item : item.toLowerCase();
@@ -164,23 +154,21 @@ export function ListComparator() {
       both.sort(collator.compare);
     }
 
-    setLastResults({ aOnly, bOnly, both });
-    setHasCompared(true);
-  }, [inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, processList]);
+    return { aOnly, bOnly, both };
+  }, [inputA, inputB, caseSensitive, sortAlpha, processList]);
 
-  // Auto-compare when hydrated or when settings/inputs change if already compared
-  useEffect(() => {
-    if (isHydrated && (inputA || inputB)) {
-      handleCompare();
-    }
-  }, [isHydrated, inputA, inputB, caseSensitive, trimWhitespace, sortAlpha, handleCompare]);
+  const handleCompare = useCallback(() => {
+    addToast({ message: "Lists compared", type: "success" });
+  }, [addToast]);
+
+  const hasCompared = Boolean(inputA.trim() || inputB.trim());
 
   const filteredResults = useMemo(() => {
-    const current = lastResults[activeTab];
+    const current = comparisonResults[activeTab];
     if (!query.trim()) return current;
     const q = query.toLowerCase();
     return current.filter((item: string) => item.toLowerCase().includes(q));
-  }, [lastResults, activeTab, query]);
+  }, [comparisonResults, activeTab, query]);
 
   const handleCopy = (content: string[], id: string) => {
     if (content.length === 0) return;

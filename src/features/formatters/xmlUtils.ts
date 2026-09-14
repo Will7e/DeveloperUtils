@@ -40,67 +40,70 @@ export function minifyXml(xml: string): string {
   return xml.replace(/>\s+</g, "><").trim();
 }
 
+export interface XmlTreeNode {
+  _tag: string;
+  _attributes?: Record<string, string>;
+  _value?: string;
+  _children?: (XmlTreeNode | string)[];
+}
+
 /**
  * Simple XML to Object converter for Tree View (Very basic)
  */
-export function xmlToTreeData(xml: string): any {
-  try {
-    if (!xml || !xml.trim()) return null;
+export function xmlToTreeData(xml: string): XmlTreeNode | string | null {
+  if (!xml || !xml.trim()) return null;
 
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, "application/xml");
-    
-    // Check for parse errors
-    const errorNode = doc.querySelector("parsererror");
-    if (errorNode) {
-      throw new Error("Invalid XML: " + (errorNode.textContent || "Parse Error"));
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xml, "application/xml");
+  
+  // Check for parse errors
+  const errorNode = doc.querySelector("parsererror");
+  if (errorNode) {
+    throw new Error("Invalid XML: " + (errorNode.textContent || "Parse Error"));
+  }
+
+  if (!doc.documentElement) return null;
+
+  const nodeToJson = (node: Node): XmlTreeNode | string | null => {
+    if (node.nodeType === 3) { // Node.TEXT_NODE
+      const text = node.textContent?.trim();
+      return text || null;
     }
 
-    if (!doc.documentElement) return null;
+    if (node.nodeType === 1) { // Node.ELEMENT_NODE
+      const element = node as Element;
+      const obj: XmlTreeNode = {
+        _tag: element.tagName,
+      };
 
-    const nodeToJson = (node: Node): any => {
-      if (node.nodeType === 3) { // Node.TEXT_NODE
-        const text = node.textContent?.trim();
-        return text || null;
-      }
-
-      if (node.nodeType === 1) { // Node.ELEMENT_NODE
-        const element = node as Element;
-        const obj: any = {
-          _tag: element.tagName,
-        };
-
-        // Attributes
-        if (element.attributes && element.attributes.length > 0) {
-          obj._attributes = {};
-          for (let i = 0; i < element.attributes.length; i++) {
-            const attr = element.attributes.item(i);
-            if (attr) {
-              obj._attributes[attr.name] = attr.value;
-            }
+      // Attributes
+      if (element.attributes && element.attributes.length > 0) {
+        obj._attributes = {};
+        for (let i = 0; i < element.attributes.length; i++) {
+          const attr = element.attributes.item(i);
+          if (attr) {
+            obj._attributes[attr.name] = attr.value;
           }
         }
-
-        // Children
-        const children = Array.from(element.childNodes)
-          .map(nodeToJson)
-          .filter(child => child !== null);
-
-        if (children.length > 0) {
-          if (children.length === 1 && typeof children[0] === "string") {
-            obj._value = children[0];
-          } else {
-            obj._children = children;
-          }
-        }
-
-        return obj;
       }
-      return null;
-    };
 
-    return nodeToJson(doc.documentElement);
-  } catch (e) {
-    throw e;
-  }
+      // Children
+      const children = Array.from(element.childNodes)
+        .map(nodeToJson)
+        .filter((child): child is XmlTreeNode | string => child !== null);
+
+      if (children.length > 0) {
+        if (children.length === 1 && typeof children[0] === "string") {
+          obj._value = children[0];
+        } else {
+          obj._children = children;
+        }
+      }
+
+      return obj;
+    }
+    return null;
+  };
+
+  return nodeToJson(doc.documentElement);
 }

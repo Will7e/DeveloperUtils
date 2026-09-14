@@ -1,16 +1,15 @@
 import React, { useState } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { XmlTreeNode } from "./xmlUtils";
 
 interface XmlTreeViewProps {
-  data: any;
-  isLast?: boolean;
+  data: XmlTreeNode | string;
   depth?: number;
 }
 
 export function XmlTreeView({
   data,
-  isLast = true,
   depth = 0,
 }: XmlTreeViewProps) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -19,9 +18,9 @@ export function XmlTreeView({
     return <span className="xml-text-node">{data}</span>;
   }
 
-  const hasChildren = data._children && data._children.length > 0;
+  const hasChildren = !!(data._children && data._children.length > 0);
   const hasValue = data._value !== undefined;
-  const hasAttributes = data._attributes && Object.keys(data._attributes).length > 0;
+  const hasAttributes = !!(data._attributes && Object.keys(data._attributes).length > 0);
   const isExpandable = hasChildren;
 
   const toggleExpand = () => {
@@ -46,14 +45,14 @@ export function XmlTreeView({
         <span className="xml-tag-bracket">&lt;</span>
         <span className="xml-tag-name">{data._tag}</span>
         
-        {hasAttributes && (
+        {hasAttributes && data._attributes && (
           <span className="xml-attributes">
             {Object.entries(data._attributes).map(([key, val]) => (
               <span key={key} className="xml-attribute">
                 {" "}
                 <span className="xml-attr-name">{key}</span>
                 <span className="xml-attr-equal">=</span>
-                <span className="xml-attr-value">"{val as string}"</span>
+                <span className="xml-attr-value">"{val}"</span>
               </span>
             ))}
           </span>
@@ -81,14 +80,13 @@ export function XmlTreeView({
         )}
       </div>
 
-      {isExpanded && hasChildren && (
+      {isExpanded && hasChildren && data._children && (
         <div className="xml-tree-children">
-          {data._children.map((child: any, index: number) => (
+          {data._children.map((child, index) => (
             <XmlTreeView 
               key={index} 
               data={child} 
               depth={depth + 1} 
-              isLast={index === data._children.length - 1} 
             />
           ))}
         </div>

@@ -3,7 +3,7 @@ import { ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface JsonTreeViewProps {
-  data: any;
+  data: unknown;
   label?: string;
   isLast?: boolean;
   depth?: number;
@@ -21,13 +21,13 @@ export function JsonTreeView({
   expandVersion,
   expandTarget,
 }: JsonTreeViewProps) {
+  const [prevExpandVersion, setPrevExpandVersion] = useState(expandVersion);
   const [isExpanded, setIsExpanded] = useState(initialExpanded);
 
-  useEffect(() => {
-    if (expandVersion !== undefined) {
-      setIsExpanded(!!expandTarget);
-    }
-  }, [expandVersion, expandTarget]);
+  if (expandVersion !== undefined && expandVersion !== prevExpandVersion) {
+    setPrevExpandVersion(expandVersion);
+    setIsExpanded(!!expandTarget);
+  }
 
   const isObject = typeof data === "object" && data !== null;
   const isArray = Array.isArray(data);
@@ -39,7 +39,7 @@ export function JsonTreeView({
     }
   };
 
-  const renderValue = (val: any) => {
+  const renderValue = (val: unknown) => {
     if (typeof val === "string") return <span className="json-value-string">"{val}"</span>;
     if (typeof val === "number") return <span className="json-value-number">{val}</span>;
     if (typeof val === "boolean") return <span className="json-value-boolean">{val.toString()}</span>;
@@ -100,7 +100,7 @@ export function JsonTreeView({
       {isExpanded && isObject && !isEmpty && (
         <div className="json-tree-children">
           {isArray ? (
-            data.map((item: any, index: number) => (
+            (data as unknown[]).map((item, index: number) => (
               <JsonTreeView
                 key={index}
                 data={item}

@@ -10,6 +10,10 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useAppStore } from "@/stores/app.store";
 import { DrawFlowToolbar } from "./DrawFlowToolbar";
 
+type ExcalidrawProps = React.ComponentProps<typeof Excalidraw>;
+type ExcalidrawOnChange = NonNullable<ExcalidrawProps["onChange"]>;
+type ExcalidrawOnLibraryChange = NonNullable<ExcalidrawProps["onLibraryChange"]>;
+
 export function DrawFlowDesigner() {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null);
 
@@ -28,7 +32,7 @@ export function DrawFlowDesigner() {
 
   // Sync scene elements when active tab changes
   useEffect(() => {
-    if (!excalidrawAPI || !activeWorkflow) return;
+    if (!activeWorkflow || !excalidrawAPI) return;
 
     isUpdatingSceneRef.current = true;
     excalidrawAPI.updateScene({
@@ -37,7 +41,7 @@ export function DrawFlowDesigner() {
         theme: isDark ? "dark" : "light",
         openSidebar: activeWorkflow.appState?.openSidebar ?? null,
         ...(activeWorkflow.appState || {}),
-      } as any,
+      } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
     });
 
     const timer = setTimeout(() => {
@@ -45,11 +49,11 @@ export function DrawFlowDesigner() {
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [activeWorkflowId, excalidrawAPI, isDark]);
+  }, [activeWorkflowId, activeWorkflow, excalidrawAPI, isDark]);
 
   // Debounced handler for canvas changes (elements, appState, files)
-  const handleChange = useCallback(
-    (elements: readonly any[], appState: any, files: any) => {
+  const handleChange: ExcalidrawOnChange = useCallback(
+    (elements, appState, files) => {
       if (!activeWorkflowId || isUpdatingSceneRef.current) return;
 
       clearTimeout(saveTimeoutRef.current);
@@ -83,8 +87,8 @@ export function DrawFlowDesigner() {
   );
 
   // Handle library changes and persist globally
-  const handleLibraryChange = useCallback(
-    (libraryItems: readonly any[]) => {
+  const handleLibraryChange: ExcalidrawOnLibraryChange = useCallback(
+    (libraryItems) => {
       updateExcalidrawLibraryItems([...libraryItems]);
     },
     [updateExcalidrawLibraryItems]
@@ -106,7 +110,7 @@ export function DrawFlowDesigner() {
               theme: isDark ? "dark" : "light",
               openSidebar: activeWorkflow?.appState?.openSidebar ?? null,
               ...(activeWorkflow?.appState || {}),
-            } as any,
+            } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
             files: activeWorkflow?.files || {},
             libraryItems: excalidrawLibraryItems || [],
           }}
