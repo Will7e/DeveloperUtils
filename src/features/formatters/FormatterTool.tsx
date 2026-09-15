@@ -7,6 +7,7 @@ import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData, type XmlTreeNode } from "./xmlUtils";
 import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtils";
+import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { 
   FileJson, 
   FileCode,
@@ -82,41 +83,7 @@ export function FormatterTool() {
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     formatterEditorRef.current = editor;
     monacoRef.current = monaco;
-    monaco.editor.defineTheme("devutils-dark", {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "comment", foreground: "5c6378", fontStyle: "italic" },
-        { token: "keyword", foreground: "c084fc" },
-        { token: "string", foreground: "a3e635" },
-        { token: "number", foreground: "fbbf24" },
-        { token: "type", foreground: "3b82f6" },
-        { token: "variable", foreground: "e8eaed" },
-      ],
-      colors: {
-        "editor.background": "#0f172a00",
-        "editor.lineHighlightBackground": "#ffffff05",
-        "editorLineNumber.foreground": "#2a2f42",
-      },
-    });
-
-    monaco.editor.defineTheme("devutils-light", {
-      base: "vs",
-      inherit: true,
-      rules: [
-        { token: "comment", foreground: "94a3b8", fontStyle: "italic" },
-        { token: "keyword", foreground: "7c3aed" },
-        { token: "string", foreground: "16a34a" },
-        { token: "number", foreground: "d97706" },
-        { token: "type", foreground: "2563eb" },
-        { token: "variable", foreground: "1e293b" },
-      ],
-      colors: {
-        "editor.background": "#ffffff00",
-        "editor.lineHighlightBackground": "#00000005",
-        "editorLineNumber.foreground": "#cbd5e1",
-      },
-    });
+    setupMonacoTheme(monaco);
 
     const initTheme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");

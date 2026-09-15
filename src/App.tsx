@@ -43,10 +43,12 @@ function PageLoader() {
 function AppContent() {
   useKeyboardShortcuts();
 
-  // Apply light/dark theme class to document root
+  // Apply light/dark theme class and color-scheme to document root
   const theme = useAppStore((s) => s.editorSettings.theme);
   useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
   return (

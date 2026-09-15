@@ -38,8 +38,8 @@ const initialFile = createDefaultFile("javascript");
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
 const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
-const initialDiffSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext" };
-const initialDiffSettings: DiffSettings = { renderSideBySide: true, ignoreTrimWhitespace: true, enableSplitViewResizing: true };
+const initialDiffSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext", autoDetect: true };
+const initialDiffSettings: DiffSettings = { renderSideBySide: true, ignoreTrimWhitespace: true, enableSplitViewResizing: true, autoFormatOnPaste: true, wordWrap: false };
 
 const createDefaultWorkflowElements = (): unknown[] => [
   {
@@ -321,17 +321,18 @@ export const useAppStore = create<AppState>()(
       librarySelectedItemId: null,
       librarySearchQuery: "",
       libraryTab: "servicenow",
+      libraryExcalidrawCategory: "all",
       workflows: [initialWorkflow],
       activeWorkflowId: initialWorkflow.id,
 
       // File actions
-      createFile: (name: string, language: Language) => {
+      createFile: (name: string, language: Language, content?: string) => {
         const config = LANGUAGE_CONFIGS[language];
         const newFile: EditorFile = {
           id: generateId(),
           name: name || `untitled${config.extension}`,
           language,
-          content: config.defaultCode,
+          content: content !== undefined ? content : config.defaultCode,
           isDirty: false,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -625,7 +626,7 @@ export const useAppStore = create<AppState>()(
       // Diff checker actions
       createDiffSession: (name) => {
         const id = generateId();
-        const newSession: DiffSession = { id, name: name || "Diff Check", original: "", modified: "", language: "plaintext" };
+        const newSession: DiffSession = { id, name: name || "Diff Check", original: "", modified: "", language: "plaintext", autoDetect: true };
         set((state) => ({
           diffSessions: [...state.diffSessions, newSession],
           activeDiffSessionId: id
@@ -636,7 +637,7 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const remaining = state.diffSessions.filter(s => s.id !== id);
           if (remaining.length === 0) {
-            const newSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext" };
+            const newSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext", autoDetect: true };
             return {
               diffSessions: [newSession],
               activeDiffSessionId: newSession.id
@@ -662,10 +663,10 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      updateDiffSessionLanguage: (id, language) => {
+      updateDiffSessionLanguage: (id, language, autoDetect) => {
         set((state) => ({
           diffSessions: state.diffSessions.map(s =>
-            s.id === id ? { ...s, language } : s
+            s.id === id ? { ...s, language, ...(autoDetect !== undefined ? { autoDetect } : {}) } : s
           )
         }));
       },
@@ -702,15 +703,20 @@ export const useAppStore = create<AppState>()(
         set({ libraryTab: tab, librarySelectedItemId: null, librarySearchQuery: "" });
       },
 
+      setLibraryExcalidrawCategory: (category) => {
+        set({ libraryExcalidrawCategory: category });
+      },
+
       // Workflow actions
-      createWorkflow: (name?: string) => {
+      createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
         const id = generateId();
         const state = get();
         const newWorkflow: Workflow = {
           id,
           name: name || `DrawFlow ${state.workflows.length + 1}`,
-          elements: [],
-          appState: {},
+          elements: elements || [],
+          appState: appState || {},
+          files: files || {},
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
@@ -718,6 +724,7 @@ export const useAppStore = create<AppState>()(
           workflows: [...state.workflows, newWorkflow],
           activeWorkflowId: id,
         }));
+        return id;
       },
 
       deleteWorkflow: (id) => {
@@ -805,6 +812,7 @@ export const useAppStore = create<AppState>()(
         diffSettings: state.diffSettings,
         librarySelectedItemId: state.librarySelectedItemId,
         librarySearchQuery: state.librarySearchQuery,
+        libraryExcalidrawCategory: state.libraryExcalidrawCategory,
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
         excalidrawLibraryItems: state.excalidrawLibraryItems,

@@ -17,6 +17,8 @@ import {
   Library,
   GitFork,
   Globe,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -93,6 +95,12 @@ export function MainLayout() {
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
+  const currentTheme = useAppStore((s) => s.editorSettings.theme);
+  const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
+
+  const handleToggleTheme = () => {
+    updateEditorSettings({ theme: currentTheme === "dark" ? "light" : "dark" });
+  };
 
   return (
     <div className="main-layout">
@@ -185,6 +193,13 @@ export function MainLayout() {
         {/* Bottom Actions */}
         <div className="activity-bar-bottom">
           <div className="activity-bar-divider" />
+
+          <NavItem
+            icon={currentTheme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+            label={currentTheme === "dark" ? "Light Mode" : "Dark Mode"}
+            collapsed={sidebarCollapsed}
+            onClick={handleToggleTheme}
+          />
 
           <NavItem
             icon={<Settings className="h-[18px] w-[18px]" />}

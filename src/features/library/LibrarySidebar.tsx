@@ -1,108 +1,144 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
-import { Search, Database, ChevronDown, Server, Monitor, ArrowLeftRight, FileCode2, X, Wrench, ArrowRight, Zap } from "lucide-react";
+import { 
+  Search, 
+  Database, 
+  ChevronDown, 
+  Server, 
+  Monitor, 
+  ArrowLeftRight, 
+  FileCode2, 
+  X, 
+  Wrench, 
+  ArrowRight, 
+  Zap,
+  LayoutGrid,
+  Cloud,
+  Layers,
+  Boxes,
+  GitBranch,
+  ExternalLink,
+  BookOpen
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary } from "@/types";
+import { 
+  EXCALIDRAW_CATEGORIES, 
+  getExcalidrawLibraries, 
+  type ExcalidrawLibraryItem 
+} from "@/utils/excalidrawLibrary";
+import { useNavigate } from "react-router-dom";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
 
-const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string; short: string }> = {
   "Server-side": {
-    icon: <Server className="lib-cat-icon" />,
+    icon: <Server className="w-3.5 h-3.5" />,
     color: "var(--accent)",
     label: "Server-side",
+    short: "SRV",
   },
   "Client-side": {
-    icon: <Monitor className="lib-cat-icon" />,
+    icon: <Monitor className="w-3.5 h-3.5" />,
     color: "var(--green)",
     label: "Client-side",
+    short: "CLI",
   },
   "Client/Server Interaction": {
-    icon: <ArrowLeftRight className="lib-cat-icon" />,
+    icon: <ArrowLeftRight className="w-3.5 h-3.5" />,
     color: "var(--yellow)",
     label: "Client ↔ Server",
+    short: "C/S",
   },
   "Utils": {
-    icon: <Wrench className="lib-cat-icon" />,
+    icon: <Wrench className="w-3.5 h-3.5" />,
     color: "var(--purple)",
     label: "Utilities & Snippets",
+    short: "UTL",
   },
 };
 
+function normalizeCategory(type: string): string {
+  if (type.toLowerCase().startsWith("server-side")) return "Server-side";
+  if (type.toLowerCase().startsWith("client-side")) return "Client-side";
+  if (type.toLowerCase().includes("interaction")) return "Client/Server Interaction";
+  if (type.toLowerCase().includes("util")) return "Utils";
+  return type;
+}
+
 function getTypeConfig(type: string) {
-  return TYPE_CONFIG[type] || {
-    icon: <FileCode2 className="lib-cat-icon" />,
+  const norm = normalizeCategory(type);
+  return TYPE_CONFIG[norm] || {
+    icon: <FileCode2 className="w-3.5 h-3.5" />,
     color: "var(--text-3)",
-    label: type,
+    label: norm,
+    short: "API",
   };
 }
+
+const EXCAL_ICONS: Record<string, React.ReactNode> = {
+  all: <LayoutGrid className="w-3.5 h-3.5" />,
+  system: <Cloud className="w-3.5 h-3.5" />,
+  ui: <Layers className="w-3.5 h-3.5" />,
+  icons: <Boxes className="w-3.5 h-3.5" />,
+  diagrams: <GitBranch className="w-3.5 h-3.5" />,
+};
 
 // --- Search result types ---
 interface SearchResult {
   apiName: string;
   apiType: string;
   methodCount: number;
-  matchedMethods: string[];     // method names that matched
-  matchType: 'api' | 'method' | 'description';
-  score: number;                // relevance score for ranking
+  matchedMethods: string[];
+  matchType: "api" | "method" | "description";
+  score: number;
 }
 
 function computeSearchResults(query: string): SearchResult[] {
   if (!query.trim()) return [];
-  
+
   const q = query.toLowerCase().trim().replace(/\(\)$/, "");
   const results: SearchResult[] = [];
 
   for (const api of libraryData.apis) {
     const apiNameLower = api.name.toLowerCase();
     const apiDescLower = api.description.toLowerCase();
-    
+
     // Extract shorthand from name like "GlideSystem (gs)"
     const shorthandMatch = api.name.match(/\((.*?)\)/);
     const shorthand = shorthandMatch?.[1]?.toLowerCase() || "";
 
     let score = 0;
-    let matchType: 'api' | 'method' | 'description' = 'description';
+    let matchType: "api" | "method" | "description" = "description";
     const matchedMethods: string[] = [];
 
     // 1. API name exact match (highest)
     if (apiNameLower === q) {
       score = 1000;
-      matchType = 'api';
-    }
-    // 2. API name starts with query
-    else if (apiNameLower.startsWith(q)) {
+      matchType = "api";
+    } else if (apiNameLower.startsWith(q)) {
       score = 800;
-      matchType = 'api';
-    }
-    // 3. Shorthand exact match
-    else if (shorthand && shorthand === q) {
+      matchType = "api";
+    } else if (shorthand && shorthand === q) {
       score = 750;
-      matchType = 'api';
-    }
-    // 4. API name contains query
-    else if (apiNameLower.includes(q)) {
+      matchType = "api";
+    } else if (apiNameLower.includes(q)) {
       score = 600;
-      matchType = 'api';
-    }
-    // 5. Shorthand contains query
-    else if (shorthand && shorthand.includes(q)) {
+      matchType = "api";
+    } else if (shorthand && shorthand.includes(q)) {
       score = 550;
-      matchType = 'api';
-    }
-    // 6. API description contains query
-    else if (apiDescLower.includes(q)) {
+      matchType = "api";
+    } else if (apiDescLower.includes(q)) {
       score = 200;
-      matchType = 'description';
+      matchType = "description";
     }
 
-    // Check method-level matches (always, to populate matchedMethods)
+    // Check method-level matches
     for (const method of api.methods) {
       const methodNameLower = method.name.toLowerCase();
       const methodDescLower = method.description.toLowerCase();
-      
-      // Check various patterns
+
       const directMatch = methodNameLower.includes(q);
       const fullCallMatch = `${apiNameLower}.${methodNameLower}`.includes(q);
       const shorthandCallMatch = shorthand ? `${shorthand}.${methodNameLower}`.includes(q) : false;
@@ -110,17 +146,16 @@ function computeSearchResults(query: string): SearchResult[] {
 
       if (directMatch || fullCallMatch || shorthandCallMatch || descMatch) {
         matchedMethods.push(method.name);
-        
-        // Boost score for method matches if no API-level match yet
+
         if (score < 400) {
           if (methodNameLower === q) {
-            score = Math.max(score, 500); // exact method name
+            score = Math.max(score, 500);
           } else if (directMatch || fullCallMatch || shorthandCallMatch) {
-            score = Math.max(score, 400); // method name contains
+            score = Math.max(score, 400);
           } else {
-            score = Math.max(score, 150); // only desc match
+            score = Math.max(score, 150);
           }
-          matchType = 'method';
+          matchType = "method";
         }
       }
     }
@@ -137,7 +172,6 @@ function computeSearchResults(query: string): SearchResult[] {
     }
   }
 
-  // Sort by score descending, then alphabetically
   results.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return a.apiName.localeCompare(b.apiName);
@@ -151,14 +185,18 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   if (!query) return text;
   const q = query.toLowerCase().trim().replace(/\(\)$/, "");
   if (!q) return text;
-  
+
   try {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = text.split(new RegExp(`(${escaped})`, "gi"));
     return parts.map((part, i) =>
-      part.toLowerCase() === q
-        ? <mark key={i} className="lib-search-highlight">{part}</mark>
-        : part
+      part.toLowerCase() === q ? (
+        <mark key={i} className="lib-search-highlight">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
     );
   } catch {
     return text;
@@ -168,14 +206,19 @@ function highlightMatch(text: string, query: string): React.ReactNode {
 const CATEGORY_ORDER = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"] as const;
 
 export function LibrarySidebar() {
+  const navigate = useNavigate();
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
   const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
   const searchQuery = useAppStore((s) => s.librarySearchQuery);
   const setSearchQuery = useAppStore((s) => s.setLibrarySearchQuery);
   const libraryTab = useAppStore((s) => s.libraryTab);
   const setLibraryTab = useAppStore((s) => s.setLibraryTab);
+  const excalCategory = useAppStore((s) => s.libraryExcalidrawCategory);
+  const setExcalCategory = useAppStore((s) => s.setLibraryExcalidrawCategory);
 
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(libraryData.apis.map((a) => a.type)));
+  const [activeChip, setActiveChip] = useState<string>("All");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [excalLibraries, setExcalLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const isSearchMode = searchQuery.trim().length > 0;
   const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
@@ -189,17 +232,25 @@ export function LibrarySidebar() {
   const activeRef = useRef<HTMLButtonElement>(null);
   const resultRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
-  // Group APIs by type for browse mode
+  // Load Excalidraw libraries for category counts
+  useEffect(() => {
+    getExcalidrawLibraries().then((data) => {
+      setExcalLibraries(data);
+    });
+  }, []);
+
+  // Group APIs by normalized type for browse mode
   const grouped = useMemo(() => {
     const groups: Record<string, typeof libraryData.apis> = {};
     const seen = new Set<string>();
+
     for (const api of libraryData.apis) {
       if (seen.has(api.name)) continue;
       seen.add(api.name);
-      
-      const key = api.type;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(api);
+
+      const normType = normalizeCategory(api.type);
+      if (!groups[normType]) groups[normType] = [];
+      groups[normType].push(api);
     }
 
     for (const type in groups) {
@@ -232,37 +283,40 @@ export function LibrarySidebar() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!isSearchMode || searchResults.length === 0) return;
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (!isSearchMode || searchResults.length === 0) return;
 
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setSelectedResultIndex((prev) => {
-        const next = Math.min(prev + 1, searchResults.length - 1);
-        resultRefs.current.get(next)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        return next;
-      });
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setSelectedResultIndex((prev) => {
-        const next = Math.max(prev - 1, 0);
-        resultRefs.current.get(next)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        return next;
-      });
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (selectedResultIndex >= 0 && selectedResultIndex < searchResults.length) {
-        const selected = searchResults[selectedResultIndex];
-        if (selected) {
-          setSelectedId(selected.apiName);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedResultIndex((prev) => {
+          const next = Math.min(prev + 1, searchResults.length - 1);
+          resultRefs.current.get(next)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          return next;
+        });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedResultIndex((prev) => {
+          const next = Math.max(prev - 1, 0);
+          resultRefs.current.get(next)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          return next;
+        });
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (selectedResultIndex >= 0 && selectedResultIndex < searchResults.length) {
+          const selected = searchResults[selectedResultIndex];
+          if (selected) {
+            setSelectedId(selected.apiName);
+          }
         }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setSearchQuery("");
+        searchRef.current?.blur();
       }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setSearchQuery("");
-      searchRef.current?.blur();
-    }
-  }, [isSearchMode, searchResults, selectedResultIndex, setSelectedId, setSearchQuery]);
+    },
+    [isSearchMode, searchResults, selectedResultIndex, setSelectedId, setSearchQuery]
+  );
 
   const clearSearch = useCallback(() => {
     setSearchQuery("");
@@ -278,12 +332,20 @@ export function LibrarySidebar() {
 
   const displayedCategories = useMemo(() => {
     const existing = Object.keys(grouped);
-    const sorted: string[] = CATEGORY_ORDER.filter((c) => existing.includes(c));
+    const sorted = CATEGORY_ORDER.filter((c) => existing.includes(c));
     existing.forEach((c) => {
-      if (!sorted.includes(c)) sorted.push(c);
+      if (!sorted.includes(c as (typeof CATEGORY_ORDER)[number])) sorted.push(c as (typeof CATEGORY_ORDER)[number]);
     });
-    return sorted;
-  }, [grouped]);
+
+    if (activeChip === "All") return sorted;
+    return sorted.filter((c) => {
+      if (activeChip === "Server") return c === "Server-side";
+      if (activeChip === "Client") return c === "Client-side";
+      if (activeChip === "Interaction") return c === "Client/Server Interaction";
+      if (activeChip === "Utils") return c === "Utils";
+      return true;
+    });
+  }, [grouped, activeChip]);
 
   const toggleGroup = (type: string) => {
     setCollapsedGroups((prev) => {
@@ -296,14 +358,14 @@ export function LibrarySidebar() {
 
   const totalApis = useMemo(() => {
     const seen = new Set<string>();
-    libraryData.apis.forEach(a => seen.add(a.name));
+    libraryData.apis.forEach((a) => seen.add(a.name));
     return seen.size;
   }, []);
 
   const totalMethods = useMemo(() => {
     const seen = new Set<string>();
     let count = 0;
-    libraryData.apis.forEach(a => {
+    libraryData.apis.forEach((a) => {
       if (!seen.has(a.name)) {
         seen.add(a.name);
         count += a.methods.length;
@@ -312,99 +374,168 @@ export function LibrarySidebar() {
     return count;
   }, []);
 
+  // Compute Excalidraw counts
+  const excalCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: excalLibraries.length };
+    EXCALIDRAW_CATEGORIES.forEach((cat) => {
+      if (cat.id === "all") return;
+      if (cat.keywords) {
+        const matching = excalLibraries.filter((lib) =>
+          cat.keywords!.some((kw) => lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw))
+        );
+        counts[cat.id] = matching.length;
+      }
+    });
+    return counts;
+  }, [excalLibraries]);
+
   return (
     <div className="lib-sidebar">
       {/* Header */}
       <div className="lib-sidebar-header">
         <div className="lib-sidebar-title-row">
-          <div className="lib-sidebar-title-icon">
-            <Database className="lib-db-icon" />
-          </div>
-          <div className="lib-sidebar-title-text">
-            <span className="lib-sidebar-title">Developer Library</span>
-            <span className="lib-sidebar-subtitle">
-              {libraryTab === "servicenow" ? "ServiceNow API Reference" : "Excalidraw Community Shapes"}
-            </span>
+          <div 
+            className="lib-sidebar-brand" 
+            onClick={() => {
+              setSelectedId(null);
+              setSearchQuery("");
+            }}
+            title="Return to Library Discovery Hub"
+          >
+            <div className="lib-sidebar-title-icon">
+              {libraryTab === "servicenow" ? <Database className="w-3.5 h-3.5" /> : <BookOpen className="w-3.5 h-3.5" />}
+            </div>
+            <div className="lib-sidebar-title-text">
+              <span className="lib-sidebar-title">Developer Library</span>
+              <span className="lib-sidebar-subtitle">
+                {libraryTab === "servicenow" ? "ServiceNow API Hub" : "Community Shapes"}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Tab Toggle */}
-        <div className="flex border border-border/40 p-0.5 bg-bg-2/60 rounded-lg text-[11px] font-medium my-2">
+        {/* Dual Tab Segmented Control */}
+        <div className="lib-mode-tabs">
           <button
-            className={cn(
-              "flex-1 py-1 px-2 rounded-md text-center transition-colors",
-              libraryTab === "servicenow" ? "bg-bg-0 text-text-0 shadow-sm font-semibold" : "text-text-2 hover:text-text-0"
-            )}
+            className={cn("lib-mode-tab", libraryTab === "servicenow" && "lib-mode-tab-active")}
             onClick={() => setLibraryTab("servicenow")}
           >
-            ServiceNow APIs
+            <Server className="w-3 h-3" />
+            <span>ServiceNow APIs</span>
           </button>
           <button
-            className={cn(
-              "flex-1 py-1 px-2 rounded-md text-center transition-colors flex items-center justify-center gap-1",
-              libraryTab === "excalidraw" ? "bg-bg-0 text-accent shadow-sm font-semibold" : "text-text-2 hover:text-text-0"
-            )}
+            className={cn("lib-mode-tab", libraryTab === "excalidraw" && "lib-mode-tab-active")}
             onClick={() => setLibraryTab("excalidraw")}
           >
-            Excalidraw Libraries
+            <Boxes className="w-3 h-3" />
+            <span>Excalidraw</span>
           </button>
         </div>
 
-        {/* Search */}
+        {/* Search Input */}
         <div className="lib-search-container">
           <Search className="lib-search-icon" />
           <input
             ref={searchRef}
             type="text"
-            placeholder={libraryTab === "servicenow" ? "Search APIs, methods..." : "Search Excalidraw shapes..."}
+            placeholder={
+              libraryTab === "servicenow"
+                ? "Search APIs, methods..."
+                : "Search shapes, authors..."
+            }
             className="lib-search-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
           />
           {searchQuery ? (
-            <button className="lib-search-clear" onClick={clearSearch}>
-              <X className="lib-search-clear-icon" />
+            <button className="lib-search-clear" onClick={clearSearch} title="Clear search">
+              <X className="w-2.5 h-2.5" />
             </button>
           ) : (
             <kbd className="lib-search-kbd">/</kbd>
           )}
         </div>
 
+        {/* Quick Filter Chips (ServiceNow mode only when not searching) */}
+        {libraryTab === "servicenow" && !isSearchMode && (
+          <div className="lib-filter-chips">
+            {["All", "Server", "Client", "Interaction", "Utils"].map((chip) => (
+              <button
+                key={chip}
+                className={cn("lib-filter-chip", activeChip === chip && "lib-filter-chip-active")}
+                onClick={() => setActiveChip(chip)}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
+        )}
+
         {isSearchMode && libraryTab === "servicenow" && (
           <div className="lib-search-status">
-            <Zap size={10} className="lib-search-status-icon" />
-            <span>
-              {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
-              {searchResults.length > 0 && (
-                <span className="lib-search-status-hint"> · ↑↓ navigate · ⏎ select</span>
-              )}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <Zap className="w-3 h-3 text-accent" />
+              <span>
+                {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            {searchResults.length > 0 && (
+              <span className="text-[10px] text-text-3 font-normal">↑↓ navigate · ⏎ open</span>
+            )}
           </div>
         )}
       </div>
 
-      {/* Content: Search mode or Browse mode */}
+      {/* Sidebar Content */}
       <div className="lib-sidebar-content">
         {libraryTab === "excalidraw" ? (
-          <div className="p-3 text-xs text-text-2 space-y-2">
-            <div className="p-2.5 rounded-lg bg-accent/10 border border-accent/20 text-accent font-medium flex items-center gap-2">
-              <Zap className="w-4 h-4 shrink-0" />
-              <span>Browse 200+ downloaded Excalidraw libraries on the right panel.</span>
+          /* ---- EXCALIDRAW CATEGORY NAV ---- */
+          <div className="lib-excal-nav">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-text-3">
+              Collections
             </div>
-            <p className="text-[11px] text-text-3">
-              Features System Design, AWS Architecture, UI Wireframes, Icons, Flowcharts, and Diagram Shapes.
-            </p>
+            {EXCALIDRAW_CATEGORIES.map((cat) => {
+              const isActive = excalCategory === cat.id;
+              const count = excalCounts[cat.id] ?? 0;
+              const icon = EXCAL_ICONS[cat.id] || <LayoutGrid className="w-3.5 h-3.5" />;
+
+              return (
+                <button
+                  key={cat.id}
+                  className={cn("lib-excal-cat-item", isActive && "lib-excal-cat-item-active")}
+                  onClick={() => setExcalCategory(cat.id)}
+                >
+                  <span className={cn("shrink-0", isActive ? "text-accent" : "text-text-3")}>
+                    {icon}
+                  </span>
+                  <span className="flex-1 truncate">{cat.label}</span>
+                  <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-3">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+
+            <div className="mt-4 pt-3 border-t border-border-1 px-1">
+              <button
+                onClick={() => navigate("/drawflows")}
+                className="w-full py-2 px-2.5 rounded-lg bg-bg-2 hover:bg-accent hover:text-white border border-border-1 text-text-2 hover:border-accent text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm"
+              >
+                <span>Open DrawFlow Studio</span>
+                <ExternalLink className="w-3 h-3" />
+              </button>
+            </div>
           </div>
         ) : isSearchMode ? (
-          // ---- SEARCH RESULTS ----
+          /* ---- SERVICENOW SEARCH RESULTS ---- */
           searchResults.length > 0 ? (
             <div className="lib-search-results">
               {searchResults.map((result, idx) => {
                 const config = getTypeConfig(result.apiType);
                 const isActive = selectedId === result.apiName;
                 const isSelected = idx === selectedResultIndex;
-                
+
                 return (
                   <button
                     key={`${result.apiName}-${idx}`}
@@ -424,36 +555,33 @@ export function LibrarySidebar() {
                     onMouseEnter={() => setSelectedResultIndex(idx)}
                   >
                     <div className="lib-search-result-header">
-                      <div
-                        className="lib-search-result-dot"
-                        style={{ background: config.color }}
-                      />
+                      <div className="lib-search-result-dot" style={{ background: config.color }} />
                       <span className="lib-search-result-name">
                         {highlightMatch(result.apiName, searchQuery)}
                       </span>
-                      <span className="lib-search-result-badge" style={{ color: config.color }}>
-                        {result.apiType === "Server-side" ? "SRV" :
-                         result.apiType === "Client-side" ? "CLI" :
-                         result.apiType === "Client/Server Interaction" ? "C/S" :
-                         result.apiType === "Utils" ? "UTL" : "API"}
+                      <span
+                        className="lib-search-result-badge"
+                        style={{ color: config.color, borderColor: config.color }}
+                      >
+                        {config.short}
                       </span>
                     </div>
-                    
+
                     {result.matchedMethods.length > 0 && (
                       <div className="lib-search-result-methods">
-                        <ArrowRight size={8} className="lib-search-result-arrow" />
+                        <ArrowRight className="w-2.5 h-2.5 text-text-3 shrink-0" />
                         <span className="lib-search-result-methods-text">
                           {result.matchedMethods.slice(0, 3).map((name, i) => (
                             <React.Fragment key={name}>
-                              {i > 0 && <span className="lib-search-method-sep">, </span>}
-                              <span className="lib-search-method-name">
+                              {i > 0 && <span className="opacity-40">, </span>}
+                              <span className="text-accent font-medium">
                                 {highlightMatch(name, searchQuery)}
-                                <span className="lib-search-method-parens">()</span>
+                                <span className="text-text-3 font-normal">()</span>
                               </span>
                             </React.Fragment>
                           ))}
                           {result.matchedMethods.length > 3 && (
-                            <span className="lib-search-method-more">
+                            <span className="text-text-3 text-[9px] font-semibold ml-1">
                               +{result.matchedMethods.length - 3} more
                             </span>
                           )}
@@ -465,19 +593,22 @@ export function LibrarySidebar() {
               })}
             </div>
           ) : (
-            <div className="lib-empty-state">
-              <Search className="lib-empty-icon" />
-              <p className="lib-empty-text">No results for "{searchQuery}"</p>
-              <p className="lib-empty-subtext">Try searching for an API name or method</p>
-              <button className="lib-empty-clear" onClick={clearSearch}>
-                Clear search
+            <div className="p-8 text-center flex flex-col items-center gap-2">
+              <Search className="w-6 h-6 text-text-3 opacity-40 mb-1" />
+              <p className="text-xs font-semibold text-text-2">No matching APIs</p>
+              <p className="text-[11px] text-text-3">Try searching for methods like 'addQuery' or 'info'</p>
+              <button
+                className="mt-2 text-xs text-accent hover:underline font-medium"
+                onClick={clearSearch}
+              >
+                Clear search query
               </button>
             </div>
           )
         ) : (
-          // ---- BROWSE MODE ----
+          /* ---- SERVICENOW BROWSE CATEGORIES ---- */
           displayedCategories.map((type) => {
-            const apis = grouped[type];
+            const apis = grouped[type] || [];
             const config = getTypeConfig(type);
             const isCollapsed = collapsedGroups.has(type);
 
@@ -488,35 +619,53 @@ export function LibrarySidebar() {
                   onClick={() => toggleGroup(type)}
                 >
                   <ChevronDown
-                    className={cn("lib-group-chevron", isCollapsed && "lib-group-chevron-collapsed")}
+                    className={cn(
+                      "lib-group-chevron",
+                      isCollapsed && "lib-group-chevron-collapsed"
+                    )}
                   />
                   <span className="lib-group-icon" style={{ color: config.color }}>
                     {config.icon}
                   </span>
                   <span className="lib-group-label">{config.label}</span>
-                  <span className="lib-group-count">{apis?.length || 0}</span>
+                  <span className="lib-group-count">{apis.length}</span>
                 </button>
 
                 {!isCollapsed && (
                   <div className="lib-group-items">
-                    {apis && apis.map((api) => {
+                    {apis.map((api) => {
                       const isActive = selectedId === api.name;
-                      const typeConfig = getTypeConfig(api.type);
+                      const isScoped = api.type.toLowerCase().includes("scoped");
+                      const isGlobal = api.type.toLowerCase().includes("global");
+
                       return (
                         <button
                           key={api.name}
                           ref={isActive ? activeRef : null}
                           className={cn("lib-item", isActive && "lib-item-active")}
                           onClick={() => setSelectedId(api.name)}
+                          title={`${api.name} (${api.methods.length} methods)`}
                         >
                           <div
                             className="lib-item-dot"
-                            style={{ background: isActive ? typeConfig.color : undefined }}
+                            style={{
+                              background: isActive ? config.color : undefined,
+                            }}
                           />
                           <span className="lib-item-name">{api.name}</span>
-                          <span className="lib-item-method-count">
-                            {api.methods.length}
-                          </span>
+
+                          {isScoped && (
+                            <span className="text-[9px] font-mono text-purple font-semibold uppercase px-1 rounded bg-purple/10">
+                              scope
+                            </span>
+                          )}
+                          {isGlobal && (
+                            <span className="text-[9px] font-mono text-yellow font-semibold uppercase px-1 rounded bg-yellow/10">
+                              global
+                            </span>
+                          )}
+
+                          <span className="lib-item-method-count">{api.methods.length}</span>
                         </button>
                       );
                     })}
@@ -530,16 +679,26 @@ export function LibrarySidebar() {
 
       {/* Footer */}
       <div className="lib-sidebar-footer">
-        <div className="lib-footer-stats">
-          <span className="lib-footer-stat">
-            {totalApis} APIs
-          </span>
-          <span className="lib-footer-divider">·</span>
-          <span className="lib-footer-stat">
-            {totalMethods} Methods
-          </span>
-        </div>
-        <span className="lib-footer-version">v{libraryData.version}</span>
+        {libraryTab === "servicenow" ? (
+          <>
+            <div className="lib-footer-stats">
+              <span>{totalApis} APIs</span>
+              <span className="opacity-30">·</span>
+              <span>{totalMethods} Methods</span>
+            </div>
+            <span className="lib-footer-version">v{libraryData.version}</span>
+          </>
+        ) : (
+          <>
+            <div className="lib-footer-stats">
+              <span>{excalLibraries.length} Collections</span>
+            </div>
+            <span className="text-[10px] text-accent font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              Offline Ready
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

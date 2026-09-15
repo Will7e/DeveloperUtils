@@ -147,3 +147,17 @@ export async function loadLibraryToExcalidraw(
   return formattedItems.length;
 }
 
+export interface ExcalidrawCategoryDef {
+  id: string;
+  label: string;
+  keywords?: string[];
+}
+
+export const EXCALIDRAW_CATEGORIES: ExcalidrawCategoryDef[] = [
+  { id: "all", label: "All Libraries" },
+  { id: "system", label: "System Design & Cloud", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
+  { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
+  { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
+  { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
+];
+

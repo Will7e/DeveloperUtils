@@ -59,6 +59,7 @@ export interface DiffSession {
   original: string;
   modified: string;
   language: string;
+  autoDetect?: boolean;
 }
 
 /** Diff checker settings */
@@ -66,6 +67,8 @@ export interface DiffSettings {
   renderSideBySide: boolean;
   ignoreTrimWhitespace: boolean;
   enableSplitViewResizing: boolean;
+  autoFormatOnPaste?: boolean;
+  wordWrap?: boolean;
 }
 
 /** Editor settings */
@@ -142,9 +145,10 @@ export interface AppState {
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
   libraryTab: "servicenow" | "excalidraw";
+  libraryExcalidrawCategory: string;
 
   // Actions
-  createFile: (name: string, language: Language) => void;
+  createFile: (name: string, language: Language, content?: string) => void;
   deleteFile: (id: string) => void;
   setActiveFile: (id: string) => void;
   reorderFiles: (fromIndex: number, toIndex: number) => void;
@@ -193,7 +197,7 @@ export interface AppState {
   deleteDiffSession: (id: string) => void;
   setActiveDiffSession: (id: string) => void;
   updateDiffSessionInput: (id: string, side: "original" | "modified", input: string) => void;
-  updateDiffSessionLanguage: (id: string, language: string) => void;
+  updateDiffSessionLanguage: (id: string, language: string, autoDetect?: boolean) => void;
   renameDiffSession: (id: string, name: string) => void;
   reorderDiffSessions: (fromIndex: number, toIndex: number) => void;
   updateDiffSettings: (settings: Partial<DiffSettings>) => void;
@@ -201,13 +205,14 @@ export interface AppState {
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
   setLibraryTab: (tab: "servicenow" | "excalidraw") => void;
+  setLibraryExcalidrawCategory: (category: string) => void;
 
   // Workflow UI & State
   workflows: Workflow[];
   activeWorkflowId: string;
   excalidrawLibraryItems?: unknown[];
   excalidrawAddedLibraryIds?: string[];
-  createWorkflow: (name?: string) => void;
+  createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => string;
   deleteWorkflow: (id: string) => void;
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;

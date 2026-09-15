@@ -1,6 +1,28 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Book, Copy, Check, Code2, Server, Monitor, ArrowLeftRight, FileCode2, ChevronDown, ExternalLink, Sparkles, Hash, Wrench } from "lucide-react";
+import { 
+  Copy, 
+  Check, 
+  Code2, 
+  Server, 
+  Monitor, 
+  ArrowLeftRight, 
+  FileCode2, 
+  ChevronDown, 
+  ExternalLink, 
+  Sparkles, 
+  Hash, 
+  Wrench,
+  Search,
+  ArrowRight,
+  Play,
+  Layers,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  X,
+  Boxes
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
@@ -9,6 +31,7 @@ import {
   getExcalidrawLibraries,
   getExcalidrawLibraryPreviewUrl,
   getExcalidrawLibraryCdnPreviewUrl,
+  EXCALIDRAW_CATEGORIES,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -24,214 +47,368 @@ interface ActionTooltipProps {
 const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
   <Tooltip>
     <TooltipTrigger asChild>{children}</TooltipTrigger>
-    <TooltipContent side={side} sideOffset={10}>
-      <p>{content}</p>
+    <TooltipContent side={side} sideOffset={8}>
+      <p className="text-xs">{content}</p>
     </TooltipContent>
   </Tooltip>
 );
 
-const TYPE_BADGE: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
+const TYPE_BADGE: Record<string, { icon: React.ReactNode; color: string; bg: string; label: string }> = {
   "Server-side": {
     icon: <Server size={11} />,
     color: "var(--accent)",
-    bg: "rgba(14,165,233,0.08)",
+    bg: "rgba(56, 189, 248, 0.1)",
+    label: "Server-side",
   },
   "Client-side": {
     icon: <Monitor size={11} />,
     color: "var(--green)",
-    bg: "rgba(16,185,129,0.08)",
+    bg: "rgba(16, 185, 129, 0.1)",
+    label: "Client-side",
   },
   "Client/Server Interaction": {
     icon: <ArrowLeftRight size={11} />,
     color: "var(--yellow)",
-    bg: "rgba(245,158,11,0.08)",
+    bg: "rgba(245, 158, 11, 0.1)",
+    label: "Client ↔ Server",
   },
   "Utils": {
     icon: <Wrench size={11} />,
     color: "var(--purple)",
-    bg: "rgba(168,85,247,0.08)",
+    bg: "rgba(168, 85, 247, 0.1)",
+    label: "Utilities & Snippets",
   },
 };
 
+function normalizeType(type: string): string {
+  if (type.toLowerCase().startsWith("server-side")) return "Server-side";
+  if (type.toLowerCase().startsWith("client-side")) return "Client-side";
+  if (type.toLowerCase().includes("interaction")) return "Client/Server Interaction";
+  if (type.toLowerCase().includes("util")) return "Utils";
+  return type;
+}
+
 function getTypeBadge(type: string) {
-  return TYPE_BADGE[type] || {
+  const norm = normalizeType(type);
+  return TYPE_BADGE[norm] || {
     icon: <FileCode2 size={11} />,
     color: "var(--text-3)",
-    bg: "rgba(255,255,255,0.04)",
+    bg: "rgba(255,255,255,0.05)",
+    label: norm,
   };
 }
 
 export function LibraryView() {
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
+  const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
   const searchQuery = useAppStore((s) => s.librarySearchQuery);
+  const setSearchQuery = useAppStore((s) => s.setLibrarySearchQuery);
   const libraryTab = useAppStore((s) => s.libraryTab);
   const addToast = useAppStore((s) => s.addToast);
-  const contentRef = useRef<HTMLDivElement>(null);
+  const createFile = useAppStore((s) => s.createFile);
 
-  const selectedApi = libraryData.apis.find((api) => api.name === selectedId);
+  const selectedApi = useMemo(() => {
+    return libraryData.apis.find((api) => api.name === selectedId);
+  }, [selectedId]);
 
   // Normalize query
   const q = useMemo(() => searchQuery.toLowerCase().trim().replace(/\(\)$/, ""), [searchQuery]);
 
-  // Scroll to top when API changes
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  }, [selectedId]);
-
   if (libraryTab === "excalidraw") {
-    return <ExcalidrawLibraryGallery searchQuery={searchQuery} addToast={addToast} />;
+    return <ExcalidrawLibraryGallery searchQuery={searchQuery} />;
   }
 
+  // If no API is selected, render the Welcome / Discovery Hub
   if (!selectedApi) {
     return (
-      <div className="lib-view-empty">
-        <div className="lib-view-empty-glow" />
-        <div className="lib-view-empty-content">
-          <div className="lib-view-empty-icon-ring">
-            <div className="lib-view-empty-icon-inner">
-              <Book className="lib-view-empty-book" />
-            </div>
-          </div>
-          <h2 className="lib-view-empty-title">API Reference</h2>
-          <p className="lib-view-empty-desc">
-            Select an API from the sidebar to explore detailed documentation, method signatures, and production-ready code snippets.
-          </p>
-          <div className="lib-view-empty-hints">
-            <div className="lib-view-empty-hint">
-              <kbd className="lib-kbd">/</kbd>
-              <span>to search</span>
-            </div>
-            <div className="lib-view-empty-hint">
-              <kbd className="lib-kbd">↑↓</kbd>
-              <span>to navigate</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <LibraryDiscoveryHub 
+        onSelectApi={(name) => setSelectedId(name)} 
+        onSearch={(query) => setSearchQuery(query)}
+        addToast={addToast}
+        createFile={createFile}
+      />
     );
   }
 
+  return (
+    <ApiDocumentationView
+      key={selectedApi.name}
+      selectedApi={selectedApi}
+      q={q}
+      addToast={addToast}
+      createFile={createFile}
+      onBackToHub={() => setSelectedId(null)}
+    />
+  );
+}
+
+/* ============================================================
+   API DOCUMENTATION DETAIL VIEW
+   ============================================================ */
+
+function ApiDocumentationView({
+  selectedApi,
+  q,
+  addToast,
+  createFile,
+  onBackToHub,
+}: {
+  selectedApi: (typeof libraryData.apis)[0];
+  q: string;
+  addToast: (toast: Omit<Toast, "id">) => void;
+  createFile: (name: string, language: "javascript", content?: string) => void;
+  onBackToHub: () => void;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [methodFilter, setMethodFilter] = useState("");
+  const [expandAll, setExpandAll] = useState(true);
+
   const badge = getTypeBadge(selectedApi.type);
+
+  // Filter methods inside this API if methodFilter is set
+  const filteredMethods = useMemo(() => {
+    return selectedApi.methods.filter((m) => {
+      if (!methodFilter.trim()) return true;
+      const term = methodFilter.toLowerCase();
+      return m.name.toLowerCase().includes(term) || m.description.toLowerCase().includes(term);
+    });
+  }, [selectedApi, methodFilter]);
+
+  const handleCopyApiName = () => {
+    navigator.clipboard.writeText(selectedApi.name);
+    addToast({ message: `Copied "${selectedApi.name}" to clipboard`, type: "success" });
+  };
 
   return (
     <div className="lib-view">
       {/* Sticky Header */}
       <header className="lib-view-header">
         <div className="lib-view-header-inner">
+          {/* Breadcrumbs */}
+          <div className="lib-breadcrumbs">
+            <button 
+              className="lib-breadcrumb-link" 
+              onClick={onBackToHub}
+            >
+              Developer Library
+            </button>
+            <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
+            <span className="text-text-3">{badge.label}</span>
+            <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
+            <span className="text-text-1 font-semibold">{selectedApi.name}</span>
+          </div>
+
           <div className="lib-view-header-top">
             <div className="lib-view-header-meta">
               <h1 className="lib-view-api-name">{selectedApi.name}</h1>
               <span
                 className="lib-view-type-badge"
-                style={{ color: badge.color, background: badge.bg, borderColor: `color-mix(in srgb, ${badge.color} 20%, transparent)` }}
+                style={{ 
+                  color: badge.color, 
+                  background: badge.bg, 
+                  borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)` 
+                }}
               >
                 {badge.icon}
-                {selectedApi.type}
+                {badge.label}
               </span>
-            </div>
-            <div className="lib-view-header-stats">
-              <div className="lib-view-stat">
+              <div className="flex items-center gap-1.5 text-xs text-text-3 font-medium ml-1">
                 <Hash size={12} />
                 <span>{selectedApi.methods.length} methods</span>
               </div>
-              <div className="lib-view-stat lib-view-stat-verified">
+              <div className="flex items-center gap-1 text-xs text-yellow opacity-80 font-medium">
                 <Sparkles size={12} />
                 <span>Verified</span>
               </div>
             </div>
-          </div>
-          <p className="lib-view-description">{selectedApi.description}</p>
-        </div>
-      </header>
 
-      {/* Method List */}
-      <div className="lib-view-content" ref={contentRef}>
-        <div className="lib-view-methods">
-          {/* Quick Jump TOC */}
-          <div className="lib-toc">
-            <span className="lib-toc-label">Jump to</span>
-            <div className="lib-toc-list">
-              {selectedApi.methods.map((method) => {
-                const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
-                return (
-                  <a
-                    key={method.name}
-                    className={cn("lib-toc-item", isMatch && "lib-toc-item-match")}
-                    href={`#method-${method.name}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      document.getElementById(`method-${method.name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    }}
-                  >
-                    {method.name}()
-                    {isMatch && <Sparkles size={10} className="lib-match-sparkle" />}
-                  </a>
-                );
-              })}
+            <div className="lib-view-header-actions">
+              <button
+                className="lib-view-action-btn"
+                onClick={handleCopyApiName}
+                title="Copy API Name"
+              >
+                <Copy size={12} />
+                <span>Copy Name</span>
+              </button>
+
+              <button
+                className="lib-view-action-btn"
+                onClick={() => setExpandAll(!expandAll)}
+                title={expandAll ? "Collapse All Methods" : "Expand All Methods"}
+              >
+                {expandAll ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                <span>{expandAll ? "Collapse All" : "Expand All"}</span>
+              </button>
+
+              <button
+                className="lib-view-action-btn text-accent hover:text-accent"
+                onClick={onBackToHub}
+              >
+                <span>Back to Hub</span>
+              </button>
             </div>
           </div>
 
+          <p className="lib-view-description">{selectedApi.description}</p>
+
+          {/* Inline method filter bar */}
+          <div className="lib-method-filter-bar">
+            <div className="lib-method-filter-input-wrap">
+              <Search className="w-3.5 h-3.5 lib-method-filter-icon" />
+              <input
+                type="text"
+                className="lib-method-filter-input"
+                placeholder={`Filter ${selectedApi.methods.length} methods...`}
+                value={methodFilter}
+                onChange={(e) => setMethodFilter(e.target.value)}
+              />
+              {methodFilter && (
+                <button 
+                  className="lib-method-filter-clear" 
+                  onClick={() => setMethodFilter("")}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            <div className="text-xs text-text-3 font-medium">
+              Showing {filteredMethods.length} of {selectedApi.methods.length} methods
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Method List Content */}
+      <div className="lib-view-content" ref={contentRef}>
+        <div className="lib-view-methods">
+          {/* Quick Jump TOC */}
+          {selectedApi.methods.length > 0 && (
+            <div className="lib-toc">
+              <span className="lib-toc-label">Jump to</span>
+              <div className="lib-toc-list">
+                {selectedApi.methods.map((method) => {
+                  const isMatch = (q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q))) ||
+                                  (methodFilter && method.name.toLowerCase().includes(methodFilter.toLowerCase()));
+                  return (
+                    <a
+                      key={method.name}
+                      className={cn("lib-toc-item", isMatch && "lib-toc-item-match")}
+                      href={`#method-${method.name}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        document.getElementById(`method-${method.name}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    >
+                      {method.name}()
+                      {isMatch && <Sparkles size={10} className="text-yellow shrink-0 ml-0.5" />}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Method Cards */}
           <div className="lib-method-list">
-            {selectedApi.methods.map((method, idx) => {
-              const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
-              return (
-                <MethodCard 
-                  key={method.name} 
-                  method={method} 
-                  index={idx} 
-                  addToast={addToast} 
-                  badgeColor={badge.color} 
-                  isHighlighted={!!isMatch}
-                  searchQuery={q}
-                />
-              );
-            })}
+            {filteredMethods.length > 0 ? (
+              filteredMethods.map((method, idx) => {
+                const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
+                return (
+                  <MethodCard 
+                    key={method.name} 
+                    apiName={selectedApi.name}
+                    method={method} 
+                    index={idx} 
+                    addToast={addToast} 
+                    badgeColor={badge.color} 
+                    isHighlighted={!!isMatch}
+                    searchQuery={q || methodFilter}
+                    forceExpanded={expandAll}
+                    createFile={createFile}
+                  />
+                );
+              })
+            ) : (
+              <div className="p-8 text-center bg-bg-1 border border-border-1 rounded-xl">
+                <Search className="w-8 h-8 text-text-3 opacity-40 mx-auto mb-2" />
+                <p className="text-sm font-semibold text-text-1">No methods match "{methodFilter}"</p>
+                <p className="text-xs text-text-3 mt-1">Try another search term or clear the filter.</p>
+                <button
+                  className="mt-3 text-xs text-accent hover:underline font-medium"
+                  onClick={() => setMethodFilter("")}
+                >
+                  Clear method filter
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <footer className="lib-view-footer">
-          <div className="lib-view-footer-left">
-            <span className="lib-view-footer-source">Source: {libraryData.source}</span>
-          </div>
-          <span className="lib-view-footer-updated">Updated {libraryData.last_updated}</span>
+        <footer className="lib-view-footer px-8">
+          <div className="lib-view-footer-source">Source: {libraryData.source}</div>
+          <div className="lib-view-footer-updated">Documentation v{libraryData.version} · Updated {libraryData.last_updated}</div>
         </footer>
       </div>
     </div>
   );
 }
 
+/* ============================================================
+   Method Card Component
+   ============================================================ */
 
-function MethodCard({ method, index, addToast, badgeColor, isHighlighted, searchQuery }: {
+function MethodCard({ 
+  apiName,
+  method, 
+  index, 
+  addToast, 
+  badgeColor, 
+  isHighlighted, 
+  searchQuery,
+  forceExpanded,
+  createFile,
+}: {
+  apiName: string;
   method: ServiceNowMethod;
   index: number;
   addToast: (toast: Omit<Toast, "id">) => void;
   badgeColor: string;
   isHighlighted?: boolean;
   searchQuery?: string;
+  forceExpanded: boolean;
+  createFile: (name: string, language: "javascript", content?: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  const navigate = useNavigate();
+
+  const isExpanded = userExpanded !== null ? userExpanded : forceExpanded;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(method.example);
     setCopied(true);
-    addToast({ message: `Copied ${method.name}()`, type: "success" });
+    addToast({ message: `Copied ${method.name}() example to clipboard`, type: "success" });
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleTryInCompiler = () => {
+    const filename = `${apiName.replace(/[^a-zA-Z0-9]/g, "")}_${method.name}.js`;
+    createFile(filename, "javascript", method.example);
+    addToast({ message: `Loaded ${method.name}() in Compiler`, type: "success" });
+    navigate("/compiler");
   };
 
   const highlightText = (text: string, query: string | undefined) => {
     if (!query || !text) return text;
     try {
-      // Escape special regex characters
-      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const parts = text.split(new RegExp(`(${escapedQuery})`, 'gi'));
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
       return parts.map((part, i) => 
         part.toLowerCase() === query.toLowerCase() 
-          ? <mark key={i} className="lib-text-highlight">{part}</mark> 
+          ? <mark key={i} className="lib-search-highlight">{part}</mark> 
           : part
       );
     } catch {
@@ -239,22 +416,25 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
     }
   };
 
-  const lines = method.example.split('\n');
+  const lines = method.example.split("\n");
 
   return (
     <div
       id={`method-${method.name}`}
       className={cn("lib-method-card", isHighlighted && "lib-method-card-highlighted")}
-      style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
+      style={{ animationDelay: `${Math.min(index * 30, 300)}ms` }}
     >
       {/* Card Header */}
-      <div className="lib-method-header" onClick={() => setIsExpanded(!isExpanded)}>
+      <div className="lib-method-header" onClick={() => setUserExpanded(!isExpanded)}>
         <div className="lib-method-header-left">
           <span className="lib-method-dot" style={{ background: badgeColor }} />
           <h3 className="lib-method-name">
-            {highlightText(method.name, searchQuery)}<span className="lib-method-parens">()</span>
+            {highlightText(method.name, searchQuery)}
+            <span className="lib-method-parens">
+              ({method.parameters.map(p => p.split(" ")[0]).join(", ")})
+            </span>
           </h3>
-          {isHighlighted && <Sparkles size={14} className="lib-highlight-sparkle" />}
+          {isHighlighted && <Sparkles size={13} className="text-yellow shrink-0 animate-pulse" />}
         </div>
         <ChevronDown className={cn("lib-method-chevron", !isExpanded && "lib-method-chevron-collapsed")} />
       </div>
@@ -273,8 +453,8 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
                   const isOptional = p.toLowerCase().includes("optional");
                   return (
                     <span key={i} className={cn("lib-param-tag", isOptional && "lib-param-optional")}>
-                      {p.split(' ')[0]}
-                      {isOptional && <span className="lib-param-opt-label">?</span>}
+                      <span>{p.split(" ")[0]}</span>
+                      {isOptional && <span className="lib-param-opt-label">optional</span>}
                     </span>
                   );
                 })}
@@ -282,26 +462,44 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
             </div>
           )}
 
-          {/* Code Block */}
+          {/* macOS-style Code Block */}
           <div className="lib-code-block">
             <div className="lib-code-toolbar">
-              <div className="lib-code-toolbar-left">
-                <Code2 size={12} />
-                <span>Example</span>
+              <div className="flex items-center gap-2">
+                <div className="lib-code-toolbar-dots">
+                  <div className="lib-code-dot lib-code-dot-red" />
+                  <div className="lib-code-dot lib-code-dot-yellow" />
+                  <div className="lib-code-dot lib-code-dot-green" />
+                </div>
+                <span className="lib-code-lang">JavaScript</span>
               </div>
-              <ActionTooltip content={copied ? "Copied to clipboard" : "Copy example to clipboard"} side="left">
-                <button
-                  className={cn("lib-code-copy-btn", copied && "lib-code-copy-btn-copied")}
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <><Check size={12} /><span>Copied!</span></>
-                  ) : (
-                    <><Copy size={12} /><span>Copy</span></>
-                  )}
-                </button>
-              </ActionTooltip>
+
+              <div className="lib-code-actions">
+                <ActionTooltip content="Run and experiment with this snippet in Compiler">
+                  <button
+                    className="lib-code-action-btn lib-code-action-btn-compiler"
+                    onClick={handleTryInCompiler}
+                  >
+                    <Play size={10} />
+                    <span>Try in Compiler</span>
+                  </button>
+                </ActionTooltip>
+
+                <ActionTooltip content={copied ? "Copied!" : "Copy snippet to clipboard"}>
+                  <button
+                    className="lib-code-action-btn"
+                    onClick={handleCopy}
+                  >
+                    {copied ? (
+                      <><Check size={10} className="text-green" /><span>Copied</span></>
+                    ) : (
+                      <><Copy size={10} /><span>Copy</span></>
+                    )}
+                  </button>
+                </ActionTooltip>
+              </div>
             </div>
+
             <pre className="lib-code-pre">
               <code>
                 {lines.map((line, i) => (
@@ -319,22 +517,385 @@ function MethodCard({ method, index, addToast, badgeColor, isHighlighted, search
   );
 }
 
-/* ========================================
-   JavaScript Syntax Highlighter
-   ======================================== */
+/* ============================================================
+   WELCOME & DISCOVERY HUB (When no API is selected)
+   ============================================================ */
+
+function LibraryDiscoveryHub({ 
+  onSelectApi,
+  onSearch,
+  addToast,
+  createFile,
+}: { 
+  onSelectApi: (name: string) => void;
+  onSearch: (query: string) => void;
+  addToast: (toast: Omit<Toast, "id">) => void;
+  createFile: (name: string, language: "javascript", content?: string) => void;
+}) {
+  const [localSearch, setLocalSearch] = useState("");
+  const navigate = useNavigate();
+
+  const handleHeroSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (localSearch.trim()) {
+      onSearch(localSearch);
+    }
+  };
+
+  const handleRunRecipe = (title: string, code: string) => {
+    createFile(`${title.toLowerCase().replace(/[^a-z0-9]/g, "_")}.js`, "javascript", code);
+    addToast({ message: `Opened "${title}" recipe in Compiler`, type: "success" });
+    navigate("/compiler");
+  };
+
+  const handleCopyRecipe = (title: string, code: string) => {
+    navigator.clipboard.writeText(code);
+    addToast({ message: `Copied "${title}" recipe to clipboard`, type: "success" });
+  };
+
+  // 6 Essential APIs
+  const essentialApis = [
+    {
+      name: "GlideRecord",
+      type: "Server-side",
+      desc: "Primary class for database operations. Provides object-oriented querying, record inserts, updates, and deletes without raw SQL.",
+      methods: 48,
+    },
+    {
+      name: "GlideSystem (gs)",
+      type: "Server-side",
+      desc: "Comprehensive system utility class for logging, session information, dates, events, security roles, and user context.",
+      methods: 35,
+    },
+    {
+      name: "GlideAggregate",
+      type: "Server-side",
+      desc: "Performant database aggregations (COUNT, SUM, MIN, MAX, AVG). Replaces slow GlideRecord iterating for counts.",
+      methods: 8,
+    },
+    {
+      name: "GlideAjax",
+      type: "Client/Server Interaction",
+      desc: "Standard client-side class for invoking server-side Script Includes asynchronously with XML/JSON response handling.",
+      methods: 6,
+    },
+    {
+      name: "g_form",
+      type: "Client-side",
+      desc: "Core client API for form interaction: retrieve/set values, display field messages, toggle visibility, and control UI actions.",
+      methods: 42,
+    },
+    {
+      name: "RESTMessageV2",
+      type: "Server-side",
+      desc: "Send outbound REST HTTP requests to external web services with endpoints, headers, query params, and JSON responses.",
+      methods: 24,
+    },
+  ];
+
+  // Common production snippets
+  const recipes = [
+    {
+      title: "Asynchronous GlideAjax Call",
+      desc: "Best-practice pattern to fetch server data without freezing the browser UI.",
+      code: `// Client Script: Asynchronous GlideAjax
+var ga = new GlideAjax('IncidentUtils');
+ga.addParam('sysparm_name', 'getIncidentDetails');
+ga.addParam('sysparm_sys_id', g_form.getUniqueValue());
+ga.getXMLAnswer(function(response) {
+  if (!response) return;
+  var data = JSON.parse(response);
+  if (data.assignedTo) {
+    g_form.setValue('assigned_to', data.assignedTo);
+    g_form.showFieldMsg('assigned_to', 'Assigned via auto-dispatch', 'info');
+  }
+});`,
+    },
+    {
+      title: "Optimized GlideAggregate Count",
+      desc: "Fast database count query grouped by category without loading records.",
+      code: `// Server-side: High Performance Aggregation
+var ga = new GlideAggregate('incident');
+ga.addAggregate('COUNT', 'category');
+ga.addEncodedQuery('active=true^priority<=2');
+ga.groupBy('category');
+ga.query();
+
+while (ga.next()) {
+  var category = ga.getValue('category') || 'Uncategorized';
+  var count = ga.getAggregate('COUNT', 'category');
+  gs.info(category + ': ' + count + ' open priority 1/2 incidents');
+}`,
+    },
+    {
+      title: "GlideRecord Encoded Query with Limit",
+      desc: "Query high-priority incidents safely with sorting and hard limit safeguard.",
+      code: `// Server-side: Encoded Query with Safeguards
+var gr = new GlideRecord('incident');
+gr.addEncodedQuery('active=true^assigned_toISEMPTY^priority=1');
+gr.orderByDesc('sys_created_on');
+gr.setLimit(50);
+gr.query();
+
+while (gr.next()) {
+  gs.info('P1 Alert: ' + gr.number + ' - ' + gr.short_description);
+}`,
+    },
+    {
+      title: "g_form Dynamic Validation & Notice",
+      desc: "Client-side validation and responsive field messages for user feedback.",
+      code: `// Client Script: onChange Validation
+function onChange(control, oldValue, newValue, isLoading) {
+  if (isLoading || newValue === '') return;
+  
+  var shortDesc = g_form.getValue('short_description');
+  if (shortDesc.length < 10) {
+    g_form.showFieldMsg('short_description', 'Please provide at least 10 characters.', 'error');
+  } else {
+    g_form.hideFieldMsg('short_description', true);
+  }
+}`,
+    },
+  ];
+
+  return (
+    <div className="lib-hub-container">
+      {/* Hero Banner */}
+      <div className="lib-hub-hero">
+        <div className="lib-hub-hero-glow" />
+        <div className="relative z-10">
+          <div className="lib-hub-hero-badge">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Developer Reference & Code Recipes</span>
+          </div>
+
+          <h1 className="lib-hub-hero-title">ServiceNow Developer Hub</h1>
+          <p className="lib-hub-hero-desc">
+            Explore 125+ verified ServiceNow APIs, 720+ method signatures, and production-tested snippets. 
+            Test any script immediately in the local JavaScript compiler or copy straight into your workspace.
+          </p>
+
+          <form onSubmit={handleHeroSearch} className="lib-hub-hero-search">
+            <Search className="w-4 h-4 lib-hub-hero-search-icon" />
+            <input
+              type="text"
+              placeholder="Search APIs, methods (e.g. GlideRecord, addQuery, GlideAjax)..."
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+            />
+          </form>
+        </div>
+      </div>
+
+      {/* Category Overview Cards */}
+      <div className="lib-hub-section">
+        <div className="lib-hub-section-header">
+          <h2 className="lib-hub-section-title">
+            <Layers className="w-4 h-4 text-accent" />
+            <span>API Categories</span>
+          </h2>
+          <span className="lib-hub-section-count">4 Domains · 125 Total APIs</span>
+        </div>
+
+        <div className="lib-cat-grid">
+          <div 
+            className="lib-cat-card"
+            onClick={() => onSelectApi("GlideRecord")}
+          >
+            <div className="lib-cat-card-top">
+              <div className="lib-cat-card-icon" style={{ background: "rgba(56, 189, 248, 0.12)", color: "var(--accent)" }}>
+                <Server className="w-4 h-4" />
+              </div>
+              <span className="lib-cat-card-count">75 APIs</span>
+            </div>
+            <h3 className="lib-cat-card-title">Server-side APIs</h3>
+            <p className="lib-cat-card-desc">
+              Database operations, background scripts, business rules, script includes, and system utilities.
+            </p>
+            <div className="lib-cat-card-action text-accent">
+              <span>Browse Server APIs</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </div>
+
+          <div 
+            className="lib-cat-card"
+            onClick={() => onSelectApi("g_form")}
+          >
+            <div className="lib-cat-card-top">
+              <div className="lib-cat-card-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "var(--green)" }}>
+                <Monitor className="w-4 h-4" />
+              </div>
+              <span className="lib-cat-card-count">17 APIs</span>
+            </div>
+            <h3 className="lib-cat-card-title">Client-side APIs</h3>
+            <p className="lib-cat-card-desc">
+              Client scripts, UI policies, form manipulation (g_form), user data (g_user), and dialog controls.
+            </p>
+            <div className="lib-cat-card-action text-green">
+              <span>Browse Client APIs</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </div>
+
+          <div 
+            className="lib-cat-card"
+            onClick={() => onSelectApi("GlideAjax")}
+          >
+            <div className="lib-cat-card-top">
+              <div className="lib-cat-card-icon" style={{ background: "rgba(245, 158, 11, 0.12)", color: "var(--yellow)" }}>
+                <ArrowLeftRight className="w-4 h-4" />
+              </div>
+              <span className="lib-cat-card-count">3 APIs</span>
+            </div>
+            <h3 className="lib-cat-card-title">Client ↔ Server</h3>
+            <p className="lib-cat-card-desc">
+              Asynchronous communication bridges between browser UI and server via GlideAjax and scratchpads.
+            </p>
+            <div className="lib-cat-card-action text-yellow">
+              <span>Browse Ajax APIs</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </div>
+
+          <div 
+            className="lib-cat-card"
+            onClick={() => onSelectApi("JSON")}
+          >
+            <div className="lib-cat-card-top">
+              <div className="lib-cat-card-icon" style={{ background: "rgba(168, 85, 247, 0.12)", color: "var(--purple)" }}>
+                <Wrench className="w-4 h-4" />
+              </div>
+              <span className="lib-cat-card-count">30 APIs</span>
+            </div>
+            <h3 className="lib-cat-card-title">Utilities & Helpers</h3>
+            <p className="lib-cat-card-desc">
+              JSON serialization, XML parsers, regular expressions, date math, and array manipulation.
+            </p>
+            <div className="lib-cat-card-action text-purple">
+              <span>Browse Utilities</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Essential APIs Grid */}
+      <div className="lib-hub-section">
+        <div className="lib-hub-section-header">
+          <h2 className="lib-hub-section-title">
+            <Sparkles className="w-4 h-4 text-yellow" />
+            <span>Essential APIs & Quick Start</span>
+          </h2>
+          <span className="lib-hub-section-count">Most Used Enterprise Classes</span>
+        </div>
+
+        <div className="lib-essentials-grid">
+          {essentialApis.map((api) => {
+            const badge = getTypeBadge(api.type);
+            return (
+              <div
+                key={api.name}
+                className="lib-essential-card"
+                onClick={() => onSelectApi(api.name)}
+              >
+                <div className="lib-essential-header">
+                  <span className="lib-essential-name">{api.name}</span>
+                  <span
+                    className="lib-view-type-badge"
+                    style={{ 
+                      color: badge.color, 
+                      background: badge.bg, 
+                      borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)` 
+                    }}
+                  >
+                    {badge.icon}
+                    {api.type}
+                  </span>
+                </div>
+                <p className="lib-essential-desc">{api.desc}</p>
+                <div className="lib-essential-footer">
+                  <span>{api.methods} documented methods</span>
+                  <span className="text-accent font-semibold flex items-center gap-1">
+                    Open Docs <ChevronRight className="w-3 h-3" />
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Production Recipes */}
+      <div className="lib-hub-section">
+        <div className="lib-hub-section-header">
+          <h2 className="lib-hub-section-title">
+            <Code2 className="w-4 h-4 text-accent" />
+            <span>Production Code Recipes</span>
+          </h2>
+          <span className="lib-hub-section-count">Ready to copy or run in Compiler</span>
+        </div>
+
+        <div className="lib-recipes-grid">
+          {recipes.map((recipe) => (
+            <div key={recipe.title} className="lib-recipe-card">
+              <div className="lib-recipe-header">
+                <div>
+                  <h3 className="lib-recipe-title">
+                    <Code2 className="w-3.5 h-3.5 text-accent" />
+                    <span>{recipe.title}</span>
+                  </h3>
+                  <p className="text-[11px] text-text-3 mt-0.5">{recipe.desc}</p>
+                </div>
+                <div className="lib-recipe-actions">
+                  <ActionTooltip content="Run this recipe in Compiler">
+                    <button
+                      className="lib-recipe-btn text-accent border-accent/30 hover:bg-accent/15"
+                      onClick={() => handleRunRecipe(recipe.title, recipe.code)}
+                    >
+                      <Play size={10} />
+                      <span>Compiler</span>
+                    </button>
+                  </ActionTooltip>
+
+                  <ActionTooltip content="Copy snippet to clipboard">
+                    <button
+                      className="lib-recipe-btn"
+                      onClick={() => handleCopyRecipe(recipe.title, recipe.code)}
+                    >
+                      <Copy size={10} />
+                      <span>Copy</span>
+                    </button>
+                  </ActionTooltip>
+                </div>
+              </div>
+              <pre className="lib-recipe-pre">
+                <code>{recipe.code}</code>
+              </pre>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   JavaScript Syntax Highlighter Line
+   ============================================================ */
 
 const JS_KEYWORDS = new Set([
-  'var', 'let', 'const', 'function', 'return', 'if', 'else', 'for', 'while',
-  'do', 'switch', 'case', 'break', 'continue', 'new', 'this', 'typeof',
-  'instanceof', 'in', 'of', 'try', 'catch', 'finally', 'throw', 'class',
-  'extends', 'import', 'export', 'default', 'from', 'async', 'await', 'yield',
-  'delete', 'void', 'with',
+  "var", "let", "const", "function", "return", "if", "else", "for", "while",
+  "do", "switch", "case", "break", "continue", "new", "this", "typeof",
+  "instanceof", "in", "of", "try", "catch", "finally", "throw", "class",
+  "extends", "import", "export", "default", "from", "async", "await", "yield",
+  "delete", "void", "with",
 ]);
 
-const JS_LITERALS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
+const JS_LITERALS = new Set(["true", "false", "null", "undefined", "NaN", "Infinity"]);
 
 interface Token {
-  type: 'keyword' | 'string' | 'number' | 'comment' | 'function' | 'method' | 'operator' | 'punctuation' | 'literal' | 'property' | 'text';
+  type: "keyword" | "string" | "number" | "comment" | "function" | "method" | "operator" | "punctuation" | "literal" | "property" | "text";
   value: string;
 }
 
@@ -342,125 +903,113 @@ function tokenizeLine(line: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
 
-  // Check for full-line comment (with leading whitespace)
   const trimmed = line.trimStart();
-  if (trimmed.startsWith('//')) {
-    tokens.push({ type: 'comment', value: line });
+  if (trimmed.startsWith("//")) {
+    tokens.push({ type: "comment", value: line });
     return tokens;
   }
 
   while (i < line.length) {
     const ch = line[i] as string;
 
-    // Inline comment
-    if (ch === '/' && line[i + 1] === '/') {
-      tokens.push({ type: 'comment', value: line.slice(i) });
+    if (ch === "/" && line[i + 1] === "/") {
+      tokens.push({ type: "comment", value: line.slice(i) });
       break;
     }
 
-    // Strings (single or double quoted)
     if (ch === "'" || ch === '"') {
       const quote = ch;
       let j = i + 1;
       while (j < line.length && line[j] !== quote) {
-        if (line[j] === '\\') j++; // skip escaped chars
+        if (line[j] === "\\") j++;
         j++;
       }
-      j++; // include closing quote
-      tokens.push({ type: 'string', value: line.slice(i, j) });
+      j++;
+      tokens.push({ type: "string", value: line.slice(i, j) });
       i = j;
       continue;
     }
 
-    // Numbers
     if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=!<>+\-*/:;[]/.test(line[i - 1] as string))) {
       let j = i;
       while (j < line.length && /[0-9._xXa-fA-F]/.test(line[j] as string)) j++;
-      tokens.push({ type: 'number', value: line.slice(i, j) });
+      tokens.push({ type: "number", value: line.slice(i, j) });
       i = j;
       continue;
     }
 
-    // Operators
     if (/[=!<>+\-*/%&|^~?:]/.test(ch)) {
       let j = i;
       while (j < line.length && /[=!<>+\-*/%&|^~?:]/.test(line[j] as string)) j++;
-      tokens.push({ type: 'operator', value: line.slice(i, j) });
+      tokens.push({ type: "operator", value: line.slice(i, j) });
       i = j;
       continue;
     }
 
-    // Punctuation
     if (/[(){}[\];,.]/.test(ch)) {
-      tokens.push({ type: 'punctuation', value: ch });
+      tokens.push({ type: "punctuation", value: ch });
       i++;
       continue;
     }
 
-    // Whitespace
     if (/\s/.test(ch)) {
       let j = i;
       while (j < line.length && /\s/.test(line[j] as string)) j++;
-      tokens.push({ type: 'text', value: line.slice(i, j) });
+      tokens.push({ type: "text", value: line.slice(i, j) });
       i = j;
       continue;
     }
 
-    // Words (identifiers, keywords)
     if (/[a-zA-Z_$]/.test(ch)) {
       let j = i;
       while (j < line.length && /[a-zA-Z0-9_$]/.test(line[j] as string)) j++;
       const word = line.slice(i, j);
 
-      // Determine type
       if (JS_KEYWORDS.has(word)) {
-        tokens.push({ type: 'keyword', value: word });
+        tokens.push({ type: "keyword", value: word });
       } else if (JS_LITERALS.has(word)) {
-        tokens.push({ type: 'literal', value: word });
+        tokens.push({ type: "literal", value: word });
       } else {
-        // Look ahead: is this a function/method call? (word followed by '(')
         let lookAhead = j;
-        while (lookAhead < line.length && line[lookAhead] === ' ') lookAhead++;
-        const isCall = lookAhead < line.length && line[lookAhead] === '(';
+        while (lookAhead < line.length && line[lookAhead] === " ") lookAhead++;
+        const isCall = lookAhead < line.length && line[lookAhead] === "(";
 
-        // Look behind: is this accessed via '.'?
         const prevToken = tokens.length > 0 ? tokens[tokens.length - 1] : null;
-        const isDotAccess = prevToken && prevToken.type === 'punctuation' && prevToken.value === '.';
+        const isDotAccess = prevToken && prevToken.type === "punctuation" && prevToken.value === ".";
 
         if (isCall && isDotAccess) {
-          tokens.push({ type: 'method', value: word });
+          tokens.push({ type: "method", value: word });
         } else if (isCall) {
-          tokens.push({ type: 'function', value: word });
+          tokens.push({ type: "function", value: word });
         } else if (isDotAccess) {
-          tokens.push({ type: 'property', value: word });
+          tokens.push({ type: "property", value: word });
         } else {
-          tokens.push({ type: 'text', value: word });
+          tokens.push({ type: "text", value: word });
         }
       }
       i = j;
       continue;
     }
 
-    // Fallback
-    tokens.push({ type: 'text', value: ch });
+    tokens.push({ type: "text", value: ch });
     i++;
   }
 
   return tokens;
 }
 
-const TOKEN_CLASS_MAP: Record<Token['type'], string> = {
-  keyword: 'lib-syn-keyword',
-  string: 'lib-syn-string',
-  number: 'lib-syn-number',
-  comment: 'lib-syn-comment',
-  function: 'lib-syn-function',
-  method: 'lib-syn-method',
-  operator: 'lib-syn-operator',
-  punctuation: 'lib-syn-punctuation',
-  literal: 'lib-syn-literal',
-  property: 'lib-syn-property',
-  text: 'lib-syn-text',
+const TOKEN_CLASS_MAP: Record<Token["type"], string> = {
+  keyword: "lib-syn-keyword",
+  string: "lib-syn-string",
+  number: "lib-syn-number",
+  comment: "lib-syn-comment",
+  function: "lib-syn-function",
+  method: "lib-syn-method",
+  operator: "lib-syn-operator",
+  punctuation: "lib-syn-punctuation",
+  literal: "lib-syn-literal",
+  property: "lib-syn-property",
+  text: "lib-syn-text",
 };
 
 const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
@@ -477,21 +1026,19 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
   );
 });
 
-const EXCALIDRAW_CATEGORIES = [
-  { id: "all", label: "All Libraries" },
-  { id: "system", label: "System Design", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
-  { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
-  { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
-  { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
-] as const;
+/* ============================================================
+   EXCALIDRAW COMMUNITY GALLERY
+   ============================================================ */
 
-function ExcalidrawLibraryGallery({ searchQuery, addToast }: { 
+function ExcalidrawLibraryGallery({ 
+  searchQuery, 
+}: { 
   searchQuery: string; 
-  addToast: (toast: Omit<Toast, "id">) => void; 
 }) {
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState("all");
+  const activeCategory = useAppStore((s) => s.libraryExcalidrawCategory);
+  const setActiveCategory = useAppStore((s) => s.setLibraryExcalidrawCategory);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -505,7 +1052,7 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: {
     return libraries.filter((lib) => {
       if (activeCategory !== "all") {
         const cat = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
-        if (cat && "keywords" in cat) {
+        if (cat && "keywords" in cat && cat.keywords) {
           const keywords = cat.keywords as readonly string[];
           const matchCat = keywords.some((kw: string) =>
             lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw)
@@ -527,125 +1074,68 @@ function ExcalidrawLibraryGallery({ searchQuery, addToast }: {
   }, [libraries, activeCategory, searchQuery]);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-bg-0 overflow-hidden">
-      {/* Header */}
-      <div className="p-6 border-b border-border/40 bg-bg-1/50 shrink-0">
-        <div className="flex items-center justify-between gap-4 mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-text-0 flex items-center gap-2.5">
-              Excalidraw Community Libraries
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-accent/15 text-accent font-semibold">
-                {libraries.length} Libraries
-              </span>
-            </h1>
-            <p className="text-xs text-text-2 mt-1">
-              Explore 200+ offline community shape collections downloaded into your DeveloperUtils workspace.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate("/drawflows")}
-            className="px-3.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium flex items-center gap-1.5 shadow-sm hover:bg-accent/90 transition-colors"
-          >
-            <span>Open DrawFlow Studio</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        {/* Category Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-          {EXCALIDRAW_CATEGORIES.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id)}
-              className={`text-xs px-3 py-1 rounded-md transition-colors whitespace-nowrap ${
-                activeCategory === cat.id
-                  ? "bg-accent text-white font-medium shadow-sm"
-                  : "bg-bg-2 text-text-2 hover:text-text-0 hover:bg-bg-3"
-              }`}
-            >
-              {cat.label}
-            </button>
-          ))}
-        </div>
+    <div style={{ flex: 1, overflow: "auto", padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h2 style={{ margin: 0 }}>Excalidraw Libraries ({filteredLibraries.length} items)</h2>
+        <button onClick={() => navigate("/drawflows")}>Open DrawFlow Studio</button>
       </div>
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
-          <div className="h-full flex flex-col items-center justify-center text-text-2 gap-2">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs">Loading library catalog...</span>
-          </div>
-        ) : filteredLibraries.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-text-3 py-12 gap-2">
-            <p className="text-sm font-medium text-text-2">No libraries match your search</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filteredLibraries.map((lib) => {
-              const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
-              const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+      {loading ? (
+        <p>Loading...</p>
+      ) : filteredLibraries.length === 0 ? (
+        <p>No libraries found.</p>
+      ) : (
+        <div>
+          {filteredLibraries.map((lib) => {
+            const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
+            const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
 
-              return (
-                <div
-                  key={lib.id}
-                  className="group bg-bg-1 border border-border/40 hover:border-accent/40 rounded-xl p-3.5 flex flex-col justify-between transition-all hover:shadow-lg hover:bg-bg-1/90"
-                >
-                  <div>
-                    <div className="w-full h-32 rounded-lg bg-bg-2/80 border border-border/30 overflow-hidden flex items-center justify-center mb-3 relative group-hover:bg-bg-2 transition-colors">
-                      <img
-                        src={previewUrl}
-                        alt={lib.name}
-                        className="max-h-full max-w-full object-contain p-2 filter dark:invert-[0.1]"
-                        onError={(e) => {
-                          const img = e.currentTarget;
-                          if (img.src !== cdnPreviewUrl) {
-                            img.src = cdnPreviewUrl;
-                          } else {
-                            img.style.display = "none";
-                          }
-                        }}
-                      />
-                    </div>
-
-                    <h3 className="text-xs font-semibold text-text-0 line-clamp-1 group-hover:text-accent transition-colors">
-                      {lib.name}
-                    </h3>
-                    <p className="text-[11px] text-text-2 line-clamp-2 my-1 min-h-[32px]">
-                      {lib.description}
-                    </p>
-
-                    {lib.authors.length > 0 && (
-                      <div className="text-[10px] text-text-3 mb-3 flex items-center gap-1">
-                        <span>by</span>
-                        <a
-                          href={lib.authors[0]!.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-text-2 hover:text-accent underline flex items-center gap-0.5 truncate"
-                        >
-                          {lib.authors[0]!.name}
-                        </a>
-                      </div>
-                    )}
+            return (
+              <div
+                key={lib.id}
+                style={{
+                  borderBottom: "1px solid rgba(255,255,255,0.1)",
+                  padding: "12px 0",
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                }}
+              >
+                <img
+                  src={previewUrl}
+                  alt={lib.name}
+                  style={{
+                    width: 80,
+                    height: 60,
+                    objectFit: "contain",
+                    background: "#fff",
+                    borderRadius: 4,
+                    flexShrink: 0,
+                  }}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (img.src !== cdnPreviewUrl) {
+                      img.src = cdnPreviewUrl;
+                    } else {
+                      img.style.display = "none";
+                    }
+                  }}
+                />
+                <div style={{ flex: 1 }}>
+                  <strong>{lib.name}</strong>
+                  <div style={{ fontSize: 12, opacity: 0.5 }}>{lib.description}</div>
+                  <div style={{ fontSize: 11, opacity: 0.4, marginTop: 2 }}>
+                    by {lib.authors[0]?.name || "Unknown"} · v{lib.version || 1} · {lib.created}
                   </div>
-
-                  <button
-                    onClick={() => {
-                      navigate("/workflows");
-                      addToast({ message: `Open /workflows and click "Libraries" to import "${lib.name}"`, type: "info" });
-                    }}
-                    className="w-full py-1.5 px-3 rounded-lg bg-bg-2 hover:bg-accent hover:text-white border border-border/40 text-text-0 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
-                  >
-                    <span>Use in Workflow</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                <button onClick={() => navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`)}>
+                  Use in DrawFlow
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
