@@ -29,6 +29,7 @@ import {
 import { X, Plus } from "lucide-react";
 import { SortableTab } from "@/components/ui/SortableTab";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { TabContextMenu } from "@/components/ui/TabContextMenu";
 import { cn } from "@/lib/utils";
 
 export interface TabItem {
@@ -53,6 +54,13 @@ export interface WorkspaceTabBarProps<T extends TabItem = TabItem> {
     oldIndex: number,
     newIndex: number
   ) => void;
+  // Tab Context Menu callbacks
+  onCloseOthers?: (id: string) => void;
+  onCloseToRight?: (id: string) => void;
+  onCloseAll?: () => void;
+  onDuplicateTab?: (id: string) => void;
+  onCopyContent?: (id: string) => void;
+  onCopyName?: (id: string) => void;
   newTabTooltip?: string;
   closeTabTooltip?: string;
   renderNewTabButton?: () => React.ReactNode;
@@ -68,6 +76,12 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
   onNewTab,
   onRenameTab,
   onReorderTabs,
+  onCloseOthers,
+  onCloseToRight,
+  onCloseAll,
+  onDuplicateTab,
+  onCopyContent,
+  onCopyName,
   newTabTooltip = "New Tab",
   closeTabTooltip = "Close Tab",
   renderNewTabButton,
@@ -76,6 +90,10 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
 }: WorkspaceTabBarProps<T>) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [contextMenu, setContextMenu] = useState<{
+    tab: T;
+    position: { x: number; y: number };
+  } | null>(null);
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
@@ -111,6 +129,64 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
     setRenamingId(null);
   };
 
+  const handleCloseOthers = useCallback(
+    (targetTabId: string) => {
+      if (onCloseOthers) {
+        onCloseOthers(targetTabId);
+        return;
+      }
+      if (!onCloseTab) return;
+      tabs.forEach((t) => {
+        if (t.id !== targetTabId && t.closable !== false) {
+          onCloseTab(t.id);
+        }
+      });
+    },
+    [onCloseOthers, onCloseTab, tabs]
+  );
+
+  const handleCloseToRight = useCallback(
+    (targetTabId: string) => {
+      if (onCloseToRight) {
+        onCloseToRight(targetTabId);
+        return;
+      }
+      if (!onCloseTab) return;
+      const targetIndex = tabs.findIndex((t) => t.id === targetTabId);
+      if (targetIndex === -1) return;
+      tabs.slice(targetIndex + 1).forEach((t) => {
+        if (t.closable !== false) {
+          onCloseTab(t.id);
+        }
+      });
+    },
+    [onCloseToRight, onCloseTab, tabs]
+  );
+
+  const handleCloseAll = useCallback(() => {
+    if (onCloseAll) {
+      onCloseAll();
+      return;
+    }
+    if (!onCloseTab) return;
+    tabs.forEach((t) => {
+      if (t.closable !== false) {
+        onCloseTab(t.id);
+      }
+    });
+  }, [onCloseAll, onCloseTab, tabs]);
+
+  const handleCopyName = useCallback(
+    (targetTab: T) => {
+      if (onCopyName) {
+        onCopyName(targetTab.id);
+        return;
+      }
+      navigator.clipboard.writeText(targetTab.name);
+    },
+    [onCopyName]
+  );
+
   return (
     <div className={cn("tabs-bar", className)}>
       <div className="tabs-list">
@@ -137,6 +213,15 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
                     className={cn("tab", isActive && "tab-active")}
                     onClick={() => onSelectTab(tab.id)}
                     onDoubleClick={() => handleStartRename(tab)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onSelectTab(tab.id);
+                      setContextMenu({
+                        tab,
+                        position: { x: e.clientX, y: e.clientY },
+                      });
+                    }}
                     title={tab.tooltip}
                   >
                     {tab.icon && (
@@ -204,6 +289,63 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
       </div>
 
       {rightContent && <div className="tabs-toolbar">{rightContent}</div>}
+
+      {/* Tab Context Menu */}
+      {contextMenu && (
+        <TabContextMenu
+          isOpen={Boolean(contextMenu)}
+          position={contextMenu.position}
+          onClose={() => setContextMenu(null)}
+          tabName={contextMenu.tab.name}
+          canRename={Boolean(onRenameTab)}
+          canDuplicate={Boolean(onDuplicateTab)}
+          canCopyContent={Boolean(onCopyContent)}
+          canClose={
+            onCloseTab !== undefined &&
+            (contextMenu.tab.closable !== undefined
+              ? contextMenu.tab.closable
+              : tabs.length > 1)
+          }
+          canCloseOthers={
+            tabs.length > 1 && Boolean(onCloseOthers || onCloseTab)
+          }
+          canCloseToRight={
+            tabs.findIndex((t) => t.id === contextMenu.tab.id) <
+              tabs.length - 1 && Boolean(onCloseToRight || onCloseTab)
+          }
+          canCloseAll={Boolean(onCloseAll || onCloseTab)}
+          onRename={
+            onRenameTab ? () => handleStartRename(contextMenu.tab) : undefined
+          }
+          onDuplicate={
+            onDuplicateTab
+              ? () => onDuplicateTab(contextMenu.tab.id)
+              : undefined
+          }
+          onCopyName={() => handleCopyName(contextMenu.tab)}
+          onCopyContent={
+            onCopyContent
+              ? () => onCopyContent(contextMenu.tab.id)
+              : undefined
+          }
+          onCloseTab={
+            onCloseTab ? () => onCloseTab(contextMenu.tab.id) : undefined
+          }
+          onCloseOthers={
+            Boolean(onCloseOthers || onCloseTab)
+              ? () => handleCloseOthers(contextMenu.tab.id)
+              : undefined
+          }
+          onCloseToRight={
+            Boolean(onCloseToRight || onCloseTab)
+              ? () => handleCloseToRight(contextMenu.tab.id)
+              : undefined
+          }
+          onCloseAll={
+            Boolean(onCloseAll || onCloseTab) ? handleCloseAll : undefined
+          }
+        />
+      )}
     </div>
   );
 }

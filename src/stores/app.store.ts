@@ -633,6 +633,24 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      duplicateDiffSession: (id) => {
+        const session = get().diffSessions.find((s) => s.id === id);
+        if (!session) return;
+        const newId = generateId();
+        const newSession: DiffSession = {
+          ...session,
+          id: newId,
+          name: `${session.name} (Copy)`,
+        };
+        const index = get().diffSessions.findIndex((s) => s.id === id);
+        const newSessions = [...get().diffSessions];
+        newSessions.splice(index + 1, 0, newSession);
+        set({
+          diffSessions: newSessions,
+          activeDiffSessionId: newId,
+        });
+      },
+
       deleteDiffSession: (id) => {
         set((state) => {
           const remaining = state.diffSessions.filter(s => s.id !== id);
@@ -648,6 +666,41 @@ export const useAppStore = create<AppState>()(
             activeDiffSessionId:
               state.activeDiffSessionId === id ? remaining[remaining.length - 1]!.id : state.activeDiffSessionId
           };
+        });
+      },
+
+      closeOtherDiffSessions: (id) => {
+        set((state) => ({
+          diffSessions: state.diffSessions.filter((s) => s.id === id),
+          activeDiffSessionId: id,
+        }));
+      },
+
+      closeDiffSessionsToRight: (id) => {
+        set((state) => {
+          const idx = state.diffSessions.findIndex((s) => s.id === id);
+          if (idx === -1) return state;
+          const remaining = state.diffSessions.slice(0, idx + 1);
+          const activeExists = remaining.some((s) => s.id === state.activeDiffSessionId);
+          return {
+            diffSessions: remaining,
+            activeDiffSessionId: activeExists ? state.activeDiffSessionId : id,
+          };
+        });
+      },
+
+      closeAllDiffSessions: () => {
+        const newSession: DiffSession = {
+          id: generateId(),
+          name: "Diff Check",
+          original: "",
+          modified: "",
+          language: "plaintext",
+          autoDetect: true,
+        };
+        set({
+          diffSessions: [newSession],
+          activeDiffSessionId: newSession.id,
         });
       },
 

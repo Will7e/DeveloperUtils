@@ -3,6 +3,9 @@
 // ============================================================
 
 import { Link, useLocation, Outlet } from "react-router-dom";
+import { Suspense } from "react";
+import { LoadingState } from "@/components/ui/loading-state";
+import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import {
   Home,
   Settings,
@@ -233,8 +236,21 @@ export function MainLayout() {
       </nav>
 
       {/* Main Content View */}
-      <main className="main-content">
-        <Outlet />
+      <main className="main-content relative">
+        <Suspense
+          fallback={
+            <>
+              <TopLoadingBar />
+              <LoadingState
+                fullPage
+                message="Loading workspace..."
+                description="Preparing tools and editor components"
+              />
+            </>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   );

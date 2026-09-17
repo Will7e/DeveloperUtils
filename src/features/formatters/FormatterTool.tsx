@@ -9,6 +9,7 @@ import { formatXml, minifyXml, xmlToTreeData, type XmlTreeNode } from "./xmlUtil
 import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtils";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import { 
   FileJson, 
   FileCode,
@@ -574,7 +575,7 @@ export function FormatterTool() {
                           horizontalScrollbarSize: 10,
                         }
                       }}
-                      loading={<div className="flex items-center justify-center h-full text-xs text-[var(--text-3)]">Loading advanced editor...</div>}
+                      loading={<EditorLoadingFallback message="Loading advanced editor..." />}
                     />
                   </div>
                 </div>

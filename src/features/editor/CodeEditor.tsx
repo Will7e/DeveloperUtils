@@ -8,6 +8,7 @@ import { FileCode2 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import type { editor } from "monaco-editor";
 
 export function CodeEditor() {
@@ -215,16 +216,7 @@ export function CodeEditor() {
             showReferences: true,
           },
         }}
-        loading={
-          <div className="flex-1 flex items-center justify-center bg-editor">
-            <div className="flex items-center gap-3">
-              <div className="loading-spinner" />
-              <span className="text-muted-foreground text-sm">
-                Loading editor...
-              </span>
-            </div>
-          </div>
-        }
+        loading={<EditorLoadingFallback message="Loading editor..." />}
       />
     </div>
   );

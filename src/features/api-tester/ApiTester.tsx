@@ -6,6 +6,8 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
+import { LoadingState } from "@/components/ui/loading-state";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import {
   Send,
   Plus,
@@ -801,12 +803,12 @@ export function ApiTester() {
   // Issue 28 & Bug 1: Loading state during store initialization or when no active tab exists
   if (!store.isInitialized || !activeTab) {
     return (
-      <div className="api-tester-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-        <div style={{ textAlign: 'center' }}>
-          <Activity className="h-8 w-8 text-accent mx-auto mb-4 animate-spin" />
-          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Loading Workspace...</h2>
-          <p style={{ color: 'var(--text-2)' }}>Please wait while we initialize the API Tester.</p>
-        </div>
+      <div className="api-tester-container flex items-center justify-center p-8">
+        <LoadingState
+          size="lg"
+          title="Loading Workspace..."
+          description="Please wait while we initialize the API Tester."
+        />
       </div>
     );
   }
@@ -1721,7 +1723,7 @@ export function ApiTester() {
                 {showCodeSnippet && (
                   <Editor
                     className="api-monaco-wrapper"
-                    loading={<div />}
+                    loading={<EditorLoadingFallback message="Loading code snippet..." />}
                     height="100%"
                     language={CODE_LANGUAGES.find(l => l.id === snippetLang)?.language || "text"}
                     theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2047,7 +2049,7 @@ export function ApiTester() {
                       </button>
                       <Editor
                         className="api-monaco-wrapper"
-                        loading={<div />}
+                        loading={<EditorLoadingFallback message="Loading body editor..." />}
                         height="100%"
                         language="json"
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2124,7 +2126,7 @@ export function ApiTester() {
                     <div className="api-monaco-editor-wrapper">
                       <Editor
                         className="api-monaco-wrapper"
-                        loading={<div />}
+                        loading={<EditorLoadingFallback message="Loading editor..." />}
                         height="100%"
                         language={activeTab.rawType.split("/")[1] || "text"}
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2157,7 +2159,7 @@ export function ApiTester() {
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
                           className="api-monaco-wrapper"
-                          loading={<div />}
+                          loading={<EditorLoadingFallback message="Loading GraphQL query..." />}
                           height="100%"
                           language="graphql"
                           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2187,7 +2189,7 @@ export function ApiTester() {
                       <div style={{ flex: 1, position: "relative" }}>
                         <Editor
                           className="api-monaco-wrapper"
-                          loading={<div />}
+                          loading={<EditorLoadingFallback message="Loading GraphQL variables..." />}
                           height="100%"
                           language="json"
                           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2218,7 +2220,7 @@ export function ApiTester() {
                   <div style={{ flex: 1, border: "1px solid var(--border-1)", borderRadius: "var(--radius-md)", overflow: "hidden", position: "relative" }}>
                     <Editor
                       className="api-monaco-wrapper"
-                      loading={<div />}
+                      loading={<EditorLoadingFallback message="Loading WebSocket payload..." />}
                       height="100%"
                       language="json"
                       theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
@@ -2744,7 +2746,7 @@ export function ApiTester() {
                     <div className="api-response-monaco-wrapper">
                       <Editor
                         className="api-monaco-wrapper"
-                        loading={<div />}
+                        loading={<EditorLoadingFallback message="Loading response preview..." />}
                         height="100%"
                         language={responseLang}
                         theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}

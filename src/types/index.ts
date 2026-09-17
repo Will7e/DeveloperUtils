@@ -194,7 +194,11 @@ export interface AppState {
 
   // Diff checker actions
   createDiffSession: (name?: string) => void;
+  duplicateDiffSession: (id: string) => void;
   deleteDiffSession: (id: string) => void;
+  closeOtherDiffSessions: (id: string) => void;
+  closeDiffSessionsToRight: (id: string) => void;
+  closeAllDiffSessions: () => void;
   setActiveDiffSession: (id: string) => void;
   updateDiffSessionInput: (id: string, side: "original" | "modified", input: string) => void;
   updateDiffSessionLanguage: (id: string, language: string, autoDetect?: boolean) => void;

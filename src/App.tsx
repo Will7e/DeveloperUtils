@@ -6,6 +6,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
 import { loader } from "@monaco-editor/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { LoadingState } from "@/components/ui/loading-state";
+import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
@@ -31,11 +33,13 @@ loader.init().then((monaco) => {
 
 function PageLoader() {
   return (
-    <div className="flex-1 flex items-center justify-center w-full h-full min-h-[300px]">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-7 h-7 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-        <span className="text-xs text-text-3 font-medium">Loading workspace...</span>
-      </div>
+    <div className="flex-1 flex items-center justify-center w-full h-full min-h-screen bg-bg-0 relative">
+      <TopLoadingBar />
+      <LoadingState
+        fullPage
+        message="Loading workspace..."
+        description="Initializing workspace environment"
+      />
     </div>
   );
 }

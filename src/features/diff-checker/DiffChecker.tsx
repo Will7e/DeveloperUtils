@@ -10,6 +10,8 @@ import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
+import { Spinner } from "@/components/ui/spinner";
 import {
   ArrowLeftRight,
   Trash2,
@@ -22,7 +24,6 @@ import {
   Columns,
   FileCode2,
   Minus,
-  Equal,
   Sparkles,
   Search,
   Check,
@@ -32,7 +33,6 @@ import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
-  SimpleTooltip,
 } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -81,58 +81,17 @@ interface DiffStats {
   totalDiffs: number;
 }
 
-const SAMPLE_ORIGINAL = JSON.stringify({
-  service: "billing-gateway",
-  version: "2.4.0",
-  environment: "production",
-  features: {
-    instantPayouts: false,
-    cryptoBilling: false,
-    multiCurrency: true
-  },
-  rateLimits: {
-    perMinute: 1200,
-    burst: 2000
-  },
-  supportedCurrencies: ["USD", "EUR", "GBP", "CAD"],
-  endpoints: [
-    "/v1/charges",
-    "/v1/customers",
-    "/v1/invoices"
-  ]
-}, null, 2);
-
-const SAMPLE_MODIFIED = JSON.stringify({
-  service: "billing-gateway",
-  version: "2.5.0",
-  environment: "production",
-  features: {
-    instantPayouts: true,
-    cryptoBilling: false,
-    multiCurrency: true,
-    smartRouting: true
-  },
-  rateLimits: {
-    perMinute: 2400,
-    burst: 3500
-  },
-  supportedCurrencies: ["USD", "EUR", "GBP", "CAD", "JPY", "AUD"],
-  endpoints: [
-    "/v1/charges",
-    "/v1/customers",
-    "/v1/invoices",
-    "/v1/subscriptions",
-    "/v1/refunds"
-  ]
-}, null, 2);
-
 export function DiffChecker() {
   // Store state
   const sessions = useAppStore((s) => s.diffSessions);
   const activeSessionId = useAppStore((s) => s.activeDiffSessionId);
   const setActiveSession = useAppStore((s) => s.setActiveDiffSession);
   const createSession = useAppStore((s) => s.createDiffSession);
+  const duplicateSession = useAppStore((s) => s.duplicateDiffSession);
   const deleteSession = useAppStore((s) => s.deleteDiffSession);
+  const closeOtherSessions = useAppStore((s) => s.closeOtherDiffSessions);
+  const closeSessionsToRight = useAppStore((s) => s.closeDiffSessionsToRight);
+  const closeAllSessions = useAppStore((s) => s.closeAllDiffSessions);
   const renameSession = useAppStore((s) => s.renameDiffSession);
   const updateSessionInput = useAppStore((s) => s.updateDiffSessionInput);
   const updateSessionLanguage = useAppStore((s) => s.updateDiffSessionLanguage);
@@ -216,6 +175,43 @@ export function DiffChecker() {
     setTimeout(() => setCopiedMod(false), 2000);
     addToast({ message: "Modified content copied", type: "success", duration: 1500 });
   }, [localModified, addToast]);
+
+  const handleCopyTabContent = useCallback(
+    async (id: string) => {
+      const session = sessions.find((s) => s.id === id);
+      if (!session) return;
+      const orig =
+        id === activeSession.id
+          ? originalEditorRef.current?.getValue() ?? localOriginal
+          : session.original;
+      const mod =
+        id === activeSession.id
+          ? modifiedEditorRef.current?.getValue() ?? localModified
+          : session.modified;
+      const combined = `// ── Original ──\n${orig}\n\n// ── Modified ──\n${mod}`;
+      await navigator.clipboard.writeText(combined);
+      addToast({
+        message: `Copied "${session.name}" content to clipboard`,
+        type: "success",
+        duration: 1500,
+      });
+    },
+    [sessions, activeSession.id, localOriginal, localModified, addToast]
+  );
+
+  const handleCopyTabName = useCallback(
+    async (id: string) => {
+      const session = sessions.find((s) => s.id === id);
+      if (!session) return;
+      await navigator.clipboard.writeText(session.name);
+      addToast({
+        message: `Copied tab name "${session.name}"`,
+        type: "success",
+        duration: 1500,
+      });
+    },
+    [sessions, addToast]
+  );
 
   // Session switch sync
   const [prevSessionId, setPrevSessionId] = useState(activeSession.id);
@@ -548,20 +544,6 @@ export function DiffChecker() {
     addToast({ message: "Diff cleared", type: "info" });
   }, [activeSession.id, updateSessionInput, updateSessionLanguage, addToast]);
 
-  // Load sample diff
-  const handleLoadSample = useCallback(() => {
-    updateSessionInput(activeSession.id, "original", SAMPLE_ORIGINAL);
-    updateSessionInput(activeSession.id, "modified", SAMPLE_MODIFIED);
-    updateSessionLanguage(activeSession.id, "json", true);
-    setLocalOriginal(SAMPLE_ORIGINAL);
-    setLocalModified(SAMPLE_MODIFIED);
-    originalEditorRef.current?.setValue(SAMPLE_ORIGINAL);
-    modifiedEditorRef.current?.setValue(SAMPLE_MODIFIED);
-    const det = detectLanguageFromInputs(SAMPLE_ORIGINAL, SAMPLE_MODIFIED);
-    setDetection(det);
-    addToast({ message: "Sample loaded", type: "success" });
-  }, [activeSession.id, updateSessionInput, updateSessionLanguage, addToast]);
-
   // Export diff file
   const handleExportDiff = useCallback(() => {
     const orig = originalEditorRef.current?.getValue() ?? localOriginal;
@@ -623,6 +605,12 @@ export function DiffChecker() {
         onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
           reorderSessions(oldIndex, newIndex)
         }
+        onDuplicateTab={(id) => duplicateSession(id)}
+        onCloseOthers={(id) => closeOtherSessions(id)}
+        onCloseToRight={(id) => closeSessionsToRight(id)}
+        onCloseAll={() => closeAllSessions()}
+        onCopyContent={handleCopyTabContent}
+        onCopyName={handleCopyTabName}
         newTabTooltip="New Diff Session"
         closeTabTooltip="Close Tab"
         rightContent={
@@ -712,7 +700,11 @@ export function DiffChecker() {
                 onClick={handleFormatBoth}
                 disabled={isFormatting}
               >
-                <Sparkles className={cn("h-3.5 w-3.5 text-accent", isFormatting && "animate-spin")} />
+                {isFormatting ? (
+                  <Spinner size="xs" variant="accent" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                )}
                 <span>Format</span>
               </button>
             </ActionTooltip>
@@ -751,10 +743,6 @@ export function DiffChecker() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuItem onSelect={handleLoadSample}>
-                  <Sparkles className="h-3.5 w-3.5 text-accent mr-2" />
-                  <span>Load Sample Diff</span>
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={handleExportDiff}>
                   <Download className="h-3.5 w-3.5 mr-2" />
                   <span>Export as .diff</span>
@@ -890,18 +878,6 @@ export function DiffChecker() {
                   </div>
                 )}
 
-                {/* Quick Load Sample when empty */}
-                {!localOriginal.trim() && !localModified.trim() && (
-                  <button
-                    type="button"
-                    className="diff-pill-toggle text-accent hover:border-accent"
-                    onClick={handleLoadSample}
-                  >
-                    <Sparkles className="h-3 w-3 mr-1" />
-                    <span>Load Sample</span>
-                  </button>
-                )}
-
                 <ActionTooltip content="Copy modified content">
                   <button
                     type="button"
@@ -967,16 +943,6 @@ export function DiffChecker() {
                   </ActionTooltip>
                 </div>
               )}
-              {!localOriginal.trim() && !localModified.trim() && (
-                <button
-                  type="button"
-                  className="diff-pill-toggle text-accent hover:border-accent"
-                  onClick={handleLoadSample}
-                >
-                  <Sparkles className="h-3 w-3 mr-1" />
-                  <span>Sample</span>
-                </button>
-              )}
             </div>
           </div>
         )}
@@ -1016,11 +982,7 @@ export function DiffChecker() {
             diffWordWrap: diffSettings.wordWrap ? "on" : "off",
             renderOverviewRuler: true,
           }}
-          loading={
-            <div className="flex-1 flex items-center justify-center bg-editor h-full">
-              <span className="text-xs text-text-3">Loading diff editor...</span>
-            </div>
-          }
+          loading={<EditorLoadingFallback message="Loading diff editor..." />}
         />
       </div>
     </div>

@@ -2373,6 +2373,86 @@ body {
   }
 }
 
+/* Modern Unified Spinner */
+.ui-spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  animation: ui-spin 0.75s linear infinite;
+}
+
+@keyframes ui-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner,
+  .ui-spinner {
+    animation-duration: 3s;
+  }
+}
+
+/* Unified Loading Smooth Fade-in & Ambient Glow */
+.loading-fade-in {
+  animation: loading-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes loading-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.loading-ambient-glow {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  pointer-events: none;
+  filter: blur(28px);
+  opacity: 0.65;
+}
+
+/* Route Navigation Top Progress Bar */
+.route-top-loader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 30%,
+    #38bdf8 60%,
+    var(--accent) 85%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: route-progress 1.4s ease-in-out infinite;
+  z-index: 50;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+@keyframes route-progress {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 /* Empty editor icon */
 .empty-editor-icon {
   width: 56px;
@@ -4509,6 +4589,12 @@ body {
   height: 1px;
   background: var(--border-1);
   margin: 4px;
+}
+
+.tab-context-menu {
+  z-index: 9999;
+  min-width: 195px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 /* ============================================================

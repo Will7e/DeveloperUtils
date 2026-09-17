@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { LoadingState } from "@/components/ui/loading-state";
 import { 
   Copy, 
   Check, 
@@ -1081,7 +1082,12 @@ function ExcalidrawLibraryGallery({
       </div>
 
       {loading ? (
-        <p>Loading...</p>
+        <LoadingState
+          size="md"
+          message="Loading Excalidraw libraries..."
+          description="Fetching community component packs"
+          minHeight={200}
+        />
       ) : filteredLibraries.length === 0 ? (
         <p>No libraries found.</p>
       ) : (
