@@ -7,9 +7,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import type { Monaco } from "@monaco-editor/react";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
-import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-import { SortableTab } from "@/components/ui/SortableTab";
+import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import {
@@ -20,15 +18,15 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
-  X,
-  Columns,
   Rows,
+  Columns,
   FileCode2,
   Minus,
   Equal,
   Sparkles,
   Search,
   Check,
+  Copy,
 } from "lucide-react";
 import {
   Tooltip,
@@ -150,8 +148,8 @@ export function DiffChecker() {
   // Local state
   const [localOriginal, setLocalOriginal] = useState(activeSession.original);
   const [localModified, setLocalModified] = useState(activeSession.modified);
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
+  const [copiedOrig, setCopiedOrig] = useState(false);
+  const [copiedMod, setCopiedMod] = useState(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
   const [langSearch, setLangSearch] = useState("");
   const [isFormatting, setIsFormatting] = useState(false);
@@ -178,20 +176,46 @@ export function DiffChecker() {
   const containerRef = useRef<HTMLDivElement>(null);
   const disposablesRef = useRef<{ dispose: () => void }[]>([]);
 
-  // DnD sensors for tabs
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  // Tab items for WorkspaceTabBar
+  const tabs: TabItem[] = useMemo(
+    () =>
+      sessions.map((session) => ({
+        id: session.id,
+        name: session.name,
+        icon: (
+          <span className="tab-icon tab-icon-diff">
+            <FileCode2 className="h-3 w-3" />
+          </span>
+        ),
+        closable: sessions.length > 1,
+      })),
+    [sessions]
   );
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = sessions.findIndex((s) => s.id === active.id);
-    const newIndex = sessions.findIndex((s) => s.id === over.id);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      reorderSessions(oldIndex, newIndex);
-    }
-  }, [sessions, reorderSessions]);
+  const handleDeleteSession = useCallback(
+    (id: string) => {
+      deleteSession(id);
+    },
+    [deleteSession]
+  );
+
+  const handleCopyOriginal = useCallback(async () => {
+    const orig = originalEditorRef.current?.getValue() ?? localOriginal;
+    if (!orig) return;
+    await navigator.clipboard.writeText(orig);
+    setCopiedOrig(true);
+    setTimeout(() => setCopiedOrig(false), 2000);
+    addToast({ message: "Original content copied", type: "success", duration: 1500 });
+  }, [localOriginal, addToast]);
+
+  const handleCopyModified = useCallback(async () => {
+    const mod = modifiedEditorRef.current?.getValue() ?? localModified;
+    if (!mod) return;
+    await navigator.clipboard.writeText(mod);
+    setCopiedMod(true);
+    setTimeout(() => setCopiedMod(false), 2000);
+    addToast({ message: "Modified content copied", type: "success", duration: 1500 });
+  }, [localModified, addToast]);
 
   // Session switch sync
   const [prevSessionId, setPrevSessionId] = useState(activeSession.id);
@@ -588,320 +612,377 @@ export function DiffChecker() {
 
   return (
     <div className="diff-checker-container">
-      {/* 1. Clean Tab Bar */}
-      <div className="tabs-bar">
-        <div className="tabs-list">
-          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={sessions.map((s) => s.id)} strategy={horizontalListSortingStrategy}>
-              {sessions.map((session) => (
-                <SortableTab key={session.id} id={session.id}>
-                  <button
-                    className={cn(
-                      "tab",
-                      activeSessionId === session.id && "tab-active"
-                    )}
-                    onClick={() => setActiveSession(session.id)}
-                    onDoubleClick={() => {
-                      setEditName(session.name);
-                      setEditingSessionId(session.id);
-                    }}
-                  >
-                    <span className="tab-icon tab-icon-diff">
-                      <FileCode2 className="h-3 w-3" />
-                    </span>
-                    {editingSessionId === session.id ? (
-                      <input
-                        autoFocus
-                        className="tab-rename-input"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onBlur={() => {
-                          if (editName.trim() && editName !== session.name) {
-                            renameSession(session.id, editName.trim());
-                          }
-                          setEditingSessionId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            setEditingSessionId(null);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="tab-name">
-                        {session.name}
-                      </span>
-                    )}
-                    <SimpleTooltip content="Close Tab">
-                      <span
-                        className="tab-close"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSession(session.id);
-                        }}
-                      >
-                        <X className="h-3 w-3" />
-                      </span>
-                    </SimpleTooltip>
-                  </button>
-                </SortableTab>
-              ))}
-            </SortableContext>
-          </DndContext>
-          <SimpleTooltip content="New Diff Session">
-            <button
-              className="tab-new"
-              onClick={() => createSession()}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          </SimpleTooltip>
-        </div>
-
-        {/* 2. Streamlined Controls Toolbar */}
-        <div className="tabs-toolbar">
-          {/* Smart Language Dropdown */}
-          <DropdownMenu open={langDropdownOpen} onOpenChange={setLangDropdownOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  "toolbar-btn",
-                  isAutoDetectActive && "text-accent font-medium"
-                )}
-              >
-                {isAutoDetectActive ? (
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
-                ) : (
-                  <FileCode2 className="h-3.5 w-3.5" />
-                )}
-                <span>
-                  {isAutoDetectActive
-                    ? `Auto (${detection.language !== "plaintext" ? detection.label : currentLang.label})`
-                    : currentLang.label}
-                </span>
-                <ChevronDown className="h-3 w-3 opacity-50" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-1">
-              <div className="flex items-center gap-2 px-2 py-1 mb-1 bg-bg-2 rounded border border-border-1">
-                <Search className="h-3 w-3 text-text-3" />
-                <input
-                  type="text"
-                  placeholder="Filter languages..."
-                  className="w-full bg-transparent text-xs text-text-1 placeholder:text-text-3 outline-none"
-                  value={langSearch}
-                  onChange={(e) => setLangSearch(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </div>
-              <DropdownMenuItem
-                className={cn(
-                  "flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer",
-                  isAutoDetectActive && "bg-accent/15 text-accent font-semibold"
-                )}
-                onSelect={() => {
-                  const det = detectLanguageFromInputs(localOriginal, localModified);
-                  updateSessionLanguage(activeSession.id, det.language, true);
-                  setLangDropdownOpen(false);
-                }}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
-                  <span>Auto-Detect</span>
+      {/* 1. Reusable Workspace Tab Bar */}
+      <WorkspaceTabBar
+        tabs={tabs}
+        activeTabId={activeSession.id}
+        onSelectTab={setActiveSession}
+        onCloseTab={handleDeleteSession}
+        onNewTab={() => createSession()}
+        onRenameTab={(id, newName) => renameSession(id, newName)}
+        onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
+          reorderSessions(oldIndex, newIndex)
+        }
+        newTabTooltip="New Diff Session"
+        closeTabTooltip="Close Tab"
+        rightContent={
+          <>
+            {/* Cluster 1: Transforms (Language, Format, Swap) */}
+            <DropdownMenu open={langDropdownOpen} onOpenChange={setLangDropdownOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "toolbar-btn",
+                    isAutoDetectActive && "text-accent font-medium"
+                  )}
+                >
+                  {isAutoDetectActive ? (
+                    <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  ) : (
+                    <FileCode2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {isAutoDetectActive
+                      ? `Auto (${detection.language !== "plaintext" ? detection.label : currentLang.label})`
+                      : currentLang.label}
+                  </span>
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 p-1">
+                <div className="flex items-center gap-2 px-2 py-1 mb-1 bg-bg-2 rounded border border-border-1">
+                  <Search className="h-3 w-3 text-text-3" />
+                  <input
+                    type="text"
+                    placeholder="Filter languages..."
+                    className="w-full bg-transparent text-xs text-text-1 placeholder:text-text-3 outline-none"
+                    value={langSearch}
+                    onChange={(e) => setLangSearch(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                 </div>
-                {detection.confidence > 0 && (
-                  <span className="text-[10px] opacity-70">{detection.label}</span>
+                <DropdownMenuItem
+                  className={cn(
+                    "flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer",
+                    isAutoDetectActive && "bg-accent/15 text-accent font-semibold"
+                  )}
+                  onSelect={() => {
+                    const det = detectLanguageFromInputs(localOriginal, localModified);
+                    updateSessionLanguage(activeSession.id, det.language, true);
+                    setLangDropdownOpen(false);
+                  }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-accent" />
+                    <span>Auto-Detect</span>
+                  </div>
+                  {detection.confidence > 0 && (
+                    <span className="text-[10px] opacity-70">{detection.label}</span>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-1" />
+                <div className="max-h-48 overflow-y-auto space-y-0.5">
+                  {filteredLanguages.map((lang) => (
+                    <DropdownMenuItem
+                      key={lang.id}
+                      className={cn(
+                        "flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer",
+                        !isAutoDetectActive && activeSession.language === lang.id && "bg-bg-2 text-accent font-semibold"
+                      )}
+                      onSelect={() => {
+                        updateSessionLanguage(activeSession.id, lang.id, false);
+                        setLangDropdownOpen(false);
+                      }}
+                    >
+                      <span>{lang.label}</span>
+                      {!isAutoDetectActive && activeSession.language === lang.id && (
+                        <Check className="h-3 w-3 text-accent" />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <ActionTooltip content="Auto-format both inputs (⌘S / Shift+Alt+F)">
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={handleFormatBoth}
+                disabled={isFormatting}
+              >
+                <Sparkles className={cn("h-3.5 w-3.5 text-accent", isFormatting && "animate-spin")} />
+                <span>Format</span>
+              </button>
+            </ActionTooltip>
+
+            <ActionTooltip content="Swap original ↔ modified">
+              <button type="button" className="toolbar-btn" onClick={handleSwap}>
+                <ArrowLeftRight className="h-3.5 w-3.5" />
+                <span>Swap</span>
+              </button>
+            </ActionTooltip>
+
+            <div className="tabs-toolbar-sep" />
+
+            {/* Cluster 2: View Modes (Split / Inline & Options) */}
+            <ActionTooltip content={diffSettings.renderSideBySide ? "Switch to inline view" : "Switch to side-by-side"}>
+              <button
+                type="button"
+                className="toolbar-btn"
+                onClick={() => updateDiffSettings({ renderSideBySide: !diffSettings.renderSideBySide })}
+              >
+                {diffSettings.renderSideBySide ? (
+                  <Rows className="h-3.5 w-3.5" />
+                ) : (
+                  <Columns className="h-3.5 w-3.5" />
                 )}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="my-1" />
-              <div className="max-h-48 overflow-y-auto space-y-0.5">
-                {filteredLanguages.map((lang) => (
-                  <DropdownMenuItem
-                    key={lang.id}
-                    className={cn(
-                      "flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer",
-                      !isAutoDetectActive && activeSession.language === lang.id && "bg-bg-2 text-accent font-semibold"
-                    )}
-                    onSelect={() => {
-                      updateSessionLanguage(activeSession.id, lang.id, false);
-                      setLangDropdownOpen(false);
-                    }}
-                  >
-                    <span>{lang.label}</span>
-                    {!isAutoDetectActive && activeSession.language === lang.id && (
-                      <Check className="h-3 w-3 text-accent" />
-                    )}
-                  </DropdownMenuItem>
-                ))}
+                <span>{diffSettings.renderSideBySide ? "Inline" : "Split"}</span>
+              </button>
+            </ActionTooltip>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="toolbar-btn">
+                  <Settings2 className="h-3.5 w-3.5" />
+                  <span>Options</span>
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onSelect={handleLoadSample}>
+                  <Sparkles className="h-3.5 w-3.5 text-accent mr-2" />
+                  <span>Load Sample Diff</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleExportDiff}>
+                  <Download className="h-3.5 w-3.5 mr-2" />
+                  <span>Export as .diff</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={diffSettings.autoFormatOnPaste !== false}
+                  onCheckedChange={(checked) => updateDiffSettings({ autoFormatOnPaste: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Auto-Format on Paste
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={diffSettings.ignoreTrimWhitespace}
+                  onCheckedChange={(checked) => updateDiffSettings({ ignoreTrimWhitespace: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Ignore Whitespace
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={diffSettings.wordWrap ?? false}
+                  onCheckedChange={(checked) => updateDiffSettings({ wordWrap: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Wrap Long Lines
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={diffSettings.enableSplitViewResizing}
+                  onCheckedChange={(checked) => updateDiffSettings({ enableSplitViewResizing: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Resizable Split
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="tabs-toolbar-sep" />
+
+            {/* Cluster 3: Danger / Reset */}
+            <ActionTooltip content="Clear inputs">
+              <button
+                type="button"
+                className="toolbar-btn toolbar-btn-danger"
+                onClick={handleClearAll}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Clear</span>
+              </button>
+            </ActionTooltip>
+          </>
+        }
+      />
+
+      {/* 2. Consolidated 30px Sub-Header (Pane Headers + Diff Status) */}
+      <div className="diff-sub-header">
+        {diffSettings.renderSideBySide ? (
+          <>
+            {/* Original Pane Header (Left 50%) */}
+            <div className="diff-sub-pane diff-sub-pane-original">
+              <div className="diff-pane-left">
+                <span className="diff-pane-tag diff-pane-tag-orig">Original</span>
+                {origLineCount > 0 && (
+                  <span className="diff-pane-count">{origLineCount} lines</span>
+                )}
               </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              <div className="diff-pane-right">
+                <ActionTooltip content="Copy original content">
+                  <button
+                    type="button"
+                    className="diff-pane-action-btn"
+                    onClick={handleCopyOriginal}
+                    disabled={!localOriginal}
+                  >
+                    {copiedOrig ? <Check className="h-3 w-3 text-green" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                </ActionTooltip>
+              </div>
+            </div>
 
-          <div className="tabs-toolbar-sep" />
+            {/* Modified Pane Header (Right 50%) */}
+            <div className="diff-sub-pane">
+              <div className="diff-pane-left">
+                <span className="diff-pane-tag diff-pane-tag-mod">Modified</span>
+                {modLineCount > 0 && (
+                  <span className="diff-pane-count">{modLineCount} lines</span>
+                )}
 
-          {/* Format Both */}
-          <ActionTooltip content="Auto-format both inputs (⌘S / Shift+Alt+F)">
-            <button
-              className="toolbar-btn"
-              onClick={handleFormatBoth}
-              disabled={isFormatting}
-            >
-              <Sparkles className={cn("h-3.5 w-3.5 text-accent", isFormatting && "animate-spin")} />
-              <span>Format</span>
-            </button>
-          </ActionTooltip>
+                {/* Diff Stats Badges */}
+                <div className="flex items-center gap-1.5 ml-2">
+                  <span className="diff-stat-pill diff-stat-pill-add" title={`${diffStats.additions} additions`}>
+                    <Plus className="h-2.5 w-2.5" />
+                    {diffStats.additions}
+                  </span>
+                  <span className="diff-stat-pill diff-stat-pill-del" title={`${diffStats.deletions} deletions`}>
+                    <Minus className="h-2.5 w-2.5" />
+                    {diffStats.deletions}
+                  </span>
+                  {diffStats.unchanged > 0 && (
+                    <span className="diff-stat-pill-eq" title={`${diffStats.unchanged} unchanged lines`}>
+                      {diffStats.unchanged} unchanged
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          {/* Swap */}
-          <ActionTooltip content="Swap original ↔ modified">
-            <button className="toolbar-btn" onClick={handleSwap}>
-              <ArrowLeftRight className="h-3.5 w-3.5" />
-              <span>Swap</span>
-            </button>
-          </ActionTooltip>
+              <div className="diff-pane-right">
+                {/* Stepper Controls */}
+                {diffStats.totalDiffs > 0 && (
+                  <div className="flex items-center gap-1 mr-1">
+                    <ActionTooltip content="Previous change (Shift+F7)">
+                      <button
+                        type="button"
+                        className="diff-nav-btn"
+                        onClick={handlePrevDiff}
+                      >
+                        <ChevronUp className="h-3 w-3" />
+                      </button>
+                    </ActionTooltip>
+                    <span className="diff-nav-counter">
+                      {currentDiffIndex > 0
+                        ? `${currentDiffIndex}/${diffStats.totalDiffs}`
+                        : `${diffStats.totalDiffs} diffs`}
+                    </span>
+                    <ActionTooltip content="Next change (F7)">
+                      <button
+                        type="button"
+                        className="diff-nav-btn"
+                        onClick={handleNextDiff}
+                      >
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </ActionTooltip>
+                  </div>
+                )}
 
-          {/* View Toggle */}
-          <ActionTooltip content={diffSettings.renderSideBySide ? "Switch to inline view" : "Switch to side-by-side"}>
-            <button
-              className="toolbar-btn"
-              onClick={() => updateDiffSettings({ renderSideBySide: !diffSettings.renderSideBySide })}
-            >
-              {diffSettings.renderSideBySide ? (
-                <Rows className="h-3.5 w-3.5" />
-              ) : (
-                <Columns className="h-3.5 w-3.5" />
+                {/* Quick Load Sample when empty */}
+                {!localOriginal.trim() && !localModified.trim() && (
+                  <button
+                    type="button"
+                    className="diff-pill-toggle text-accent hover:border-accent"
+                    onClick={handleLoadSample}
+                  >
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    <span>Load Sample</span>
+                  </button>
+                )}
+
+                <ActionTooltip content="Copy modified content">
+                  <button
+                    type="button"
+                    className="diff-pane-action-btn"
+                    onClick={handleCopyModified}
+                    disabled={!localModified}
+                  >
+                    {copiedMod ? <Check className="h-3 w-3 text-green" /> : <Copy className="h-3 w-3" />}
+                  </button>
+                </ActionTooltip>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Inline View Sub-Header */
+          <div className="diff-sub-pane diff-sub-pane-inline">
+            <div className="diff-pane-left">
+              <span className="diff-pane-tag diff-pane-tag-inline">Inline Diff</span>
+              <span className="diff-pane-count">
+                {origLineCount} orig · {modLineCount} mod
+              </span>
+              <div className="flex items-center gap-1.5 ml-3">
+                <span className="diff-stat-pill diff-stat-pill-add" title={`${diffStats.additions} additions`}>
+                  <Plus className="h-2.5 w-2.5" />
+                  {diffStats.additions}
+                </span>
+                <span className="diff-stat-pill diff-stat-pill-del" title={`${diffStats.deletions} deletions`}>
+                  <Minus className="h-2.5 w-2.5" />
+                  {diffStats.deletions}
+                </span>
+                {diffStats.unchanged > 0 && (
+                  <span className="diff-stat-pill-eq" title={`${diffStats.unchanged} unchanged lines`}>
+                    {diffStats.unchanged} unchanged
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="diff-pane-right">
+              {diffStats.totalDiffs > 0 && (
+                <div className="flex items-center gap-1">
+                  <ActionTooltip content="Previous change (Shift+F7)">
+                    <button
+                      type="button"
+                      className="diff-nav-btn"
+                      onClick={handlePrevDiff}
+                    >
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                  </ActionTooltip>
+                  <span className="diff-nav-counter">
+                    {currentDiffIndex > 0
+                      ? `${currentDiffIndex}/${diffStats.totalDiffs}`
+                      : `${diffStats.totalDiffs} diffs`}
+                  </span>
+                  <ActionTooltip content="Next change (F7)">
+                    <button
+                      type="button"
+                      className="diff-nav-btn"
+                      onClick={handleNextDiff}
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </ActionTooltip>
+                </div>
               )}
-              <span>{diffSettings.renderSideBySide ? "Inline" : "Split"}</span>
-            </button>
-          </ActionTooltip>
-
-          {/* Options Menu */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="toolbar-btn">
-                <Settings2 className="h-3.5 w-3.5" />
-                <span>Options</span>
-                <ChevronDown className="h-3 w-3 opacity-50" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onSelect={handleLoadSample}>
-                <Sparkles className="h-3.5 w-3.5 text-accent mr-2" />
-                <span>Load Sample Diff</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleExportDiff}>
-                <Download className="h-3.5 w-3.5 mr-2" />
-                <span>Export as .diff</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuCheckboxItem
-                checked={diffSettings.autoFormatOnPaste !== false}
-                onCheckedChange={(checked) => updateDiffSettings({ autoFormatOnPaste: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Auto-Format on Paste
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={diffSettings.ignoreTrimWhitespace}
-                onCheckedChange={(checked) => updateDiffSettings({ ignoreTrimWhitespace: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Ignore Whitespace
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={diffSettings.wordWrap ?? false}
-                onCheckedChange={(checked) => updateDiffSettings({ wordWrap: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Wrap Long Lines
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={diffSettings.enableSplitViewResizing}
-                onCheckedChange={(checked) => updateDiffSettings({ enableSplitViewResizing: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Resizable Split
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <div className="tabs-toolbar-sep" />
-
-          {/* Clear */}
-          <ActionTooltip content="Clear inputs">
-            <button className="toolbar-btn text-red hover:bg-red-dim" onClick={handleClearAll}>
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Clear</span>
-            </button>
-          </ActionTooltip>
-        </div>
-      </div>
-
-      {/* 3. Compact Diff Stats & Navigation Bar */}
-      <div className="diff-stats-bar">
-        <div className="diff-stat diff-stat-add">
-          <Plus className="h-3 w-3" />
-          <span>{diffStats.additions}</span>
-        </div>
-        <div className="diff-stat diff-stat-del">
-          <Minus className="h-3 w-3" />
-          <span>{diffStats.deletions}</span>
-        </div>
-        <div className="diff-stat diff-stat-eq">
-          <Equal className="h-3 w-3" />
-          <span>{diffStats.unchanged} unchanged</span>
-        </div>
-
-        {/* Diff stepper */}
-        {diffStats.totalDiffs > 0 && (
-          <div className="flex items-center gap-1 ml-2 pl-2 border-l border-border-1">
-            <ActionTooltip content="Previous change (Shift+F7)">
-              <button className="diff-nav-btn" onClick={handlePrevDiff}>
-                <ChevronUp className="h-3 w-3" />
-              </button>
-            </ActionTooltip>
-            <span className="diff-nav-counter">
-              {currentDiffIndex > 0 ? `${currentDiffIndex} of ${diffStats.totalDiffs}` : `${diffStats.totalDiffs} diffs`}
-            </span>
-            <ActionTooltip content="Next change (F7)">
-              <button className="diff-nav-btn" onClick={handleNextDiff}>
-                <ChevronDown className="h-3 w-3" />
-              </button>
-            </ActionTooltip>
-          </div>
-        )}
-
-        <div className="diff-stat-spacer" />
-
-        {/* Sample quick button if empty */}
-        {!localOriginal.trim() && !localModified.trim() && (
-          <button
-            className="diff-pill-toggle text-accent hover:border-accent"
-            onClick={handleLoadSample}
-          >
-            <Sparkles className="h-3 w-3 mr-1" />
-            <span>Load Sample</span>
-          </button>
-        )}
-      </div>
-
-      {/* 4. Super Clean Subdued Pane Strip */}
-      <div className="diff-pane-strip">
-        <div className="diff-pane-strip-side">
-          <span className="diff-pane-tag diff-pane-tag-orig">Original</span>
-          {origLineCount > 0 && <span className="diff-pane-count">{origLineCount} lines</span>}
-        </div>
-        {diffSettings.renderSideBySide && (
-          <div className="diff-pane-strip-side">
-            <span className="diff-pane-tag diff-pane-tag-mod">Modified</span>
-            {modLineCount > 0 && <span className="diff-pane-count">{modLineCount} lines</span>}
+              {!localOriginal.trim() && !localModified.trim() && (
+                <button
+                  type="button"
+                  className="diff-pill-toggle text-accent hover:border-accent"
+                  onClick={handleLoadSample}
+                >
+                  <Sparkles className="h-3 w-3 mr-1" />
+                  <span>Sample</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* 5. Direct Monaco Diff Editor — Clean Canvas, Zero Popups */}
+      {/* 3. Direct Monaco Diff Editor */}
       <div className="diff-editor-container" ref={containerRef}>
         <DiffEditor
           key={activeSession.id}
@@ -927,7 +1008,7 @@ export function DiffChecker() {
             renderLineHighlight: "all",
             scrollBeyondLastLine: false,
             automaticLayout: true,
-            padding: { top: 6, bottom: 10 },
+            padding: { top: 8, bottom: 8 },
             scrollbar: {
               verticalScrollbarSize: 7,
               horizontalScrollbarSize: 7,
