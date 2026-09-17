@@ -38,6 +38,7 @@ export function DrawFlowDesigner() {
   const updateWorkflowExcalidraw = useAppStore((s) => s.updateWorkflowExcalidraw);
   const excalidrawLibraryItems = useAppStore((s) => s.excalidrawLibraryItems);
   const updateExcalidrawLibraryItems = useAppStore((s) => s.updateExcalidrawLibraryItems);
+  const addExcalidrawAddedLibraryId = useAppStore((s) => s.addExcalidrawAddedLibraryId);
   const clearExcalidrawAddedLibraryIds = useAppStore((s) => s.clearExcalidrawAddedLibraryIds);
   const addToast = useAppStore((s) => s.addToast);
   const appTheme = useAppStore((s) => s.editorSettings.theme);
@@ -120,7 +121,8 @@ export function DrawFlowDesigner() {
     getExcalidrawLibraries().then((allLibs) => {
       const target = allLibs.find((lib) => lib.id === importLibId);
       if (target) {
-        loadLibraryToExcalidraw(target.source, excalidrawAPI).then((count) => {
+        addExcalidrawAddedLibraryId(target.id);
+        loadLibraryToExcalidraw(target.source, excalidrawAPI, target.id).then((count) => {
           addToast({ message: `Imported "${target.name}" (${count} shapes) to Excalidraw Library!`, type: "success" });
         }).catch(() => {
           addToast({ message: `Failed to load "${target.name}"`, type: "error" });

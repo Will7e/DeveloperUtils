@@ -35,6 +35,8 @@ import {
   getExcalidrawLibraries,
   getExcalidrawLibraryPreviewUrl,
   getExcalidrawLibraryCdnPreviewUrl,
+  fetchAndFormatLibraryItems,
+  removeLibraryItemsFromList,
   EXCALIDRAW_CATEGORIES,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
@@ -1046,6 +1048,8 @@ function ExcalidrawLibraryGallery({
     }).catch(() => setLoading(false));
   }, []);
 
+  const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+
   const categoryLabel = useMemo(() => {
     const found = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
     return found?.label || "All Libraries";
@@ -1053,7 +1057,9 @@ function ExcalidrawLibraryGallery({
 
   const filteredLibraries = useMemo(() => {
     return libraries.filter((lib) => {
-      if (activeCategory !== "all") {
+      if (activeCategory === "added") {
+        if (!storeIds.includes(lib.id)) return false;
+      } else if (activeCategory !== "all") {
         const cat = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
         if (cat && "keywords" in cat && cat.keywords) {
           const keywords = cat.keywords as readonly string[];
@@ -1074,12 +1080,7 @@ function ExcalidrawLibraryGallery({
 
       return true;
     });
-  }, [libraries, activeCategory, searchQuery]);
-
-  const handleUseInDrawFlow = (lib: ExcalidrawLibraryItem) => {
-    addToast({ message: `Importing "${lib.name}" into DrawFlow Studio...`, type: "success" });
-    navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`);
-  };
+  }, [libraries, activeCategory, searchQuery, storeIds]);
 
   return (
     <div className="lib-excal-container">
@@ -1123,9 +1124,15 @@ function ExcalidrawLibraryGallery({
       ) : filteredLibraries.length === 0 ? (
         <div className="p-12 text-center bg-bg-1 border border-border-1 rounded-2xl flex flex-col items-center justify-center">
           <Boxes className="w-10 h-10 text-text-3 opacity-40 mb-3" />
-          <h3 className="text-sm font-bold text-text-1">No collections match your criteria</h3>
+          <h3 className="text-sm font-bold text-text-1">
+            {activeCategory === "added" ? "No libraries added to DrawFlow yet" : "No collections match your criteria"}
+          </h3>
           <p className="text-xs text-text-3 mt-1 max-w-sm">
-            {searchQuery ? `No shape packs found for "${searchQuery}".` : "No items found in this collection category."}
+            {activeCategory === "added"
+              ? "Browse the collections and click \"Add to DrawFlow\" to make shape packs ready in DrawFlow Studio."
+              : searchQuery
+              ? `No shape packs found for "${searchQuery}".`
+              : "No items found in this collection category."}
           </p>
         </div>
       ) : (
@@ -1150,38 +1157,58 @@ function ExcalidrawCard({
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);
   const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+  const storeLibraryItems = useAppStore((s) => s.excalidrawLibraryItems || []);
   const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
   const storeRemove = useAppStore((s) => s.removeExcalidrawAddedLibraryId);
+  const updateStoreLibraryItems = useAppStore((s) => s.updateExcalidrawLibraryItems);
   const addToast = useAppStore((s) => s.addToast);
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const isAdded = storeIds.includes(lib.id);
 
   const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
   const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
 
-  const handleAdd = () => {
-    storeAdd(lib.id);
-    addToast({ message: `Added "${lib.name}" to DrawFlow Studio`, type: "success" });
-    navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`);
+  const handleAdd = async () => {
+    try {
+      setLoading(true);
+      const items = await fetchAndFormatLibraryItems(lib.source, lib.id);
+      storeAdd(lib.id);
+      updateStoreLibraryItems([...storeLibraryItems, ...items]);
+      addToast({
+        message: `Added "${lib.name}" (${items.length} shapes) to DrawFlow Studio`,
+        type: "success",
+      });
+    } catch {
+      addToast({ message: `Failed to load "${lib.name}"`, type: "error" });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemove = () => {
-    setLoading(true);
-    storeRemove(lib.id);
-    addToast({ message: `Removed "${lib.name}" from added libraries`, type: "success" });
-    setLoading(false);
+  const handleRemove = async () => {
+    try {
+      setLoading(true);
+      const { remainingItems, removedCount } = await removeLibraryItemsFromList(
+        storeLibraryItems,
+        lib.source,
+        lib.id
+      );
+      storeRemove(lib.id);
+      updateStoreLibraryItems(remainingItems);
+      addToast({
+        message: `Removed "${lib.name}" (${removedCount} shapes) from DrawFlow Studio`,
+        type: "success",
+      });
+    } catch {
+      addToast({ message: `Failed to remove "${lib.name}"`, type: "error" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="lib-excal-card">
       <div className="lib-excal-preview-wrap">
-        {isAdded && (
-          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-green/15 border border-green/30 text-green text-[10px] font-semibold">
-            <Check className="w-2.5 h-2.5" />
-            Added
-          </div>
-        )}
         {!imgError ? (
           <img
             src={triedCdn ? cdnPreviewUrl : previewUrl}
@@ -1220,10 +1247,10 @@ function ExcalidrawCard({
             className={`lib-excal-action-btn ${isAdded ? "lib-excal-action-btn-remove" : ""}`}
             onClick={isAdded ? handleRemove : handleAdd}
             disabled={loading}
-            title={isAdded ? `Remove "${lib.name}"` : `Add "${lib.name}" to DrawFlow Studio`}
+            title={isAdded ? `Remove "${lib.name}" from DrawFlow Studio` : `Add "${lib.name}" to DrawFlow Studio`}
           >
             {loading ? (
-              <><Loader2 className="w-3 h-3 animate-spin" /><span>Removing...</span></>
+              <><Loader2 className="w-3 h-3 animate-spin" /><span>{isAdded ? "Removing..." : "Adding..."}</span></>
             ) : isAdded ? (
               <><Trash2 className="w-3 h-3" /><span>Remove</span></>
             ) : (

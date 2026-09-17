@@ -72,6 +72,21 @@ export function registerMonacoFormatShortcut(
     handler
   );
 
+  // Add Cmd+K / Ctrl+K command for Command Palette
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+    useAppStore.getState().toggleCommandPalette();
+  });
+
+  // Add Cmd+B / Ctrl+B command for Sidebar Toggle
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => {
+    useAppStore.getState().toggleSidebar();
+  });
+
+  // Add Cmd+J / Ctrl+J command for Output Panel
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyJ, () => {
+    useAppStore.getState().toggleOutputPanel();
+  });
+
   // Add to editor action menu / context menu
   const actionDisposable = editorInstance.addAction({
     id: "devutils.formatDocument",

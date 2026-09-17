@@ -105,6 +105,11 @@ export function CodeEditor() {
           });
         }
       });
+
+      // Add Cmd+K / Ctrl+K support for Command Palette
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+        useAppStore.getState().toggleCommandPalette();
+      });
     },
     [editorSettings.theme]
   );

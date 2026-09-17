@@ -130,6 +130,8 @@ export function CommandPalette() {
           if (activeFile) {
             navigator.clipboard.writeText(activeFile.content);
             addToast({ message: "Code copied to clipboard", type: "success", duration: 2000 });
+          } else {
+            addToast({ message: "No active code file to copy", type: "info", duration: 1500 });
           }
         },
       },
@@ -140,17 +142,36 @@ export function CommandPalette() {
         category: "Actions",
         icon: <Wand2 style={{ width: 14, height: 14 }} />,
         action: async () => {
-          if (!activeFile) return;
-          if (supportsFormatting(activeFile.language)) {
-            try {
-              const formatted = await formatCode(activeFile.content, activeFile.language);
-              updateFileContent(activeFile.id, formatted);
-              addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
-            } catch {
-              addToast({ message: "Format failed", type: "error", duration: 2000 });
+          const pathname = window.location.pathname;
+
+          if (pathname.startsWith("/formatters")) {
+            window.dispatchEvent(new CustomEvent("devutils:format-formatter"));
+            return;
+          }
+          if (pathname.startsWith("/diff")) {
+            window.dispatchEvent(new CustomEvent("devutils:format-diff"));
+            return;
+          }
+          if (pathname.startsWith("/api-tester")) {
+            window.dispatchEvent(new CustomEvent("devutils:format-api-tester"));
+            return;
+          }
+
+          if (activeFile) {
+            if (supportsFormatting(activeFile.language)) {
+              try {
+                const formatted = await formatCode(activeFile.content, activeFile.language);
+                updateFileContent(activeFile.id, formatted);
+                useAppStore.getState().saveFile(activeFile.id);
+                addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
+              } catch {
+                addToast({ message: "Format failed", type: "error", duration: 2000 });
+              }
+            } else {
+              addToast({ message: `Formatting not supported for ${activeFile.language}`, type: "info", duration: 2000 });
             }
           } else {
-            addToast({ message: `Formatting not supported for ${activeFile.language}`, type: "info", duration: 2000 });
+            addToast({ message: "No active code file to format", type: "info", duration: 1500 });
           }
         },
       },
@@ -169,6 +190,8 @@ export function CommandPalette() {
             a.click();
             URL.revokeObjectURL(url);
             addToast({ message: `Downloaded ${activeFile.name}`, type: "success", duration: 2000 });
+          } else {
+            addToast({ message: "No active code file to download", type: "info", duration: 1500 });
           }
         },
       },
@@ -226,16 +249,6 @@ export function CommandPalette() {
         action: () => {
           createFormatterFile("xml");
           navigate("/formatters");
-        },
-      },
-      {
-        id: "new-comparator-session",
-        label: "New Comparator Session",
-        category: "File",
-        icon: <FilePlus style={{ width: 14, height: 14 }} />,
-        action: () => {
-          createComparatorSession();
-          navigate("/comparators");
         },
       },
       {
@@ -382,17 +395,41 @@ export function CommandPalette() {
     );
   }, [actions, query]);
 
+  // Group by category and build flatOrdered in exact visual order
+  const { grouped, flatOrdered } = useMemo(() => {
+    const groupedMap = new Map<string, PaletteAction[]>();
+    filtered.forEach((a) => {
+      const list = groupedMap.get(a.category) || [];
+      list.push(a);
+      groupedMap.set(a.category, list);
+    });
+
+    const flat: PaletteAction[] = [];
+    groupedMap.forEach((items) => {
+      flat.push(...items);
+    });
+
+    return { grouped: groupedMap, flatOrdered: flat };
+  }, [filtered]);
+
   // Reset on open
   useEffect(() => {
     if (commandPaletteOpen) {
+      setQuery("");
+      setSelectedIndex(0);
+      inputRef.current?.focus();
       const timer = setTimeout(() => {
-        setQuery("");
-        setSelectedIndex(0);
         inputRef.current?.focus();
-      }, 0);
+      }, 20);
       return () => clearTimeout(timer);
     }
   }, [commandPaletteOpen]);
+
+  // Ensure selectedIndex is always within valid bounds
+  const validSelectedIndex = useMemo(() => {
+    if (flatOrdered.length === 0) return 0;
+    return Math.min(Math.max(0, selectedIndex), flatOrdered.length - 1);
+  }, [selectedIndex, flatOrdered.length]);
 
   // Scroll selected into view
   useEffect(() => {
@@ -402,41 +439,62 @@ export function CommandPalette() {
     if (selected) {
       selected.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-  }, [selectedIndex]);
+  }, [validSelectedIndex]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
+    (e: React.KeyboardEvent | KeyboardEvent) => {
+      if (flatOrdered.length === 0) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          toggleCommandPalette();
+        }
+        return;
+      }
+
+      if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey)) {
         e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
-      } else if (e.key === "ArrowUp") {
+        setSelectedIndex((i) => (i + 1) % flatOrdered.length);
+      } else if (e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey)) {
         e.preventDefault();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
+        setSelectedIndex((i) => (i - 1 + flatOrdered.length) % flatOrdered.length);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (filtered[selectedIndex]) {
-          filtered[selectedIndex].action();
+        const actionItem = flatOrdered[validSelectedIndex];
+        if (actionItem) {
           toggleCommandPalette();
+          actionItem.action();
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
         toggleCommandPalette();
       }
     },
-    [filtered, selectedIndex, toggleCommandPalette]
+    [flatOrdered, validSelectedIndex, toggleCommandPalette]
   );
+
+  // Global window listener so keyboard actions work even if input loses focus
+  useEffect(() => {
+    if (!commandPaletteOpen) return;
+
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp" ||
+        e.key === "Enter" ||
+        e.key === "Escape" ||
+        e.key === "Tab"
+      ) {
+        handleKeyDown(e);
+      }
+    };
+
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown);
+  }, [commandPaletteOpen, handleKeyDown]);
 
   if (!commandPaletteOpen) return null;
 
-  // Group by category
-  const grouped = new Map<string, typeof filtered>();
-  filtered.forEach((a) => {
-    const list = grouped.get(a.category) || [];
-    list.push(a);
-    grouped.set(a.category, list);
-  });
-
-  let globalIdx = 0;
+  let globalCounter = 0;
 
   return (
     <div className="palette-overlay" onClick={toggleCommandPalette}>
@@ -462,21 +520,22 @@ export function CommandPalette() {
         </div>
 
         <div className="palette-list" ref={listRef}>
-          {filtered.length === 0 ? (
+          {flatOrdered.length === 0 ? (
             <div className="palette-empty">No matching commands</div>
           ) : (
             Array.from(grouped.entries()).map(([category, items]) => (
               <div key={category}>
                 <div className="palette-category">{category}</div>
                 {items.map((item) => {
-                  const idx = globalIdx++;
+                  const idx = globalCounter++;
                   return (
                     <button
                       key={item.id}
-                      className={`palette-item ${idx === selectedIndex ? "palette-item-active" : ""}`}
+                      type="button"
+                      className={`palette-item ${idx === validSelectedIndex ? "palette-item-active" : ""}`}
                       onClick={() => {
-                        item.action();
                         toggleCommandPalette();
+                        item.action();
                       }}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >

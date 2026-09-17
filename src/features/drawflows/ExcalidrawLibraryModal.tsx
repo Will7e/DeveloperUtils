@@ -55,7 +55,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
     if (!excalidrawAPI || isAdded(lib.id)) return;
     try {
       setLoadingId(lib.id);
-      const n = await loadLibraryToExcalidraw(lib.source, excalidrawAPI);
+      const n = await loadLibraryToExcalidraw(lib.source, excalidrawAPI, lib.id);
       setAdded((p) => new Set(p).add(lib.id));
       storeAdd(lib.id);
       toast({ message: `Added "${lib.name}" (${n} shapes) to canvas`, type: "success" });
@@ -70,7 +70,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
     if (!excalidrawAPI || !isAdded(lib.id)) return;
     try {
       setRemovingId(lib.id);
-      const n = await removeLibraryFromExcalidraw(lib.source, excalidrawAPI);
+      const n = await removeLibraryFromExcalidraw(lib.source, excalidrawAPI, lib.id);
       setAdded((p) => { const next = new Set(p); next.delete(lib.id); return next; });
       storeRemove(lib.id);
       toast({ message: `Removed "${lib.name}" (${n} shapes) from canvas`, type: "success" });

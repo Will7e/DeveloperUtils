@@ -75,11 +75,8 @@ export async function getExcalidrawLibraries(): Promise<ExcalidrawLibraryItem[]>
   }
 }
 
-/** Load a specific library (.excalidrawlib) into an Excalidraw canvas instance with fallback */
-export async function loadLibraryToExcalidraw(
-  sourcePath: string,
-  excalidrawAPI: ExcalidrawImperativeAPI
-): Promise<number> {
+/** Fetch raw library items from local or CDN */
+export async function fetchRawLibraryItems(sourcePath: string): Promise<unknown[]> {
   const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
   const baseUrl = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
@@ -118,25 +115,123 @@ export async function loadLibraryToExcalidraw(
     ? data
     : [];
 
-  const formattedItems = rawItems.map((item: unknown, idx: number) => {
+  return rawItems;
+}
+
+/** Fetch and format library items, tagging each with metadata for reliable tracking */
+export async function fetchAndFormatLibraryItems(
+  sourcePath: string,
+  libId?: string
+): Promise<unknown[]> {
+  const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
+  const safeTag = (libId || cleanPath).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const rawItems = await fetchRawLibraryItems(sourcePath);
+
+  return rawItems.map((item: unknown, idx: number) => {
     if (Array.isArray(item)) {
       return {
-        id: `lib-item-${Date.now()}-${idx}`,
+        id: `lib-${safeTag}-${idx}`,
         status: "published" as const,
         elements: item,
         created: Date.now(),
+        _libraryId: libId,
+        _librarySource: cleanPath,
       };
     } else if (typeof item === "object" && item !== null && "elements" in item) {
       const obj = item as Record<string, unknown>;
       return {
-        id: (obj.id as string) || `lib-item-${Date.now()}-${idx}`,
+        id: (obj.id as string) || `lib-${safeTag}-${idx}`,
         status: ((obj.status as string) || "published") as "published" | "unpublished",
         elements: obj.elements,
         created: (obj.created as number) || Date.now(),
+        _libraryId: libId,
+        _librarySource: cleanPath,
       };
     }
     return item;
   });
+}
+
+/** Remove library items from an array in-memory */
+export async function removeLibraryItemsFromList(
+  currentItems: unknown[],
+  sourcePath: string,
+  libId?: string
+): Promise<{ remainingItems: unknown[]; removedCount: number }> {
+  const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
+  const safeTag = (libId || cleanPath).replace(/[^a-zA-Z0-9_-]/g, "_");
+  let rawItems: unknown[] = [];
+  try {
+    rawItems = await fetchRawLibraryItems(sourcePath);
+  } catch {
+    rawItems = [];
+  }
+
+  const libItemIds = new Set<string>();
+  rawItems.forEach((item: unknown) => {
+    if (typeof item === "object" && item !== null && "id" in item) {
+      libItemIds.add((item as Record<string, unknown>).id as string);
+    }
+  });
+
+  const libElementSignatures = new Set<string>();
+  rawItems.forEach((item: unknown) => {
+    if (Array.isArray(item)) {
+      libElementSignatures.add(JSON.stringify(item));
+    } else if (typeof item === "object" && item !== null && "elements" in item) {
+      libElementSignatures.add(JSON.stringify((item as Record<string, unknown>).elements));
+    }
+  });
+
+  let removedCount = 0;
+  const remainingItems = currentItems.filter((existingItem: unknown) => {
+    if (typeof existingItem !== "object" || existingItem === null) return true;
+    const obj = existingItem as Record<string, unknown>;
+
+    // 1. Tag match
+    if (libId && obj._libraryId === libId) {
+      removedCount++;
+      return false;
+    }
+    if (cleanPath && obj._librarySource === cleanPath) {
+      removedCount++;
+      return false;
+    }
+
+    // 2. ID match
+    if (typeof obj.id === "string") {
+      if (obj.id.startsWith(`lib-${safeTag}-`)) {
+        removedCount++;
+        return false;
+      }
+      if (libItemIds.has(obj.id)) {
+        removedCount++;
+        return false;
+      }
+    }
+
+    // 3. Signature match
+    if ("elements" in obj && libElementSignatures.size > 0) {
+      const sig = JSON.stringify(obj.elements);
+      if (libElementSignatures.has(sig)) {
+        removedCount++;
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  return { remainingItems, removedCount };
+}
+
+/** Load a specific library (.excalidrawlib) into an Excalidraw canvas instance with fallback */
+export async function loadLibraryToExcalidraw(
+  sourcePath: string,
+  excalidrawAPI: ExcalidrawImperativeAPI,
+  libId?: string
+): Promise<number> {
+  const formattedItems = await fetchAndFormatLibraryItems(sourcePath, libId);
 
   await excalidrawAPI.updateLibrary({
     libraryItems: formattedItems as Parameters<ExcalidrawImperativeAPI["updateLibrary"]>[0]["libraryItems"],
@@ -150,45 +245,18 @@ export async function loadLibraryToExcalidraw(
 /** Remove a specific library's items from an Excalidraw canvas instance */
 export async function removeLibraryFromExcalidraw(
   sourcePath: string,
-  excalidrawAPI: ExcalidrawImperativeAPI
+  excalidrawAPI: ExcalidrawImperativeAPI,
+  libId?: string
 ): Promise<number> {
   const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
-  const baseUrl = import.meta.env.BASE_URL.endsWith("/")
-    ? import.meta.env.BASE_URL
-    : `${import.meta.env.BASE_URL}/`;
-
-  const localUrl = `${baseUrl}excalidraw-libraries/libraries/${cleanPath}`;
-  const cdnUrl = `${CDN_BASE_URL}/${cleanPath}`;
-
-  let data: Record<string, unknown> | unknown[] | null = null;
-
+  const safeTag = (libId || cleanPath).replace(/[^a-zA-Z0-9_-]/g, "_");
+  let rawItems: unknown[] = [];
   try {
-    const res = await fetch(localUrl);
-    const contentType = res.headers.get("content-type") || "";
-    if (res.ok && !contentType.includes("text/html")) {
-      const text = await res.text();
-      data = JSON.parse(text);
-    }
+    rawItems = await fetchRawLibraryItems(sourcePath);
   } catch {
-    // fall through to CDN
+    rawItems = [];
   }
 
-  if (!data) {
-    const res = await fetch(cdnUrl);
-    if (!res.ok) throw new Error(`Failed to load library from CDN at ${cleanPath}`);
-    data = await res.json();
-  }
-
-  const rawRecord = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
-  const rawItems: unknown[] = rawRecord?.libraryItems && Array.isArray(rawRecord.libraryItems)
-    ? (rawRecord.libraryItems as unknown[])
-    : rawRecord?.library && Array.isArray(rawRecord.library)
-    ? (rawRecord.library as unknown[])
-    : Array.isArray(data)
-    ? data
-    : [];
-
-  // Collect the IDs of items in this library to remove
   const libItemIds = new Set<string>();
   rawItems.forEach((item: unknown) => {
     if (typeof item === "object" && item !== null && "id" in item) {
@@ -196,7 +264,6 @@ export async function removeLibraryFromExcalidraw(
     }
   });
 
-  // Build a set of element JSON signatures for array-type items (fallback matching)
   const libElementSignatures = new Set<string>();
   rawItems.forEach((item: unknown) => {
     if (Array.isArray(item)) {
@@ -210,15 +277,31 @@ export async function removeLibraryFromExcalidraw(
 
   // Use the callback form of updateLibrary to access current items directly
   await excalidrawAPI.updateLibrary({
-    libraryItems: ((currentItems: unknown[]) => {
-      const filtered = currentItems.filter((existingItem: unknown) => {
+    libraryItems: ((currentItems: readonly unknown[]) => {
+      const filtered = (currentItems as unknown[]).filter((existingItem: unknown) => {
         if (typeof existingItem !== "object" || existingItem === null) return true;
         const obj = existingItem as Record<string, unknown>;
 
-        // Match by ID
-        if ("id" in obj && typeof obj.id === "string" && libItemIds.has(obj.id)) {
+        // Match by tag
+        if (libId && obj._libraryId === libId) {
           removedCount++;
           return false;
+        }
+        if (cleanPath && obj._librarySource === cleanPath) {
+          removedCount++;
+          return false;
+        }
+
+        // Match by ID
+        if (typeof obj.id === "string") {
+          if (obj.id.startsWith(`lib-${safeTag}-`)) {
+            removedCount++;
+            return false;
+          }
+          if (libItemIds.has(obj.id)) {
+            removedCount++;
+            return false;
+          }
         }
 
         // Match by element content signature
@@ -233,7 +316,7 @@ export async function removeLibraryFromExcalidraw(
         return true;
       });
       return filtered;
-    }) as Parameters<ExcalidrawImperativeAPI["updateLibrary"]>[0]["libraryItems"],
+    }) as unknown as Parameters<ExcalidrawImperativeAPI["updateLibrary"]>[0]["libraryItems"],
     merge: false,
     openLibraryMenu: false,
   });
@@ -249,6 +332,7 @@ export interface ExcalidrawCategoryDef {
 
 export const EXCALIDRAW_CATEGORIES: ExcalidrawCategoryDef[] = [
   { id: "all", label: "All Libraries" },
+  { id: "added", label: "Added to DrawFlow" },
   { id: "system", label: "System Design & Cloud", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
   { id: "ui", label: "UI & Wireframes", keywords: ["ui", "wireframe", "mobile", "android", "ios", "gadget", "component", "design"] },
   { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },

@@ -487,6 +487,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => {
         const newTabs = [...state.tabs];
         const [moved] = newTabs.splice(oldIndex, 1);
+        if (!moved) return state;
         newTabs.splice(newIndex, 0, moved);
         return { tabs: newTabs };
       });

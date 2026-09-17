@@ -16,8 +16,8 @@ import {
   Layers,
   Boxes,
   GitBranch,
-  ExternalLink,
-  BookOpen
+  BookOpen,
+  CheckCircle2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -79,6 +79,7 @@ function getTypeConfig(type: string) {
 
 const EXCAL_ICONS: Record<string, React.ReactNode> = {
   all: <LayoutGrid className="w-3.5 h-3.5" />,
+  added: <CheckCircle2 className="w-3.5 h-3.5 text-green" />,
   system: <Cloud className="w-3.5 h-3.5" />,
   ui: <Layers className="w-3.5 h-3.5" />,
   icons: <Boxes className="w-3.5 h-3.5" />,
@@ -215,6 +216,7 @@ export function LibrarySidebar() {
   const setLibraryTab = useAppStore((s) => s.setLibraryTab);
   const excalCategory = useAppStore((s) => s.libraryExcalidrawCategory);
   const setExcalCategory = useAppStore((s) => s.setLibraryExcalidrawCategory);
+  const storeAddedIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
 
   const [activeChip, setActiveChip] = useState<string>("All");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -376,9 +378,12 @@ export function LibrarySidebar() {
 
   // Compute Excalidraw counts
   const excalCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: excalLibraries.length };
+    const counts: Record<string, number> = { 
+      all: excalLibraries.length,
+      added: storeAddedIds.length,
+    };
     EXCALIDRAW_CATEGORIES.forEach((cat) => {
-      if (cat.id === "all") return;
+      if (cat.id === "all" || cat.id === "added") return;
       if (cat.keywords) {
         const matching = excalLibraries.filter((lib) =>
           cat.keywords!.some((kw) => lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw))
@@ -387,7 +392,7 @@ export function LibrarySidebar() {
       }
     });
     return counts;
-  }, [excalLibraries]);
+  }, [excalLibraries, storeAddedIds]);
 
   return (
     <div className="lib-sidebar">
@@ -518,16 +523,6 @@ export function LibrarySidebar() {
                 </button>
               );
             })}
-
-            <div className="mt-4 pt-3 border-t border-border-1 px-1">
-              <button
-                onClick={() => navigate("/drawflows")}
-                className="w-full py-2 px-2.5 rounded-lg bg-bg-2 hover:bg-accent hover:text-white border border-border-1 text-text-2 hover:border-accent text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm"
-              >
-                <span>Open DrawFlow Studio</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            </div>
           </div>
         ) : isSearchMode ? (
           /* ---- SERVICENOW SEARCH RESULTS ---- */
