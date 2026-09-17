@@ -83,14 +83,14 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
 
           <div className="flex items-center gap-3">
             {/* Search Input */}
-            <div className="relative flex items-center w-56">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 text-text-3 pointer-events-none" />
+            <div className="lib-search-container" style={{ width: "220px" }}>
+              <Search className="lib-search-icon" />
               <input
                 type="text"
                 placeholder="Filter collections..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-8 pl-8 pr-3 rounded-lg bg-bg-2 border border-border-1 text-xs text-text-1 focus:outline-none focus:border-accent"
+                className="lib-search-input"
               />
             </div>
 

@@ -638,7 +638,9 @@ export function ApiTester() {
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
   const [settingsEnvId, setSettingsEnvId] = useState<string>("global");
   const [showEnvDropdown, setShowEnvDropdown] = useState(false);
+  const [envDropdownPos, setEnvDropdownPos] = useState({ top: 0, right: 0 });
   const envDropdownRef = useRef<HTMLDivElement>(null);
+  const envBtnRef = useRef<HTMLButtonElement>(null);
   const [curlImportValue, setCurlImportValue] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<boolean>(false);
@@ -735,7 +737,10 @@ export function ApiTester() {
   // ── Close env dropdown on outside click ─────────────────────
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (envDropdownRef.current && !envDropdownRef.current.contains(event.target as Node)) {
+      if (
+        envDropdownRef.current && !envDropdownRef.current.contains(event.target as Node) &&
+        envBtnRef.current && !envBtnRef.current.contains(event.target as Node)
+      ) {
         setShowEnvDropdown(false);
       }
     }
@@ -1290,9 +1295,15 @@ export function ApiTester() {
           rightContent={
             <>
               <div className="tabs-toolbar-sep" />
-              <div style={{ position: 'relative' }} ref={envDropdownRef}>
-                <button 
-                  onClick={() => setShowEnvDropdown(!showEnvDropdown)}
+              <button 
+                  ref={envBtnRef}
+                  onClick={() => {
+                    if (!showEnvDropdown && envBtnRef.current) {
+                      const rect = envBtnRef.current.getBoundingClientRect();
+                      setEnvDropdownPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                    }
+                    setShowEnvDropdown(!showEnvDropdown);
+                  }}
                   className="console-toggle-btn"
                   style={{ gap: '6px' }}
                 >
@@ -1302,81 +1313,6 @@ export function ApiTester() {
                   </span>
                   <ChevronDown className="h-3 w-3" style={{ opacity: 0.5 }} />
                 </button>
-
-                {showEnvDropdown && (
-                  <div style={{ 
-                    position: 'absolute', 
-                    top: '100%', 
-                    right: 0, 
-                    marginTop: '8px', 
-                    background: 'var(--bg-1)', 
-                    border: '1px solid var(--border-1)', 
-                    borderRadius: '8px', 
-                    padding: '6px', 
-                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
-                    zIndex: 50,
-                    minWidth: '180px'
-                  }}>
-                    <button 
-                      style={{ 
-                        width: '100%', 
-                        textAlign: 'left', 
-                        padding: '8px 12px', 
-                        background: store.activeEnvironmentId === null ? 'var(--bg-hover)' : 'transparent', 
-                        border: 'none', 
-                        borderRadius: '4px', 
-                        fontSize: '13px', 
-                        fontWeight: 500, 
-                        color: 'var(--text-1)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        store.setActiveEnvironment(null);
-                        setShowEnvDropdown(false);
-                      }}
-                      onMouseEnter={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'var(--bg-hover)' }}
-                      onMouseLeave={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'transparent' }}
-                    >
-                      <span>Global Only</span>
-                      {store.activeEnvironmentId === null && <Check className="h-3 w-3 text-accent" />}
-                    </button>
-                    {store.environments.map(env => (
-                      <button 
-                        key={env.id}
-                        style={{ 
-                          width: '100%', 
-                          textAlign: 'left', 
-                          padding: '8px 12px', 
-                          background: store.activeEnvironmentId === env.id ? 'var(--bg-hover)' : 'transparent', 
-                          border: 'none', 
-                          borderRadius: '4px', 
-                          fontSize: '13px', 
-                          fontWeight: 500, 
-                          color: 'var(--text-1)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between'
-                        }}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          store.setActiveEnvironment(env.id);
-                          setShowEnvDropdown(false);
-                        }}
-                        onMouseEnter={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'var(--bg-hover)' }}
-                        onMouseLeave={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'transparent' }}
-                      >
-                        <span>{env.name}</span>
-                        {store.activeEnvironmentId === env.id && <Check className="h-3 w-3 text-accent" />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
               
               <div className="tabs-toolbar-sep" />
 
@@ -1395,6 +1331,85 @@ export function ApiTester() {
             </>
           }
         />
+
+        {/* Environment dropdown — rendered as fixed-position portal to avoid overflow clipping */}
+        {showEnvDropdown && (
+          <>
+            <div className="dropdown-backdrop" onClick={() => setShowEnvDropdown(false)} />
+            <div
+              ref={envDropdownRef}
+              style={{ 
+                position: 'fixed', 
+                top: envDropdownPos.top, 
+                right: envDropdownPos.right, 
+                background: 'var(--bg-1)', 
+                border: '1px solid var(--border-1)', 
+                borderRadius: '8px', 
+                padding: '6px', 
+                boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+                zIndex: 1000,
+                minWidth: '180px'
+              }}>
+              <button 
+                style={{ 
+                  width: '100%', 
+                  textAlign: 'left', 
+                  padding: '8px 12px', 
+                  background: store.activeEnvironmentId === null ? 'var(--bg-hover)' : 'transparent', 
+                  border: 'none', 
+                  borderRadius: '4px', 
+                  fontSize: '13px', 
+                  fontWeight: 500, 
+                  color: 'var(--text-1)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  store.setActiveEnvironment(null);
+                  setShowEnvDropdown(false);
+                }}
+                onMouseEnter={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                onMouseLeave={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'transparent' }}
+              >
+                <span>Global Only</span>
+                {store.activeEnvironmentId === null && <Check className="h-3 w-3 text-accent" />}
+              </button>
+              {store.environments.map(env => (
+                <button 
+                  key={env.id}
+                  style={{ 
+                    width: '100%', 
+                    textAlign: 'left', 
+                    padding: '8px 12px', 
+                    background: store.activeEnvironmentId === env.id ? 'var(--bg-hover)' : 'transparent', 
+                    border: 'none', 
+                    borderRadius: '4px', 
+                    fontSize: '13px', 
+                    fontWeight: 500, 
+                    color: 'var(--text-1)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    store.setActiveEnvironment(env.id);
+                    setShowEnvDropdown(false);
+                  }}
+                  onMouseEnter={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                  onMouseLeave={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'transparent' }}
+                >
+                  <span>{env.name}</span>
+                  {store.activeEnvironmentId === env.id && <Check className="h-3 w-3 text-accent" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">

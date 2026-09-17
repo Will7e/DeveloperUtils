@@ -12,7 +12,6 @@ import {
   ChevronDown, 
   ExternalLink, 
   Sparkles, 
-  Hash, 
   Wrench,
   Search,
   ArrowRight,
@@ -230,14 +229,7 @@ function ApiDocumentationView({
                 {badge.icon}
                 {badge.label}
               </span>
-              <div className="flex items-center gap-1 text-[11px] font-mono text-text-3 font-semibold px-2 py-0.5 rounded-full bg-bg-2 border border-border-1">
-                <Hash size={11} />
-                <span>{selectedApi.methods.length} methods</span>
-              </div>
-              <div className="flex items-center gap-1 text-[11px] text-yellow opacity-90 font-medium px-2 py-0.5 rounded-full bg-yellow/10 border border-yellow/20">
-                <Sparkles size={11} />
-                <span>Verified</span>
-              </div>
+
             </div>
 
             {/* Consolidated Method Controls: Filter + Count + Collapse/Expand */}
