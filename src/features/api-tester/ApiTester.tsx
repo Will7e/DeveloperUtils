@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import {
   Send,
   Plus,
@@ -545,6 +546,34 @@ export function ApiTester() {
     setupMonacoTheme(monaco);
     const theme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
+
+    registerMonacoFormatShortcut(editor, monaco);
+  }, []);
+
+  const formatGraphqlQuery = useCallback((value: string) => {
+    if (!value || !value.trim()) return value;
+    try {
+      let query = value.replace(/\s+/g, ' ');
+      let indent = 0;
+      let formatted = "";
+      for (let i = 0; i < query.length; i++) {
+        const char = query[i];
+        if (char === '{') {
+          indent += 2;
+          formatted += ' {\n' + ' '.repeat(indent);
+        } else if (char === '}') {
+          indent = Math.max(0, indent - 2);
+          formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
+        } else if (char === ',') {
+          formatted += ',\n' + ' '.repeat(indent);
+        } else {
+          formatted += char;
+        }
+      }
+      return formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
+    } catch {
+      return value;
+    }
   }, []);
 
   const handleGraphqlEditorMount: OnMount = useCallback((editor, monaco) => {
@@ -552,39 +581,45 @@ export function ApiTester() {
     const theme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(theme === "light" ? "devutils-light" : "devutils-dark");
 
+    // Register Cmd+S / Ctrl+S for GraphQL
+    registerMonacoFormatShortcut(editor, monaco, {
+      onFormat: () => {
+        const val = editor.getValue();
+        const formatted = formatGraphqlQuery(val);
+        if (formatted !== val) {
+          editor.setValue(formatted);
+          store.setGraphqlQuery(formatted);
+          useAppStore.getState().addToast({ message: "GraphQL query formatted", type: "success", duration: 1500 });
+        }
+      },
+    });
+
     // Bind blur event for auto-formatting
     editor.onDidBlurEditorText(() => {
       const value = editor.getValue();
       if (!value || !value.trim()) return;
-      try {
-        let query = value;
-        query = query.replace(/\s+/g, ' ');
-        let indent = 0;
-        let formatted = "";
-        for (let i = 0; i < query.length; i++) {
-          const char = query[i];
-          if (char === '{') {
-            indent += 2;
-            formatted += ' {\n' + ' '.repeat(indent);
-          } else if (char === '}') {
-            indent = Math.max(0, indent - 2);
-            formatted += '\n' + ' '.repeat(indent) + '}\n' + ' '.repeat(indent);
-          } else if (char === ',') {
-            formatted += ',\n' + ' '.repeat(indent);
-          } else {
-            formatted += char;
-          }
-        }
-        formatted = formatted.replace(/\n\s*\n/g, '\n').replace(/ +/g, ' ').replace(/\{ \n/g, '{\n').trim();
-        if (formatted !== value) {
-          editor.setValue(formatted);
-          store.setGraphqlQuery(formatted);
-        }
-      } catch (e) {
-        console.error("Failed to auto-format GraphQL query", e);
+      const formatted = formatGraphqlQuery(value);
+      if (formatted !== value) {
+        editor.setValue(formatted);
+        store.setGraphqlQuery(formatted);
       }
     });
-  }, [store]);
+  }, [store, formatGraphqlQuery]);
+
+  // Listen for global format event when /api-tester is active
+  useEffect(() => {
+    const handleExternalFormat = () => {
+      const activeTab = useApiTesterStore.getState().tabs.find(
+        (t) => t.id === useApiTesterStore.getState().activeTabId
+      );
+      if (activeTab?.bodyType === "json") {
+        useApiTesterStore.getState().formatActiveTabJsonBody();
+        useAppStore.getState().addToast({ message: "JSON formatted", type: "success", duration: 1500 });
+      }
+    };
+    window.addEventListener("devutils:format-api-tester", handleExternalFormat);
+    return () => window.removeEventListener("devutils:format-api-tester", handleExternalFormat);
+  }, []);
 
   // Tab states
   const [requestTab, setRequestTab] = useState<string>("params");

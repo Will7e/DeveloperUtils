@@ -8,6 +8,7 @@ import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData, type XmlTreeNode } from "./xmlUtils";
 import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtils";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { 
   FileJson, 
   FileCode,
@@ -88,11 +89,16 @@ export function FormatterTool() {
     const initTheme = useAppStore.getState().editorSettings.theme;
     monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");
 
-    // Add format shortcut (Ctrl+Enter or Cmd+Enter)
+    // Register Cmd+S / Ctrl+S and Shift+Alt+F format shortcut
+    registerMonacoFormatShortcut(editor, monaco, {
+      onFormat: () => {
+        handleFormatRef.current?.();
+      },
+    });
+
+    // Also support Ctrl+Enter or Cmd+Enter
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      if (handleFormatRef.current) {
-        handleFormatRef.current();
-      }
+      handleFormatRef.current?.();
     });
   }, []);
 
@@ -185,29 +191,47 @@ export function FormatterTool() {
   };
 
   const handleFormat = async () => {
-    if (!currentInput) return;
-    // For JSON we need valid input, for XML we can try even if there are errors
-    if (type === "json" && error) return;
-    
+    const input = formatterEditorRef.current?.getValue() ?? currentInput;
+    if (!input.trim()) return;
+
     try {
+      let formatted = "";
       if (type === "json") {
-        updateContent("json", activeFile.id, formatJsonRobust(currentInput, jsonSettings));
+        formatted = formatJsonRobust(input, jsonSettings);
       } else {
-        updateContent("xml", activeFile.id, formatXml(currentInput, " ".repeat(jsonSettings.tabSize)));
+        formatted = formatXml(input, " ".repeat(jsonSettings.tabSize));
+      }
+      updateContent(type, activeFile.id, formatted);
+      if (formatterEditorRef.current && formatterEditorRef.current.getValue() !== formatted) {
+        formatterEditorRef.current.setValue(formatted);
       }
       addToast({
         message: `${type.toUpperCase()} formatted successfully`,
         type: "success",
         duration: 2000
       });
-    } catch {
-      // Error handled by useMemo
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast({
+        message: `Formatting failed: ${msg}`,
+        type: "error",
+        duration: 2500
+      });
     }
   };
 
   useEffect(() => {
     handleFormatRef.current = handleFormat;
   });
+
+  // Listen for global format event when /formatters is active
+  useEffect(() => {
+    const handleExternalFormat = () => {
+      handleFormatRef.current?.();
+    };
+    window.addEventListener("devutils:format-formatter", handleExternalFormat);
+    return () => window.removeEventListener("devutils:format-formatter", handleExternalFormat);
+  }, []);
 
   const handleClear = () => {
     updateContent(type, activeFile.id, "");
@@ -336,11 +360,11 @@ export function FormatterTool() {
           </ActionTooltip>
           <div className="toolbar-sep" />
           <div className="flex items-center gap-1.5">
-            <ActionTooltip content={`Prettify ${type.toUpperCase()}`} side="bottom">
+            <ActionTooltip content={`Prettify ${type.toUpperCase()} (⌘S)`} side="bottom">
               <button 
                 className="toolbar-btn" 
                 onClick={handleFormat}
-                disabled={!currentInput || (type === "json" && !!error)}
+                disabled={!currentInput.trim()}
               >
                 <Maximize2 className="h-3.5 w-3.5" />
                 Format

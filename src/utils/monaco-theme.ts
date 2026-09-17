@@ -1,4 +1,6 @@
 import { Monaco } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
+import { registerMonacoFormatShortcut } from "./monaco-format";
 
 export function setupMonacoTheme(monaco: Monaco) {
   // Configure TypeScript/JavaScript defaults
@@ -113,4 +115,14 @@ export function setupMonacoTheme(monaco: Monaco) {
       "diffEditor.removedLineBackground": "#dc262610",
     },
   });
+
+  // Automatically register Cmd+S / Ctrl+S and Shift+Alt+F formatting for every created editor
+  const monacoAny = monaco as unknown as { __devutilsFormatListenerAttached?: boolean };
+  if (!monacoAny.__devutilsFormatListenerAttached) {
+    monacoAny.__devutilsFormatListenerAttached = true;
+    monaco.editor.onDidCreateEditor((codeEditor: editor.ICodeEditor) => {
+      registerMonacoFormatShortcut(codeEditor as editor.IStandaloneCodeEditor, monaco);
+    });
+  }
 }
+

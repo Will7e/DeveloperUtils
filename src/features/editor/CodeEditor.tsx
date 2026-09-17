@@ -71,10 +71,12 @@ export function CodeEditor() {
         const activeFile = state.files.find((f) => f.id === state.activeFileId);
         
         if (!activeFile) return;
+        const content = editor.getValue();
 
         if (supportsFormatting(activeFile.language)) {
           try {
-            const formatted = await formatCode(activeFile.content, activeFile.language);
+            const formatted = await formatCode(content, activeFile.language);
+            editor.setValue(formatted);
             state.updateFileContent(activeFile.id, formatted);
             state.saveFile(activeFile.id);
             state.addToast({ 
@@ -83,14 +85,18 @@ export function CodeEditor() {
               duration: 1500 
             });
           } catch (error) {
-            console.error("Formatting failed:", error);
+            state.updateFileContent(activeFile.id, content);
+            state.saveFile(activeFile.id);
+            const msg = error instanceof Error ? error.message : "formatting error";
             state.addToast({ 
-              message: "Saved (formatting error)", 
+              message: `Saved (${msg})`, 
               type: "info", 
-              duration: 1500 
+              duration: 2000 
             });
           }
         } else {
+          state.updateFileContent(activeFile.id, content);
+          state.saveFile(activeFile.id);
           state.addToast({ 
             message: "Saved", 
             type: "info", 

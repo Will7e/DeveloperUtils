@@ -130,27 +130,49 @@ export function useKeyboardShortcuts() {
         }
       }
 
-      // Ctrl/Cmd + S = Format & Save
-      if (mod && e.key === "s") {
-        if (!window.location.pathname.includes("/compiler") && window.location.pathname !== "/") {
+      // Ctrl/Cmd + S = Universal Format & Save
+      if (mod && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+
+        const pathname = window.location.pathname;
+
+        // 1. Formatters (/formatters)
+        if (pathname.startsWith("/formatters")) {
+          window.dispatchEvent(new CustomEvent("devutils:format-formatter"));
           return;
         }
-        e.preventDefault();
-        if (!activeFile) return;
 
-        if (supportsFormatting(activeFile.language)) {
-          try {
-            const formatted = await formatCode(activeFile.content, activeFile.language);
-            updateFileContent(activeFile.id, formatted);
+        // 2. Diff Checker (/diff)
+        if (pathname.startsWith("/diff")) {
+          window.dispatchEvent(new CustomEvent("devutils:format-diff"));
+          return;
+        }
+
+        // 3. API Tester (/api-tester)
+        if (pathname.startsWith("/api-tester")) {
+          window.dispatchEvent(new CustomEvent("devutils:format-api-tester"));
+          return;
+        }
+
+        // 4. Compiler / Code Editor (/compiler and /)
+        if (pathname === "/" || pathname.startsWith("/compiler")) {
+          if (!activeFile) return;
+
+          if (supportsFormatting(activeFile.language)) {
+            try {
+              const formatted = await formatCode(activeFile.content, activeFile.language);
+              updateFileContent(activeFile.id, formatted);
+              useAppStore.getState().saveFile(activeFile.id);
+              addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
+            } catch {
+              useAppStore.getState().saveFile(activeFile.id);
+              addToast({ message: "Saved (formatting not available)", type: "info", duration: 1500 });
+            }
+          } else {
             useAppStore.getState().saveFile(activeFile.id);
-            addToast({ message: "Formatted & saved", type: "success", duration: 1500 });
-          } catch {
-            useAppStore.getState().saveFile(activeFile.id);
-            addToast({ message: "Saved (formatting not available)", type: "info", duration: 1500 });
+            addToast({ message: "Saved", type: "info", duration: 1500 });
           }
-        } else {
-          useAppStore.getState().saveFile(activeFile.id);
-          addToast({ message: "Saved", type: "info", duration: 1500 });
+          return;
         }
         return;
       }

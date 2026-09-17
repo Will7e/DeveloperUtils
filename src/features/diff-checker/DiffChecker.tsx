@@ -11,6 +11,7 @@ import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor,
 import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
 import { SortableTab } from "@/components/ui/SortableTab";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import {
   ArrowLeftRight,
   Trash2,
@@ -298,7 +299,10 @@ export function DiffChecker() {
   const handleFormatBoth = useCallback(async () => {
     const orig = originalEditorRef.current?.getValue() ?? localOriginal;
     const mod = modifiedEditorRef.current?.getValue() ?? localModified;
-    if (!orig.trim() && !mod.trim()) return;
+    if (!orig.trim() && !mod.trim()) {
+      addToast({ message: "Nothing to format", type: "info", duration: 1500 });
+      return;
+    }
 
     setIsFormatting(true);
     try {
@@ -306,7 +310,13 @@ export function DiffChecker() {
       if (res.changed) {
         if (res.original !== orig) applyFormattedValue("original", res.original);
         if (res.modified !== mod) applyFormattedValue("modified", res.modified);
-        addToast({ message: `Formatted both sides (${activeSession.language})`, type: "success" });
+        if (res.original !== orig && res.modified !== mod) {
+          addToast({ message: `Formatted both sides (${activeSession.language})`, type: "success" });
+        } else if (res.original !== orig) {
+          addToast({ message: `Formatted original (${activeSession.language})`, type: "success" });
+        } else {
+          addToast({ message: `Formatted modified (${activeSession.language})`, type: "success" });
+        }
       } else if (res.errors.length > 0) {
         addToast({ message: `Formatting: ${res.errors.join("; ")}`, type: "error" });
       } else {
@@ -318,6 +328,20 @@ export function DiffChecker() {
       setIsFormatting(false);
     }
   }, [activeSession.language, localOriginal, localModified, applyFormattedValue, addToast]);
+
+  const handleFormatBothRef = useRef<(() => Promise<void>) | null>(null);
+  useEffect(() => {
+    handleFormatBothRef.current = handleFormatBoth;
+  });
+
+  // Listen for global format event when /diff is active
+  useEffect(() => {
+    const handleExternalFormat = () => {
+      handleFormatBothRef.current?.();
+    };
+    window.addEventListener("devutils:format-diff", handleExternalFormat);
+    return () => window.removeEventListener("devutils:format-diff", handleExternalFormat);
+  }, []);
 
   // Auto-format on Paste
   const handlePasteEvent = useCallback((side: "original" | "modified") => {
@@ -381,6 +405,14 @@ export function DiffChecker() {
     const modEditor = diffEditor.getModifiedEditor();
     originalEditorRef.current = origEditor;
     modifiedEditorRef.current = modEditor;
+
+    // Register Cmd+S / Ctrl+S and Shift+Alt+F format shortcut for both editors
+    registerMonacoFormatShortcut(origEditor, monaco, {
+      onFormat: () => handleFormatBothRef.current?.(),
+    });
+    registerMonacoFormatShortcut(modEditor, monaco, {
+      onFormat: () => handleFormatBothRef.current?.(),
+    });
 
     // Diff update listener
     const dDiff = diffEditor.onDidUpdateDiff(() => {
@@ -711,7 +743,7 @@ export function DiffChecker() {
           <div className="tabs-toolbar-sep" />
 
           {/* Format Both */}
-          <ActionTooltip content="Auto-format both inputs (Shift+Alt+F)">
+          <ActionTooltip content="Auto-format both inputs (⌘S / Shift+Alt+F)">
             <button
               className="toolbar-btn"
               onClick={handleFormatBoth}
