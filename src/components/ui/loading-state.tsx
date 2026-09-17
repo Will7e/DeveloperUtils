@@ -1,10 +1,11 @@
 // ============================================================
 // Unified LoadingState Component — Full-page, section, and inline states
+// Powered by DevUtils branded loader (pulsing bolt + gradient text + sliding bar)
 // ============================================================
 
 import React from "react";
 import { cn } from "@/lib/utils";
-import { Spinner, type SpinnerSize, type SpinnerVariant } from "./spinner";
+import { DevUtilsLoader, type DevUtilsLoaderSize } from "./devutils-loader";
 
 export interface LoadingStateProps {
   /** Primary heading or title */
@@ -13,10 +14,8 @@ export interface LoadingStateProps {
   message?: string;
   /** Secondary detailed description text */
   description?: string;
-  /** Spinner size */
-  size?: SpinnerSize;
-  /** Spinner color variant */
-  variant?: SpinnerVariant;
+  /** Size variant */
+  size?: DevUtilsLoaderSize;
   /** Render as full-page or full-container centered layout */
   fullPage?: boolean;
   /** Render as compact inline horizontal layout */
@@ -34,15 +33,15 @@ export function LoadingState({
   message,
   description,
   size,
-  variant = "accent",
   fullPage = false,
   inline = false,
   icon,
   minHeight,
   className,
 }: LoadingStateProps) {
-  // Determine effective spinner size based on mode
-  const effectiveSize: SpinnerSize = size || (fullPage ? "xl" : inline ? "sm" : "md");
+  // Determine effective loader size based on mode
+  const effectiveSize: DevUtilsLoaderSize =
+    size || (fullPage ? "xl" : inline ? "xs" : "md");
   const displayTitle = title || (!description ? message : undefined);
   const displayDescription = description || (title ? message : undefined);
 
@@ -54,8 +53,12 @@ export function LoadingState({
           className
         )}
       >
-        {icon || <Spinner size={effectiveSize} variant={variant} />}
-        {(displayTitle || message) && <span>{displayTitle || message}</span>}
+        <DevUtilsLoader
+          size={effectiveSize}
+          inline
+          icon={icon}
+          message={displayTitle || message}
+        />
       </div>
     );
   }
@@ -64,9 +67,7 @@ export function LoadingState({
     <div
       className={cn(
         "relative flex flex-col items-center justify-center w-full overflow-hidden loading-fade-in",
-        fullPage
-          ? "flex-1 h-full min-h-[360px] p-8"
-          : "p-6",
+        fullPage ? "flex-1 h-full min-h-[360px] p-8" : "p-6",
         className
       )}
       style={minHeight ? { minHeight } : undefined}
@@ -75,25 +76,13 @@ export function LoadingState({
       {fullPage && <div className="loading-ambient-glow" />}
 
       <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
-        {icon ? (
-          <div className="mb-4">{icon}</div>
-        ) : (
-          <div className="mb-4">
-            <Spinner size={effectiveSize} variant={variant} />
-          </div>
-        )}
-
-        {displayTitle && (
-          <h3 className="text-sm font-semibold text-text-1 tracking-tight mb-1">
-            {displayTitle}
-          </h3>
-        )}
-
-        {displayDescription && (
-          <p className="text-xs text-text-2 leading-relaxed font-normal">
-            {displayDescription}
-          </p>
-        )}
+        <DevUtilsLoader
+          size={effectiveSize}
+          icon={icon}
+          title={displayTitle}
+          description={displayDescription}
+          showBar={true}
+        />
       </div>
     </div>
   );

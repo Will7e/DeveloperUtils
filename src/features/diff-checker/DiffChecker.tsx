@@ -11,7 +11,7 @@ import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
-import { Spinner } from "@/components/ui/spinner";
+import { DevUtilsLoader } from "@/components/ui/devutils-loader";
 import {
   ArrowLeftRight,
   Trash2,
@@ -701,7 +701,7 @@ export function DiffChecker() {
                 disabled={isFormatting}
               >
                 {isFormatting ? (
-                  <Spinner size="xs" variant="accent" />
+                  <DevUtilsLoader size="xs" />
                 ) : (
                   <Sparkles className="h-3.5 w-3.5 text-accent" />
                 )}

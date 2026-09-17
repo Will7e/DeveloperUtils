@@ -1663,28 +1663,7 @@
   align-items: center;
   justify-content: center;
   flex: 1;
-  gap: 16px;
-}
-
-.api-spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid var(--border-2);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: api-spin 0.7s linear infinite;
-}
-
-@keyframes api-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.api-loading-text {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
+  padding: 32px 16px;
 }
 
 /* ── Error Card ───────────────────────────────────────────── */

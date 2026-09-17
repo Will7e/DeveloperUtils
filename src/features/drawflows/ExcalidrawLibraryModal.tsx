@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import { LoadingState } from "@/components/ui/loading-state";
 import { useAppStore } from "@/stores/app.store";
 import {
   getExcalidrawLibraries, loadLibraryToExcalidraw,
@@ -53,7 +54,9 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
           <button onClick={onClose}>✕ Close</button>
         </div>
 
-        {loading ? <p>Loading...</p> : (
+        {loading ? (
+          <LoadingState size="sm" message="Loading libraries..." minHeight={160} />
+        ) : (
           <div>
             {libs.map((lib) => (
               <div key={lib.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 0", display: "flex", gap: 12, alignItems: "flex-start" }}>

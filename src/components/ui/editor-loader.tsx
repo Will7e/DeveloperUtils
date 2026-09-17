@@ -1,10 +1,11 @@
 // ============================================================
 // EditorLoadingFallback — Standardized loading placeholder for Monaco editors
+// Powered by DevUtils branded loader (pulsing bolt + gradient text + sliding bar)
 // ============================================================
 
 import React from "react";
 import { cn } from "@/lib/utils";
-import { Spinner } from "./spinner";
+import { DevUtilsLoader } from "./devutils-loader";
 
 export interface EditorLoadingFallbackProps {
   message?: string;
@@ -22,11 +23,13 @@ export function EditorLoadingFallback({
         className
       )}
     >
-      <div className="flex items-center gap-3 px-4 py-2 rounded-lg border border-border-1 bg-bg-1/40 backdrop-blur-xs shadow-xs">
-        <Spinner size="sm" variant="accent" />
-        <span className="text-xs font-mono text-text-3 tracking-wide">
-          {message}
-        </span>
+      <div className="flex flex-col items-center gap-2.5 px-6 py-4 rounded-xl border border-border-1 bg-bg-1/60 backdrop-blur-md shadow-sm">
+        <DevUtilsLoader size="sm" showBar />
+        {message && (
+          <span className="text-[11px] font-mono text-text-3 tracking-wide mt-0.5">
+            {message}
+          </span>
+        )}
       </div>
     </div>
   );

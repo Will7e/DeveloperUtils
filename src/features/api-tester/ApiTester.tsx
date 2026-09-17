@@ -2571,10 +2571,11 @@ export function ApiTester() {
                 {/* Loading */}
                 {activeTab.loading && (
                   <div className="api-loading-state">
-                    <div className="api-spinner" />
-                    <span className="api-loading-text">
-                      Connecting to server...
-                    </span>
+                    <LoadingState
+                      size="md"
+                      message="Connecting to server..."
+                      description="Sending HTTP request and awaiting response"
+                    />
                   </div>
                 )}
 
