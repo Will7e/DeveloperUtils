@@ -22,7 +22,10 @@ import {
   Maximize2,
   Minimize2,
   X,
-  Boxes
+  Boxes,
+  Plus,
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -1131,7 +1134,6 @@ function ExcalidrawLibraryGallery({
             <ExcalidrawCard 
               key={lib.id} 
               lib={lib} 
-              onUse={() => handleUseInDrawFlow(lib)} 
             />
           ))}
         </div>
@@ -1142,20 +1144,44 @@ function ExcalidrawLibraryGallery({
 
 function ExcalidrawCard({ 
   lib, 
-  onUse 
 }: { 
   lib: ExcalidrawLibraryItem; 
-  onUse: () => void; 
 }) {
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);
+  const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+  const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
+  const storeRemove = useAppStore((s) => s.removeExcalidrawAddedLibraryId);
+  const addToast = useAppStore((s) => s.addToast);
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const isAdded = storeIds.includes(lib.id);
 
   const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
   const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
 
+  const handleAdd = () => {
+    storeAdd(lib.id);
+    addToast({ message: `Added "${lib.name}" to DrawFlow Studio`, type: "success" });
+    navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`);
+  };
+
+  const handleRemove = () => {
+    setLoading(true);
+    storeRemove(lib.id);
+    addToast({ message: `Removed "${lib.name}" from added libraries`, type: "success" });
+    setLoading(false);
+  };
+
   return (
     <div className="lib-excal-card">
       <div className="lib-excal-preview-wrap">
+        {isAdded && (
+          <div className="absolute top-2 right-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-green/15 border border-green/30 text-green text-[10px] font-semibold">
+            <Check className="w-2.5 h-2.5" />
+            Added
+          </div>
+        )}
         {!imgError ? (
           <img
             src={triedCdn ? cdnPreviewUrl : previewUrl}
@@ -1190,13 +1216,19 @@ function ExcalidrawCard({
             <span>v{lib.version || 1} · {lib.created || "2024"}</span>
           </div>
 
-          <button 
-            className="lib-excal-action-btn" 
-            onClick={onUse}
-            title={`Import ${lib.name} into DrawFlow Studio`}
+          <button
+            className={`lib-excal-action-btn ${isAdded ? "lib-excal-action-btn-remove" : ""}`}
+            onClick={isAdded ? handleRemove : handleAdd}
+            disabled={loading}
+            title={isAdded ? `Remove "${lib.name}"` : `Add "${lib.name}" to DrawFlow Studio`}
           >
-            <span>Use in DrawFlow</span>
-            <ArrowRight className="w-3 h-3" />
+            {loading ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /><span>Removing...</span></>
+            ) : isAdded ? (
+              <><Trash2 className="w-3 h-3" /><span>Remove</span></>
+            ) : (
+              <><Plus className="w-3 h-3" /><span>Add to DrawFlow</span></>
+            )}
           </button>
         </div>
       </div>
