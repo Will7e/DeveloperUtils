@@ -4,11 +4,11 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { LoadingState } from "@/components/ui/loading-state";
 import { useAppStore } from "@/stores/app.store";
 import {
-  getExcalidrawLibraries, loadLibraryToExcalidraw,
+  getExcalidrawLibraries, loadLibraryToExcalidraw, removeLibraryFromExcalidraw,
   getExcalidrawLibraryPreviewUrl, getExcalidrawLibraryCdnPreviewUrl,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
-import { X, Search, Check, Plus, Loader2, Boxes } from "lucide-react";
+import { X, Search, Plus, Loader2, Boxes, Trash2 } from "lucide-react";
 
 interface Props { 
   isOpen: boolean; 
@@ -20,11 +20,13 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
   const [libs, setLibs] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const toast = useAppStore((s) => s.addToast);
   const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
   const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
+  const storeRemove = useAppStore((s) => s.removeExcalidrawAddedLibraryId);
 
   const isAdded = useCallback((id: string) => storeIds.includes(id) || added.has(id), [storeIds, added]);
 
@@ -61,6 +63,21 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
       toast({ message: `Failed to load "${lib.name}"`, type: "error" });
     } finally {
       setLoadingId(null);
+    }
+  };
+
+  const handleRemove = async (lib: ExcalidrawLibraryItem) => {
+    if (!excalidrawAPI || !isAdded(lib.id)) return;
+    try {
+      setRemovingId(lib.id);
+      const n = await removeLibraryFromExcalidraw(lib.source, excalidrawAPI);
+      setAdded((p) => { const next = new Set(p); next.delete(lib.id); return next; });
+      storeRemove(lib.id);
+      toast({ message: `Removed "${lib.name}" (${n} shapes) from canvas`, type: "success" });
+    } catch {
+      toast({ message: `Failed to remove "${lib.name}"`, type: "error" });
+    } finally {
+      setRemovingId(null);
     }
   };
 
@@ -125,7 +142,9 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
                     lib={lib}
                     isAdded={addedItem}
                     isLoading={isLoading}
+                    isRemoving={removingId === lib.id}
                     onAdd={() => handleAdd(lib)}
+                    onRemove={() => handleRemove(lib)}
                   />
                 );
               })}
@@ -142,12 +161,16 @@ function ModalExcalidrawCard({
   lib,
   isAdded,
   isLoading,
+  isRemoving,
   onAdd,
+  onRemove,
 }: {
   lib: ExcalidrawLibraryItem;
   isAdded: boolean;
   isLoading: boolean;
+  isRemoving: boolean;
   onAdd: () => void;
+  onRemove: () => void;
 }) {
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);
@@ -193,18 +216,21 @@ function ModalExcalidrawCard({
           </div>
 
           <button
-            className={`lib-excal-action-btn ${isAdded ? "lib-excal-action-btn-added" : ""}`}
-            onClick={onAdd}
-            disabled={isLoading || isAdded}
-          >
-            {isLoading ? (
-              <><Loader2 className="w-3 h-3 animate-spin" /><span>Adding...</span></>
-            ) : isAdded ? (
-              <><Check className="w-3 h-3" /><span>Added</span></>
-            ) : (
-              <><Plus className="w-3 h-3" /><span>Add</span></>
-            )}
-          </button>
+              className={`lib-excal-action-btn ${isAdded ? "lib-excal-action-btn-remove" : ""}`}
+              onClick={isAdded ? onRemove : onAdd}
+              disabled={isLoading || isRemoving}
+              title={isAdded ? `Remove "${lib.name}" from canvas` : `Add "${lib.name}" to canvas`}
+            >
+              {isLoading ? (
+                <><Loader2 className="w-3 h-3 animate-spin" /><span>Adding...</span></>
+              ) : isRemoving ? (
+                <><Loader2 className="w-3 h-3 animate-spin" /><span>Removing...</span></>
+              ) : isAdded ? (
+                <><Trash2 className="w-3 h-3" /><span>Remove</span></>
+              ) : (
+                <><Plus className="w-3 h-3" /><span>Add</span></>
+              )}
+            </button>
         </div>
       </div>
     </div>

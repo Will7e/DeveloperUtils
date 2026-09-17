@@ -240,6 +240,7 @@ export interface AppState {
   updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => void;
   updateExcalidrawLibraryItems: (libraryItems: unknown[]) => void;
   addExcalidrawAddedLibraryId: (id: string) => void;
+  removeExcalidrawAddedLibraryId: (id: string) => void;
   clearExcalidrawAddedLibraryIds: () => void;
 }
 

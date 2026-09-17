@@ -6513,6 +6513,19 @@ html.light .lib-excal-preview-wrap {
   color: var(--green) !important;
 }
 
+.lib-excal-action-btn-remove {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: rgba(239, 68, 68, 0.8) !important;
+  transition: all 0.2s ease;
+}
+
+.lib-excal-action-btn-remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #ef4444 !important;
+}
+
 .lib-excal-action-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

@@ -1062,6 +1062,11 @@ export const useAppStore = create<AppState>()(
             : [...(state.excalidrawAddedLibraryIds || []), id],
         }));
       },
+      removeExcalidrawAddedLibraryId: (id: string) => {
+        set((state) => ({
+          excalidrawAddedLibraryIds: (state.excalidrawAddedLibraryIds || []).filter((libId) => libId !== id),
+        }));
+      },
       clearExcalidrawAddedLibraryIds: () => {
         set({ excalidrawAddedLibraryIds: [] });
       },
