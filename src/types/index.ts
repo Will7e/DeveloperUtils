@@ -149,7 +149,11 @@ export interface AppState {
 
   // Actions
   createFile: (name: string, language: Language, content?: string) => void;
+  duplicateFile: (id: string) => void;
   deleteFile: (id: string) => void;
+  closeOtherFiles: (id: string) => void;
+  closeFilesToRight: (id: string) => void;
+  closeAllFiles: () => void;
   setActiveFile: (id: string) => void;
   reorderFiles: (fromIndex: number, toIndex: number) => void;
   updateFileContent: (id: string, content: string) => void;
@@ -176,7 +180,11 @@ export interface AppState {
   
   // Formatter actions
   createFormatterFile: (type: "json" | "xml", name?: string) => void;
+  duplicateFormatterFile: (type: "json" | "xml", id: string) => void;
   deleteFormatterFile: (type: "json" | "xml", id: string) => void;
+  closeOtherFormatterFiles: (type: "json" | "xml", id: string) => void;
+  closeFormatterFilesToRight: (type: "json" | "xml", id: string) => void;
+  closeAllFormatterFiles: (type: "json" | "xml") => void;
   setActiveFormatterFile: (type: "json" | "xml", id: string) => void;
   updateFormatterFileContent: (type: "json" | "xml", id: string, content: string) => void;
   renameFormatterFile: (type: "json" | "xml", id: string, name: string) => void;
@@ -185,7 +193,11 @@ export interface AppState {
 
   // Comparator actions
   createComparatorSession: (name?: string) => void;
+  duplicateComparatorSession: (id: string) => void;
   deleteComparatorSession: (id: string) => void;
+  closeOtherComparatorSessions: (id: string) => void;
+  closeComparatorSessionsToRight: (id: string) => void;
+  closeAllComparatorSessions: () => void;
   setActiveComparatorSession: (id: string) => void;
   updateComparatorSessionInput: (id: string, side: "a" | "b", input: string) => void;
   renameComparatorSession: (id: string, name: string) => void;
@@ -217,13 +229,18 @@ export interface AppState {
   excalidrawLibraryItems?: unknown[];
   excalidrawAddedLibraryIds?: string[];
   createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => string;
+  duplicateWorkflow: (id: string) => void;
   deleteWorkflow: (id: string) => void;
+  closeOtherWorkflows: (id: string) => void;
+  closeWorkflowsToRight: (id: string) => void;
+  closeAllWorkflows: () => void;
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;
   reorderWorkflows: (fromIndex: number, toIndex: number) => void;
   updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => void;
   updateExcalidrawLibraryItems: (libraryItems: unknown[]) => void;
   addExcalidrawAddedLibraryId: (id: string) => void;
+  clearExcalidrawAddedLibraryIds: () => void;
 }
 
 // ============================================================

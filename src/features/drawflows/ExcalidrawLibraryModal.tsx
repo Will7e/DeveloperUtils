@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -8,14 +8,20 @@ import {
   getExcalidrawLibraryPreviewUrl, getExcalidrawLibraryCdnPreviewUrl,
   type ExcalidrawLibraryItem,
 } from "@/utils/excalidrawLibrary";
+import { X, Search, Check, Plus, Loader2, Boxes } from "lucide-react";
 
-interface Props { isOpen: boolean; onClose: () => void; excalidrawAPI: ExcalidrawImperativeAPI | null; }
+interface Props { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  excalidrawAPI: ExcalidrawImperativeAPI | null; 
+}
 
 export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props) {
   const [libs, setLibs] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
   const toast = useAppStore((s) => s.addToast);
   const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
   const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
@@ -24,10 +30,24 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
 
   useEffect(() => {
     if (isOpen) {
+      setAdded(new Set()); // Reset local session state; store is the source of truth
       setLoading(true);
-      getExcalidrawLibraries().then((d) => { setLibs(d); setLoading(false); }).catch(() => setLoading(false));
+      getExcalidrawLibraries().then((d) => { 
+        setLibs(d); 
+        setLoading(false); 
+      }).catch(() => setLoading(false));
     }
   }, [isOpen]);
+
+  const filteredLibs = useMemo(() => {
+    if (!search.trim()) return libs;
+    const q = search.toLowerCase().trim();
+    return libs.filter((lib) => 
+      lib.name.toLowerCase().includes(q) || 
+      lib.description.toLowerCase().includes(q) ||
+      lib.authors.some((a) => a.name.toLowerCase().includes(q))
+    );
+  }, [libs, search]);
 
   const handleAdd = async (lib: ExcalidrawLibraryItem) => {
     if (!excalidrawAPI || isAdded(lib.id)) return;
@@ -36,7 +56,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
       const n = await loadLibraryToExcalidraw(lib.source, excalidrawAPI);
       setAdded((p) => new Set(p).add(lib.id));
       storeAdd(lib.id);
-      toast({ message: `Added "${lib.name}" — ${n} shapes`, type: "success" });
+      toast({ message: `Added "${lib.name}" (${n} shapes) to canvas`, type: "success" });
     } catch {
       toast({ message: `Failed to load "${lib.name}"`, type: "error" });
     } finally {
@@ -47,42 +67,147 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
   if (!isOpen) return null;
 
   return createPortal(
-    <div style={{ position: "fixed", inset: 0, zIndex: 99999, background: "rgba(0,0,0,0.5)", overflow: "auto", padding: 40 }}>
-      <div style={{ background: "#1a1a2e", color: "#fff", maxWidth: 900, margin: "0 auto", padding: 20, borderRadius: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 20 }}>
-          <h2 style={{ margin: 0 }}>Library ({libs.length} items)</h2>
-          <button onClick={onClose}>✕ Close</button>
+    <div className="lib-modal-overlay" onClick={onClose}>
+      <div className="lib-modal-content" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="lib-modal-header">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/25 flex items-center justify-center text-accent">
+              <Boxes className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-text-1">Excalidraw Libraries</h2>
+              <p className="text-[11px] text-text-3">Browse and add community component packs directly to your canvas</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {/* Search Input */}
+            <div className="relative flex items-center w-56">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 text-text-3 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Filter collections..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full h-8 pl-8 pr-3 rounded-lg bg-bg-2 border border-border-1 text-xs text-text-1 focus:outline-none focus:border-accent"
+              />
+            </div>
+
+            <button 
+              onClick={onClose}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-text-3 hover:text-text-1 hover:bg-bg-2 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {loading ? (
-          <LoadingState size="sm" message="Loading libraries..." minHeight={160} />
-        ) : (
-          <div>
-            {libs.map((lib) => (
-              <div key={lib.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.1)", padding: "12px 0", display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <img
-                  src={getExcalidrawLibraryPreviewUrl(lib.preview)}
-                  alt={lib.name}
-                  style={{ width: 80, height: 60, objectFit: "contain", background: "#fff", borderRadius: 4 }}
-                  onError={(e) => { e.currentTarget.src = getExcalidrawLibraryCdnPreviewUrl(lib.preview); }}
-                />
-                <div style={{ flex: 1 }}>
-                  <strong>{lib.name}</strong>
-                  <div style={{ fontSize: 12, opacity: 0.5 }}>{lib.description}</div>
-                  <div style={{ fontSize: 11, opacity: 0.4, marginTop: 2 }}>
-                    by {lib.authors[0]?.name || "Unknown"} · v{lib.version || 1} · {lib.created}
-                  </div>
-                </div>
-                <button onClick={() => handleAdd(lib)} disabled={loadingId === lib.id || isAdded(lib.id)}>
-                  {loadingId === lib.id ? "Adding..." : isAdded(lib.id) ? "✓ Added" : "+ Add"}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Body */}
+        <div className="lib-modal-body">
+          {loading ? (
+            <LoadingState size="md" message="Loading libraries..." minHeight={240} />
+          ) : filteredLibs.length === 0 ? (
+            <div className="p-12 text-center flex flex-col items-center justify-center">
+              <Boxes className="w-10 h-10 text-text-3 opacity-30 mb-2" />
+              <p className="text-sm font-semibold text-text-2">No libraries found</p>
+              <p className="text-xs text-text-3 mt-1">Try another search term.</p>
+            </div>
+          ) : (
+            <div className="lib-excal-grid">
+              {filteredLibs.map((lib) => {
+                const addedItem = isAdded(lib.id);
+                const isLoading = loadingId === lib.id;
+
+                return (
+                  <ModalExcalidrawCard
+                    key={lib.id}
+                    lib={lib}
+                    isAdded={addedItem}
+                    isLoading={isLoading}
+                    onAdd={() => handleAdd(lib)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>,
     document.body,
+  );
+}
+
+function ModalExcalidrawCard({
+  lib,
+  isAdded,
+  isLoading,
+  onAdd,
+}: {
+  lib: ExcalidrawLibraryItem;
+  isAdded: boolean;
+  isLoading: boolean;
+  onAdd: () => void;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const [triedCdn, setTriedCdn] = useState(false);
+
+  const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
+  const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+
+  return (
+    <div className="lib-excal-card">
+      <div className="lib-excal-preview-wrap">
+        {!imgError ? (
+          <img
+            src={triedCdn ? cdnPreviewUrl : previewUrl}
+            alt={lib.name}
+            className="lib-excal-preview-img"
+            loading="lazy"
+            onError={() => {
+              if (!triedCdn) {
+                setTriedCdn(true);
+              } else {
+                setImgError(true);
+              }
+            }}
+          />
+        ) : (
+          <div className="lib-excal-preview-fallback">
+            <Boxes className="w-6 h-6 opacity-30" />
+            <span>Preview unavailable</span>
+          </div>
+        )}
+      </div>
+
+      <div className="lib-excal-body">
+        <h3 className="lib-excal-name" title={lib.name}>{lib.name}</h3>
+        <p className="lib-excal-desc" title={lib.description}>{lib.description || "Collection of diagram elements."}</p>
+
+        <div className="lib-excal-footer">
+          <div className="lib-excal-meta">
+            <span className="lib-excal-author" title={lib.authors[0]?.name || "Community"}>
+              by {lib.authors[0]?.name || "Community"}
+            </span>
+            <span>v{lib.version || 1}</span>
+          </div>
+
+          <button
+            className={`lib-excal-action-btn ${isAdded ? "lib-excal-action-btn-added" : ""}`}
+            onClick={onAdd}
+            disabled={isLoading || isAdded}
+          >
+            {isLoading ? (
+              <><Loader2 className="w-3 h-3 animate-spin" /><span>Adding...</span></>
+            ) : isAdded ? (
+              <><Check className="w-3 h-3" /><span>Added</span></>
+            ) : (
+              <><Plus className="w-3 h-3" /><span>Add</span></>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

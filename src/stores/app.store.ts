@@ -343,6 +343,32 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      duplicateFile: (id: string) => {
+        const file = get().files.find((f) => f.id === id);
+        if (!file) return;
+        const newId = generateId();
+        const lastDot = file.name.lastIndexOf(".");
+        const copyName =
+          lastDot !== -1
+            ? `${file.name.slice(0, lastDot)} (Copy)${file.name.slice(lastDot)}`
+            : `${file.name} (Copy)`;
+        const newFile: EditorFile = {
+          ...file,
+          id: newId,
+          name: copyName,
+          isDirty: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        const index = get().files.findIndex((f) => f.id === id);
+        const newFiles = [...get().files];
+        newFiles.splice(index + 1, 0, newFile);
+        set({
+          files: newFiles,
+          activeFileId: newId,
+        });
+      },
+
       deleteFile: (id: string) => {
         const state = get();
         const remaining = state.files.filter((f) => f.id !== id);
@@ -362,6 +388,34 @@ export const useAppStore = create<AppState>()(
                 : state.activeFileId,
           });
         }
+      },
+
+      closeOtherFiles: (id: string) => {
+        set((state) => ({
+          files: state.files.filter((f) => f.id === id),
+          activeFileId: id,
+        }));
+      },
+
+      closeFilesToRight: (id: string) => {
+        set((state) => {
+          const idx = state.files.findIndex((f) => f.id === id);
+          if (idx === -1) return state;
+          const remaining = state.files.slice(0, idx + 1);
+          const activeExists = remaining.some((f) => f.id === state.activeFileId);
+          return {
+            files: remaining,
+            activeFileId: activeExists ? state.activeFileId : id,
+          };
+        });
+      },
+
+      closeAllFiles: () => {
+        const fallback = createDefaultFile("javascript");
+        set({
+          files: [fallback],
+          activeFileId: fallback.id,
+        });
       },
 
       setActiveFile: (id: string) => {
@@ -498,6 +552,25 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      duplicateFormatterFile: (type, id) => {
+        const file = get().formatterFiles[type].find((f) => f.id === id);
+        if (!file) return;
+        const newId = generateId();
+        const lastDot = file.name.lastIndexOf(".");
+        const copyName =
+          lastDot !== -1
+            ? `${file.name.slice(0, lastDot)} (Copy)${file.name.slice(lastDot)}`
+            : `${file.name} (Copy)`;
+        const newFile = { ...file, id: newId, name: copyName };
+        const index = get().formatterFiles[type].findIndex((f) => f.id === id);
+        const newFiles = [...get().formatterFiles[type]];
+        newFiles.splice(index + 1, 0, newFile);
+        set((state) => ({
+          formatterFiles: { ...state.formatterFiles, [type]: newFiles },
+          activeFormatterFileId: { ...state.activeFormatterFileId, [type]: newId },
+        }));
+      },
+
       deleteFormatterFile: (type, id) => {
         set((state) => {
           const remaining = state.formatterFiles[type].filter(f => f.id !== id);
@@ -516,6 +589,44 @@ export const useAppStore = create<AppState>()(
             }
           };
         });
+      },
+
+      closeOtherFormatterFiles: (type, id) => {
+        set((state) => ({
+          formatterFiles: {
+            ...state.formatterFiles,
+            [type]: state.formatterFiles[type].filter((f) => f.id === id),
+          },
+          activeFormatterFileId: {
+            ...state.activeFormatterFileId,
+            [type]: id,
+          },
+        }));
+      },
+
+      closeFormatterFilesToRight: (type, id) => {
+        set((state) => {
+          const list = state.formatterFiles[type];
+          const idx = list.findIndex((f) => f.id === id);
+          if (idx === -1) return state;
+          const remaining = list.slice(0, idx + 1);
+          const activeExists = remaining.some((f) => f.id === state.activeFormatterFileId[type]);
+          return {
+            formatterFiles: { ...state.formatterFiles, [type]: remaining },
+            activeFormatterFileId: {
+              ...state.activeFormatterFileId,
+              [type]: activeExists ? state.activeFormatterFileId[type] : id,
+            },
+          };
+        });
+      },
+
+      closeAllFormatterFiles: (type) => {
+        const newFile = { id: generateId(), name: `Untitled.${type}`, content: "" };
+        set((state) => ({
+          formatterFiles: { ...state.formatterFiles, [type]: [newFile] },
+          activeFormatterFileId: { ...state.activeFormatterFileId, [type]: newFile.id },
+        }));
       },
 
       setActiveFormatterFile: (type, id) => {
@@ -573,6 +684,24 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      duplicateComparatorSession: (id) => {
+        const session = get().comparatorSessions.find((s) => s.id === id);
+        if (!session) return;
+        const newId = generateId();
+        const newSession = {
+          ...session,
+          id: newId,
+          name: `${session.name} (Copy)`,
+        };
+        const index = get().comparatorSessions.findIndex((s) => s.id === id);
+        const newSessions = [...get().comparatorSessions];
+        newSessions.splice(index + 1, 0, newSession);
+        set({
+          comparatorSessions: newSessions,
+          activeComparatorSessionId: newId,
+        });
+      },
+
       deleteComparatorSession: (id) => {
         set((state) => {
           const remaining = state.comparatorSessions.filter(s => s.id !== id);
@@ -588,6 +717,34 @@ export const useAppStore = create<AppState>()(
             activeComparatorSessionId:
               state.activeComparatorSessionId === id ? remaining[remaining.length - 1]!.id : state.activeComparatorSessionId
           };
+        });
+      },
+
+      closeOtherComparatorSessions: (id) => {
+        set((state) => ({
+          comparatorSessions: state.comparatorSessions.filter((s) => s.id === id),
+          activeComparatorSessionId: id,
+        }));
+      },
+
+      closeComparatorSessionsToRight: (id) => {
+        set((state) => {
+          const idx = state.comparatorSessions.findIndex((s) => s.id === id);
+          if (idx === -1) return state;
+          const remaining = state.comparatorSessions.slice(0, idx + 1);
+          const activeExists = remaining.some((s) => s.id === state.activeComparatorSessionId);
+          return {
+            comparatorSessions: remaining,
+            activeComparatorSessionId: activeExists ? state.activeComparatorSessionId : id,
+          };
+        });
+      },
+
+      closeAllComparatorSessions: () => {
+        const newSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+        set({
+          comparatorSessions: [newSession],
+          activeComparatorSessionId: newSession.id,
         });
       },
 
@@ -764,11 +921,12 @@ export const useAppStore = create<AppState>()(
       createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
         const id = generateId();
         const state = get();
+        const { theme: _staleTheme, ...cleanAppState } = appState || {};
         const newWorkflow: Workflow = {
           id,
           name: name || `DrawFlow ${state.workflows.length + 1}`,
           elements: elements || [],
-          appState: appState || {},
+          appState: cleanAppState,
           files: files || {},
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -778,6 +936,29 @@ export const useAppStore = create<AppState>()(
           activeWorkflowId: id,
         }));
         return id;
+      },
+
+      duplicateWorkflow: (id: string) => {
+        const wf = get().workflows.find((w) => w.id === id);
+        if (!wf) return;
+        const newId = generateId();
+        const newWorkflow: Workflow = {
+          ...wf,
+          id: newId,
+          name: `${wf.name} (Copy)`,
+          elements: wf.elements ? JSON.parse(JSON.stringify(wf.elements)) : [],
+          appState: wf.appState ? { ...wf.appState } : {},
+          files: wf.files ? { ...wf.files } : undefined,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        const index = get().workflows.findIndex((w) => w.id === id);
+        const newWorkflows = [...get().workflows];
+        newWorkflows.splice(index + 1, 0, newWorkflow);
+        set({
+          workflows: newWorkflows,
+          activeWorkflowId: newId,
+        });
       },
 
       deleteWorkflow: (id) => {
@@ -807,6 +988,41 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      closeOtherWorkflows: (id: string) => {
+        set((state) => ({
+          workflows: state.workflows.filter((w) => w.id === id),
+          activeWorkflowId: id,
+        }));
+      },
+
+      closeWorkflowsToRight: (id: string) => {
+        set((state) => {
+          const idx = state.workflows.findIndex((w) => w.id === id);
+          if (idx === -1) return state;
+          const remaining = state.workflows.slice(0, idx + 1);
+          const activeExists = remaining.some((w) => w.id === state.activeWorkflowId);
+          return {
+            workflows: remaining,
+            activeWorkflowId: activeExists ? state.activeWorkflowId : id,
+          };
+        });
+      },
+
+      closeAllWorkflows: () => {
+        const newWorkflow: Workflow = {
+          id: generateId(),
+          name: "My DrawFlow",
+          elements: createDefaultWorkflowElements(),
+          appState: {},
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        set({
+          workflows: [newWorkflow],
+          activeWorkflowId: newWorkflow.id,
+        });
+      },
+
       setActiveWorkflow: (id) => {
         set({ activeWorkflowId: id });
       },
@@ -826,9 +1042,10 @@ export const useAppStore = create<AppState>()(
       },
 
       updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
+        const { theme: _staleTheme, ...cleanAppState } = appState || {};
         set((state) => ({
           workflows: state.workflows.map((w) =>
-            w.id === workflowId ? { ...w, elements, appState, files, updatedAt: Date.now() } : w
+            w.id === workflowId ? { ...w, elements, appState: cleanAppState, files, updatedAt: Date.now() } : w
           ),
         }));
       },
@@ -844,6 +1061,9 @@ export const useAppStore = create<AppState>()(
             ? state.excalidrawAddedLibraryIds
             : [...(state.excalidrawAddedLibraryIds || []), id],
         }));
+      },
+      clearExcalidrawAddedLibraryIds: () => {
+        set({ excalidrawAddedLibraryIds: [] });
       },
     }),
     {

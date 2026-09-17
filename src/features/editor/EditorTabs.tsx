@@ -2,11 +2,9 @@
 // Editor Tabs — File tabs with new-file dropdown & run controls
 // ============================================================
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
-import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-import { SortableTab } from "@/components/ui/SortableTab";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
+import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { useAppStore } from "@/stores/app.store";
 import {
   Tooltip,
@@ -59,6 +57,10 @@ export function EditorTabs() {
   const activeFileId = useAppStore((s) => s.activeFileId);
   const setActiveFile = useAppStore((s) => s.setActiveFile);
   const deleteFile = useAppStore((s) => s.deleteFile);
+  const duplicateFile = useAppStore((s) => s.duplicateFile);
+  const closeOtherFiles = useAppStore((s) => s.closeOtherFiles);
+  const closeFilesToRight = useAppStore((s) => s.closeFilesToRight);
+  const closeAllFiles = useAppStore((s) => s.closeAllFiles);
   const renameFile = useAppStore((s) => s.renameFile);
   const createFile = useAppStore((s) => s.createFile);
   const reorderFiles = useAppStore((s) => s.reorderFiles);
@@ -77,28 +79,11 @@ export function EditorTabs() {
   const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
   const cancelExecution = useAppStore((s) => s.cancelExecution);
 
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
   const [isCopied, setIsCopied] = useState(false);
 
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
   const canRun = activeFile && !isHtml;
-
-  // DnD sensor with activation constraint to allow clicks without triggering drag
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = files.findIndex((f) => f.id === active.id);
-    const newIndex = files.findIndex((f) => f.id === over.id);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      reorderFiles(oldIndex, newIndex);
-    }
-  }, [files, reorderFiles]);
 
   // Close menu on outside click
   useEffect(() => {
@@ -252,173 +237,167 @@ export function EditorTabs() {
     addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
   }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, addToast]);
 
+  // Map files to standardized TabItems
+  const tabs: TabItem[] = useMemo(
+    () =>
+      files.map((file) => ({
+        id: file.id,
+        name: file.name,
+        icon: (
+          <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
+            {tabIcons[file.language]}
+          </span>
+        ),
+        isDirty: file.isDirty,
+        closable: files.length > 1,
+      })),
+    [files]
+  );
+
+  const handleCopyTabContent = useCallback(
+    (id: string) => {
+      const file = files.find((f) => f.id === id);
+      if (file) {
+        navigator.clipboard.writeText(file.content);
+        addToast({ message: `Copied ${file.name} content to clipboard`, type: "success", duration: 2000 });
+      }
+    },
+    [files, addToast]
+  );
+
+  const handleCopyTabName = useCallback(
+    (id: string) => {
+      const file = files.find((f) => f.id === id);
+      if (file) {
+        navigator.clipboard.writeText(file.name);
+        addToast({ message: "File name copied", type: "info", duration: 1500 });
+      }
+    },
+    [files, addToast]
+  );
+
   return (
     <>
-      <div className="tabs-bar">
-        <div className="tabs-list">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={files.map((f) => f.id)} strategy={horizontalListSortingStrategy}>
-              {files.map((file) => (
-                <SortableTab key={file.id} id={file.id}>
-                  <button
-                    className={cn("tab", file.id === activeFileId && "tab-active")}
-                    onClick={() => setActiveFile(file.id)}
-                    onDoubleClick={() => {
-                      setRenamingId(file.id);
-                      setRenameValue(file.name);
-                    }}
-                  >
-                    <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
-                      {tabIcons[file.language]}
-                    </span>
-                    {renamingId === file.id ? (
-                      <input
-                        autoFocus
-                        className="tab-rename-input"
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => {
-                          if (renameValue.trim() && renameValue !== file.name) {
-                            renameFile(file.id, renameValue.trim());
-                          }
-                          setRenamingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            if (renameValue.trim() && renameValue !== file.name) {
-                              renameFile(file.id, renameValue.trim());
-                            }
-                            setRenamingId(null);
-                          } else if (e.key === "Escape") {
-                            setRenamingId(null);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <>
-                        <span className="tab-name">{file.name}</span>
-                        {file.isDirty && <span className="tab-dirty" />}
-                      </>
-                    )}
-                    {files.length > 1 && (
-                      <ActionTooltip content="Close Tab" side="bottom">
-                        <span
-                          className="tab-close"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteFile(file.id);
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </span>
-                      </ActionTooltip>
-                    )}
-                  </button>
-                </SortableTab>
-              ))}
-            </SortableContext>
-          </DndContext>
-
+      <WorkspaceTabBar
+        tabs={tabs}
+        activeTabId={activeFileId || (files[0]?.id ?? "")}
+        onSelectTab={setActiveFile}
+        onCloseTab={deleteFile}
+        onRenameTab={(id, newName) => renameFile(id, newName)}
+        onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
+          reorderFiles(oldIndex, newIndex)
+        }
+        onDuplicateTab={duplicateFile}
+        onCloseOthers={closeOtherFiles}
+        onCloseToRight={closeFilesToRight}
+        onCloseAll={closeAllFiles}
+        onCopyContent={handleCopyTabContent}
+        onCopyName={handleCopyTabName}
+        renderNewTabButton={() => (
           <ActionTooltip content="New File" side="bottom">
             <button
               ref={btnRef}
+              type="button"
               className="tab-new"
               onClick={handleToggleMenu}
             >
               <Plus className="h-4 w-4" />
             </button>
           </ActionTooltip>
-        </div>
+        )}
+        rightContent={
+          <>
+            <div className="tabs-toolbar-sep" />
 
-        {/* ── Premium Toolbar Actions ─────────────────────────── */}
-        <div className="tabs-toolbar">
-          <div className="tabs-toolbar-sep" />
+            {/* Console toggle */}
+            {!isHtml && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "console-toggle-btn",
+                        outputPanelOpen && "console-toggle-btn-active"
+                      )}
+                      onClick={toggleOutputPanel}
+                    >
+                      <Terminal className="h-3.5 w-3.5" />
+                      <span className="console-toggle-label">Console</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Toggle Console <kbd>⌘J</kbd></TooltipContent>
+                </Tooltip>
+                <div className="tabs-toolbar-sep" />
+              </>
+            )}
 
-          {/* Console toggle */}
-          {!isHtml && (
-            <>
+            {/* Copy button */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "toolbar-action-btn",
+                    isCopied && "toolbar-action-btn-active"
+                  )}
+                  onClick={handleCopy}
+                  disabled={!activeFile}
+                >
+                  {isCopied ? (
+                    <Check className="h-3.5 w-3.5 text-green-400" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  <span className="toolbar-action-label">Copy</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isCopied ? "Copied!" : "Copy Code"}
+              </TooltipContent>
+            </Tooltip>
+
+            <div className="tabs-toolbar-sep" />
+
+            {/* Run / Stop / Preview button */}
+            {isHtml ? (
+              <div className="tabs-preview-badge">
+                <Eye className="h-3.5 w-3.5" />
+                <span>Preview</span>
+              </div>
+            ) : isRunning ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
-                    className={cn(
-                      "console-toggle-btn",
-                      outputPanelOpen && "console-toggle-btn-active"
-                    )}
-                    onClick={toggleOutputPanel}
+                    type="button"
+                    className="tabs-run-btn tabs-run-btn-stop"
+                    onClick={handleCancel}
                   >
-                    <Terminal className="h-3.5 w-3.5" />
-                    <span className="console-toggle-label">Console</span>
+                    <Square className="h-3 w-3" style={{ fill: "currentColor" }} />
+                    <span>Stop</span>
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Toggle Console <kbd>⌘J</kbd></TooltipContent>
+                <TooltipContent side="bottom">Cancel Execution <kbd>⌘⇧C</kbd></TooltipContent>
               </Tooltip>
-              <div className="tabs-toolbar-sep" />
-            </>
-          )}
-
-          {/* Copy button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className={cn(
-                  "toolbar-action-btn",
-                  isCopied && "toolbar-action-btn-active"
-                )}
-                onClick={handleCopy}
-                disabled={!activeFile}
-              >
-                {isCopied ? (
-                  <Check className="h-3.5 w-3.5 text-green-400" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-                <span className="toolbar-action-label">Copy</span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {isCopied ? "Copied!" : "Copy Code"}
-            </TooltipContent>
-          </Tooltip>
-
-          <div className="tabs-toolbar-sep" />
-
-          {/* Run / Stop / Preview button */}
-          {isHtml ? (
-            <div className="tabs-preview-badge">
-              <Eye className="h-3.5 w-3.5" />
-              <span>Preview</span>
-            </div>
-          ) : isRunning ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="tabs-run-btn tabs-run-btn-stop"
-                  onClick={handleCancel}
-                >
-                  <Square className="h-3 w-3" style={{ fill: "currentColor" }} />
-                  <span>Stop</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Cancel Execution <kbd>⌘⇧C</kbd></TooltipContent>
-            </Tooltip>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  className="tabs-run-btn"
-                  onClick={handleRun}
-                  disabled={!canRun}
-                >
-                  <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
-                  <span>Run</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Run Code <kbd>⌘↵</kbd></TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="tabs-run-btn"
+                    onClick={handleRun}
+                    disabled={!canRun}
+                  >
+                    <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
+                    <span>Run</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Run Code <kbd>⌘↵</kbd></TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+      />
 
       {/* New file dropdown — rendered as fixed-position portal to avoid overflow clipping */}
       {showMenu && (
@@ -432,6 +411,7 @@ export function EditorTabs() {
             {(Object.keys(LANGUAGE_CONFIGS) as Language[]).map((lang) => (
               <button
                 key={lang}
+                type="button"
                 className="new-file-option"
                 onClick={() => handleCreate(lang)}
               >

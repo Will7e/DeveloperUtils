@@ -4820,10 +4820,13 @@ html.light .loader-bar-fill {
   border-radius: 8px;
   border: 1px solid var(--border-1);
   gap: 2px;
+  width: 100%;
+  min-width: 0;
 }
 
 .lib-mode-tab {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4838,6 +4841,8 @@ html.light .loader-bar-fill {
   cursor: pointer;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lib-mode-tab:hover {
@@ -5076,7 +5081,7 @@ html.light .loader-bar-fill {
   flex-direction: column;
   gap: 1px;
   padding: 2px 0 4px 12px;
-  border-left: 1px dashed var(--border-1);
+  border-left: 1px solid var(--border-1);
   margin-left: 12px;
 }
 
@@ -5667,6 +5672,12 @@ html.light .loader-bar-fill {
   color: #e2e8f0;
 }
 
+html.light .lib-recipe-pre {
+  background: var(--bg-2);
+  color: var(--text-1);
+  border-top: 1px solid var(--border-1);
+}
+
 /* ============================================================
    DETAIL API DOCUMENTATION VIEW
    ============================================================ */
@@ -5690,7 +5701,7 @@ html.light .loader-bar-fill {
 }
 
 .lib-view-header-inner {
-  padding: 20px 32px 18px;
+  padding: 14px 28px 12px;
   max-width: 1060px;
 }
 
@@ -5865,14 +5876,13 @@ html.light .loader-bar-fill {
 /* Quick Jump TOC */
 .lib-toc {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
   background: var(--bg-1);
   border: 1px solid var(--border-1);
-  border-radius: 8px;
-  margin-bottom: 24px;
-  overflow-x: auto;
+  border-radius: 10px;
+  margin-bottom: 20px;
 }
 
 .lib-toc-label {
@@ -5883,19 +5893,26 @@ html.light .loader-bar-fill {
   color: var(--text-3);
   white-space: nowrap;
   flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .lib-toc-list {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  max-height: 108px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .lib-toc-list::-webkit-scrollbar {
-  display: none;
+  width: 4px;
+}
+
+.lib-toc-list::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
 }
 
 .lib-toc-item {
@@ -6273,6 +6290,274 @@ html.light .lib-code-block {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-3);
+}
+
+/* ============================================================
+   EXCALIDRAW COMMUNITY GALLERY & CARDS
+   ============================================================ */
+
+.lib-excal-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px 48px;
+  max-width: 1320px;
+  margin: 0 auto;
+  width: 100%;
+  animation: fadeIn 0.25s ease;
+}
+
+.lib-excal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.lib-excal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lib-excal-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-1);
+  letter-spacing: -0.4px;
+}
+
+.lib-excal-count-badge {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+}
+
+.lib-excal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lib-excal-studio-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  text-decoration: none;
+}
+
+.lib-excal-studio-btn:hover {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+
+.lib-excal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.lib-excal-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.lib-excal-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.lib-excal-preview-wrap {
+  height: 140px;
+  width: 100%;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  position: relative;
+  border-bottom: 1px solid var(--border-1);
+  overflow: hidden;
+}
+
+html.light .lib-excal-preview-wrap {
+  background: #f8fafc;
+}
+
+.lib-excal-preview-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transition: transform 0.25s ease;
+}
+
+.lib-excal-card:hover .lib-excal-preview-img {
+  transform: scale(1.04);
+}
+
+.lib-excal-preview-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.lib-excal-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.lib-excal-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: -0.2px;
+  margin-bottom: 4px;
+}
+
+.lib-excal-desc {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin-bottom: 14px;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lib-excal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-1);
+  margin-top: auto;
+}
+
+.lib-excal-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+}
+
+.lib-excal-author {
+  font-weight: 500;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+
+.lib-excal-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  color: var(--accent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.lib-excal-action-btn:hover {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.lib-excal-action-btn-added {
+  background: rgba(16, 185, 129, 0.12) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+  color: var(--green) !important;
+}
+
+.lib-excal-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal specific styles */
+.lib-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.2s ease;
+}
+
+.lib-modal-content {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 960px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+}
+
+.lib-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+
+.lib-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
 }
 
 .section-header-row {
@@ -6711,3 +6996,49 @@ html.light .lang-diff {
   color: #db2777;
   border-color: rgba(219, 39, 119, 0.15);
 }
+
+/* ============================================================
+   EXCALIDRAW LIBRARY — BROWSE COMMUNITY LIBRARIES ENHANCED
+   ============================================================ */
+
+.excalidraw .library-menu-browse-button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-radius: var(--radius-md, 8px) !important;
+  background: var(--accent, #6366f1) !important;
+  color: #ffffff !important;
+  cursor: pointer !important;
+  text-decoration: none !important;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.25) !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+.excalidraw .library-menu-browse-button:hover {
+  filter: brightness(1.12) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35) !important;
+}
+
+.excalidraw .library-menu-browse-button:active {
+  transform: translateY(0) scale(0.985) !important;
+  filter: brightness(0.96) !important;
+}
+
+.excalidraw .library-menu-browse-button .devutils-lib-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  letter-spacing: 0.02em;
+  margin-left: 4px;
+}
+

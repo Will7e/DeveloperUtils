@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-import { SortableTab } from "@/components/ui/SortableTab";
+import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
@@ -12,7 +10,7 @@ import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import { 
   FileJson, 
-  FileCode,
+  FileCode, 
   Copy, 
   Trash2, 
   Check, 
@@ -65,6 +63,10 @@ export function FormatterTool() {
   const setActiveFile = useAppStore((s) => s.setActiveFormatterFile);
   const createFile = useAppStore((s) => s.createFormatterFile);
   const deleteFile = useAppStore((s) => s.deleteFormatterFile);
+  const duplicateFormatterFile = useAppStore((s) => s.duplicateFormatterFile);
+  const closeOtherFormatterFiles = useAppStore((s) => s.closeOtherFormatterFiles);
+  const closeFormatterFilesToRight = useAppStore((s) => s.closeFormatterFilesToRight);
+  const closeAllFormatterFiles = useAppStore((s) => s.closeAllFormatterFiles);
   const updateContent = useAppStore((s) => s.updateFormatterFileContent);
   const renameFile = useAppStore((s) => s.renameFormatterFile);
   const reorderFiles = useAppStore((s) => s.reorderFormatterFiles);
@@ -74,8 +76,6 @@ export function FormatterTool() {
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
-  const [editingFileId, setEditingFileId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
   const dropdownRef = React.useRef<HTMLDivElement>(null);
   const handleFormatRef = React.useRef<(() => void) | null>(null);
 
@@ -124,20 +124,43 @@ export function FormatterTool() {
   const activeFile = files.find(f => f.id === activeFileId) || files[0]!;
   const currentInput = activeFile.content;
 
-  // DnD sensor with activation constraint to allow clicks without triggering drag
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  // Standardized Workspace Tabs
+  const tabs: TabItem[] = useMemo(
+    () =>
+      files.map((file) => ({
+        id: file.id,
+        name: file.name,
+        icon: (
+          <span className={cn("tab-icon", `tab-icon-${type}`)}>
+            {type === "json" ? "{}" : "<>"}
+          </span>
+        ),
+        closable: files.length > 1,
+      })),
+    [files, type]
   );
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = files.findIndex((f) => f.id === active.id);
-    const newIndex = files.findIndex((f) => f.id === over.id);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      reorderFiles(type, oldIndex, newIndex);
-    }
-  }, [files, type, reorderFiles]);
+  const handleCopyTabContent = useCallback(
+    (id: string) => {
+      const file = files.find((f) => f.id === id);
+      if (file) {
+        navigator.clipboard.writeText(file.content);
+        addToast({ message: `Copied ${file.name} to clipboard`, type: "success", duration: 1500 });
+      }
+    },
+    [files, addToast]
+  );
+
+  const handleCopyTabName = useCallback(
+    (id: string) => {
+      const file = files.find((f) => f.id === id);
+      if (file) {
+        navigator.clipboard.writeText(file.name);
+        addToast({ message: "File name copied", type: "info", duration: 1500 });
+      }
+    },
+    [files, addToast]
+  );
 
   // Derive data and error from current input
   const { data, error } = useMemo(() => {
@@ -478,74 +501,24 @@ export function FormatterTool() {
             <>
               <Panel defaultSize={50} minSize={20}>
                 <div className="json-input-section h-full">
-                  <div className="tabs-bar">
-                    <div className="tabs-list">
-                      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                        <SortableContext items={files.map(f => f.id)} strategy={horizontalListSortingStrategy}>
-                          {files.map(file => (
-                            <SortableTab key={file.id} id={file.id}>
-                              <button 
-                                className={cn(
-                                  "tab",
-                                  activeFile.id === file.id && "tab-active"
-                                )}
-                                onClick={() => setActiveFile(type, file.id)}
-                                onDoubleClick={() => {
-                                  setEditName(file.name);
-                                  setEditingFileId(file.id);
-                                }}
-                              >
-                                <span className={cn("tab-icon", `tab-icon-${type}`)}>
-                                  {type === "json" ? "{}" : "<>"}
-                                </span>
-                                {editingFileId === file.id ? (
-                                  <input
-                                    autoFocus
-                                    className="tab-rename-input"
-                                    value={editName}
-                                    onChange={(e) => setEditName(e.target.value)}
-                                    onBlur={() => {
-                                      if (editName.trim() && editName !== file.name) {
-                                        renameFile(type, file.id, editName.trim());
-                                      }
-                                      setEditingFileId(null);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        e.currentTarget.blur();
-                                      } else if (e.key === "Escape") {
-                                        setEditingFileId(null);
-                                      }
-                                    }}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                ) : (
-                                  <span className="tab-name">
-                                    {file.name}
-                                  </span>
-                                )}
-                                <span 
-                                  className="tab-close"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    deleteFile(type, file.id);
-                                  }}
-                                >
-                                  <X className="h-3 w-3" />
-                                </span>
-                              </button>
-                            </SortableTab>
-                          ))}
-                        </SortableContext>
-                      </DndContext>
-                      <button 
-                        className="tab-new"
-                        onClick={() => createFile(type)}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
+                  <WorkspaceTabBar
+                    tabs={tabs}
+                    activeTabId={activeFile.id}
+                    onSelectTab={(id) => setActiveFile(type, id)}
+                    onCloseTab={(id) => deleteFile(type, id)}
+                    onNewTab={() => createFile(type)}
+                    onRenameTab={(id, newName) => renameFile(type, id, newName)}
+                    onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
+                      reorderFiles(type, oldIndex, newIndex)
+                    }
+                    onDuplicateTab={(id) => duplicateFormatterFile(type, id)}
+                    onCloseOthers={(id) => closeOtherFormatterFiles(type, id)}
+                    onCloseToRight={(id) => closeFormatterFilesToRight(type, id)}
+                    onCloseAll={() => closeAllFormatterFiles(type)}
+                    onCopyContent={handleCopyTabContent}
+                    onCopyName={handleCopyTabName}
+                    newTabTooltip={`New ${type.toUpperCase()} File`}
+                  />
                   <div className="flex-1 w-full relative">
                     <Editor
                       className="monaco-wrapper"

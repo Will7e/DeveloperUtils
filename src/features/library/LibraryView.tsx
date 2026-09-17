@@ -16,6 +16,7 @@ import {
   Wrench,
   Search,
   ArrowRight,
+  ArrowLeft,
   Play,
   Layers,
   ChevronRight,
@@ -182,26 +183,42 @@ function ApiDocumentationView({
 
   return (
     <div className="lib-view">
-      {/* Sticky Header */}
+      {/* Sleek Compact Header */}
       <header className="lib-view-header">
         <div className="lib-view-header-inner">
-          {/* Breadcrumbs */}
-          <div className="lib-breadcrumbs">
-            <button 
-              className="lib-breadcrumb-link" 
-              onClick={onBackToHub}
-            >
-              Developer Library
-            </button>
-            <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
-            <span className="text-text-3">{badge.label}</span>
-            <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
-            <span className="text-text-1 font-semibold">{selectedApi.name}</span>
+          {/* Top Row: Navigation Breadcrumbs */}
+          <div className="flex items-center justify-between gap-4 mb-2">
+            <div className="lib-breadcrumbs mb-0">
+              <button 
+                className="lib-breadcrumb-link flex items-center gap-1 font-medium hover:text-accent" 
+                onClick={onBackToHub}
+                title="Return to Developer Library Hub"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                <span>Developer Library</span>
+              </button>
+              <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
+              <span className="text-text-3">{badge.label}</span>
+              <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
+              <span className="text-text-1 font-semibold">{selectedApi.name}</span>
+            </div>
           </div>
 
-          <div className="lib-view-header-top">
-            <div className="lib-view-header-meta">
-              <h1 className="lib-view-api-name">{selectedApi.name}</h1>
+          {/* Middle Row: Title, Badges, and Method Controls Toolbar */}
+          <div className="flex items-center justify-between gap-4 flex-wrap mb-2">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex items-center gap-2">
+                <h1 className="lib-view-api-name text-xl md:text-2xl">{selectedApi.name}</h1>
+                <ActionTooltip content="Copy API Name">
+                  <button
+                    onClick={handleCopyApiName}
+                    className="p-1 text-text-3 hover:text-text-1 hover:bg-bg-2 rounded-md transition-all"
+                    aria-label="Copy API Name"
+                  >
+                    <Copy size={13} />
+                  </button>
+                </ActionTooltip>
+              </div>
               <span
                 className="lib-view-type-badge"
                 style={{ 
@@ -213,71 +230,56 @@ function ApiDocumentationView({
                 {badge.icon}
                 {badge.label}
               </span>
-              <div className="flex items-center gap-1.5 text-xs text-text-3 font-medium ml-1">
-                <Hash size={12} />
+              <div className="flex items-center gap-1 text-[11px] font-mono text-text-3 font-semibold px-2 py-0.5 rounded-full bg-bg-2 border border-border-1">
+                <Hash size={11} />
                 <span>{selectedApi.methods.length} methods</span>
               </div>
-              <div className="flex items-center gap-1 text-xs text-yellow opacity-80 font-medium">
-                <Sparkles size={12} />
+              <div className="flex items-center gap-1 text-[11px] text-yellow opacity-90 font-medium px-2 py-0.5 rounded-full bg-yellow/10 border border-yellow/20">
+                <Sparkles size={11} />
                 <span>Verified</span>
               </div>
             </div>
 
-            <div className="lib-view-header-actions">
-              <button
-                className="lib-view-action-btn"
-                onClick={handleCopyApiName}
-                title="Copy API Name"
-              >
-                <Copy size={12} />
-                <span>Copy Name</span>
-              </button>
+            {/* Consolidated Method Controls: Filter + Count + Collapse/Expand */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="lib-method-filter-input-wrap !w-56">
+                <Search className="w-3.5 h-3.5 lib-method-filter-icon" />
+                <input
+                  type="text"
+                  className="lib-method-filter-input !h-7 text-xs"
+                  placeholder={`Filter ${selectedApi.methods.length} methods...`}
+                  value={methodFilter}
+                  onChange={(e) => setMethodFilter(e.target.value)}
+                />
+                {methodFilter && (
+                  <button 
+                    className="lib-method-filter-clear" 
+                    onClick={() => setMethodFilter("")}
+                    title="Clear filter"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+              <span className="text-[11px] text-text-3 font-mono shrink-0 hidden sm:inline-block">
+                {filteredMethods.length}/{selectedApi.methods.length}
+              </span>
 
               <button
-                className="lib-view-action-btn"
+                className="lib-view-action-btn !h-7 !py-0 !px-2.5 text-xs"
                 onClick={() => setExpandAll(!expandAll)}
                 title={expandAll ? "Collapse All Methods" : "Expand All Methods"}
               >
-                {expandAll ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                {expandAll ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
                 <span>{expandAll ? "Collapse All" : "Expand All"}</span>
               </button>
-
-              <button
-                className="lib-view-action-btn text-accent hover:text-accent"
-                onClick={onBackToHub}
-              >
-                <span>Back to Hub</span>
-              </button>
             </div>
           </div>
 
-          <p className="lib-view-description">{selectedApi.description}</p>
-
-          {/* Inline method filter bar */}
-          <div className="lib-method-filter-bar">
-            <div className="lib-method-filter-input-wrap">
-              <Search className="w-3.5 h-3.5 lib-method-filter-icon" />
-              <input
-                type="text"
-                className="lib-method-filter-input"
-                placeholder={`Filter ${selectedApi.methods.length} methods...`}
-                value={methodFilter}
-                onChange={(e) => setMethodFilter(e.target.value)}
-              />
-              {methodFilter && (
-                <button 
-                  className="lib-method-filter-clear" 
-                  onClick={() => setMethodFilter("")}
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
-
-            <div className="text-xs text-text-3 font-medium">
-              Showing {filteredMethods.length} of {selectedApi.methods.length} methods
-            </div>
-          </div>
+          {/* Description */}
+          <p className="lib-view-description !mb-0 text-xs md:text-[13px] text-text-2 leading-relaxed max-w-4xl line-clamp-2">
+            {selectedApi.description}
+          </p>
         </div>
       </header>
 
@@ -1039,15 +1041,20 @@ function ExcalidrawLibraryGallery({
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const activeCategory = useAppStore((s) => s.libraryExcalidrawCategory);
-  const setActiveCategory = useAppStore((s) => s.setLibraryExcalidrawCategory);
+  const addToast = useAppStore((s) => s.addToast);
   const navigate = useNavigate();
 
   useEffect(() => {
     getExcalidrawLibraries().then((data) => {
       setLibraries(data);
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, []);
+
+  const categoryLabel = useMemo(() => {
+    const found = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
+    return found?.label || "All Libraries";
+  }, [activeCategory]);
 
   const filteredLibraries = useMemo(() => {
     return libraries.filter((lib) => {
@@ -1074,11 +1081,41 @@ function ExcalidrawLibraryGallery({
     });
   }, [libraries, activeCategory, searchQuery]);
 
+  const handleUseInDrawFlow = (lib: ExcalidrawLibraryItem) => {
+    addToast({ message: `Importing "${lib.name}" into DrawFlow Studio...`, type: "success" });
+    navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`);
+  };
+
   return (
-    <div style={{ flex: 1, overflow: "auto", padding: 20 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h2 style={{ margin: 0 }}>Excalidraw Libraries ({filteredLibraries.length} items)</h2>
-        <button onClick={() => navigate("/drawflows")}>Open DrawFlow Studio</button>
+    <div className="lib-excal-container">
+      {/* Header Bar */}
+      <div className="lib-excal-header">
+        <div className="lib-excal-title-group">
+          <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/25 flex items-center justify-center text-accent">
+            <Boxes className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="lib-excal-title">{categoryLabel}</h2>
+              <span className="lib-excal-count-badge">
+                {filteredLibraries.length} collection{filteredLibraries.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <p className="text-xs text-text-3 mt-0.5">
+              Ready-to-use shape libraries, architecture icons, and UI components for DrawFlow Studio
+            </p>
+          </div>
+        </div>
+
+        <div className="lib-excal-header-actions">
+          <button 
+            className="lib-excal-studio-btn"
+            onClick={() => navigate("/drawflows")}
+          >
+            <span>Open DrawFlow Studio</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1086,62 +1123,91 @@ function ExcalidrawLibraryGallery({
           size="md"
           message="Loading Excalidraw libraries..."
           description="Fetching community component packs"
-          minHeight={200}
+          minHeight={260}
         />
       ) : filteredLibraries.length === 0 ? (
-        <p>No libraries found.</p>
+        <div className="p-12 text-center bg-bg-1 border border-border-1 rounded-2xl flex flex-col items-center justify-center">
+          <Boxes className="w-10 h-10 text-text-3 opacity-40 mb-3" />
+          <h3 className="text-sm font-bold text-text-1">No collections match your criteria</h3>
+          <p className="text-xs text-text-3 mt-1 max-w-sm">
+            {searchQuery ? `No shape packs found for "${searchQuery}".` : "No items found in this collection category."}
+          </p>
+        </div>
       ) : (
-        <div>
-          {filteredLibraries.map((lib) => {
-            const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
-            const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
-
-            return (
-              <div
-                key={lib.id}
-                style={{
-                  borderBottom: "1px solid rgba(255,255,255,0.1)",
-                  padding: "12px 0",
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "flex-start",
-                }}
-              >
-                <img
-                  src={previewUrl}
-                  alt={lib.name}
-                  style={{
-                    width: 80,
-                    height: 60,
-                    objectFit: "contain",
-                    background: "#fff",
-                    borderRadius: 4,
-                    flexShrink: 0,
-                  }}
-                  onError={(e) => {
-                    const img = e.currentTarget;
-                    if (img.src !== cdnPreviewUrl) {
-                      img.src = cdnPreviewUrl;
-                    } else {
-                      img.style.display = "none";
-                    }
-                  }}
-                />
-                <div style={{ flex: 1 }}>
-                  <strong>{lib.name}</strong>
-                  <div style={{ fontSize: 12, opacity: 0.5 }}>{lib.description}</div>
-                  <div style={{ fontSize: 11, opacity: 0.4, marginTop: 2 }}>
-                    by {lib.authors[0]?.name || "Unknown"} · v{lib.version || 1} · {lib.created}
-                  </div>
-                </div>
-                <button onClick={() => navigate(`/drawflows?importLib=${encodeURIComponent(lib.id)}`)}>
-                  Use in DrawFlow
-                </button>
-              </div>
-            );
-          })}
+        <div className="lib-excal-grid">
+          {filteredLibraries.map((lib) => (
+            <ExcalidrawCard 
+              key={lib.id} 
+              lib={lib} 
+              onUse={() => handleUseInDrawFlow(lib)} 
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ExcalidrawCard({ 
+  lib, 
+  onUse 
+}: { 
+  lib: ExcalidrawLibraryItem; 
+  onUse: () => void; 
+}) {
+  const [imgError, setImgError] = useState(false);
+  const [triedCdn, setTriedCdn] = useState(false);
+
+  const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
+  const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+
+  return (
+    <div className="lib-excal-card">
+      <div className="lib-excal-preview-wrap">
+        {!imgError ? (
+          <img
+            src={triedCdn ? cdnPreviewUrl : previewUrl}
+            alt={lib.name}
+            className="lib-excal-preview-img"
+            loading="lazy"
+            onError={() => {
+              if (!triedCdn) {
+                setTriedCdn(true);
+              } else {
+                setImgError(true);
+              }
+            }}
+          />
+        ) : (
+          <div className="lib-excal-preview-fallback">
+            <Boxes className="w-6 h-6 opacity-30" />
+            <span>Preview unavailable</span>
+          </div>
+        )}
+      </div>
+
+      <div className="lib-excal-body">
+        <h3 className="lib-excal-name" title={lib.name}>{lib.name}</h3>
+        <p className="lib-excal-desc" title={lib.description}>{lib.description || "Collection of diagram elements and shapes."}</p>
+
+        <div className="lib-excal-footer">
+          <div className="lib-excal-meta">
+            <span className="lib-excal-author" title={lib.authors[0]?.name || "Community"}>
+              by {lib.authors[0]?.name || "Community"}
+            </span>
+            <span>v{lib.version || 1} · {lib.created || "2024"}</span>
+          </div>
+
+          <button 
+            className="lib-excal-action-btn" 
+            onClick={onUse}
+            title={`Import ${lib.name} into DrawFlow Studio`}
+          >
+            <span>Use in DrawFlow</span>
+            <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

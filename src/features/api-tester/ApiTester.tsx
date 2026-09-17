@@ -2,7 +2,7 @@
 // API Tester Component — Premium REST Client
 // ============================================================
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
@@ -57,6 +57,7 @@ import {
 } from "@/stores/api-tester.store";
 import { useAppStore } from "@/stores/app.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { generateCodeSnippet, CODE_LANGUAGES } from "./code-generator";
 import "./api-tester.css";
 
@@ -661,10 +662,7 @@ export function ApiTester() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Tab rename
-  const [editingTabId, setEditingTabId] = useState<string | null>(null);
-  const [editingTabName, setEditingTabName] = useState("");
-  const editTabInputRef = useRef<HTMLInputElement>(null);
+  // Tab rename state is now handled by WorkspaceTabBar internally
 
   // Resizable panes
   const [requestPaneHeight, setRequestPaneHeight] = useState(280);
@@ -764,13 +762,24 @@ export function ApiTester() {
     setRequestTab("params");
   }
 
-  // ── Focus tab rename input when editing ─────────────────────
-  useEffect(() => {
-    if (editingTabId && editTabInputRef.current) {
-      editTabInputRef.current.focus();
-      editTabInputRef.current.select();
-    }
-  }, [editingTabId]);
+  // Tab items memo for WorkspaceTabBar
+  const workspaceTabs: TabItem[] = useMemo(
+    () =>
+      tabs.map((tab) => ({
+        id: tab.id,
+        name: tab.name,
+        icon: (
+          <span
+            className={`api-badge api-badge-${tab.method.toLowerCase()}`}
+            style={{ fontSize: '8px', width: 'auto', padding: '1px 4px', lineHeight: 1 }}
+          >
+            {tab.method}
+          </span>
+        ),
+        closable: tabs.length > 1,
+      })),
+    [tabs]
+  );
 
   // ── Auto-scroll WebSocket console to bottom ──────────────────
   useEffect(() => {
@@ -1259,146 +1268,61 @@ export function ApiTester() {
       {/* ── Main Panel ─────────────────────────────────────── */}
       <main className="api-main">
         {/* Tab Bar UI */}
-        <div className="api-tab-bar">
-          <div className="api-tabs-scroll-container">
-            {tabs.map(tab => (
-              <div 
-                key={tab.id} 
-                className={`api-tab-item ${tab.id === store.activeTabId ? 'api-tab-item-active' : ''}`}
-                onClick={() => store.setActiveTab(tab.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  setEditingTabId(tab.id);
-                  setEditingTabName(tab.name);
-                }}
-              >
-                <span className={`api-badge api-badge-${tab.method.toLowerCase()}`} style={{ fontSize: '8px', width: 'auto', padding: '1px 4px' }}>
-                  {tab.method}
-                </span>
-                {editingTabId === tab.id ? (
-                  <input
-                    ref={editTabInputRef}
-                    type="text"
-                    className="api-tab-rename-input"
-                    value={editingTabName}
-                    onChange={(e) => setEditingTabName(e.target.value)}
-                    onBlur={() => {
-                      if (editingTabName.trim()) {
-                        store.renameTab(tab.id, editingTabName.trim());
-                      }
-                      setEditingTabId(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        if (editingTabName.trim()) {
-                          store.renameTab(tab.id, editingTabName.trim());
-                        }
-                        setEditingTabId(null);
-                      } else if (e.key === "Escape") {
-                        setEditingTabId(null);
-                      }
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="api-tab-title">{tab.name}</span>
-                )}
-                {tabs.length > 1 && (
-                  <button 
-                    className="api-tab-close" 
-                    onClick={(e) => { 
-                      e.stopPropagation(); 
-                      store.removeTab(tab.id); 
-                    }}
-                    title="Close Tab"
-                  >
-                    &times;
-                  </button>
-                )}
-              </div>
-            ))}
-            <SimpleTooltip content="New Tab">
-              <button className="api-tab-add" onClick={() => store.addTab()}>
-                <Plus className="h-3 w-3" />
-              </button>
-            </SimpleTooltip>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ position: 'relative' }} ref={envDropdownRef}>
-              <button 
-                onClick={() => setShowEnvDropdown(!showEnvDropdown)}
-                style={{ 
-                  padding: '6px 14px', 
-                  height: '30px',
-                  background: 'var(--bg-1)', 
-                  border: '1px solid var(--border-2)', 
-                  borderRadius: '6px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '6px',
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.borderColor = 'var(--border-3)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-1)'; e.currentTarget.style.borderColor = 'var(--border-2)' }}
-              >
-                <Globe className="h-3.5 w-3.5" style={{ color: 'var(--text-2)' }} />
-                <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-1)' }}>
-                  {store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.name || 'Global Environment' : 'Global Environment'}
-                </span>
-                <ChevronDown className="h-3.5 w-3.5" style={{ color: 'var(--text-3)' }} />
-              </button>
+        <WorkspaceTabBar
+          tabs={workspaceTabs}
+          activeTabId={store.activeTabId}
+          onSelectTab={(id) => store.setActiveTab(id)}
+          onCloseTab={(id) => store.removeTab(id)}
+          onNewTab={() => store.addTab()}
+          onRenameTab={(id, newName) => store.renameTab(id, newName)}
+          onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
+            store.reorderTabs(oldIndex, newIndex)
+          }
+          onDuplicateTab={(id) => store.duplicateTab(id)}
+          onCloseOthers={(id) => store.closeOtherTabs(id)}
+          onCloseToRight={(id) => store.closeTabsToRight(id)}
+          onCloseAll={() => store.closeAllTabs()}
+          onCopyName={(id) => {
+            const t = tabs.find((tab) => tab.id === id);
+            if (t) navigator.clipboard.writeText(t.name);
+          }}
+          newTabTooltip="New Request Tab"
+          rightContent={
+            <>
+              <div className="tabs-toolbar-sep" />
+              <div style={{ position: 'relative' }} ref={envDropdownRef}>
+                <button 
+                  onClick={() => setShowEnvDropdown(!showEnvDropdown)}
+                  className="console-toggle-btn"
+                  style={{ gap: '6px' }}
+                >
+                  <Globe className="h-3.5 w-3.5" />
+                  <span className="console-toggle-label">
+                    {store.activeEnvironmentId ? store.environments.find(e => e.id === store.activeEnvironmentId)?.name || 'Global Environment' : 'Global Environment'}
+                  </span>
+                  <ChevronDown className="h-3 w-3" style={{ opacity: 0.5 }} />
+                </button>
 
-              {showEnvDropdown && (
-                <div style={{ 
-                  position: 'absolute', 
-                  top: '100%', 
-                  right: 0, 
-                  marginTop: '8px', 
-                  background: 'var(--bg-1)', 
-                  border: '1px solid var(--border-1)', 
-                  borderRadius: '8px', 
-                  padding: '6px', 
-                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
-                  zIndex: 50,
-                  minWidth: '180px'
-                }}>
-                  <button 
-                    style={{ 
-                      width: '100%', 
-                      textAlign: 'left', 
-                      padding: '8px 12px', 
-                      background: store.activeEnvironmentId === null ? 'var(--bg-hover)' : 'transparent', 
-                      border: 'none', 
-                      borderRadius: '4px', 
-                      fontSize: '13px', 
-                      fontWeight: 500, 
-                      color: 'var(--text-1)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      store.setActiveEnvironment(null);
-                      setShowEnvDropdown(false);
-                    }}
-                    onMouseEnter={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'var(--bg-hover)' }}
-                    onMouseLeave={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <span>Global Only</span>
-                    {store.activeEnvironmentId === null && <Check className="h-3 w-3 text-accent" />}
-                  </button>
-                  {store.environments.map(env => (
+                {showEnvDropdown && (
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: '100%', 
+                    right: 0, 
+                    marginTop: '8px', 
+                    background: 'var(--bg-1)', 
+                    border: '1px solid var(--border-1)', 
+                    borderRadius: '8px', 
+                    padding: '6px', 
+                    boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+                    zIndex: 50,
+                    minWidth: '180px'
+                  }}>
                     <button 
-                      key={env.id}
                       style={{ 
                         width: '100%', 
                         textAlign: 'left', 
                         padding: '8px 12px', 
-                        background: store.activeEnvironmentId === env.id ? 'var(--bg-hover)' : 'transparent', 
+                        background: store.activeEnvironmentId === null ? 'var(--bg-hover)' : 'transparent', 
                         border: 'none', 
                         borderRadius: '4px', 
                         fontSize: '13px', 
@@ -1411,34 +1335,66 @@ export function ApiTester() {
                       }}
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        store.setActiveEnvironment(env.id);
+                        store.setActiveEnvironment(null);
                         setShowEnvDropdown(false);
                       }}
-                      onMouseEnter={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'var(--bg-hover)' }}
-                      onMouseLeave={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'transparent' }}
+                      onMouseEnter={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                      onMouseLeave={(e) => { if(store.activeEnvironmentId !== null) e.currentTarget.style.background = 'transparent' }}
                     >
-                      <span>{env.name}</span>
-                      {store.activeEnvironmentId === env.id && <Check className="h-3 w-3 text-accent" />}
+                      <span>Global Only</span>
+                      {store.activeEnvironmentId === null && <Check className="h-3 w-3 text-accent" />}
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            
-            <SimpleTooltip content="Export all tabs to a ZIP file">
-              <button 
-                className="api-tab-export" 
-                onClick={() => {
-                  setExportSelectedTabs(store.tabs.map(t => t.id));
-                  setShowExportModal(true);
-                }}
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>Export</span>
-              </button>
-            </SimpleTooltip>
-          </div>
-        </div>
+                    {store.environments.map(env => (
+                      <button 
+                        key={env.id}
+                        style={{ 
+                          width: '100%', 
+                          textAlign: 'left', 
+                          padding: '8px 12px', 
+                          background: store.activeEnvironmentId === env.id ? 'var(--bg-hover)' : 'transparent', 
+                          border: 'none', 
+                          borderRadius: '4px', 
+                          fontSize: '13px', 
+                          fontWeight: 500, 
+                          color: 'var(--text-1)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          store.setActiveEnvironment(env.id);
+                          setShowEnvDropdown(false);
+                        }}
+                        onMouseEnter={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'var(--bg-hover)' }}
+                        onMouseLeave={(e) => { if(store.activeEnvironmentId !== env.id) e.currentTarget.style.background = 'transparent' }}
+                      >
+                        <span>{env.name}</span>
+                        {store.activeEnvironmentId === env.id && <Check className="h-3 w-3 text-accent" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              <div className="tabs-toolbar-sep" />
+
+              <SimpleTooltip content="Export all tabs to a ZIP file">
+                <button 
+                  className="toolbar-action-btn" 
+                  onClick={() => {
+                    setExportSelectedTabs(store.tabs.map(t => t.id));
+                    setShowExportModal(true);
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span className="toolbar-action-label">Export</span>
+                </button>
+              </SimpleTooltip>
+            </>
+          }
+        />
 
         {/* URL Bar */}
         <form onSubmit={handleSend} className="api-url-bar">

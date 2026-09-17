@@ -127,6 +127,11 @@ interface ApiTesterState {
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   renameTab: (id: string, name: string) => void;
+  reorderTabs: (oldIndex: number, newIndex: number) => void;
+  duplicateTab: (id: string) => void;
+  closeOtherTabs: (id: string) => void;
+  closeTabsToRight: (id: string) => void;
+  closeAllTabs: () => void;
 
   // Active tab Setters
   setMethod: (method: HttpMethod) => void;
@@ -476,6 +481,95 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((t) => (t.id === id ? { ...t, name } : t)),
       }));
+      persistTabs();
+    },
+    reorderTabs: (oldIndex, newIndex) => {
+      set((state) => {
+        const newTabs = [...state.tabs];
+        const [moved] = newTabs.splice(oldIndex, 1);
+        newTabs.splice(newIndex, 0, moved);
+        return { tabs: newTabs };
+      });
+      persistTabs();
+    },
+    duplicateTab: (id) => {
+      set((state) => {
+        const source = state.tabs.find((t) => t.id === id);
+        if (!source) return state;
+        const newTab: TabState = {
+          ...JSON.parse(JSON.stringify(source)),
+          id: genId(),
+          name: `${source.name} (Copy)`,
+          response: null,
+          loading: false,
+          error: null,
+          wsConnected: false,
+          sseActive: false,
+          wsMessages: [],
+        };
+        const idx = state.tabs.findIndex((t) => t.id === id);
+        const newTabs = [...state.tabs];
+        newTabs.splice(idx + 1, 0, newTab);
+        return { tabs: newTabs, activeTabId: newTab.id };
+      });
+      persistTabs();
+    },
+    closeOtherTabs: (id) => {
+      // Clean up WS/controllers for removed tabs
+      const state = get();
+      state.tabs.forEach((t) => {
+        if (t.id === id) return;
+        const ws = wsConnections.get(t.id);
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close(1000, "Tab closed");
+        }
+        wsConnections.delete(t.id);
+        const controller = activeControllers.get(t.id);
+        if (controller) { controller.abort(); activeControllers.delete(t.id); }
+      });
+      set((state) => ({
+        tabs: state.tabs.filter((t) => t.id === id),
+        activeTabId: id,
+      }));
+      persistTabs();
+    },
+    closeTabsToRight: (id) => {
+      const state = get();
+      const idx = state.tabs.findIndex((t) => t.id === id);
+      if (idx === -1) return;
+      state.tabs.slice(idx + 1).forEach((t) => {
+        const ws = wsConnections.get(t.id);
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close(1000, "Tab closed");
+        }
+        wsConnections.delete(t.id);
+        const controller = activeControllers.get(t.id);
+        if (controller) { controller.abort(); activeControllers.delete(t.id); }
+      });
+      set((state) => {
+        const idx = state.tabs.findIndex((t) => t.id === id);
+        const newTabs = state.tabs.slice(0, idx + 1);
+        return {
+          tabs: newTabs,
+          activeTabId: newTabs.find((t) => t.id === state.activeTabId) ? state.activeTabId : id,
+        };
+      });
+      persistTabs();
+    },
+    closeAllTabs: () => {
+      // Clean up all WS/controllers
+      const state = get();
+      state.tabs.forEach((t) => {
+        const ws = wsConnections.get(t.id);
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          ws.close(1000, "Tab closed");
+        }
+        wsConnections.delete(t.id);
+        const controller = activeControllers.get(t.id);
+        if (controller) { controller.abort(); activeControllers.delete(t.id); }
+      });
+      const freshTab = createNewTab("Tab 1");
+      set({ tabs: [freshTab], activeTabId: freshTab.id });
       persistTabs();
     },
 

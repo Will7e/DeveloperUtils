@@ -1,7 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
-import { DndContext, closestCenter, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
-import { SortableTab } from "@/components/ui/SortableTab";
+import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { 
   Columns, 
   Trash2, 
@@ -69,6 +67,10 @@ export function ListComparator() {
   const setActiveSession = useAppStore((s) => s.setActiveComparatorSession);
   const createSession = useAppStore((s) => s.createComparatorSession);
   const deleteSession = useAppStore((s) => s.deleteComparatorSession);
+  const duplicateComparatorSession = useAppStore((s) => s.duplicateComparatorSession);
+  const closeOtherComparatorSessions = useAppStore((s) => s.closeOtherComparatorSessions);
+  const closeComparatorSessionsToRight = useAppStore((s) => s.closeComparatorSessionsToRight);
+  const closeAllComparatorSessions = useAppStore((s) => s.closeAllComparatorSessions);
   const renameSession = useAppStore((s) => s.renameComparatorSession);
   const updateSessionInput = useAppStore((s) => s.updateComparatorSessionInput);
 
@@ -81,27 +83,49 @@ export function ListComparator() {
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ComparisonType>("aOnly");
   const [copied, setCopied] = useState<string | null>(null);
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-
-  // DnD sensor with activation constraint to allow clicks without triggering drag
-  const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = sessions.findIndex((s) => s.id === active.id);
-    const newIndex = sessions.findIndex((s) => s.id === over.id);
-    if (oldIndex !== -1 && newIndex !== -1) {
-      reorderSessions(oldIndex, newIndex);
-    }
-  }, [sessions, reorderSessions]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
   const inputA = activeSession.a;
   const inputB = activeSession.b;
+
+  // Standardized Workspace Tabs
+  const tabs: TabItem[] = useMemo(
+    () =>
+      sessions.map((session) => ({
+        id: session.id,
+        name: session.name,
+        icon: (
+          <span className="tab-icon tab-icon-javascript">
+            <Columns className="h-3 w-3" />
+          </span>
+        ),
+        closable: sessions.length > 1,
+      })),
+    [sessions]
+  );
+
+  const handleCopyTabContent = useCallback(
+    (id: string) => {
+      const session = sessions.find((s) => s.id === id);
+      if (session) {
+        const text = `--- List A ---\n${session.a}\n\n--- List B ---\n${session.b}`;
+        navigator.clipboard.writeText(text);
+        addToast({ message: `Copied ${session.name} inputs to clipboard`, type: "success", duration: 1500 });
+      }
+    },
+    [sessions, addToast]
+  );
+
+  const handleCopyTabName = useCallback(
+    (id: string) => {
+      const session = sessions.find((s) => s.id === id);
+      if (session) {
+        navigator.clipboard.writeText(session.name);
+        addToast({ message: "Session name copied", type: "info", duration: 1500 });
+      }
+    },
+    [sessions, addToast]
+  );
 
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
@@ -187,133 +211,84 @@ export function ListComparator() {
 
   return (
     <div className="list-comparator-container">
-      <div className="tabs-bar">
-        <div className="tabs-list">
-          <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={sessions.map(s => s.id)} strategy={horizontalListSortingStrategy}>
-              {sessions.map(session => (
-                <SortableTab key={session.id} id={session.id}>
-                  <button 
-                    className={cn(
-                      "tab",
-                      activeSessionId === session.id && "tab-active"
-                    )}
-                    onClick={() => setActiveSession(session.id)}
-                    onDoubleClick={() => {
-                      setEditName(session.name);
-                      setEditingSessionId(session.id);
-                    }}
-                  >
-                    <span className="tab-icon tab-icon-javascript">
-                      <Columns className="h-3 w-3" />
-                    </span>
-                    {editingSessionId === session.id ? (
-                      <input
-                        autoFocus
-                        className="tab-rename-input"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onBlur={() => {
-                          if (editName.trim() && editName !== session.name) {
-                            renameSession(session.id, editName.trim());
-                          }
-                          setEditingSessionId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            setEditingSessionId(null);
-                          }
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    ) : (
-                      <span className="tab-name">
-                        {session.name}
-                      </span>
-                    )}
-                    <span 
-                      className="tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSession(session.id);
-                      }}
-                    >
-                      <X className="h-3 w-3" />
-                    </span>
-                  </button>
-                </SortableTab>
-              ))}
-            </SortableContext>
-          </DndContext>
-          <button 
-            className="tab-new"
-            onClick={() => createSession()}
-          >
-            <Plus className="h-4 w-4" />
-          </button>
-        </div>
+      <WorkspaceTabBar
+        tabs={tabs}
+        activeTabId={activeSession.id}
+        onSelectTab={setActiveSession}
+        onCloseTab={deleteSession}
+        onNewTab={() => createSession()}
+        onRenameTab={(id, newName) => renameSession(id, newName)}
+        onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
+          reorderSessions(oldIndex, newIndex)
+        }
+        onDuplicateTab={duplicateComparatorSession}
+        onCloseOthers={closeOtherComparatorSessions}
+        onCloseToRight={closeComparatorSessionsToRight}
+        onCloseAll={closeAllComparatorSessions}
+        onCopyContent={handleCopyTabContent}
+        onCopyName={handleCopyTabName}
+        newTabTooltip="New Comparison Session"
+        rightContent={
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="toolbar-btn">
+                  <Settings2 className="h-3.5 w-3.5" />
+                  Settings
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Analysis Rules</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={caseSensitive}
+                  onCheckedChange={(checked) => updateComparatorSettings({ caseSensitive: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Case Sensitive
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={trimWhitespace}
+                  onCheckedChange={(checked) => updateComparatorSettings({ trimWhitespace: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Trim Whitespace
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Display</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={sortAlpha}
+                  onCheckedChange={(checked) => updateComparatorSettings({ sortAlpha: checked })}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  Natural Sort Order
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-        <div className="tabs-toolbar">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="toolbar-btn">
-                <Settings2 className="h-3.5 w-3.5" />
-                Settings
-                <ChevronDown className="h-3 w-3 opacity-50" />
+            <div className="tabs-toolbar-sep" />
+
+            <ActionTooltip content="Reset both input lists">
+              <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
+                updateSessionInput(activeSession.id, "a", ""); 
+                updateSessionInput(activeSession.id, "b", ""); 
+              }}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear
               </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Analysis Rules</DropdownMenuLabel>
-              <DropdownMenuCheckboxItem
-                checked={caseSensitive}
-                onCheckedChange={(checked) => updateComparatorSettings({ caseSensitive: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Case Sensitive
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={trimWhitespace}
-                onCheckedChange={(checked) => updateComparatorSettings({ trimWhitespace: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Trim Whitespace
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>Display</DropdownMenuLabel>
-              <DropdownMenuCheckboxItem
-                checked={sortAlpha}
-                onCheckedChange={(checked) => updateComparatorSettings({ sortAlpha: checked })}
-                onSelect={(e) => e.preventDefault()}
-              >
-                Natural Sort Order
-              </DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </ActionTooltip>
 
-          <div className="tabs-toolbar-sep" />
+            <div className="tabs-toolbar-sep" />
 
-          <ActionTooltip content="Reset both input lists">
-            <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
-              updateSessionInput(activeSession.id, "a", ""); 
-              updateSessionInput(activeSession.id, "b", ""); 
-            }}>
-              <Trash2 className="h-3.5 w-3.5" />
-              Clear
-            </button>
-          </ActionTooltip>
-
-          <div className="tabs-toolbar-sep" />
-
-          <ActionTooltip content="Results update automatically as you type">
-            <div className="tabs-run-btn opacity-80 cursor-default">
-              <Check className="h-3 w-3" />
-              <span>Live Synced</span>
-            </div>
-          </ActionTooltip>
-        </div>
-      </div>
+            <ActionTooltip content="Results update automatically as you type">
+              <div className="tabs-run-btn opacity-80 cursor-default">
+                <Check className="h-3 w-3" />
+                <span>Live Synced</span>
+              </div>
+            </ActionTooltip>
+          </>
+        }
+      />
 
       <div className="list-comparator-content">
         <PanelGroup orientation="vertical">

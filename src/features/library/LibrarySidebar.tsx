@@ -419,16 +419,18 @@ export function LibrarySidebar() {
           <button
             className={cn("lib-mode-tab", libraryTab === "servicenow" && "lib-mode-tab-active")}
             onClick={() => setLibraryTab("servicenow")}
+            title="ServiceNow APIs"
           >
-            <Server className="w-3 h-3" />
-            <span>ServiceNow APIs</span>
+            <Server className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">ServiceNow</span>
           </button>
           <button
             className={cn("lib-mode-tab", libraryTab === "excalidraw" && "lib-mode-tab-active")}
             onClick={() => setLibraryTab("excalidraw")}
+            title="Excalidraw Shapes & Diagrams"
           >
-            <Boxes className="w-3 h-3" />
-            <span>Excalidraw</span>
+            <Boxes className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Excalidraw</span>
           </button>
         </div>
 
