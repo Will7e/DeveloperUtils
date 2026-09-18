@@ -436,6 +436,12 @@ export function DiffChecker() {
     originalEditorRef.current = origEditor;
     modifiedEditorRef.current = modEditor;
 
+    // Trigger immediate layout pass so split panes and editors adapt to container bounds
+    diffEditor.layout();
+    requestAnimationFrame(() => {
+      diffEditor.layout();
+    });
+
     // Register Cmd+S / Ctrl+S and Shift+Alt+F format shortcut for both editors
     registerMonacoFormatShortcut(origEditor, monaco, {
       onFormat: () => handleFormatBothRef.current?.(),
@@ -609,7 +615,7 @@ export function DiffChecker() {
       cursorSmoothCaretAnimation: "on",
       renderLineHighlight: "all",
       scrollBeyondLastLine: false,
-      automaticLayout: false, // ResizeObserver handles explicit layout without interval polling
+      automaticLayout: true,
       padding: { top: 8, bottom: 8 },
       scrollbar: {
         verticalScrollbarSize: 7,
