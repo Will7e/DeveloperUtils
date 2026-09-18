@@ -57,6 +57,8 @@ export function RequestPane({
 }: RequestPaneProps) {
   const store = useApiTesterStore();
   const [showPassword, setShowPassword] = useState(false);
+  const [showBearerToken, setShowBearerToken] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   return (
     <div
@@ -708,17 +710,33 @@ export function RequestPane({
                 <div className="api-auth-fields">
                   <div className="api-auth-field">
                     <label className="api-auth-label">Token</label>
-                    <input
-                      type="text"
-                      className="api-auth-input"
-                      placeholder="Enter bearer token"
-                      value={activeTab.authConfig.bearerToken}
-                      onChange={(e) =>
-                        store.setAuthConfig({
-                          bearerToken: e.target.value,
-                        })
-                      }
-                    />
+                    <div style={{ position: "relative", display: "flex", gap: "6px" }}>
+                      <input
+                        type={showBearerToken ? "text" : "password"}
+                        className="api-auth-input"
+                        placeholder="Enter bearer token"
+                        value={activeTab.authConfig.bearerToken}
+                        onChange={(e) =>
+                          store.setAuthConfig({
+                            bearerToken: e.target.value,
+                          })
+                        }
+                      />
+                      <SimpleTooltip content={showBearerToken ? "Hide token" : "Show token"}>
+                        <button
+                          type="button"
+                          className="api-delete-row-btn"
+                          onClick={() => setShowBearerToken(!showBearerToken)}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {showBearerToken ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </SimpleTooltip>
+                    </div>
                     <span className="api-auth-hint">
                       Will be sent as: Authorization: Bearer &lt;token&gt;
                     </span>
@@ -807,17 +825,33 @@ export function RequestPane({
                   </div>
                   <div className="api-auth-field">
                     <label className="api-auth-label">Value</label>
-                    <input
-                      type="text"
-                      className="api-auth-input"
-                      placeholder="Enter API key value"
-                      value={activeTab.authConfig.apiKeyValue}
-                      onChange={(e) =>
-                        store.setAuthConfig({
-                          apiKeyValue: e.target.value,
-                        })
-                      }
-                    />
+                    <div style={{ position: "relative", display: "flex", gap: "6px" }}>
+                      <input
+                        type={showApiKey ? "text" : "password"}
+                        className="api-auth-input"
+                        placeholder="Enter API key value"
+                        value={activeTab.authConfig.apiKeyValue}
+                        onChange={(e) =>
+                          store.setAuthConfig({
+                            apiKeyValue: e.target.value,
+                          })
+                        }
+                      />
+                      <SimpleTooltip content={showApiKey ? "Hide key" : "Show key"}>
+                        <button
+                          type="button"
+                          className="api-delete-row-btn"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          style={{ flexShrink: 0 }}
+                        >
+                          {showApiKey ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </SimpleTooltip>
+                    </div>
                   </div>
                   <div className="api-auth-field">
                     <label className="api-auth-label">Add to</label>

@@ -42,9 +42,17 @@ export function HtmlPreview() {
 
   const handleOpenExternal = () => {
     if (!activeFile) return;
-    const blob = new Blob([activeFile.content], { type: "text/html" });
+    // Inject protective CSP meta tag into opened preview blob to prevent parent window/storage access
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https:; script-src 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'unsafe-inline' https:; img-src * data: blob:; font-src * data:; connect-src *;">`;
+    let content = activeFile.content;
+    if (content.includes("<head>")) {
+      content = content.replace("<head>", `<head>\n  ${cspMeta}`);
+    } else {
+      content = `${cspMeta}\n${content}`;
+    }
+    const blob = new Blob([content], { type: "text/html" });
     const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   if (!isHtml) return null;
@@ -120,7 +128,7 @@ export function HtmlPreview() {
           ref={iframeRef}
           className="html-preview-frame"
           style={viewMode === "mobile" ? { maxWidth: 375, margin: "0 auto" } : undefined}
-          sandbox="allow-scripts allow-same-origin"
+          sandbox="allow-scripts allow-modals"
           title="HTML Preview"
           srcDoc={debouncedContent}
         />

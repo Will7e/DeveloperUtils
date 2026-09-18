@@ -95,3 +95,40 @@ export function redactHeaderValue(name: string, value: string): string {
   }
   return value;
 }
+
+/**
+ * Safely sanitizes an object to prevent Prototype Pollution attacks.
+ * Strips `__proto__`, `constructor`, and `prototype` keys recursively.
+ */
+export function sanitizeObject<T>(obj: T): T {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeObject) as unknown as T;
+  }
+
+  const clean: Record<string, unknown> = Object.create(null);
+  for (const [key, val] of Object.entries(obj)) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") {
+      continue;
+    }
+    clean[key] = sanitizeObject(val);
+  }
+
+  return clean as T;
+}
+
+/**
+ * Parses JSON safely, neutralizing any prototype pollution payloads.
+ */
+export function safeJsonParse<T = unknown>(jsonStr: string, fallback: T): T {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return sanitizeObject(parsed) as T;
+  } catch {
+    return fallback;
+  }
+}
+

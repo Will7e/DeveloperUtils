@@ -5066,7 +5066,7 @@ html.light .loader-bar-fill {
    ============================================================ */
 
 .dropdown-content {
-  z-index: 100;
+  z-index: 9999;
   min-width: 180px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
@@ -5105,8 +5105,13 @@ html.light .loader-bar-fill {
 }
 
 .dropdown-item:hover,
-.dropdown-item:focus {
+.dropdown-item:focus,
+.dropdown-item[data-highlighted] {
   background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.dropdown-item[data-state="checked"] {
   color: var(--text-1);
 }
 
@@ -7062,6 +7067,11 @@ html.light .lib-excal-preview-wrap {
   color: var(--text-3);
 }
 
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
   width: 5px;
 }
@@ -7358,6 +7368,7 @@ html.light .lib-excal-preview-wrap {
 .diff-lang-dropdown {
   max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* ============================================================

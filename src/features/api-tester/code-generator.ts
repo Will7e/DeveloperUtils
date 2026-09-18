@@ -2,6 +2,7 @@ import { TabState, KeyValueField, applyAuth, substituteEnvVars } from "@/stores/
 
 export const CODE_LANGUAGES = [
   { id: "curl", name: "cURL", language: "bash" },
+  { id: "servicenow", name: "ServiceNow (RESTMessageV2)", language: "javascript" },
   { id: "fetch", name: "JavaScript (Fetch)", language: "javascript" },
   { id: "axios", name: "JavaScript (Axios)", language: "javascript" },
   { id: "python", name: "Python (Requests)", language: "python" },
@@ -80,6 +81,8 @@ export function generateCodeSnippet(
 
   // Generate per language
   switch (languageId) {
+    case "servicenow":
+      return generateServiceNow(method, finalUrl, computedHeaders, bodyType, bodyStr);
     case "fetch":
       return generateFetch(method, finalUrl, computedHeaders, bodyType, bodyStr, substitutedFormParams);
     case "axios":
@@ -274,3 +277,51 @@ function generateGo(method: string, url: string, headers: Record<string, string>
 
   return snippet;
 }
+
+function generateServiceNow(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  bodyType: string,
+  bodyStr: string
+): string {
+  let snippet = `// ServiceNow Server-side REST Message (sn_ws.RESTMessageV2)\n`;
+  snippet += `(function executeRestMessage() {\n`;
+  snippet += `  try {\n`;
+  snippet += `    var request = new sn_ws.RESTMessageV2();\n`;
+  snippet += `    request.setHttpMethod(${JSON.stringify(method)});\n`;
+  snippet += `    request.setEndpoint(${JSON.stringify(url)});\n\n`;
+
+  const headerKeys = Object.keys(headers);
+  if (headerKeys.length > 0) {
+    snippet += `    // Request Headers\n`;
+    for (const key of headerKeys) {
+      snippet += `    request.setRequestHeader(${JSON.stringify(key)}, ${JSON.stringify(headers[key])});\n`;
+    }
+    snippet += `\n`;
+  }
+
+  if (method !== "GET" && method !== "HEAD" && bodyStr.trim()) {
+    snippet += `    // Request Body\n`;
+    snippet += `    request.setRequestBody(${JSON.stringify(bodyStr)});\n\n`;
+  }
+
+  snippet += `    // Execute HTTP Request\n`;
+  snippet += `    var response = request.execute();\n`;
+  snippet += `    var httpStatus = response.getStatusCode();\n`;
+  snippet += `    var responseBody = response.getBody();\n\n`;
+  snippet += `    gs.info('REST Status: ' + httpStatus);\n`;
+  snippet += `    gs.info('REST Response: ' + responseBody);\n\n`;
+  snippet += `    return {\n`;
+  snippet += `      status: httpStatus,\n`;
+  snippet += `      body: responseBody\n`;
+  snippet += `    };\n`;
+  snippet += `  } catch (ex) {\n`;
+  snippet += `    var message = ex.message;\n`;
+  snippet += `    gs.error('REST Call Failed: ' + message);\n`;
+  snippet += `  }\n`;
+  snippet += `})();\n`;
+
+  return snippet;
+}
+

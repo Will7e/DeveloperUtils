@@ -200,7 +200,7 @@ interface ApiTesterState {
   importFromCurl: (curlStr: string) => boolean;
 
   // Export functionality
-  exportTabsAsZip: (tabIds: string[]) => Promise<void>;
+  exportTabsAsZip: (tabIds: string[], sanitizeSecrets?: boolean) => Promise<void>;
 
   // Environment Variables
   setEnvVars: (vars: KeyValueField[]) => void;
@@ -1628,26 +1628,52 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       return true;
     },
     
-    exportTabsAsZip: async (tabIds: string[]) => {
+    exportTabsAsZip: async (tabIds: string[], sanitizeSecrets = true) => {
       const { tabs } = get();
       const tabsToExport = tabs.filter(t => tabIds.includes(t.id));
       if (tabsToExport.length === 0) return;
       
       const zip = new JSZip();
       tabsToExport.forEach(tab => {
+        let authConfigToExport = { ...tab.authConfig };
+        let headersToExport = [...tab.headers];
+
+        if (sanitizeSecrets) {
+          // Sanitize sensitive authConfig fields
+          authConfigToExport = {
+            bearerToken: authConfigToExport.bearerToken ? "••••••••" : "",
+            basicUsername: authConfigToExport.basicUsername || "",
+            basicPassword: authConfigToExport.basicPassword ? "••••••••" : "",
+            apiKeyName: authConfigToExport.apiKeyName || "",
+            apiKeyValue: authConfigToExport.apiKeyValue ? "••••••••" : "",
+            apiKeyPlacement: authConfigToExport.apiKeyPlacement || "header",
+          };
+
+          // Sanitize sensitive headers (Authorization, X-API-Key, etc.)
+          headersToExport = headersToExport.map(h => {
+            const lowerKey = h.key.toLowerCase().trim();
+            if (["authorization", "proxy-authorization", "x-api-key", "api-key", "secret"].includes(lowerKey)) {
+              return { ...h, value: "••••••••" };
+            }
+            return h;
+          });
+        }
+
         const exportData = {
           id: tab.id,
           name: tab.name,
           method: tab.method,
           url: tab.url,
           params: tab.params,
-          headers: tab.headers,
+          headers: headersToExport,
           bodyType: tab.bodyType,
           bodyValue: tab.bodyValue,
           formParams: tab.formParams,
           rawType: tab.rawType,
           authType: tab.authType,
-          authConfig: tab.authConfig
+          authConfig: authConfigToExport,
+          _exportedAt: new Date().toISOString(),
+          _sanitized: sanitizeSecrets,
         };
         
         const safeName = tab.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'request';

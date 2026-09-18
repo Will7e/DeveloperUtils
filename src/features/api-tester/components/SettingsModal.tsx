@@ -11,6 +11,8 @@ import {
   Server,
   Lock,
   FileText,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -23,6 +25,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalProps) {
   const [settingsEnvId, setSettingsEnvId] = useState<string>("global");
+  const [revealedVarIndices, setRevealedVarIndices] = useState<Set<number>>(new Set());
 
   const envVars = useApiTesterStore((s) => s.envVars);
   const setEnvVars = useApiTesterStore((s) => s.setEnvVars);
@@ -574,9 +577,13 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                         />
                       </div>
 
-                      <div className="api-settings-cell-input">
+                      <div className="api-settings-cell-input" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                         <input
-                          type="text"
+                          type={
+                            /token|secret|password|key|auth|cert|credential|private/i.test(v.key) && !revealedVarIndices.has(i)
+                              ? "password"
+                              : "text"
+                          }
                           className="api-settings-input"
                           placeholder="Value"
                           value={v.value}
@@ -589,6 +596,29 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                             updateVars(newVars);
                           }}
                         />
+                        {/token|secret|password|key|auth|cert|credential|private/i.test(v.key) && (
+                          <SimpleTooltip content={revealedVarIndices.has(i) ? "Mask secret" : "Reveal secret"}>
+                            <button
+                              type="button"
+                              className="api-delete-row-btn"
+                              style={{ flexShrink: 0 }}
+                              onClick={() => {
+                                setRevealedVarIndices((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(i)) next.delete(i);
+                                  else next.add(i);
+                                  return next;
+                                });
+                              }}
+                            >
+                              {revealedVarIndices.has(i) ? (
+                                <EyeOff className="h-3.5 w-3.5" />
+                              ) : (
+                                <Eye className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </SimpleTooltip>
+                        )}
                       </div>
 
                       <div className="api-settings-cell-actions">

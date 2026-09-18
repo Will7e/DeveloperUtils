@@ -26,7 +26,6 @@ import {
   Minus,
   AlignLeft,
   ScanSearch,
-  Search,
   Check,
   Copy,
 } from "lucide-react";
@@ -42,6 +41,7 @@ import {
   DropdownMenuItem,
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -103,7 +103,16 @@ export function DiffChecker() {
   const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
 
   // Active session
-  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
+  const activeSession =
+    sessions.find((s) => s.id === activeSessionId) ||
+    sessions[0] || {
+      id: "default-diff",
+      name: "Diff Check",
+      original: "",
+      modified: "",
+      language: "plaintext",
+      autoDetect: true,
+    };
 
   // Local state
   const [localOriginal, setLocalOriginal] = useState(activeSession.original);
@@ -111,7 +120,6 @@ export function DiffChecker() {
   const [copiedOrig, setCopiedOrig] = useState(false);
   const [copiedMod, setCopiedMod] = useState(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState(false);
-  const [langSearch, setLangSearch] = useState("");
   const [isFormatting, setIsFormatting] = useState(false);
 
   // Live diff stats from Monaco
@@ -579,15 +587,6 @@ export function DiffChecker() {
     addToast({ message: "Diff exported", type: "success" });
   }, [activeSession.name, activeSession.language, localOriginal, localModified, addToast]);
 
-  // Filtered languages
-  const filteredLanguages = useMemo(() => {
-    if (!langSearch.trim()) return DIFF_LANGUAGES;
-    const q = langSearch.toLowerCase();
-    return DIFF_LANGUAGES.filter(
-      (l) => l.label.toLowerCase().includes(q) || l.id.toLowerCase().includes(q)
-    );
-  }, [langSearch]);
-
   const currentLang = getLanguageInfo(activeSession.language);
   const isAutoDetectActive = activeSession.autoDetect !== false;
   const origLineCount = localOriginal ? localOriginal.split("\n").length : 0;
@@ -639,58 +638,48 @@ export function DiffChecker() {
                   <ChevronDown className="h-3 w-3 opacity-50" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 p-1">
-                <div className="flex items-center gap-2 px-2 py-1 mb-1 bg-bg-2 rounded border border-border-1">
-                  <Search className="h-3 w-3 text-text-3" />
-                  <input
-                    type="text"
-                    placeholder="Filter languages..."
-                    className="w-full bg-transparent text-xs text-text-1 placeholder:text-text-3 outline-none"
-                    value={langSearch}
-                    onChange={(e) => setLangSearch(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-                <DropdownMenuItem
-                  className={cn(
-                    "flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer",
-                    isAutoDetectActive && "bg-accent/15 text-accent font-semibold"
-                  )}
-                  onSelect={() => {
+              <DropdownMenuContent align="end" className="w-56 diff-lang-dropdown custom-scrollbar">
+                <DropdownMenuLabel>Detection</DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  checked={isAutoDetectActive}
+                  onCheckedChange={() => {
                     const det = detectLanguageFromInputs(localOriginal, localModified);
                     updateSessionLanguage(activeSession.id, det.language, true);
                     setLangDropdownOpen(false);
                   }}
                 >
-                  <div className="flex items-center gap-1.5">
-                    <ScanSearch className="h-3.5 w-3.5 text-accent" />
-                    <span>Auto-Detect</span>
-                  </div>
+                  <span className="flex-1">Auto-Detect</span>
                   {detection.confidence > 0 && (
-                    <span className="text-[10px] opacity-70">{detection.label}</span>
+                    <span className="text-[10px] text-text-3 font-mono opacity-70 ml-2">
+                      ({detection.label})
+                    </span>
                   )}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="my-1" />
-                <div className="max-h-48 overflow-y-auto space-y-0.5">
-                  {filteredLanguages.map((lang) => (
-                    <DropdownMenuItem
+                </DropdownMenuCheckboxItem>
+
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Syntax Language</DropdownMenuLabel>
+
+                {DIFF_LANGUAGES.map((lang) => {
+                  const isChecked = !isAutoDetectActive && activeSession.language === lang.id;
+                  return (
+                    <DropdownMenuCheckboxItem
                       key={lang.id}
-                      className={cn(
-                        "flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer",
-                        !isAutoDetectActive && activeSession.language === lang.id && "bg-bg-2 text-accent font-semibold"
-                      )}
-                      onSelect={() => {
+                      checked={isChecked}
+                      className={cn(isChecked && "text-text-1 font-medium")}
+                      onCheckedChange={() => {
                         updateSessionLanguage(activeSession.id, lang.id, false);
                         setLangDropdownOpen(false);
                       }}
                     >
-                      <span>{lang.label}</span>
-                      {!isAutoDetectActive && activeSession.language === lang.id && (
-                        <Check className="h-3 w-3 text-accent" />
+                      <span className="flex-1">{lang.label}</span>
+                      {lang.extensions?.[0] && (
+                        <span className="text-[10px] text-text-3 font-mono opacity-50 ml-2">
+                          {lang.extensions[0]}
+                        </span>
                       )}
-                    </DropdownMenuItem>
-                  ))}
-                </div>
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
               </DropdownMenuContent>
             </DropdownMenu>
 

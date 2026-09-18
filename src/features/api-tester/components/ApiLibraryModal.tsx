@@ -47,6 +47,8 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
   const [methodFilter, setMethodFilter] = useState<string>("ALL");
   const [inspectingPreset, setInspectingPreset] = useState<LibraryPreset | null>(null);
   const [copiedCurlId, setCopiedCurlId] = useState<string | null>(null);
+  const [copiedResponse, setCopiedResponse] = useState<boolean>(false);
+  const [copiedServiceNow, setCopiedServiceNow] = useState<boolean>(false);
 
   // Close on Escape key
   useEffect(() => {
@@ -137,6 +139,48 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
     navigator.clipboard.writeText(curl);
     setCopiedCurlId(preset.id);
     setTimeout(() => setCopiedCurlId(null), 2000);
+  };
+
+  const handleCopyServiceNowScript = (preset: LibraryPreset, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    let script = `// ServiceNow Server-side REST Message (sn_ws.RESTMessageV2)\n`;
+    script += `(function executeRestMessage() {\n`;
+    script += `  try {\n`;
+    script += `    var request = new sn_ws.RESTMessageV2();\n`;
+    script += `    request.setHttpMethod(${JSON.stringify(preset.method)});\n`;
+    script += `    request.setEndpoint(${JSON.stringify(preset.url)});\n\n`;
+
+    if (preset.headers && preset.headers.length > 0) {
+      script += `    // Request Headers\n`;
+      preset.headers.forEach((h) => {
+        script += `    request.setRequestHeader(${JSON.stringify(h.key)}, ${JSON.stringify(h.value)});\n`;
+      });
+      script += `\n`;
+    }
+
+    if (preset.bodyValue && preset.bodyType !== "none") {
+      script += `    // Request Body\n`;
+      script += `    request.setRequestBody(${JSON.stringify(preset.bodyValue)});\n\n`;
+    }
+
+    script += `    // Execute HTTP Request\n`;
+    script += `    var response = request.execute();\n`;
+    script += `    var httpStatus = response.getStatusCode();\n`;
+    script += `    var responseBody = response.getBody();\n\n`;
+    script += `    gs.info('REST Status: ' + httpStatus);\n`;
+    script += `    gs.info('REST Response: ' + responseBody);\n\n`;
+    script += `    return {\n`;
+    script += `      status: httpStatus,\n`;
+    script += `      body: responseBody\n`;
+    script += `    };\n`;
+    script += `  } catch (ex) {\n`;
+    script += `    gs.error('REST Call Failed: ' + ex.message);\n`;
+    script += `  }\n`;
+    script += `})();\n`;
+
+    navigator.clipboard.writeText(script);
+    setCopiedServiceNow(true);
+    setTimeout(() => setCopiedServiceNow(false), 2000);
   };
 
   const handleAddToTester = (preset: LibraryPreset) => {
@@ -694,6 +738,58 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
                     </div>
                   </div>
                 )}
+
+                {/* Required Scopes / Permissions */}
+                {inspectingPreset.requiredScopes && inspectingPreset.requiredScopes.length > 0 && (
+                  <div className="api-inspector-section">
+                    <div className="api-inspector-label">Required Permissions & Scopes</div>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {inspectingPreset.requiredScopes.map((scope) => (
+                        <span key={scope} className="api-library-tag flex items-center gap-1">
+                          <Shield className="h-3 w-3 text-accent" />
+                          <span>{scope}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sample Expected Response */}
+                {inspectingPreset.sampleResponse && (
+                  <div className="api-inspector-section">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="api-inspector-label">Sample Expected Response</div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded ${
+                            inspectingPreset.sampleResponse.status < 300
+                              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                              : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                          }`}
+                        >
+                          {inspectingPreset.sampleResponse.status} {inspectingPreset.sampleResponse.statusText}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[11px] text-accent hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                          onClick={() => {
+                            navigator.clipboard.writeText(inspectingPreset.sampleResponse?.body || "");
+                            setCopiedResponse(true);
+                            setTimeout(() => setCopiedResponse(false), 2000);
+                          }}
+                        >
+                          {copiedResponse ? <Check className="h-3 w-3 text-green" /> : <Copy className="h-3 w-3" />}
+                          <span>{copiedResponse ? "Copied JSON!" : "Copy JSON"}</span>
+                        </button>
+                      </div>
+                    </div>
+                    {inspectingPreset.sampleResponse.body && (
+                      <pre className="api-inspector-code-box font-mono text-xs overflow-x-auto p-3 max-h-56">
+                        {inspectingPreset.sampleResponse.body}
+                      </pre>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Inspector Footer Actions */}
@@ -724,6 +820,7 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
                 <button
                   className="api-btn-secondary flex items-center gap-1.5 text-xs py-2 px-3"
                   onClick={() => handleCopyCurl(inspectingPreset)}
+                  title="Copy cURL terminal command"
                 >
                   {copiedCurlId === inspectingPreset.id ? (
                     <>
@@ -734,6 +831,24 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
                     <>
                       <Terminal className="h-3.5 w-3.5" />
                       <span>Copy cURL</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  className="api-btn-secondary flex items-center gap-1.5 text-xs py-2 px-3"
+                  onClick={() => handleCopyServiceNowScript(inspectingPreset)}
+                  title="Copy ServiceNow sn_ws.RESTMessageV2 script snippet"
+                >
+                  {copiedServiceNow ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-green" />
+                      <span>Copied ServiceNow!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Code2 className="h-3.5 w-3.5 text-[#81b5a1]" />
+                      <span>ServiceNow Script</span>
                     </>
                   )}
                 </button>

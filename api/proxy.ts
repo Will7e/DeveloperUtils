@@ -1,3 +1,5 @@
+import { validateUrlForSSRF } from "../src/utils/ssrfGuard";
+
 export const config = {
   runtime: "edge",
 };
@@ -15,12 +17,14 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 export default async function handler(req: Request): Promise<Response> {
+  const origin = req.headers.get("origin") || "*";
+
   // CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": origin,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Access-Control-Expose-Headers": "*",
@@ -38,41 +42,36 @@ export default async function handler(req: Request): Promise<Response> {
         status: 400,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": origin,
           "Access-Control-Expose-Headers": "*",
         },
       });
     }
 
-    let validUrl: URL;
-    try {
-      validUrl = new URL(targetUrl);
-    } catch {
-      return new Response(JSON.stringify({ error: `Invalid target URL: '${targetUrl}'` }), {
-        status: 400,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Expose-Headers": "*",
-        },
-      });
-    }
+    // SSRF Guard: Validate target against cloud metadata, loopback, and private IP subnets
+    const ssrfCheck = validateUrlForSSRF(targetUrl, {
+      allowLocalhost: false,
+      allowPrivateSubnets: false,
+    });
 
-    if (validUrl.protocol !== "http:" && validUrl.protocol !== "https:") {
+    if (!ssrfCheck.allowed || !ssrfCheck.normalizedUrl) {
       return new Response(
         JSON.stringify({
-          error: `Unsupported protocol '${validUrl.protocol}'. Only http: and https: are supported.`,
+          error: `Forbidden target URL: ${ssrfCheck.reason || "Blocked by SSRF protection policy"}`,
+          code: "SSRF_BLOCKED",
         }),
         {
-          status: 400,
+          status: 403,
           headers: {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Expose-Headers": "*",
           },
         }
       );
     }
+
+    const validUrl = new URL(ssrfCheck.normalizedUrl);
 
     // Assemble headers
     const forwardHeaders = new Headers();
@@ -126,7 +125,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
     });
 
-    resHeaders.set("Access-Control-Allow-Origin", "*");
+    resHeaders.set("Access-Control-Allow-Origin", origin);
     resHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS");
     resHeaders.set("Access-Control-Allow-Headers", "*");
     resHeaders.set("Access-Control-Expose-Headers", "*");
@@ -144,7 +143,7 @@ export default async function handler(req: Request): Promise<Response> {
         status: 502,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": origin,
           "Access-Control-Expose-Headers": "*",
         },
       }

@@ -266,6 +266,12 @@ export interface ServiceNowMethod {
   description: string;
   parameters: string[];
   example: string;
+  returnType?: string;
+  returnDescription?: string;
+  scope?: "global" | "scoped" | "both";
+  deprecated?: boolean;
+  deprecationNotice?: string;
+  sinceRelease?: string;
 }
 
 export interface ServiceNowAPI {
@@ -273,6 +279,8 @@ export interface ServiceNowAPI {
   type: string;
   description: string;
   methods: ServiceNowMethod[];
+  officialDocsUrl?: string;
+  package?: string;
 }
 
 export interface ServiceNowLibrary {

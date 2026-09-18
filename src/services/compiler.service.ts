@@ -177,14 +177,29 @@ function executeInWorker(
         groupEnd: () => {},
       };
 
-      // ── Block dangerous globals ──────────────────────
+      // ── Block dangerous globals on self/globalThis ──────────────────────
       const document = undefined;
       const window = undefined;
       const localStorage = undefined;
       const sessionStorage = undefined;
-      const indexedDB = undefined;
-      const fetch = globalThis.fetch; // Allow fetch for API calls
       const XMLHttpRequest = undefined;
+      const fetch = globalThis.fetch; // Allow fetch for API calls
+
+      const __blockedGlobals = [
+        'indexedDB', 'importScripts', 'caches', 'cookieStore',
+        'SharedWorker', 'ServiceWorker', 'BroadcastChannel'
+      ];
+      for (const __prop of __blockedGlobals) {
+        try {
+          Object.defineProperty(globalThis, __prop, { value: undefined, configurable: false, writable: false });
+        } catch {}
+      }
+
+      // Safe communication channel isolated from user overrides
+      const __safePostMessage = postMessage.bind(globalThis);
+      try {
+        Object.defineProperty(globalThis, 'postMessage', { value: undefined, configurable: false, writable: false });
+      } catch {}
 
       // ── Execute ──────────────────────────────────────
       const __startTime = performance.now();
@@ -197,7 +212,7 @@ function executeInWorker(
         );
         __asyncFn(console, fetch).then(() => {
           const __duration = performance.now() - __startTime;
-          postMessage({
+          __safePostMessage({
             stdout: __stdout.join('\\n'),
             stderr: __stderr.join('\\n'),
             exitCode: 0,
@@ -208,7 +223,7 @@ function executeInWorker(
           const errorMsg = err instanceof Error
             ? err.name + ': ' + err.message
             : String(err);
-          postMessage({
+          __safePostMessage({
             stdout: __stdout.join('\\n'),
             stderr: __stderr.length > 0
               ? __stderr.join('\\n') + '\\n' + errorMsg
@@ -222,7 +237,7 @@ function executeInWorker(
         const errorMsg = err instanceof Error
           ? err.name + ': ' + err.message
           : String(err);
-        postMessage({
+        __safePostMessage({
           stdout: __stdout.join('\\n'),
           stderr: __stderr.length > 0
             ? __stderr.join('\\n') + '\\n' + errorMsg
@@ -360,143 +375,205 @@ async function executeTypeScript(
 }
 
 // ============================================================
-// Pyodide (Python WASM) Engine
+// Pyodide (Python WASM) Web Worker Sandboxed Engine
 // ============================================================
-interface PyodideInterface {
-  runPython: (code: string) => unknown;
-  runPythonAsync: (code: string) => Promise<unknown>;
-}
+// Completely isolated from the main thread DOM, window, document,
+// and localStorage. Infinite loops and CPU-heavy scripts can be
+// cancelled via worker.terminate() without freezing the UI.
+// ============================================================
 
-let pyodideInstance: PyodideInterface | null = null;
-let pyodideLoadPromise: Promise<PyodideInterface> | null = null;
+let activePythonWorker: Worker | null = null;
+let pythonWorkerBlobUrl: string | null = null;
+let isPythonReady = false;
 
-async function loadPyodide(): Promise<PyodideInterface> {
-  if (pyodideInstance) return pyodideInstance;
+const PYODIDE_WORKER_CODE = `
+  'use strict';
+  let pyodide = null;
+  let pyodideReadyPromise = null;
 
-  if (pyodideLoadPromise) return pyodideLoadPromise;
-
-  pyodideLoadPromise = new Promise((resolve, reject) => {
+  // ── Block dangerous globals on self/globalThis ──────────────────
+  const __blockedGlobals = [
+    'indexedDB', 'caches', 'cookieStore',
+    'SharedWorker', 'ServiceWorker', 'BroadcastChannel'
+  ];
+  for (const __prop of __blockedGlobals) {
     try {
-      // Load Pyodide from CDN
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js";
-      script.async = true;
+      Object.defineProperty(globalThis, __prop, { value: undefined, configurable: false, writable: false });
+    } catch {}
+  }
 
-      script.onload = () => {
-        (window as unknown as { loadPyodide: (opts: { indexURL: string }) => Promise<PyodideInterface> })
-          .loadPyodide({
-            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.5/full/",
-          })
-          .then((pyodide: PyodideInterface) => {
-            pyodideInstance = pyodide;
-            resolve(pyodide);
-          })
-          .catch((err: unknown) => {
-            pyodideLoadPromise = null;
-            reject(err);
-          });
-      };
+  async function getOrInitPyodide() {
+    if (pyodide) return pyodide;
+    if (pyodideReadyPromise) return pyodideReadyPromise;
 
-      script.onerror = () => {
-        pyodideLoadPromise = null;
-        reject(new Error("Failed to load Pyodide"));
-      };
+    pyodideReadyPromise = (async () => {
+      importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js');
+      pyodide = await self.loadPyodide({
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/'
+      });
+      return pyodide;
+    })();
 
-      document.head.appendChild(script);
-    } catch (err) {
-      pyodideLoadPromise = null;
-      reject(err);
+    return pyodideReadyPromise;
+  }
+
+  self.onmessage = async (e) => {
+    const data = e.data;
+    if (data.type === 'init') {
+      try {
+        await getOrInitPyodide();
+        self.postMessage({ type: 'init_done' });
+      } catch (err) {
+        self.postMessage({ type: 'init_error', error: String(err) });
+      }
+      return;
     }
-  });
 
-  return pyodideLoadPromise;
-}
+    if (data.type === 'execute') {
+      const { id, code } = data;
+      const startTime = performance.now();
+      try {
+        const engine = await getOrInitPyodide();
 
-async function executePython(
-  code: string,
-  options?: ExecutionOptions
-): Promise<ExecutionResult> {
-  const startTime = performance.now();
-  const timeout = options?.timeout ?? 30000; // Python gets longer default (WASM is slower)
-
-  try {
-    const pyodide = await loadPyodide();
-
-    // Capture Python stdout/stderr
-    pyodide.runPython(`
+        // Capture Python stdout/stderr via StringIO
+        engine.runPython(\`
 import sys
 from io import StringIO
 sys.stdout = StringIO()
 sys.stderr = StringIO()
-`);
+\`);
 
-    // Wrap execution in a timeout using Promise.race
-    const executionPromise = (async () => {
-      try {
-        await pyodide.runPythonAsync(code);
-      } catch (err: unknown) {
-        const stdout = String(pyodide.runPython("sys.stdout.getvalue()"));
-        const stderr = err instanceof Error ? err.message : String(err);
+        try {
+          await engine.runPythonAsync(code);
+        } catch (runErr) {
+          const stdout = String(engine.runPython("sys.stdout.getvalue()") || "");
+          const stderr = runErr instanceof Error ? runErr.message : String(runErr);
+          const duration = performance.now() - startTime;
+          self.postMessage({ type: 'result', id, stdout, stderr, exitCode: 1, duration });
+          return;
+        }
+
+        const stdout = String(engine.runPython("sys.stdout.getvalue()") || "");
+        const stderr = String(engine.runPython("sys.stderr.getvalue()") || "");
         const duration = performance.now() - startTime;
 
-        // Reset stdout/stderr
-        pyodide.runPython(`
-sys.stdout = sys.__stdout__
-sys.stderr = sys.__stderr__
-`);
-
-        return {
-          stdout: stdout || "",
-          stderr,
-          exitCode: 1,
-          duration,
-          timestamp: Date.now(),
-        };
+        self.postMessage({
+          type: 'result',
+          id,
+          stdout: stdout.trimEnd(),
+          stderr: stderr.trimEnd(),
+          exitCode: 0,
+          duration
+        });
+      } catch (err) {
+        const duration = performance.now() - startTime;
+        const stderr = err instanceof Error ? err.message : String(err);
+        self.postMessage({ type: 'result', id, stdout: '', stderr, exitCode: 1, duration });
       }
+    }
+  };
+`;
 
-      const stdout = String(pyodide.runPython("sys.stdout.getvalue()") ?? "");
-      const stderr = String(pyodide.runPython("sys.stderr.getvalue()") ?? "");
-      const duration = performance.now() - startTime;
+function getOrCreatePythonWorker(): Worker {
+  if (activePythonWorker) return activePythonWorker;
 
-      // Reset stdout/stderr
-      pyodide.runPython(`
-sys.stdout = sys.__stdout__
-sys.stderr = sys.__stderr__
-`);
+  if (!pythonWorkerBlobUrl) {
+    const blob = new Blob([PYODIDE_WORKER_CODE], { type: "application/javascript" });
+    pythonWorkerBlobUrl = URL.createObjectURL(blob);
+  }
 
-      return {
-        stdout: stdout.trimEnd(),
-        stderr: stderr.trimEnd(),
-        exitCode: 0,
-        duration,
+  activePythonWorker = new Worker(pythonWorkerBlobUrl);
+  return activePythonWorker;
+}
+
+async function initPython(): Promise<void> {
+  if (isPythonReady) return;
+  return new Promise((resolve, reject) => {
+    const worker = getOrCreatePythonWorker();
+    const handleInit = (e: MessageEvent) => {
+      if (e.data.type === "init_done") {
+        isPythonReady = true;
+        worker.removeEventListener("message", handleInit);
+        resolve();
+      } else if (e.data.type === "init_error") {
+        worker.removeEventListener("message", handleInit);
+        reject(new Error(e.data.error));
+      }
+    };
+    worker.addEventListener("message", handleInit);
+    worker.postMessage({ type: "init" });
+  });
+}
+
+/** Execute Python inside a dedicated, isolated Web Worker sandbox */
+async function executePython(
+  code: string,
+  options?: ExecutionOptions
+): Promise<ExecutionResult> {
+  const timeout = options?.timeout ?? 30000;
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const worker = getOrCreatePythonWorker();
+    const execId = Math.random().toString(36).substring(2);
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    };
+
+    timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      // True infinite-loop cancellation via worker.terminate()
+      if (activePythonWorker) {
+        activePythonWorker.terminate();
+        activePythonWorker = null;
+        isPythonReady = false;
+      }
+      resolve({
+        stdout: "",
+        stderr: `⏱ Python execution timed out after ${(timeout / 1000).toFixed(0)}s\n\nTip: You can increase the timeout in Settings, or check your code for infinite loops.`,
+        exitCode: 1,
+        duration: timeout,
         timestamp: Date.now(),
-      };
-    })();
+      });
+    }, timeout);
 
-    const timeoutPromise = new Promise<ExecutionResult>((resolve) => {
-      setTimeout(() => {
+    const handleMessage = (e: MessageEvent) => {
+      if (resolved) return;
+      if (e.data.type === "result" && e.data.id === execId) {
+        resolved = true;
+        cleanup();
         resolve({
-          stdout: "",
-          stderr: `⏱ Python execution timed out after ${(timeout / 1000).toFixed(0)}s`,
-          exitCode: 1,
-          duration: timeout,
+          stdout: e.data.stdout || "",
+          stderr: e.data.stderr || "",
+          exitCode: e.data.exitCode ?? 0,
+          duration: e.data.duration ?? 0,
           timestamp: Date.now(),
         });
-      }, timeout);
-    });
-
-    return Promise.race([executionPromise, timeoutPromise]);
-  } catch (error) {
-    const duration = performance.now() - startTime;
-    return {
-      stdout: "",
-      stderr:
-        error instanceof Error ? error.message : "Failed to initialize Python",
-      exitCode: 1,
-      duration,
-      timestamp: Date.now(),
+      }
     };
-  }
+
+    const handleError = (e: ErrorEvent) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve({
+        stdout: "",
+        stderr: `Python worker error: ${e.message || "Unknown error"}`,
+        exitCode: 1,
+        duration: 0,
+        timestamp: Date.now(),
+      });
+    };
+
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "execute", id: execId, code });
+  });
 }
 
 // ============================================================
@@ -536,16 +613,24 @@ export class BrowserCompilerService implements ICompilerService {
   }
 
   async cancel(): Promise<void> {
-    const wasCancelled = cancelWorkerExecution();
-    if (!wasCancelled) {
-      // Python can't be truly cancelled since Pyodide runs in-page,
-      // but we signal the intent. Future: run Pyodide in a worker too.
+    let cancelled = false;
+    if (cancelWorkerExecution()) {
+      cancelled = true;
+    }
+    if (activePythonWorker) {
+      activePythonWorker.terminate();
+      activePythonWorker = null;
+      isPythonReady = false;
+      cancelled = true;
+    }
+    if (!cancelled) {
+      // No active worker was running
     }
   }
 
   async isReady(language: Language): Promise<boolean> {
     if (language === "python") {
-      return pyodideInstance !== null;
+      return isPythonReady;
     }
     if (language === "typescript") {
       return tsModule !== null;
@@ -555,7 +640,7 @@ export class BrowserCompilerService implements ICompilerService {
 
   async initialize(language: Language): Promise<void> {
     if (language === "python") {
-      await loadPyodide();
+      await initPython();
     }
     if (language === "typescript") {
       await loadTypeScriptCompiler();
@@ -565,3 +650,4 @@ export class BrowserCompilerService implements ICompilerService {
 
 /** Singleton compiler service */
 export const compilerService = new BrowserCompilerService();
+

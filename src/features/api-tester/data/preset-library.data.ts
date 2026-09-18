@@ -6,6 +6,7 @@ import type { HttpMethod, BodyType, AuthType, AuthConfig } from "@/stores/api-te
 
 export type PlatformId =
   | "all"
+  | "servicenow"
   | "entra"
   | "azure"
   | "google"
@@ -14,6 +15,13 @@ export type PlatformId =
   | "developer"
   | "mock"
   | "custom";
+
+export interface PresetSampleResponse {
+  status: number;
+  statusText: string;
+  headers?: Record<string, string>;
+  body: string;
+}
 
 export interface EnvVariableTemplate {
   key: string;
@@ -40,6 +48,8 @@ export interface LibraryPreset {
   authConfig?: Partial<AuthConfig>;
   envVariables?: EnvVariableTemplate[];
   tags: string[];
+  sampleResponse?: PresetSampleResponse;
+  requiredScopes?: string[];
 }
 
 export interface PlatformMetadata {
@@ -56,6 +66,21 @@ export interface PlatformMetadata {
 // ── Platform Metadata ─────────────────────────────────────────
 
 export const PLATFORMS: PlatformMetadata[] = [
+  {
+    id: "servicenow",
+    name: "ServiceNow REST APIs",
+    shortName: "ServiceNow",
+    description: "Now Platform Table API, Attachment API, Import Set API, Service Catalog, and OAuth 2.0.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest",
+    brandColor: "#81b5a1",
+    badgeBg: "rgba(129, 181, 161, 0.15)",
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname (e.g. dev12345.service-now.com)" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow basic auth username or integration service account" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow user password" },
+      { key: "sn_token", defaultValue: "", description: "ServiceNow OAuth 2.0 Bearer access token" },
+    ],
+  },
   {
     id: "entra",
     name: "Microsoft Entra ID",
@@ -164,6 +189,561 @@ export const PLATFORMS: PlatformMetadata[] = [
 // ── Complete Curated Presets ──────────────────────────────────
 
 export const LIBRARY_PRESETS: LibraryPreset[] = [
+  // ─────────────────────────────────────────────────────────────
+  // 0. SERVICENOW REST APIS (Table API, Attachments, Import Sets, OAuth)
+  // ─────────────────────────────────────────────────────────────
+  {
+    id: "sn-table-query-incidents",
+    name: "ServiceNow: Table API — Query Incidents",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Table API",
+    method: "GET",
+    url: "https://{{sn_instance}}/api/now/table/incident",
+    description: "Retrieve incident records with query filters, encoded conditions, field selection, and pagination limits.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI#table-GET",
+    params: [
+      { key: "sysparm_limit", value: "10", description: "Maximum number of records to return" },
+      { key: "sysparm_query", value: "active=true^priority<=2", description: "Encoded query string" },
+      { key: "sysparm_fields", value: "number,short_description,priority,state,caller_id,sys_created_on", description: "Comma-separated field list" },
+      { key: "sysparm_display_value", value: "false", description: "Return display values or raw database values" },
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" },
+    ],
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow admin or integration username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow user password" },
+    ],
+    tags: ["servicenow", "table-api", "incident", "query", "itsm"],
+    requiredScopes: ["itil", "rest_service", "snc_read_only"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+        "x-total-count": "14",
+      },
+      body: JSON.stringify(
+        {
+          result: [
+            {
+              number: "INC0010001",
+              short_description: "Network connectivity degraded in datacenter rack 4",
+              priority: "1",
+              state: "2",
+              caller_id: {
+                link: "https://dev12345.service-now.com/api/now/table/sys_user/6816f79cc0a8016401c5a33be04be441",
+                value: "6816f79cc0a8016401c5a33be04be441",
+              },
+              sys_created_on: "2026-04-10 08:30:14",
+            },
+            {
+              number: "INC0010002",
+              short_description: "Core database latency spike during batch ETL job",
+              priority: "2",
+              state: "1",
+              caller_id: {
+                link: "https://dev12345.service-now.com/api/now/table/sys_user/5137153cc611227c000bbd1bd8cd2005",
+                value: "5137153cc611227c000bbd1bd8cd2005",
+              },
+              sys_created_on: "2026-04-10 09:12:45",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-table-get-incident",
+    name: "ServiceNow: Table API — Retrieve Single Record",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Table API",
+    method: "GET",
+    url: "https://{{sn_instance}}/api/now/table/incident/{{sys_id}}",
+    description: "Fetch all field values for a specific record by its unique sys_id.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI#table-GET-id",
+    params: [
+      { key: "sysparm_display_value", value: "true", description: "Return human-readable display values" },
+      { key: "sysparm_exclude_reference_link", value: "false", description: "Include hyperlinks to referenced records" },
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" },
+    ],
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sys_id", defaultValue: "9d385017c611228701d22104cc95c371", description: "Record sys_id (32-character GUID)" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "table-api", "sys_id", "get-record"],
+    requiredScopes: ["itil", "rest_service"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: {
+            sys_id: "9d385017c611228701d22104cc95c371",
+            number: "INC0010001",
+            short_description: "Network connectivity degraded in datacenter rack 4",
+            description: "Interface bond0 flapping on router core-sw01.",
+            priority: "1 - Critical",
+            urgency: "1 - High",
+            impact: "1 - High",
+            state: "In Progress",
+            assignment_group: {
+              display_value: "Network Engineering",
+              link: "https://dev12345.service-now.com/api/now/table/sys_user_group/287ebd7da9fe199200f92c33a34d6041",
+            },
+            assigned_to: {
+              display_value: "Beth Anglin",
+              link: "https://dev12345.service-now.com/api/now/table/sys_user/46d44a23a9fe1992015f2661e4ced929",
+            },
+          },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-table-create-incident",
+    name: "ServiceNow: Table API — Create Incident",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Table API",
+    method: "POST",
+    url: "https://{{sn_instance}}/api/now/table/incident",
+    description: "Create a new record in the incident table with field values provided in JSON body.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI#table-POST",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+      { key: "Accept", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        short_description: "Email routing delay to external domains",
+        description: "Outgoing messages to third-party domains experiencing up to 15m delay.",
+        urgency: "2",
+        impact: "2",
+        category: "Software",
+        contact_type: "API",
+        comments: "Created automatically via DeveloperUtils API Tester integration.",
+      },
+      null,
+      2
+    ),
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "table-api", "incident", "create", "post"],
+    requiredScopes: ["itil", "rest_service"],
+    sampleResponse: {
+      status: 201,
+      statusText: "Created",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+        "location": "https://dev12345.service-now.com/api/now/table/incident/a9385017c611228701d22104cc95c998",
+      },
+      body: JSON.stringify(
+        {
+          result: {
+            sys_id: "a9385017c611228701d22104cc95c998",
+            number: "INC0010045",
+            short_description: "Email routing delay to external domains",
+            state: "1",
+            urgency: "2",
+            impact: "2",
+            priority: "3",
+            sys_created_on: "2026-09-18 13:40:02",
+          },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-table-update-incident",
+    name: "ServiceNow: Table API — Update Record (PATCH)",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Table API",
+    method: "PATCH",
+    url: "https://{{sn_instance}}/api/now/table/incident/{{sys_id}}",
+    description: "Partially update specific fields on an existing record without overwriting other attributes.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI#table-PATCH",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+      { key: "Accept", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        state: "2",
+        work_notes: "Root cause identified: queue backpressure on MX relay. Restarting postfix worker.",
+        assigned_to: "{{user_sys_id}}",
+      },
+      null,
+      2
+    ),
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sys_id", defaultValue: "a9385017c611228701d22104cc95c998", description: "Target Incident sys_id" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "table-api", "patch", "update", "incident"],
+    requiredScopes: ["itil", "rest_service"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: {
+            sys_id: "a9385017c611228701d22104cc95c998",
+            number: "INC0010045",
+            state: "2",
+            sys_updated_on: "2026-09-18 13:45:10",
+          },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-table-delete-incident",
+    name: "ServiceNow: Table API — Delete Record",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Table API",
+    method: "DELETE",
+    url: "https://{{sn_instance}}/api/now/table/incident/{{sys_id}}",
+    description: "Delete an existing record permanently by its table name and sys_id.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_TableAPI#table-DELETE",
+    headers: [
+      { key: "Accept", value: "application/json" },
+    ],
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sys_id", defaultValue: "a9385017c611228701d22104cc95c998", description: "Target Record sys_id to delete" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "table-api", "delete"],
+    requiredScopes: ["admin", "itil_admin"],
+    sampleResponse: {
+      status: 204,
+      statusText: "No Content",
+      headers: {},
+      body: "",
+    },
+  },
+  {
+    id: "sn-attachment-list",
+    name: "ServiceNow: Attachment API — List Attachments",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Attachment API",
+    method: "GET",
+    url: "https://{{sn_instance}}/api/now/attachment",
+    description: "Query metadata of attachments associated with records, filtered by table name or table sys_id.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_AttachmentAPI#attachment-GET",
+    params: [
+      { key: "sysparm_query", value: "table_name=incident^table_sys_id={{sys_id}}", description: "Filter attachments by parent table and record" },
+      { key: "sysparm_limit", value: "10", description: "Limit number of results" },
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" },
+    ],
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sys_id", defaultValue: "9d385017c611228701d22104cc95c371", description: "Parent record sys_id" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "attachment", "files", "sys_attachment"],
+    requiredScopes: ["rest_service"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: [
+            {
+              sys_id: "3487c600c0a80164010874c76b50e32f",
+              file_name: "network_trace.pcap",
+              content_type: "application/vnd.tcpdump.pcap",
+              size_bytes: "1048576",
+              table_name: "incident",
+              table_sys_id: "9d385017c611228701d22104cc95c371",
+              download_link: "https://dev12345.service-now.com/api/now/attachment/3487c600c0a80164010874c76b50e32f/file",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-attachment-upload",
+    name: "ServiceNow: Attachment API — Upload File",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Attachment API",
+    method: "POST",
+    url: "https://{{sn_instance}}/api/now/attachment/file",
+    description: "Upload a binary or text file directly to attach it to a specific record.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_AttachmentAPI#attachment-POST-file",
+    params: [
+      { key: "table_name", value: "incident", description: "Target ServiceNow table" },
+      { key: "table_sys_id", value: "{{sys_id}}", description: "Target record sys_id" },
+      { key: "file_name", value: "investigation_notes.txt", description: "Name of the file to store" },
+    ],
+    headers: [
+      { key: "Content-Type", value: "text/plain" },
+      { key: "Accept", value: "application/json" },
+    ],
+    bodyType: "raw",
+    rawType: "text/plain",
+    bodyValue: "System diagnostics logged on 2026-09-18T15:30:00Z\nStatus: OK\nCPU: 18%\nMemory: 41%",
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sys_id", defaultValue: "9d385017c611228701d22104cc95c371", description: "Target record sys_id" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "attachment", "upload", "binary"],
+    requiredScopes: ["itil", "rest_service"],
+    sampleResponse: {
+      status: 201,
+      statusText: "Created",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: {
+            sys_id: "84729104c611228701d22104cc95c102",
+            file_name: "investigation_notes.txt",
+            content_type: "text/plain",
+            size_bytes: "92",
+            table_name: "incident",
+            table_sys_id: "9d385017c611228701d22104cc95c371",
+          },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-import-set-insert",
+    name: "ServiceNow: Import Set API — Insert Staging Record",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Import Set API",
+    method: "POST",
+    url: "https://{{sn_instance}}/api/now/import/{{staging_table}}",
+    description: "Post inbound data into an Import Set staging table to trigger synchronous Transform Map execution.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_ImportSetAPI#import-POST",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+      { key: "Accept", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        u_asset_tag: "P100-9842",
+        u_serial_number: "SN-9842-X7",
+        u_model_name: "MacBook Pro 16",
+        u_assigned_email: "jane.doe@company.com",
+        u_location: "Building 4, Floor 2",
+      },
+      null,
+      2
+    ),
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "staging_table", defaultValue: "u_asset_inbound_staging", description: "Custom Import Set staging table name" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "import-set", "integration", "transform-map", "etl"],
+    requiredScopes: ["import_set_loader", "rest_service"],
+    sampleResponse: {
+      status: 201,
+      statusText: "Created",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: [
+            {
+              import_set: "ISET0010042",
+              staging_table: "u_asset_inbound_staging",
+              result: "inserted",
+              target_table: "alm_hardware",
+              target_sys_id: "c9482017c611228701d22104cc95c553",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-catalog-list-items",
+    name: "ServiceNow: Service Catalog API — List Items",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Service Catalog",
+    method: "GET",
+    url: "https://{{sn_instance}}/api/sn_sc/v1/servicecatalog/items",
+    description: "Browse orderable catalog items with categories, pricing, and availability.",
+    docsUrl: "https://developer.servicenow.com/dev.do#!/reference/api/latest/rest/c_ServiceCatalogAPI#sc-GET-items",
+    params: [
+      { key: "sysparm_limit", value: "10", description: "Max items to return" },
+      { key: "sysparm_view", value: "desktop", description: "Catalog presentation view" },
+    ],
+    headers: [
+      { key: "Accept", value: "application/json" },
+    ],
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{sn_username}}",
+      basicPassword: "{{sn_password}}",
+    },
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow username" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow password" },
+    ],
+    tags: ["servicenow", "service-catalog", "request", "ritm"],
+    requiredScopes: ["snc_read_only", "rest_service"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          result: [
+            {
+              sys_id: "04b7e94b4f014200086eeed18110c7fd",
+              name: "Standard Laptop",
+              short_description: "14-inch developer ultrabook with 32GB RAM",
+              price: "$1,450.00",
+              category: "Hardware",
+            },
+            {
+              sys_id: "e46305bdc0a8010a00645e60c6e127cc",
+              name: "VPN Access Request",
+              short_description: "Remote corporate network access request",
+              price: "$0.00",
+              category: "Security",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "sn-oauth-token-password",
+    name: "ServiceNow: OAuth 2.0 — Resource Owner Password Token",
+    platform: "servicenow",
+    platformName: "ServiceNow REST APIs",
+    category: "Authentication",
+    method: "POST",
+    url: "https://{{sn_instance}}/oauth_token.do",
+    description: "Request an OAuth 2.0 Bearer access token using username and password credentials.",
+    docsUrl: "https://docs.servicenow.com/bundle/washingtondc-platform-security/page/administer/security/concept/c_OAuthApplications.html",
+    headers: [
+      { key: "Content-Type", value: "application/x-www-form-urlencoded" },
+      { key: "Accept", value: "application/json" },
+    ],
+    bodyType: "raw",
+    rawType: "text/plain",
+    bodyValue: "grant_type=password&client_id={{client_id}}&client_secret={{client_secret}}&username={{sn_username}}&password={{sn_password}}",
+    authType: "none",
+    envVariables: [
+      { key: "sn_instance", defaultValue: "dev12345.service-now.com", description: "ServiceNow instance hostname" },
+      { key: "client_id", defaultValue: "", description: "OAuth Client ID from Application Registries" },
+      { key: "client_secret", defaultValue: "", description: "OAuth Client Secret" },
+      { key: "sn_username", defaultValue: "admin", description: "ServiceNow user account" },
+      { key: "sn_password", defaultValue: "", description: "ServiceNow user password" },
+    ],
+    tags: ["servicenow", "oauth2", "auth", "token"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          access_token: "sn_token_718293a9d82138947b91c890123ef8",
+          token_type: "Bearer",
+          expires_in: 1800,
+          refresh_token: "sn_refresh_a91283c748291038472910",
+          scope: "useraccount",
+        },
+        null,
+        2
+      ),
+    },
+  },
+
   // ─────────────────────────────────────────────────────────────
   // 1. MICROSOFT ENTRA ID (Azure AD & Microsoft Graph)
   // ─────────────────────────────────────────────────────────────
@@ -853,7 +1433,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 5. AI & LLM PLATFORMS (OpenAI, Claude, Gemini)
+  // 5. AI & LLM PLATFORMS (OpenAI, Claude, Gemini, DeepSeek, Groq, Ollama)
   // ─────────────────────────────────────────────────────────────
   {
     id: "openai-chat-completions",
@@ -886,6 +1466,95 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{OPENAI_API_KEY}}" },
     tags: ["openai", "gpt-4o", "ai", "llm", "chat"],
+    requiredScopes: ["api.openai.com/v1"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "chatcmpl-9pQ2A910",
+          object: "chat.completion",
+          created: 1718290000,
+          model: "gpt-4o-2024-05-13",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "1. Use nouns and plural resources (e.g. /api/v1/incidents).\n2. Adhere strictly to HTTP status semantics (200, 201, 400, 401, 404, 500).\n3. Standardize structured error payloads with descriptive machine-readable error codes.",
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 28, completion_tokens: 58, total_tokens: 86 },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "deepseek-chat-completions",
+    name: "DeepSeek: Chat & Reasoning (DeepSeek-V3 / R1)",
+    platform: "ai",
+    platformName: "AI & LLM Services",
+    category: "DeepSeek",
+    method: "POST",
+    url: "https://api.deepseek.com/chat/completions",
+    description: "High-performance inference and reasoning using DeepSeek-V3 or DeepSeek-R1 models via OpenAI-compatible REST API.",
+    docsUrl: "https://api-docs.deepseek.com/",
+    headers: [
+      { key: "Authorization", value: "Bearer {{DEEPSEEK_API_KEY}}" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        model: "deepseek-chat",
+        messages: [
+          { role: "system", content: "You are a senior software architect." },
+          { role: "user", content: "Explain idempotency in REST API design with 2 practical rules." },
+        ],
+        temperature: 0.6,
+        stream: false,
+      },
+      null,
+      2
+    ),
+    authType: "bearer",
+    authConfig: { bearerToken: "{{DEEPSEEK_API_KEY}}" },
+    envVariables: [
+      { key: "DEEPSEEK_API_KEY", defaultValue: "", description: "DeepSeek API key (sk-...)" },
+    ],
+    tags: ["deepseek", "deepseek-v3", "deepseek-r1", "ai", "reasoning"],
+    requiredScopes: ["api.deepseek.com"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "dsk-99218204",
+          object: "chat.completion",
+          created: 1718291000,
+          model: "deepseek-chat",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "1. GET, PUT, and DELETE operations must result in the same server state regardless of multiple executions.\n2. Non-idempotent POST requests should accept an 'Idempotency-Key' header to safely deduplicate retries on network failures.",
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 31, completion_tokens: 52, total_tokens: 83 },
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "anthropic-claude-messages",
@@ -921,6 +1590,269 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       apiKeyPlacement: "header",
     },
     tags: ["anthropic", "claude", "ai", "llm"],
+    requiredScopes: ["anthropic.messages"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "msg_013Zva2nf3gH77Dja39",
+          type: "message",
+          role: "assistant",
+          model: "claude-3-5-sonnet-20241022",
+          content: [
+            {
+              type: "text",
+              text: "1. Return uniform RFC 7807 (Problem Details for HTTP APIs) JSON bodies with 'type', 'title', 'status', and 'detail'.\n2. Include unique request trace identifiers (e.g. 'correlation_id') to speed up debugging in production logs.",
+            },
+          ],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 22, output_tokens: 61 },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "anthropic-tool-use",
+    name: "Anthropic Claude: Tool Use / Function Calling",
+    platform: "ai",
+    platformName: "AI & LLM Services",
+    category: "Anthropic",
+    method: "POST",
+    url: "https://api.anthropic.com/v1/messages",
+    description: "Provide JSON Schema tools to Claude 3.5 Sonnet so it can decide which function to call and return structured parameters.",
+    docsUrl: "https://docs.anthropic.com/en/docs/build-with-claude/tool-use",
+    headers: [
+      { key: "x-api-key", value: "{{ANTHROPIC_API_KEY}}" },
+      { key: "anthropic-version", value: "2023-06-01" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        model: "claude-3-5-sonnet-20241022",
+        max_tokens: 1024,
+        tools: [
+          {
+            name: "get_weather",
+            description: "Get the current weather for a given city and units.",
+            input_schema: {
+              type: "object",
+              properties: {
+                location: { type: "string", description: "The city and state, e.g. San Francisco, CA" },
+                unit: { type: "string", enum: ["celsius", "fahrenheit"] },
+              },
+              required: ["location"],
+            },
+          },
+        ],
+        messages: [
+          { role: "user", content: "What is the current weather in Zurich, Switzerland in Celsius?" },
+        ],
+      },
+      null,
+      2
+    ),
+    authType: "api-key",
+    authConfig: {
+      apiKeyName: "x-api-key",
+      apiKeyValue: "{{ANTHROPIC_API_KEY}}",
+      apiKeyPlacement: "header",
+    },
+    tags: ["anthropic", "claude", "tool-use", "function-calling"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "msg_017bKa4df1gL99Eja12",
+          type: "message",
+          role: "assistant",
+          model: "claude-3-5-sonnet-20241022",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_01A09q90tc1jq8djw0jk",
+              name: "get_weather",
+              input: { location: "Zurich, Switzerland", unit: "celsius" },
+            },
+          ],
+          stop_reason: "tool_use",
+          usage: { input_tokens: 382, output_tokens: 41 },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "google-gemini-2-flash",
+    name: "Google Gemini: Generate Content (Gemini 2.0 Flash)",
+    platform: "ai",
+    platformName: "AI & LLM Services",
+    category: "Google Gemini",
+    method: "POST",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={{gemini_api_key}}",
+    description: "Generate multimodal content using Google's next-generation, high-speed Gemini 2.0 Flash model.",
+    docsUrl: "https://ai.google.dev/gemini-api/docs/quickstart",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        contents: [
+          {
+            parts: [
+              { text: "Provide a JSON schema for an enterprise User profile record." },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 500,
+        },
+      },
+      null,
+      2
+    ),
+    authType: "none",
+    envVariables: [
+      { key: "gemini_api_key", defaultValue: "", description: "Google AI Studio API Key" },
+    ],
+    tags: ["gemini", "gemini-2.0", "google", "ai", "llm"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          candidates: [
+            {
+              content: {
+                parts: [
+                  { text: "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"type\": \"object\",\n  \"properties\": {\n    \"userId\": { \"type\": \"string\" },\n    \"email\": { \"type\": \"string\", \"format\": \"email\" },\n    \"role\": { \"type\": \"string\", \"enum\": [\"admin\", \"developer\", \"viewer\"] }\n  },\n  \"required\": [\"userId\", \"email\"]\n}" },
+                ],
+                role: "model",
+              },
+              finishReason: "STOP",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "groq-chat-completions",
+    name: "Groq: Ultra-Fast Inference (Llama 3.3 70B)",
+    platform: "ai",
+    platformName: "AI & LLM Services",
+    category: "Groq",
+    method: "POST",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    description: "Sub-second, ultra-fast language model inference powered by Groq LPU technology.",
+    docsUrl: "https://console.groq.com/docs/quickstart",
+    headers: [
+      { key: "Authorization", value: "Bearer {{GROQ_API_KEY}}" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        model: "llama-3.3-70b-versatile",
+        messages: [
+          { role: "user", content: "Give 3 advantages of HTTP/2 over HTTP/1.1." },
+        ],
+        temperature: 0.5,
+      },
+      null,
+      2
+    ),
+    authType: "bearer",
+    authConfig: { bearerToken: "{{GROQ_API_KEY}}" },
+    envVariables: [
+      { key: "GROQ_API_KEY", defaultValue: "", description: "Groq Cloud API Key (gsk_...)" },
+    ],
+    tags: ["groq", "llama-3.3", "fast-inference", "ai"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "chatcmpl-grq88210",
+          object: "chat.completion",
+          created: 1718292000,
+          model: "llama-3.3-70b-versatile",
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "1. Request/Response Multiplexing over a single TCP connection.\n2. Header Compression using HPACK.\n3. Binary framing protocol instead of textual parsing.",
+              },
+              finish_reason: "stop",
+            },
+          ],
+          usage: { prompt_tokens: 24, completion_tokens: 46, total_tokens: 70 },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "ollama-local-chat",
+    name: "Ollama: Local LLM Chat (Localhost)",
+    platform: "ai",
+    platformName: "AI & LLM Services",
+    category: "Ollama (Local)",
+    method: "POST",
+    url: "http://localhost:11434/api/chat",
+    description: "Query models running completely locally and offline on your machine via Ollama.",
+    docsUrl: "https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        model: "llama3.2",
+        messages: [
+          { role: "user", content: "Say hello from offline local machine!" },
+        ],
+        stream: false,
+      },
+      null,
+      2
+    ),
+    authType: "none",
+    tags: ["ollama", "local", "offline", "llama3", "privacy"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          model: "llama3.2",
+          created_at: "2026-09-18T13:40:00.123Z",
+          message: {
+            role: "assistant",
+            content: "Hello from your local Ollama instance! Your data stayed completely on-device.",
+          },
+          done: true,
+          total_duration: 382000000,
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "openai-embeddings",
@@ -948,10 +1880,31 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{OPENAI_API_KEY}}" },
     tags: ["openai", "embeddings", "vectors", "rag"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          object: "list",
+          data: [
+            {
+              object: "embedding",
+              index: 0,
+              embedding: [-0.0069, -0.0053, 0.0102, -0.024],
+            },
+          ],
+          model: "text-embedding-3-small",
+          usage: { prompt_tokens: 9, total_tokens: 9 },
+        },
+        null,
+        2
+      ),
+    },
   },
 
   // ─────────────────────────────────────────────────────────────
-  // 6. DEVELOPER & SAAS PLATFORMS (GitHub, Stripe, Supabase)
+  // 6. DEVELOPER & SAAS PLATFORMS (GitHub, Stripe, Supabase, Slack, Jira)
   // ─────────────────────────────────────────────────────────────
   {
     id: "github-get-user",
@@ -971,6 +1924,26 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{GITHUB_TOKEN}}" },
     tags: ["github", "developer", "git", "user"],
+    requiredScopes: ["read:user", "user:email"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          login: "octocat",
+          id: 583231,
+          avatar_url: "https://avatars.githubusercontent.com/u/583231?v=4",
+          html_url: "https://github.com/octocat",
+          name: "The Octocat",
+          company: "@github",
+          public_repos: 8,
+          total_private_repos: 12,
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "github-list-repos",
@@ -993,6 +1966,27 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{GITHUB_TOKEN}}" },
     tags: ["github", "repos", "developer"],
+    requiredScopes: ["repo"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        [
+          {
+            id: 1296269,
+            name: "DeveloperUtils",
+            full_name: "octocat/DeveloperUtils",
+            private: false,
+            html_url: "https://github.com/octocat/DeveloperUtils",
+            stargazers_count: 328,
+            language: "TypeScript",
+          },
+        ],
+        null,
+        2
+      ),
+    },
   },
   {
     id: "github-create-issue",
@@ -1022,6 +2016,277 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{GITHUB_TOKEN}}" },
     tags: ["github", "issues", "developer"],
+    requiredScopes: ["repo"],
+    sampleResponse: {
+      status: 201,
+      statusText: "Created",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          id: 2019482910,
+          number: 142,
+          title: "Bug: Issue created via DevUtils API Tester",
+          state: "open",
+          created_at: "2026-09-18T13:42:00Z",
+          html_url: "https://github.com/octocat/DeveloperUtils/issues/142",
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "github-workflow-dispatch",
+    name: "GitHub API: Trigger Workflow Dispatch",
+    platform: "developer",
+    platformName: "Developer & SaaS Tools",
+    category: "GitHub",
+    method: "POST",
+    url: "https://api.github.com/repos/{{owner}}/{{repo}}/actions/workflows/{{workflow_id}}/dispatches",
+    description: "Manually trigger a GitHub Actions workflow run with input parameters.",
+    docsUrl: "https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event",
+    headers: [
+      { key: "Authorization", value: "Bearer {{GITHUB_TOKEN}}" },
+      { key: "Accept", value: "application/vnd.github+json" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        ref: "main",
+        inputs: {
+          environment: "staging",
+          run_tests: "true",
+        },
+      },
+      null,
+      2
+    ),
+    authType: "bearer",
+    authConfig: { bearerToken: "{{GITHUB_TOKEN}}" },
+    tags: ["github", "actions", "ci-cd", "workflow"],
+    requiredScopes: ["workflow", "repo"],
+    sampleResponse: {
+      status: 204,
+      statusText: "No Content",
+      headers: {},
+      body: "",
+    },
+  },
+  {
+    id: "slack-incoming-webhook",
+    name: "Slack: Send Incoming Webhook (Block Kit)",
+    platform: "developer",
+    platformName: "Developer & SaaS Tools",
+    category: "Slack",
+    method: "POST",
+    url: "https://hooks.slack.com/services/{{webhook_token}}",
+    description: "Publish formatted messages and interactive card alerts into a Slack channel using Incoming Webhooks.",
+    docsUrl: "https://api.slack.com/messaging/webhooks",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        text: "🚨 Deployment Notification from DevUtils",
+        blocks: [
+          {
+            type: "header",
+            text: { type: "plain_text", text: "Production Release Complete", emoji: true },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "*Service:*\nCore API Gateway" },
+              { type: "mrkdwn", text: "*Status:*\n:white_check_mark: Healthy" },
+            ],
+          },
+        ],
+      },
+      null,
+      2
+    ),
+    authType: "none",
+    tags: ["slack", "webhook", "chat", "notifications"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "text/html" },
+      body: "ok",
+    },
+  },
+  {
+    id: "slack-post-message",
+    name: "Slack: Web API — chat.postMessage",
+    platform: "developer",
+    platformName: "Developer & SaaS Tools",
+    category: "Slack",
+    method: "POST",
+    url: "https://slack.com/api/chat.postMessage",
+    description: "Send message payloads to public or private Slack channels using bot user tokens.",
+    docsUrl: "https://api.slack.com/methods/chat.postMessage",
+    headers: [
+      { key: "Authorization", value: "Bearer {{SLACK_BOT_TOKEN}}" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        channel: "#alerts",
+        text: "Test message sent via DevUtils API Tester",
+      },
+      null,
+      2
+    ),
+    authType: "bearer",
+    authConfig: { bearerToken: "{{SLACK_BOT_TOKEN}}" },
+    envVariables: [
+      { key: "SLACK_BOT_TOKEN", defaultValue: "", description: "Slack Bot OAuth Token (xoxb-...)" },
+    ],
+    tags: ["slack", "bot", "chat", "postMessage"],
+    requiredScopes: ["chat:write"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          ok: true,
+          channel: "C012AB3CD",
+          ts: "1718294400.000100",
+          message: { text: "Test message sent via DevUtils API Tester", type: "message", bot_id: "B012AB3CD" },
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "jira-search-jql",
+    name: "Jira Cloud: Search Issues (JQL)",
+    platform: "developer",
+    platformName: "Developer & SaaS Tools",
+    category: "Atlassian Jira",
+    method: "POST",
+    url: "https://{{jira_domain}}.atlassian.net/rest/api/3/search",
+    description: "Query Jira issues matching a JQL expression with custom field projections.",
+    docsUrl: "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-post",
+    headers: [
+      { key: "Accept", value: "application/json" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        jql: "project = PROJ AND status = 'In Progress' ORDER BY created DESC",
+        maxResults: 10,
+        fields: ["summary", "status", "assignee", "priority"],
+      },
+      null,
+      2
+    ),
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{jira_email}}",
+      basicPassword: "{{jira_api_token}}",
+    },
+    envVariables: [
+      { key: "jira_domain", defaultValue: "mycompany", description: "Atlassian subdomain (e.g., mycompany)" },
+      { key: "jira_email", defaultValue: "", description: "Atlassian account email address" },
+      { key: "jira_api_token", defaultValue: "", description: "Atlassian API token created in Security settings" },
+    ],
+    tags: ["jira", "atlassian", "jql", "agile", "issues"],
+    requiredScopes: ["read:jira-work"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          startAt: 0,
+          maxResults: 10,
+          total: 1,
+          issues: [
+            {
+              id: "10042",
+              key: "PROJ-104",
+              fields: {
+                summary: "Integrate OAuth 2.0 PKCE authentication flow",
+                status: { name: "In Progress" },
+                priority: { name: "High" },
+                assignee: { displayName: "Alex Rivera" },
+              },
+            },
+          ],
+        },
+        null,
+        2
+      ),
+    },
+  },
+  {
+    id: "jira-create-issue",
+    name: "Jira Cloud: Create Issue",
+    platform: "developer",
+    platformName: "Developer & SaaS Tools",
+    category: "Atlassian Jira",
+    method: "POST",
+    url: "https://{{jira_domain}}.atlassian.net/rest/api/3/issue",
+    description: "Create an issue or sub-task in a Jira Cloud project.",
+    docsUrl: "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-post",
+    headers: [
+      { key: "Accept", value: "application/json" },
+      { key: "Content-Type", value: "application/json" },
+    ],
+    bodyType: "json",
+    bodyValue: JSON.stringify(
+      {
+        fields: {
+          project: { key: "PROJ" },
+          summary: "Feature: Support ServiceNow REST presets in DevUtils",
+          description: {
+            type: "doc",
+            version: 1,
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: "Task created from DevUtils API Tester." }],
+              },
+            ],
+          },
+          issuetype: { name: "Task" },
+        },
+      },
+      null,
+      2
+    ),
+    authType: "basic",
+    authConfig: {
+      basicUsername: "{{jira_email}}",
+      basicPassword: "{{jira_api_token}}",
+    },
+    envVariables: [
+      { key: "jira_domain", defaultValue: "mycompany", description: "Atlassian subdomain" },
+      { key: "jira_email", defaultValue: "", description: "Atlassian account email" },
+      { key: "jira_api_token", defaultValue: "", description: "Atlassian API token" },
+    ],
+    tags: ["jira", "atlassian", "create-issue", "agile"],
+    requiredScopes: ["write:jira-work"],
+    sampleResponse: {
+      status: 201,
+      statusText: "Created",
+      headers: { "content-type": "application/json;charset=UTF-8" },
+      body: JSON.stringify(
+        {
+          id: "10043",
+          key: "PROJ-105",
+          self: "https://mycompany.atlassian.net/rest/api/3/issue/10043",
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "stripe-create-customer",
@@ -1043,6 +2308,23 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{STRIPE_SECRET_KEY}}" },
     tags: ["stripe", "billing", "payments", "customers"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          id: "cus_Q10948ab12",
+          object: "customer",
+          name: "Jane Doe",
+          email: "jane.doe@example.com",
+          currency: "usd",
+          created: 1718294400,
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "supabase-query-table",
@@ -1065,11 +2347,75 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     authType: "bearer",
     authConfig: { bearerToken: "{{SUPABASE_ANON_KEY}}" },
     tags: ["supabase", "postgres", "database", "rest"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        [
+          { id: 1, title: "Initial Setup", created_at: "2026-09-18T10:00:00Z" },
+          { id: 2, title: "API Integration", created_at: "2026-09-18T11:30:00Z" },
+        ],
+        null,
+        2
+      ),
+    },
   },
 
   // ─────────────────────────────────────────────────────────────
   // 7. MOCK & TESTING UTILITIES
   // ─────────────────────────────────────────────────────────────
+  {
+    id: "mock-httpbin-status",
+    name: "HTTPBin: Dynamic Status Code Tester",
+    platform: "mock",
+    platformName: "Mock & Test Utilities",
+    category: "Diagnostics",
+    method: "GET",
+    url: "https://httpbin.org/status/{{status_code}}",
+    description: "Test client-side handling of specific HTTP status codes (e.g. 200, 400, 401, 403, 404, 500).",
+    docsUrl: "https://httpbin.org/",
+    envVariables: [
+      { key: "status_code", defaultValue: "200", description: "Target HTTP response code (200, 201, 400, 401, 500, etc.)" },
+    ],
+    tags: ["mock", "status", "httpbin", "diagnostics"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: "",
+    },
+  },
+  {
+    id: "mock-httpbin-delay",
+    name: "HTTPBin: Latency Simulation (Delay)",
+    platform: "mock",
+    platformName: "Mock & Test Utilities",
+    category: "Diagnostics",
+    method: "GET",
+    url: "https://httpbin.org/delay/{{delay_seconds}}",
+    description: "Simulate server network latency and evaluate UI loading spinners or client timeout thresholds.",
+    docsUrl: "https://httpbin.org/",
+    envVariables: [
+      { key: "delay_seconds", defaultValue: "2", description: "Simulated delay in seconds (1 to 10)" },
+    ],
+    tags: ["mock", "latency", "timeout", "httpbin", "delay"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(
+        {
+          args: {},
+          data: "",
+          origin: "203.0.113.195",
+          url: "https://httpbin.org/delay/2",
+        },
+        null,
+        2
+      ),
+    },
+  },
   {
     id: "mock-postman-echo",
     name: "Postman Echo: Inspect Full Payload",
@@ -1099,6 +2445,22 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       2
     ),
     tags: ["mock", "echo", "testing"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          args: { environment: "production", version: "2.0" },
+          data: { test: true, message: "Hello Postman Echo!" },
+          headers: { "x-client-name": "DevUtils-API-Tester", "content-type": "application/json" },
+          json: { test: true, message: "Hello Postman Echo!" },
+          url: "https://postman-echo.com/post?environment=production&version=2.0",
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "mock-jsonplaceholder-posts",
@@ -1117,6 +2479,23 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       { key: "Accept", value: "application/json" },
     ],
     tags: ["mock", "jsonplaceholder", "posts", "testing"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        [
+          {
+            userId: 1,
+            id: 1,
+            title: "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+            body: "quia et suscipit suscipit recusandae consequuntur expedita et cum reprehenderit molestiae ut ut quas totam nostrum rerum est autem sunt rem eveniet architecto",
+          },
+        ],
+        null,
+        2
+      ),
+    },
   },
   {
     id: "mock-reqres-auth",
@@ -1141,6 +2520,18 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       2
     ),
     tags: ["mock", "reqres", "login", "auth"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          token: "QpwL5tke4Pnpja7X4",
+        },
+        null,
+        2
+      ),
+    },
   },
   {
     id: "mock-coingecko-prices",
@@ -1160,5 +2551,19 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       { key: "Accept", value: "application/json" },
     ],
     tags: ["crypto", "coingecko", "prices", "finance"],
+    sampleResponse: {
+      status: 200,
+      statusText: "OK",
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body: JSON.stringify(
+        {
+          bitcoin: { usd: 68420 },
+          ethereum: { usd: 3510 },
+          solana: { usd: 178.5 },
+        },
+        null,
+        2
+      ),
+    },
   },
 ];

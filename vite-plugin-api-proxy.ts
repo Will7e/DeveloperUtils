@@ -1,5 +1,6 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
+import { validateUrlForSSRF } from "./src/utils/ssrfGuard";
 
 /**
  * Hop-by-hop headers that should not be forwarded to the upstream server.
@@ -17,9 +18,29 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 /**
+ * Check if the request Origin is an authorized local development origin.
+ * Blocks malicious third-party websites from making drive-by requests to localhost.
+ */
+function isAllowedDevOrigin(originStr?: string): boolean {
+  if (!originStr) return true; // Direct same-origin or tool execution without Origin header
+  try {
+    const o = new URL(originStr);
+    return (
+      o.hostname === "localhost" ||
+      o.hostname === "127.0.0.1" ||
+      o.hostname.endsWith(".localhost") ||
+      o.hostname === "0.0.0.0" ||
+      o.hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Vite plugin that intercepts requests to `/api/proxy` and proxies them
- * using Node.js native `fetch`. This eliminates CORS restrictions completely
- * during local development while keeping credentials local.
+ * using Node.js native `fetch`. Eliminates CORS restrictions for developer
+ * tools while enforcing strict origin validation and SSRF metadata blocking.
  */
 export function apiProxyPlugin(): Plugin {
   return {
@@ -30,8 +51,24 @@ export function apiProxyPlugin(): Plugin {
           return next();
         }
 
+        const origin = (req.headers["origin"] as string) || "";
+        const allowedOrigin = isAllowedDevOrigin(origin) ? (origin || "http://localhost:5173") : "";
+
+        // Reject drive-by attacks from foreign origins
+        if (origin && !isAllowedDevOrigin(origin)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json");
+          res.end(
+            JSON.stringify({
+              error: `Forbidden cross-origin request from untrusted origin: '${origin}'`,
+              code: "CROSS_ORIGIN_FORBIDDEN",
+            })
+          );
+          return;
+        }
+
         // Handle preflight OPTIONS request
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "*");
         res.setHeader("Access-Control-Expose-Headers", "*");
@@ -54,23 +91,25 @@ export function apiProxyPlugin(): Plugin {
             return;
           }
 
-          // Validate target URL format
-          let validUrl: URL;
-          try {
-            validUrl = new URL(targetUrl);
-          } catch {
-            res.statusCode = 400;
+          // SSRF Guard: Validate target against cloud metadata endpoints
+          const ssrfCheck = validateUrlForSSRF(targetUrl, {
+            allowLocalhost: true, // Allow local development endpoints
+            allowPrivateSubnets: true, // Allow intranet endpoints in local dev
+          });
+
+          if (!ssrfCheck.allowed || !ssrfCheck.normalizedUrl) {
+            res.statusCode = 403;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: `Invalid target URL: '${targetUrl}'` }));
+            res.end(
+              JSON.stringify({
+                error: `Forbidden target URL: ${ssrfCheck.reason || "Blocked by SSRF policy"}`,
+                code: "SSRF_BLOCKED",
+              })
+            );
             return;
           }
 
-          if (validUrl.protocol !== "http:" && validUrl.protocol !== "https:") {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: `Unsupported protocol '${validUrl.protocol}'. Only http: and https: are supported.` }));
-            return;
-          }
+          const validUrl = new URL(ssrfCheck.normalizedUrl);
 
           // Read incoming body
           const chunks: Buffer[] = [];

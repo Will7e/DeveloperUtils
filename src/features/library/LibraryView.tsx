@@ -27,7 +27,8 @@ import {
   Boxes,
   Plus,
   Trash2,
-  Loader2
+  Loader2,
+  AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -428,7 +429,7 @@ function MethodCard({
     >
       {/* Card Header */}
       <div className="lib-method-header" onClick={() => setUserExpanded(!isExpanded)}>
-        <div className="lib-method-header-left">
+        <div className="lib-method-header-left flex-wrap">
           <span className="lib-method-dot" style={{ background: badgeColor }} />
           <h3 className="lib-method-name">
             {highlightText(method.name, searchQuery)}
@@ -436,6 +437,21 @@ function MethodCard({
               ({method.parameters.map(p => p.split(" ")[0]).join(", ")})
             </span>
           </h3>
+          {method.returnType && (
+            <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0">
+              returns: {method.returnType}
+            </span>
+          )}
+          {method.scope && (
+            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-bg-2 text-text-3 border border-border-1 shrink-0">
+              {method.scope === "both" ? "Global & Scoped" : method.scope}
+            </span>
+          )}
+          {method.deprecated && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
+              Deprecated
+            </span>
+          )}
           {isHighlighted && <Star size={13} className="text-yellow fill-yellow shrink-0 animate-pulse" />}
         </div>
         <ChevronDown className={cn("lib-method-chevron", !isExpanded && "lib-method-chevron-collapsed")} />
@@ -443,8 +459,32 @@ function MethodCard({
 
       {isExpanded && (
         <div className="lib-method-body">
+          {/* Deprecation Warning Banner */}
+          {method.deprecated && method.deprecationNotice && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs mb-3">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div>
+                <span className="font-semibold block">Deprecation Notice</span>
+                <span>{method.deprecationNotice}</span>
+              </div>
+            </div>
+          )}
+
           {/* Description */}
           <p className="lib-method-desc">{highlightText(method.description, searchQuery)}</p>
+
+          {/* Return Value Semantics */}
+          {(method.returnType || method.returnDescription) && (
+            <div className="flex items-baseline gap-2 text-xs text-text-2 mb-3 flex-wrap">
+              <span className="text-text-3 font-medium shrink-0">Returns:</span>
+              <code className="px-1.5 py-0.5 rounded bg-bg-2 text-accent font-mono text-[11px] border border-border-1">
+                {method.returnType || "any"}
+              </code>
+              {method.returnDescription && (
+                <span className="text-text-3 text-[11px]">— {method.returnDescription}</span>
+              )}
+            </div>
+          )}
 
           {/* Parameters */}
           {method.parameters.length > 0 && (
@@ -486,6 +526,18 @@ function MethodCard({
                     <span>Try in Compiler</span>
                   </button>
                 </ActionTooltip>
+
+                {(apiName.toLowerCase().includes("rest") || apiName.toLowerCase().includes("http") || method.name.toLowerCase().includes("rest")) && (
+                  <ActionTooltip content="Open API Tester to test live HTTP requests">
+                    <button
+                      className="lib-code-action-btn hover:text-accent"
+                      onClick={() => navigate("/api-tester")}
+                    >
+                      <ExternalLink size={10} />
+                      <span>Test in API Tester</span>
+                    </button>
+                  </ActionTooltip>
+                )}
 
                 <ActionTooltip content={copied ? "Copied!" : "Copy snippet to clipboard"}>
                   <button

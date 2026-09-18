@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { X, Download } from "lucide-react";
+import { useState } from "react";
+import { X, Download, ShieldCheck } from "lucide-react";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 
 interface ExportModalProps {
@@ -10,15 +10,12 @@ interface ExportModalProps {
 export function ExportModal({ isOpen, onClose }: ExportModalProps) {
   const tabs = useApiTesterStore((s) => s.tabs);
   const exportTabsAsZip = useApiTesterStore((s) => s.exportTabsAsZip);
-  const [selectedTabs, setSelectedTabs] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedTabs(tabs.map((t) => t.id));
-    }
-  }, [isOpen, tabs]);
+  const [deselectedTabIds, setDeselectedTabIds] = useState<string[]>([]);
+  const [sanitizeSecrets, setSanitizeSecrets] = useState(true);
 
   if (!isOpen) return null;
+
+  const selectedTabs = tabs.filter((t) => !deselectedTabIds.includes(t.id)).map((t) => t.id);
 
   return (
     <div className="api-modal-overlay">
@@ -35,16 +32,59 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
             folder containing JSON files.
           </p>
 
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              margin: "12px 0 14px",
+              padding: "9px 12px",
+              background: sanitizeSecrets ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)",
+              border: `1px solid ${sanitizeSecrets ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
+              borderRadius: "6px",
+              transition: "all 0.15s ease",
+            }}
+          >
+            <ShieldCheck
+              className="h-4 w-4 shrink-0"
+              style={{ color: sanitizeSecrets ? "#34d399" : "#f87171" }}
+            />
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                cursor: "pointer",
+                fontSize: "12px",
+                color: "var(--text-secondary)",
+                userSelect: "none",
+                flex: 1,
+              }}
+            >
+              <input
+                type="checkbox"
+                className="api-checkbox"
+                checked={sanitizeSecrets}
+                onChange={(e) => setSanitizeSecrets(e.target.checked)}
+              />
+              <span>
+                {sanitizeSecrets
+                  ? "Sanitize sensitive credentials (passwords, tokens, keys) — Recommended"
+                  : "Include sensitive raw credentials in export files (Warning: risk of leakage)"}
+              </span>
+            </label>
+          </div>
+
           <div className="api-export-actions">
             <button
               className="api-export-action-btn"
-              onClick={() => setSelectedTabs(tabs.map((t) => t.id))}
+              onClick={() => setDeselectedTabIds([])}
             >
               Select All
             </button>
             <button
               className="api-export-action-btn"
-              onClick={() => setSelectedTabs([])}
+              onClick={() => setDeselectedTabIds(tabs.map((t) => t.id))}
             >
               Deselect All
             </button>
@@ -56,12 +96,12 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
                 <input
                   type="checkbox"
                   className="api-checkbox"
-                  checked={selectedTabs.includes(tab.id)}
+                  checked={!deselectedTabIds.includes(tab.id)}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setSelectedTabs([...selectedTabs, tab.id]);
+                      setDeselectedTabIds(deselectedTabIds.filter((id) => id !== tab.id));
                     } else {
-                      setSelectedTabs(selectedTabs.filter((id) => id !== tab.id));
+                      setDeselectedTabIds([...deselectedTabIds, tab.id]);
                     }
                   }}
                 />
@@ -84,7 +124,7 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
             className="api-send-btn"
             disabled={selectedTabs.length === 0}
             onClick={async () => {
-              await exportTabsAsZip(selectedTabs);
+              await exportTabsAsZip(selectedTabs, sanitizeSecrets);
               onClose();
             }}
             style={{ height: "32px", padding: "0 16px" }}
