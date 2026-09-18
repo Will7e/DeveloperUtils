@@ -32,6 +32,8 @@
   --color-red-dim: var(--red-dim);
   --color-yellow: var(--yellow);
   --color-yellow-dim: var(--yellow-dim);
+  --color-amber: var(--amber);
+  --color-amber-dim: var(--amber-dim);
   --color-blue: var(--blue);
   --color-blue-dim: var(--blue-dim);
   --color-purple: var(--purple);
@@ -108,6 +110,8 @@
   --red-dim: rgba(244, 63, 94, 0.12);
   --yellow: #f59e0b;
   --yellow-dim: rgba(245, 158, 11, 0.12);
+  --amber: #f59e0b;
+  --amber-dim: rgba(245, 158, 11, 0.12);
   --blue: #38bdf8;
   --blue-dim: rgba(56, 189, 248, 0.12);
   --purple: #a78bfa;
@@ -200,6 +204,8 @@ html.light {
   --red-dim: rgba(220, 38, 38, 0.08);
   --yellow: #d97706;
   --yellow-dim: rgba(217, 119, 6, 0.09);
+  --amber: #d97706;
+  --amber-dim: rgba(217, 119, 6, 0.09);
   --blue: #2563eb;
   --blue-dim: rgba(37, 99, 235, 0.09);
   --purple: #7c3aed;
@@ -6762,6 +6768,17 @@ html.light .dash-fmt-textarea {
   color: var(--purple);
 }
 
+.results-tab.tab-modified.active,
+.results-tab.tab-mismatch.active {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--yellow);
+}
+.results-tab.tab-modified.active .tab-badge,
+.results-tab.tab-mismatch.active .tab-badge {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+}
+
 .tab-badge {
   display: inline-flex;
   align-items: center;
@@ -6922,6 +6939,55 @@ html.light .result-row:nth-child(even) {
   white-space: nowrap;
 }
 
+.comparator-tag-badge.tag-added,
+.comparator-tag-badge.tag-matched {
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.comparator-tag-badge.tag-removed,
+.comparator-tag-badge.tag-missing {
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.comparator-tag-badge.tag-modified,
+.comparator-tag-badge.tag-mismatch {
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.comparator-tag-badge.tag-type-changed,
+.comparator-tag-badge.tag-extra {
+  background: var(--purple-dim);
+  color: var(--purple);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+/* Category row hover states */
+.result-row.row-added:hover {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.result-row.row-removed:hover {
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.result-row.row-modified:hover {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.result-row.row-type-changed:hover {
+  background: rgba(168, 85, 247, 0.12);
+}
+
+.result-row.row-matched:hover {
+  background: rgba(16, 185, 129, 0.08);
+}
+
 .comparator-path-code {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -7068,6 +7134,284 @@ html.light .comparator-mode-btn.active {
   background: #ffffff;
   color: var(--text-1);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================================
+   LIGHT MODE: COMPARATORS
+   ============================================================ */
+
+html.light .list-comparator-container {
+  background: var(--bg-0);
+}
+
+html.light .comparator-resize-handle-h {
+  background: var(--border-2);
+}
+
+html.light .comparator-resize-handle-h:hover,
+html.light .comparator-resize-handle-h[data-resize-handle-state="hover"],
+html.light .comparator-resize-handle-h[data-resize-handle-state="drag"] {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+html.light .comparator-resize-handle-v {
+  background: var(--border-2);
+}
+
+html.light .comparator-resize-handle-v:hover,
+html.light .comparator-resize-handle-v[data-resize-handle-state="hover"],
+html.light .comparator-resize-handle-v[data-resize-handle-state="drag"] {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+html.light .comparator-divider {
+  background: #f6f8fa;
+  border-color: var(--border-1);
+}
+
+html.light .list-comparator-results {
+  background: #ffffff;
+  border-top-color: var(--border-1);
+}
+
+html.light .results-tabs {
+  background: #f6f8fa;
+  border-bottom-color: var(--border-1);
+}
+
+html.light .results-tab {
+  color: var(--text-2);
+  background: transparent;
+  border-color: transparent;
+}
+
+html.light .results-tab:hover {
+  color: var(--text-1);
+  background: rgba(15, 23, 42, 0.05);
+}
+
+html.light .results-tab.active {
+  background: #ffffff;
+  color: var(--text-1);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+html.light .results-tab.tab-aOnly.active {
+  background: #ffffff;
+  border-color: rgba(5, 150, 105, 0.35);
+  color: #047857;
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.08);
+}
+html.light .results-tab.tab-aOnly.active .tab-badge {
+  background: rgba(5, 150, 105, 0.12);
+  color: #047857;
+}
+
+html.light .results-tab.tab-bOnly.active {
+  background: #ffffff;
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #b91c1c;
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.08);
+}
+html.light .results-tab.tab-bOnly.active .tab-badge {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+html.light .results-tab.tab-both.active {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #1d4ed8;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+}
+html.light .results-tab.tab-both.active .tab-badge {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+html.light .results-tab.tab-union.active {
+  background: #ffffff;
+  border-color: rgba(124, 58, 237, 0.35);
+  color: #6d28d9;
+  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.08);
+}
+html.light .results-tab.tab-union.active .tab-badge {
+  background: rgba(124, 58, 237, 0.12);
+  color: #6d28d9;
+}
+
+html.light .results-tab.tab-modified.active,
+html.light .results-tab.tab-mismatch.active {
+  background: #ffffff;
+  border-color: rgba(217, 119, 6, 0.35);
+  color: #b45309;
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.08);
+}
+html.light .results-tab.tab-modified.active .tab-badge,
+html.light .results-tab.tab-mismatch.active .tab-badge {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
+html.light .tab-badge {
+  background: #e8ecf1;
+  color: var(--text-2);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+html.light .results-search {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: var(--text-1);
+}
+
+html.light .results-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+html.light .results-table-header {
+  background: #f1f5f9;
+  border-bottom-color: var(--border-1);
+  color: var(--text-3);
+}
+
+html.light .results-list-container {
+  background: #ffffff;
+}
+
+html.light .result-row {
+  border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+
+html.light .result-row:nth-child(even) {
+  background: #f8fafc;
+}
+
+html.light .result-row:hover {
+  background: #f1f5f9 !important;
+}
+
+/* Category row hover states in light mode */
+html.light .result-row.row-added:hover {
+  background: rgba(5, 150, 105, 0.08) !important;
+}
+html.light .result-row.row-removed:hover {
+  background: rgba(220, 38, 38, 0.08) !important;
+}
+html.light .result-row.row-modified:hover {
+  background: rgba(217, 119, 6, 0.08) !important;
+}
+html.light .result-row.row-type-changed:hover {
+  background: rgba(124, 58, 237, 0.08) !important;
+}
+html.light .result-row.row-matched:hover {
+  background: rgba(5, 150, 105, 0.05) !important;
+}
+
+html.light .comparator-value-badge {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.10);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+html.light .comparator-value-badge:hover {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+html.light .comparator-value-prefix {
+  color: var(--text-3);
+}
+
+html.light .comparator-value-text {
+  color: var(--text-1);
+}
+
+html.light .comparator-path-code {
+  background: rgba(2, 132, 199, 0.08);
+  color: #0369a1;
+  border-color: rgba(2, 132, 199, 0.20);
+}
+
+html.light .comparator-tag-badge.tag-added,
+html.light .comparator-tag-badge.tag-matched {
+  background: rgba(5, 150, 105, 0.10);
+  color: #047857;
+  border-color: rgba(5, 150, 105, 0.25);
+}
+
+html.light .comparator-tag-badge.tag-removed,
+html.light .comparator-tag-badge.tag-missing {
+  background: rgba(220, 38, 38, 0.10);
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.25);
+}
+
+html.light .comparator-tag-badge.tag-modified,
+html.light .comparator-tag-badge.tag-mismatch {
+  background: rgba(217, 119, 6, 0.10);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.25);
+}
+
+html.light .comparator-tag-badge.tag-type-changed,
+html.light .comparator-tag-badge.tag-extra {
+  background: rgba(124, 58, 237, 0.10);
+  color: #6d28d9;
+  border-color: rgba(124, 58, 237, 0.25);
+}
+
+html.light .results-footer-bar {
+  background: #f8fafc;
+  border-top-color: var(--border-1);
+  color: var(--text-3);
+}
+
+/* Light mode for Toolbar Button across suites */
+html.light .toolbar-btn {
+  background: #ffffff;
+  color: var(--text-2);
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+html.light .toolbar-btn:hover:not(:disabled) {
+  background: #ffffff;
+  color: var(--text-1);
+  border-color: rgba(15, 23, 42, 0.20);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+/* Dashboard preview cards in light mode */
+html.light .dash-comp-topbar {
+  background: rgba(15, 23, 42, 0.02);
+}
+
+html.light .dash-comp-row {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+html.light .dash-comp-row code {
+  color: var(--text-1);
+}
+
+html.light .dash-comp-badge.match {
+  background: rgba(5, 150, 105, 0.12);
+  color: #047857;
+}
+
+html.light .dash-comp-badge.diff {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+}
+
+html.light .dash-comp-badge.missing {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
 }
 
 /* ============================================================
@@ -8157,19 +8501,53 @@ html.light .comparator-mode-btn.active {
 
 .lib-recipe-pre {
   margin: 0;
-  padding: 12px 16px;
+  padding: 12px 0;
   background: #090d16;
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.7;
   overflow-x: auto;
   color: #e2e8f0;
 }
 
 html.light .lib-recipe-pre {
-  background: var(--bg-2);
-  color: var(--text-1);
-  border-top: 1px solid var(--border-1);
+  background: #1e293b;
+  color: #e2e8f0;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.lib-recipe-line {
+  display: flex;
+  align-items: baseline;
+  padding: 0 14px;
+  min-height: 20px;
+  transition: background 0.1s ease;
+}
+
+.lib-recipe-line:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+html.light .lib-recipe-line:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lib-recipe-ln {
+  width: 24px;
+  min-width: 24px;
+  text-align: right;
+  padding-right: 12px;
+  color: #475569;
+  user-select: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  margin-right: 12px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+html.light .lib-recipe-ln {
+  color: #64748b;
+  border-right-color: rgba(255, 255, 255, 0.08);
 }
 
 /* ============================================================
@@ -8758,6 +9136,11 @@ html.light .lib-code-block {
 
 .lib-syn-property {
   color: #fde047;
+}
+
+.lib-syn-builtin {
+  color: #38bdf8;
+  font-weight: 500;
 }
 
 .lib-syn-text {

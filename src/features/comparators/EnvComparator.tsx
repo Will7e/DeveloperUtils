@@ -217,7 +217,7 @@ export function EnvComparator() {
             {/* Input A Panel */}
             <Panel defaultSize={50} minSize={25}>
               <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <span className="section-label font-medium text-xs text-text-1">
                     Environment A (Reference / Staging)
                   </span>
@@ -235,7 +235,7 @@ export function EnvComparator() {
                     </button>
                   </ActionTooltip>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
@@ -261,7 +261,7 @@ export function EnvComparator() {
             {/* Input B Panel */}
             <Panel defaultSize={50} minSize={25}>
               <div className="comparator-input-panel h-full flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <span className="section-label font-medium text-xs text-text-1">
                     Environment B (Target / Production)
                   </span>
@@ -279,7 +279,7 @@ export function EnvComparator() {
                     </button>
                   </ActionTooltip>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
@@ -336,10 +336,10 @@ export function EnvComparator() {
               </button>
 
               <button
-                className={cn("results-tab tab-both", filterType === "mismatch" && "active")}
+                className={cn("results-tab tab-mismatch", filterType === "mismatch" && "active")}
                 onClick={() => setFilterType("mismatch")}
               >
-                <span className="h-2 w-2 rounded-full bg-amber inline-block flex-shrink-0" />
+                <span className="h-2 w-2 rounded-full bg-yellow inline-block flex-shrink-0" />
                 <span>Value Mismatch</span>
                 <span className="tab-badge">{diffResult.stats.mismatch}</span>
               </button>
@@ -466,31 +466,31 @@ export function EnvComparator() {
                       key={item.key}
                       className={cn(
                         "result-row group",
-                        item.status === "missing_in_b" && "hover:bg-red-dim/20",
-                        item.status === "missing_in_a" && "hover:bg-purple-dim/20",
-                        item.status === "mismatch" && "hover:bg-amber-dim/20",
-                        item.status === "matched" && "hover:bg-green-dim/10"
+                        item.status === "missing_in_b" && "row-removed",
+                        item.status === "missing_in_a" && "row-type-changed",
+                        item.status === "mismatch" && "row-modified",
+                        item.status === "matched" && "row-added"
                       )}
                     >
                       {/* Status Tag */}
                       <div className="w-28 px-2 flex-shrink-0">
                         {item.status === "missing_in_b" && (
-                          <span className="comparator-tag-badge bg-red-dim text-red">
+                          <span className="comparator-tag-badge tag-missing">
                             MISSING IN B
                           </span>
                         )}
                         {item.status === "missing_in_a" && (
-                          <span className="comparator-tag-badge bg-purple-dim text-purple">
+                          <span className="comparator-tag-badge tag-extra">
                             EXTRA IN B
                           </span>
                         )}
                         {item.status === "mismatch" && (
-                          <span className="comparator-tag-badge bg-amber-dim text-amber">
+                          <span className="comparator-tag-badge tag-mismatch">
                             DIFFERENT
                           </span>
                         )}
                         {item.status === "matched" && (
-                          <span className="comparator-tag-badge bg-green-dim text-green">
+                          <span className="comparator-tag-badge tag-matched">
                             MATCHED
                           </span>
                         )}

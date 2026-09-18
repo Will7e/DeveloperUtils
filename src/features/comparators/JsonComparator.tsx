@@ -208,7 +208,7 @@ export function JsonComparator() {
 
   const renderValueBadge = (val: unknown, typeName?: string) => {
     if (val === undefined) return <span className="opacity-40 italic">undefined</span>;
-    if (val === null) return <span className="text-amber font-mono">null</span>;
+    if (val === null) return <span className="text-yellow font-mono">null</span>;
     if (typeof val === "boolean") {
       return <span className="text-blue font-mono">{val ? "true" : "false"}</span>;
     }
@@ -265,7 +265,7 @@ export function JsonComparator() {
             {/* JSON A Panel */}
             <Panel defaultSize={50} minSize={25}>
               <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
                       JSON A (Original)
@@ -292,7 +292,7 @@ export function JsonComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
@@ -323,7 +323,7 @@ export function JsonComparator() {
             {/* JSON B Panel */}
             <Panel defaultSize={50} minSize={25}>
               <div className="comparator-input-panel h-full flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
                       JSON B (Target / Compare)
@@ -350,7 +350,7 @@ export function JsonComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
@@ -412,10 +412,10 @@ export function JsonComparator() {
               </button>
 
               <button
-                className={cn("results-tab tab-both", filterType === "modified" && "active")}
+                className={cn("results-tab tab-modified", filterType === "modified" && "active")}
                 onClick={() => setFilterType("modified")}
               >
-                <span className="h-2 w-2 rounded-full bg-amber inline-block flex-shrink-0" />
+                <span className="h-2 w-2 rounded-full bg-yellow inline-block flex-shrink-0" />
                 <span>Modified</span>
                 <span className="tab-badge">~{diffResult.stats.modified}</span>
               </button>
@@ -538,31 +538,31 @@ export function JsonComparator() {
                       key={item.id}
                       className={cn(
                         "result-row group",
-                        item.type === "added" && "hover:bg-green-dim/20",
-                        item.type === "removed" && "hover:bg-red-dim/20",
-                        item.type === "modified" && "hover:bg-amber-dim/20",
-                        item.type === "type_changed" && "hover:bg-purple-dim/20"
+                        item.type === "added" && "row-added",
+                        item.type === "removed" && "row-removed",
+                        item.type === "modified" && "row-modified",
+                        item.type === "type_changed" && "row-type-changed"
                       )}
                     >
                       {/* Status Tag */}
                       <div className="w-24 px-2 flex-shrink-0">
                         {item.type === "added" && (
-                          <span className="comparator-tag-badge bg-green-dim text-green">
+                          <span className="comparator-tag-badge tag-added">
                             + ADDED
                           </span>
                         )}
                         {item.type === "removed" && (
-                          <span className="comparator-tag-badge bg-red-dim text-red">
+                          <span className="comparator-tag-badge tag-removed">
                             - REMOVED
                           </span>
                         )}
                         {item.type === "modified" && (
-                          <span className="comparator-tag-badge bg-amber-dim text-amber">
+                          <span className="comparator-tag-badge tag-modified">
                             ~ MODIFIED
                           </span>
                         )}
                         {item.type === "type_changed" && (
-                          <span className="comparator-tag-badge bg-purple-dim text-purple">
+                          <span className="comparator-tag-badge tag-type-changed">
                             ! MUTATION
                           </span>
                         )}

@@ -200,12 +200,12 @@ export function ListComparator() {
             {/* List A Panel */}
             <Panel defaultSize={50} minSize={20}>
               <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
                       List A
                     </span>
-                    <span className="tab-badge bg-bg-2 text-text-2">
+                    <span className="tab-badge">
                       {listACount} items
                     </span>
                   </div>
@@ -236,7 +236,7 @@ export function ListComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
@@ -262,12 +262,12 @@ export function ListComparator() {
             {/* List B Panel */}
             <Panel defaultSize={50} minSize={20}>
               <div className="comparator-input-panel h-full flex flex-col min-w-0">
-                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                <div className="section-header-row px-3 py-2 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
                       List B
                     </span>
-                    <span className="tab-badge bg-bg-2 text-text-2">
+                    <span className="tab-badge">
                       {listBCount} items
                     </span>
                   </div>
@@ -298,7 +298,7 @@ export function ListComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                <div className="flex-1 w-full min-h-0 relative bg-bg-1">
                   <Editor
                     className="monaco-wrapper"
                     height="100%"
