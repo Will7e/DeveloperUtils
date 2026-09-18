@@ -14,9 +14,12 @@ import {
   AlertTriangle,
   Code2,
   Sliders,
+  HardDrive,
+  RefreshCw,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
+import { getLocalStorageUsage } from "@/services/encrypted-storage.service";
 import {
   Tooltip,
   TooltipTrigger,
@@ -93,6 +96,32 @@ export function SettingsPanel() {
   const resetVault = useVaultStore((s) => s.resetVault);
   const [activeTab, setActiveTab] = useState<SettingsTab>("editor");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [storageUsage, setStorageUsage] = useState(() => getLocalStorageUsage());
+
+  const activeComparatorSessionId = useAppStore((s) => s.activeComparatorSessionId);
+  const closeOtherComparatorSessions = useAppStore((s) => s.closeOtherComparatorSessions);
+  const activeDiffSessionId = useAppStore((s) => s.activeDiffSessionId);
+  const closeOtherDiffSessions = useAppStore((s) => s.closeOtherDiffSessions);
+  const addToast = useAppStore((s) => s.addToast);
+
+  // Refresh storage meter when settings opens or active tab is security
+  useEffect(() => {
+    if (settingsOpen && activeTab === "security") {
+      setStorageUsage(getLocalStorageUsage());
+    }
+  }, [settingsOpen, activeTab]);
+
+  const handlePruneInactiveSessions = () => {
+    closeOtherComparatorSessions(activeComparatorSessionId);
+    closeOtherDiffSessions(activeDiffSessionId);
+    setTimeout(() => {
+      setStorageUsage(getLocalStorageUsage());
+      addToast({
+        message: "Cleaned up inactive comparator & diff sessions",
+        type: "success",
+      });
+    }, 120);
+  };
 
   // Close on Escape key press
   useEffect(() => {
@@ -500,7 +529,64 @@ export function SettingsPanel() {
 
               {/* Storage Reset Action */}
               <div className="settings-section">
-                <div className="settings-section-title">Data Management</div>
+                <div className="settings-section-title">Data Management & Quota</div>
+
+                {/* Storage Utilization Gauge */}
+                <div className="settings-row flex-col items-start gap-2 py-3 border-b border-border-1">
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2">
+                      <HardDrive className="h-4 w-4 text-accent" />
+                      <span className="settings-label">Local Storage Utilization</span>
+                    </div>
+                    <span className="text-xs font-mono font-medium text-text-1">
+                      {storageUsage.usedFormatted} / {storageUsage.quotaFormatted} ({storageUsage.percentage}%)
+                    </span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="w-full h-2 rounded-full bg-bg-2 overflow-hidden border border-border-1">
+                    <div
+                      className={`h-full transition-all duration-300 ${
+                        storageUsage.percentage >= 85
+                          ? "bg-red"
+                          : storageUsage.percentage >= 70
+                          ? "bg-amber"
+                          : "bg-accent"
+                      }`}
+                      style={{ width: `${Math.max(4, storageUsage.percentage)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between w-full text-[11px] text-text-3">
+                    <span>
+                      {storageUsage.percentage >= 85
+                        ? "⚠️ Storage nearly full! Close inactive tabs to prevent save failures."
+                        : "Encrypted at rest with AES-256-GCM. 100% client-side."}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                      onClick={() => setStorageUsage(getLocalStorageUsage())}
+                    >
+                      <RefreshCw className="h-3 w-3" /> Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {/* Clean Inactive Sessions */}
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label">Clean Inactive Tabs</label>
+                    <span className="settings-sublabel">
+                      Close background comparator & diff tabs to free browser storage
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="settings-action-btn"
+                    onClick={handlePruneInactiveSessions}
+                  >
+                    Clean Up Tabs
+                  </button>
+                </div>
 
                 <div className="settings-row">
                   <div className="settings-row-info">

@@ -129,6 +129,73 @@ export async function decryptState(rawStorage: string): Promise<string> {
 }
 
 /**
+ * Detects if an error is a browser storage quota exceeded exception.
+ */
+export function isQuotaExceededError(err: unknown): boolean {
+  return (
+    err instanceof DOMException &&
+    (err.name === "QuotaExceededError" ||
+      err.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+      err.code === 22 ||
+      err.code === 1014)
+  );
+}
+
+export interface StorageUsageStats {
+  usedBytes: number;
+  usedFormatted: string;
+  quotaBytes: number;
+  quotaFormatted: string;
+  percentage: number;
+  isNearLimit: boolean;
+}
+
+/**
+ * Calculates current localStorage utilization and approximate quota percentage.
+ */
+export function getLocalStorageUsage(): StorageUsageStats {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return {
+      usedBytes: 0,
+      usedFormatted: "0 KB",
+      quotaBytes: 5 * 1024 * 1024,
+      quotaFormatted: "5.0 MB",
+      percentage: 0,
+      isNearLimit: false,
+    };
+  }
+
+  let totalChars = 0;
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i);
+    if (key) {
+      totalChars += key.length + (window.localStorage.getItem(key)?.length || 0);
+    }
+  }
+
+  // UTF-16 strings consume 2 bytes per char
+  const usedBytes = totalChars * 2;
+  const quotaBytes = 5 * 1024 * 1024; // 5 MB typical browser quota
+  const percentage = Math.min(100, Math.round((usedBytes / quotaBytes) * 100));
+
+  let usedFormatted = `${(usedBytes / 1024).toFixed(1)} KB`;
+  if (usedBytes >= 1024 * 1024) {
+    usedFormatted = `${(usedBytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  return {
+    usedBytes,
+    usedFormatted,
+    quotaBytes,
+    quotaFormatted: "5.0 MB",
+    percentage,
+    isNearLimit: percentage >= 80,
+  };
+}
+
+let lastQuotaAlertTime = 0;
+
+/**
  * Creates a high-performance Zustand StateStorage adapter
  * with AES-256-GCM encryption at rest and coalesced writes.
  */
@@ -145,6 +212,20 @@ export function createEncryptedStorage(): StateStorage {
       const encrypted = await encryptState(value);
       window.localStorage.setItem(name, encrypted);
     } catch (err) {
+      if (isQuotaExceededError(err)) {
+        const now = Date.now();
+        // Throttle alert to once every 10 seconds to avoid spamming the user
+        if (now - lastQuotaAlertTime > 10_000) {
+          lastQuotaAlertTime = now;
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(
+              new CustomEvent("intab:storage-quota-exceeded", {
+                detail: { error: err },
+              })
+            );
+          }
+        }
+      }
       console.warn("Storage save note:", err);
     }
   };

@@ -78,6 +78,22 @@ function AppContent() {
     };
   }, [pokeActivity]);
 
+  // Listen for storage quota exceeded event
+  const addToast = useAppStore((s) => s.addToast);
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      addToast({
+        message: "Storage Quota Full (~5MB): Browser local storage is full. Please close unused comparator/diff tabs or clear heavy inputs to continue saving changes.",
+        type: "error",
+        duration: 7000,
+      });
+    };
+    window.addEventListener("intab:storage-quota-exceeded", handleQuotaExceeded);
+    return () => {
+      window.removeEventListener("intab:storage-quota-exceeded", handleQuotaExceeded);
+    };
+  }, [addToast]);
+
   return (
     <TooltipProvider delayDuration={300}>
       <Suspense fallback={<PageLoader />}>
