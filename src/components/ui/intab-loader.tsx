@@ -5,6 +5,7 @@
 
 import React from "react";
 import { cn } from "@/lib/utils";
+import { InTabLogo } from "./intab-logo";
 
 export type InTabLoaderSize = "xs" | "sm" | "md" | "lg" | "xl";
 export type DevUtilsLoaderSize = InTabLoaderSize;
@@ -105,17 +106,9 @@ export function InTabLoader({
   const displayDescription = description;
 
   const logoIcon = icon || (
-    <img
-      src="/logo.png"
-      alt="InTab"
-      width={config.iconSize}
-      height={config.iconSize}
-      draggable={false}
-      className={cn("loader-icon select-none object-contain", iconClassName)}
-      style={{
-        width: config.iconSize,
-        height: config.iconSize,
-      }}
+    <InTabLogo
+      size={config.iconSize}
+      className={cn("loader-icon select-none", iconClassName)}
       aria-hidden="true"
     />
   );

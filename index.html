@@ -7,8 +7,8 @@
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
 
-  <link rel="icon" type="image/png" href="/logo.png" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" href="/logo.png" />
   <link rel="apple-touch-icon" href="/logo.png" />
 
   <!-- Viewport & Mobile -->
@@ -156,7 +156,7 @@
     }
 
     html.light .loader-icon {
-      filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.2));
+      filter: drop-shadow(0 2px 6px rgba(2, 132, 199, 0.2));
     }
 
     html.light .loader-bar-track {
@@ -178,9 +178,7 @@
           document.documentElement.classList.add('light');
         }
       }
-    } catch (e) {
-      console.error('Failed to parse theme from local storage', e);
-    }
+    } catch (e) {}
   </script>
 
   <!-- DrawFlow / Excalidraw engine assets path -->
@@ -193,7 +191,7 @@
   <!-- Loading screen — visible until React mounts -->
   <div id="loading-screen">
     <div class="loader-brand">
-      <img class="loader-icon" src="/logo.png" alt="InTab" width="32" height="32" />
+      <img class="loader-icon" src="/favicon.svg" alt="InTab" width="32" height="32" />
       <span class="loader-text">InTab</span>
     </div>
     <div class="loader-bar-track">
