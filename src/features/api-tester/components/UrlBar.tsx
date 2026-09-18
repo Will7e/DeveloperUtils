@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import {
   Send,
   Shield,
@@ -12,7 +12,7 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { ProtocolDropdown } from "./dropdowns/ProtocolDropdown";
 import { MethodDropdown } from "./dropdowns/MethodDropdown";
-import { useApiTesterStore, type TabState } from "@/stores/api-tester.store";
+import { useApiTesterStore, substituteEnvVars, type TabState } from "@/stores/api-tester.store";
 
 interface UrlBarProps {
   activeTab: TabState;
@@ -32,6 +32,22 @@ export function UrlBar({
   onToggleCodeSnippet,
 }: UrlBarProps) {
   const store = useApiTesterStore();
+
+  const environments = store.environments;
+  const activeEnvironmentId = store.activeEnvironmentId;
+  const activeEnvVars = useMemo(() => {
+    if (!activeEnvironmentId) return [];
+    return environments.find((e) => e.id === activeEnvironmentId)?.variables || [];
+  }, [activeEnvironmentId, environments]);
+
+  const hasEnvVars = /(?:\{\{|\%7B\%7B)[^}%]+(?:%7D%7D|\}\})/i.test(activeTab.url);
+  const resolvedUrl = useMemo(() => {
+    if (!hasEnvVars) return "";
+    return substituteEnvVars(activeTab.url, store.envVars, activeEnvVars);
+  }, [hasEnvVars, activeTab.url, store.envVars, activeEnvVars]);
+  const activeEnvName = activeEnvironmentId
+    ? environments.find((e) => e.id === activeEnvironmentId)?.name || "Active Environment"
+    : "Global Environment";
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,8 +107,43 @@ export function UrlBar({
                 ? "Enter GraphQL Endpoint URL"
                 : "Enter request URL (e.g. https://api.github.com/users)"
             }
+            title={
+              hasEnvVars && resolvedUrl && resolvedUrl !== activeTab.url
+                ? `Resolved (${activeEnvName}): ${resolvedUrl}`
+                : undefined
+            }
             required
           />
+
+          {hasEnvVars && resolvedUrl && resolvedUrl !== activeTab.url && (
+            <SimpleTooltip content={`Resolved (${activeEnvName}): ${resolvedUrl}`}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontSize: "11px",
+                  padding: "2px 7px",
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border-1)",
+                  borderRadius: "4px",
+                  color: "var(--accent)",
+                  whiteSpace: "nowrap",
+                  cursor: "default",
+                  maxWidth: "200px",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  userSelect: "none",
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ opacity: 0.7 }}>Resolved:</span>
+                <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {resolvedUrl.replace(/^https?:\/\//, "")}
+                </span>
+              </div>
+            </SimpleTooltip>
+          )}
 
           <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
             {activeTab.protocol !== "websocket" && (

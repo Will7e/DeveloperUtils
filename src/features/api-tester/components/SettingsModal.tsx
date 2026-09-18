@@ -6,6 +6,7 @@ import {
   Trash2,
   BookOpen,
   X,
+  Check,
 } from "lucide-react";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -13,18 +14,34 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialEnvId?: string | null;
 }
 
-export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalProps) {
   const [settingsEnvId, setSettingsEnvId] = useState<string>("global");
 
   const envVars = useApiTesterStore((s) => s.envVars);
   const setEnvVars = useApiTesterStore((s) => s.setEnvVars);
   const environments = useApiTesterStore((s) => s.environments);
+  const activeEnvironmentId = useApiTesterStore((s) => s.activeEnvironmentId);
+  const setActiveEnvironment = useApiTesterStore((s) => s.setActiveEnvironment);
   const addEnvironment = useApiTesterStore((s) => s.addEnvironment);
   const updateEnvironment = useApiTesterStore((s) => s.updateEnvironment);
   const removeEnvironment = useApiTesterStore((s) => s.removeEnvironment);
   const setEnvironmentVars = useApiTesterStore((s) => s.setEnvironmentVars);
+
+  // Sync selected scope when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      if (initialEnvId && (initialEnvId === "global" || environments.some((e) => e.id === initialEnvId))) {
+        setSettingsEnvId(initialEnvId);
+      } else if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
+        setSettingsEnvId(activeEnvironmentId);
+      } else {
+        setSettingsEnvId("global");
+      }
+    }
+  }, [isOpen, initialEnvId, activeEnvironmentId, environments]);
 
   // Close on Escape key
   useEffect(() => {
@@ -123,6 +140,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   }`}
                 />
                 <span className="truncate">Global Variables</span>
+                {activeEnvironmentId === null && (
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      padding: "1px 5px",
+                      borderRadius: "4px",
+                      fontWeight: 600,
+                      background: "rgba(59, 130, 246, 0.15)",
+                      color: "var(--accent)",
+                      letterSpacing: "0.02em",
+                    }}
+                  >
+                    ACTIVE
+                  </span>
+                )}
               </div>
               <span className="api-settings-count-pill">
                 {envVars.filter((v) => v.key.trim()).length}
@@ -132,6 +164,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* Environments List */}
             {environments.map((env) => {
               const isActive = effectiveEnvId === env.id;
+              const isCurrentlyActive = activeEnvironmentId === env.id;
               const count =
                 env.variables?.filter((v) => v.key.trim()).length || 0;
               return (
@@ -150,6 +183,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       }`}
                     />
                     <span className="truncate">{env.name}</span>
+                    {isCurrentlyActive && (
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          padding: "1px 5px",
+                          borderRadius: "4px",
+                          fontWeight: 600,
+                          background: "rgba(59, 130, 246, 0.15)",
+                          color: "var(--accent)",
+                          letterSpacing: "0.02em",
+                        }}
+                      >
+                        ACTIVE
+                      </span>
+                    )}
                   </div>
                   <span className="api-settings-count-pill">{count}</span>
                 </button>
@@ -163,6 +211,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 const envCount = environments.length + 1;
                 const newId = addEnvironment(`Environment ${envCount}`);
                 setSettingsEnvId(newId);
+                setActiveEnvironment(newId);
               }}
               className="api-settings-add-env-btn"
             >
@@ -211,7 +260,50 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               )}
             </div>
 
-            <div className="api-settings-topbar-actions">
+            <div className="api-settings-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {/* Active Toggle / Status */}
+              {(effectiveEnvId === "global" ? activeEnvironmentId === null : activeEnvironmentId === effectiveEnvId) ? (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    background: "rgba(34, 197, 94, 0.15)",
+                    color: "#22c55e",
+                    border: "1px solid rgba(34, 197, 94, 0.25)",
+                  }}
+                >
+                  <Check className="h-3 w-3" />
+                  <span>Active Environment</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setActiveEnvironment(effectiveEnvId === "global" ? null : effectiveEnvId)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "4px 10px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    background: "var(--bg-2)",
+                    color: "var(--text-1)",
+                    border: "1px solid var(--border-1)",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <Check className="h-3.5 w-3.5 text-accent" />
+                  <span>Set as Active</span>
+                </button>
+              )}
+
               {effectiveEnvId !== "global" && (
                 <SimpleTooltip content="Delete Environment">
                   <button

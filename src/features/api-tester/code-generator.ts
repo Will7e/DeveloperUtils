@@ -54,13 +54,18 @@ export function generateCodeSnippet(
   }
 
   // 4. Generate Body string based on type
+  const substitutedFormParams = formParams.map((f) => ({
+    ...f,
+    value: substituteEnvVars(f.value, globalVars, activeEnvVars),
+  }));
+
   let bodyStr = "";
   if (method !== "GET" && method !== "HEAD") {
     if (bodyType === "json" || bodyType === "raw") {
       bodyStr = substituteEnvVars(bodyValue, globalVars, activeEnvVars);
     } else if (bodyType === "form-data") {
       // Simplistic representation of FormData
-      const formDataParts = formParams
+      const formDataParts = substitutedFormParams
         .filter((f) => f.enabled && f.key.trim())
         .map((f) => `${encodeURIComponent(f.key.trim())}=${encodeURIComponent(f.value)}`)
         .join("&");
@@ -76,13 +81,13 @@ export function generateCodeSnippet(
   // Generate per language
   switch (languageId) {
     case "fetch":
-      return generateFetch(method, finalUrl, computedHeaders, bodyType, bodyStr, formParams);
+      return generateFetch(method, finalUrl, computedHeaders, bodyType, bodyStr, substitutedFormParams);
     case "axios":
-      return generateAxios(method, finalUrl, computedHeaders, bodyType, bodyStr, formParams);
+      return generateAxios(method, finalUrl, computedHeaders, bodyType, bodyStr, substitutedFormParams);
     case "python":
-      return generatePython(method, finalUrl, computedHeaders, bodyType, bodyStr, formParams);
+      return generatePython(method, finalUrl, computedHeaders, bodyType, bodyStr, substitutedFormParams);
     case "go":
-      return generateGo(method, finalUrl, computedHeaders, bodyType, bodyStr, formParams);
+      return generateGo(method, finalUrl, computedHeaders, bodyType, bodyStr, substitutedFormParams);
     default:
       return "";
   }

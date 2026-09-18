@@ -10,7 +10,7 @@ import React, {
   useMemo,
 } from "react";
 import { type OnMount } from "@monaco-editor/react";
-import { Globe, ChevronDown, Download, Check } from "lucide-react";
+import { Globe, ChevronDown, Download, Check, Sliders } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -154,6 +154,7 @@ export function ApiTester() {
   const [showCodeSnippet, setShowCodeSnippet] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
+  const [settingsInitialEnvId, setSettingsInitialEnvId] = useState<string | null>(null);
   const [showLibraryModal, setShowLibraryModal] = useState(false);
 
   // Environment dropdown state
@@ -398,10 +399,16 @@ export function ApiTester() {
                   alignItems: "center",
                   justifyContent: "space-between",
                 }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onClick={() => {
                   store.setActiveEnvironment(null);
                   setShowEnvDropdown(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    store.setActiveEnvironment(null);
+                    setShowEnvDropdown(false);
+                  }
                 }}
                 onMouseEnter={(e) => {
                   if (store.activeEnvironmentId !== null)
@@ -438,10 +445,16 @@ export function ApiTester() {
                     alignItems: "center",
                     justifyContent: "space-between",
                   }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
+                  onClick={() => {
                     store.setActiveEnvironment(env.id);
                     setShowEnvDropdown(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      store.setActiveEnvironment(env.id);
+                      setShowEnvDropdown(false);
+                    }
                   }}
                   onMouseEnter={(e) => {
                     if (store.activeEnvironmentId !== env.id)
@@ -452,12 +465,56 @@ export function ApiTester() {
                       e.currentTarget.style.background = "transparent";
                   }}
                 >
-                  <span>{env.name}</span>
+                  <span className="truncate">{env.name}</span>
                   {store.activeEnvironmentId === env.id && (
-                    <Check className="h-3 w-3 text-accent" />
+                    <Check className="h-3 w-3 text-accent shrink-0 ml-2" />
                   )}
                 </button>
               ))}
+
+              <div
+                style={{
+                  height: "1px",
+                  background: "var(--border-1)",
+                  margin: "4px 0",
+                }}
+              />
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEnvDropdown(false);
+                  setSettingsInitialEnvId(store.activeEnvironmentId);
+                  setShowEnvVarsModal(true);
+                }}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "7px 12px",
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  color: "var(--text-2)",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--text-1)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "var(--text-2)";
+                }}
+              >
+                <Sliders className="h-3.5 w-3.5 text-accent" />
+                <span>Configure Environments...</span>
+              </button>
             </div>
           </>
         )}
@@ -523,12 +580,22 @@ export function ApiTester() {
 
         <SettingsModal
           isOpen={showEnvVarsModal}
-          onClose={() => setShowEnvVarsModal(false)}
+          initialEnvId={settingsInitialEnvId}
+          onClose={() => {
+            setShowEnvVarsModal(false);
+            setSettingsInitialEnvId(null);
+          }}
         />
 
         <ApiLibraryModal
           isOpen={showLibraryModal}
           onClose={() => setShowLibraryModal(false)}
+          onOpenSettings={(envId) => {
+            if (envId) {
+              setSettingsInitialEnvId(envId);
+            }
+            setShowEnvVarsModal(true);
+          }}
         />
       </main>
     </div>

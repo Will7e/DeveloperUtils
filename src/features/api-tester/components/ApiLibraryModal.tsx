@@ -37,9 +37,10 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 interface ApiLibraryModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenSettings?: (envId?: string) => void;
 }
 
-export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
+export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryModalProps) {
   const store = useApiTesterStore();
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformId>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -156,7 +157,11 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
 
   const handleInjectPlatformEnv = (platform: PlatformMetadata) => {
     if (!platform.envVariables || platform.envVariables.length === 0) return;
-    store.injectEnvironmentVariables(platform.envVariables, platform.name);
+    const envId = store.injectEnvironmentVariables(platform.envVariables, platform.name);
+    onClose();
+    if (onOpenSettings) {
+      onOpenSettings(envId);
+    }
   };
 
   if (!isOpen) return null;
@@ -661,7 +666,25 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
                 {/* Template Environment Variables */}
                 {inspectingPreset.envVariables && inspectingPreset.envVariables.length > 0 && (
                   <div className="api-inspector-section">
-                    <div className="api-inspector-label">Required Variables</div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="api-inspector-label">Required Variables</div>
+                      <button
+                        type="button"
+                        className="text-xs text-accent hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                        onClick={() => {
+                          const platform = PLATFORMS.find((p) => p.id === inspectingPreset.platform);
+                          const envId = store.injectEnvironmentVariables(
+                            inspectingPreset.envVariables || [],
+                            platform?.name || inspectingPreset.platformName
+                          );
+                          onClose();
+                          if (onOpenSettings) onOpenSettings(envId);
+                        }}
+                      >
+                        <Sliders className="h-3 w-3" />
+                        <span>Configure Environment</span>
+                      </button>
+                    </div>
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {inspectingPreset.envVariables.map((env) => (
                         <span key={env.key} className="api-library-tag" title={env.description}>

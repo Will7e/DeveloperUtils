@@ -217,7 +217,7 @@ interface ApiTesterState {
   addedPresetIds: string[];
   loadLibraryPreset: (preset: LibraryPreset) => void;
   importPlatformCollection: (platformName: string, presets: LibraryPreset[]) => void;
-  injectEnvironmentVariables: (variables: EnvVariableTemplate[], platformName?: string) => void;
+  injectEnvironmentVariables: (variables: EnvVariableTemplate[], platformName?: string) => string | undefined;
   saveCustomPreset: (preset: LibraryPreset) => void;
   deleteCustomPreset: (id: string) => void;
   addPresetToSidebar: (presetId: string) => void;
@@ -322,12 +322,13 @@ export function substituteEnvVars(text: string, globalVars: KeyValueField[], act
   const varMap = new Map<string, string>();
   
   // Add globals first
-  globalEnabled.forEach(v => varMap.set(v.key, v.value));
+  globalEnabled.forEach(v => varMap.set(v.key.trim(), v.value));
   
   // Override with active environment
-  activeEnabled.forEach(v => varMap.set(v.key, v.value));
+  activeEnabled.forEach(v => varMap.set(v.key.trim(), v.value));
   
-  return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, key) => {
+  // Match both literal {{var}} and URL-encoded %7B%7Bvar%7D%7D
+  return text.replace(/(?:\{\{|\%7B\%7B)\s*([^}%]+?)\s*(?:\}\}|\%7D\%7D)/gi, (match, key) => {
     const cleanKey = key.trim();
     return varMap.has(cleanKey) ? varMap.get(cleanKey)! : match;
   });
@@ -454,6 +455,14 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
           })
         : [initialTab];
 
+      const validActiveEnvId =
+        activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)
+          ? activeEnvironmentId
+          : null;
+      if (activeEnvironmentId && !validActiveEnvId) {
+        saveStoredActiveEnvId(null);
+      }
+
       set({
         isInitialized: true,
         tabs: normalizedTabs,
@@ -462,7 +471,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         collections,
         envVars: envVars.length > 0 ? envVars : [createEmptyField()],
         environments,
-        activeEnvironmentId,
+        activeEnvironmentId: validActiveEnvId,
         customPresets: customPresets || [],
         addedPresetIds: addedPresetIds || [],
       });
@@ -1662,9 +1671,13 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => {
         const updated = state.environments.filter(e => e.id !== id);
         saveStoredEnvironments(updated);
+        const newActiveId = state.activeEnvironmentId === id ? null : state.activeEnvironmentId;
+        if (state.activeEnvironmentId === id) {
+          saveStoredActiveEnvId(null);
+        }
         return { 
           environments: updated,
-          activeEnvironmentId: state.activeEnvironmentId === id ? null : state.activeEnvironmentId
+          activeEnvironmentId: newActiveId
         };
       });
     },
@@ -1763,51 +1776,82 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     },
 
     injectEnvironmentVariables: (variables, platformName) => {
-      if (!variables || variables.length === 0) return;
+      if (!variables || variables.length === 0) return undefined;
       const state = get();
-      const isTargetEnvActive = !!state.activeEnvironmentId;
-      const targetEnv = isTargetEnvActive
-        ? state.environments.find((e) => e.id === state.activeEnvironmentId)
-        : null;
+      const envName = platformName || "Platform";
 
-      const currentVars = targetEnv ? targetEnv.variables : state.envVars;
-      const existingKeys = new Set(currentVars.map((v) => v.key.trim()));
+      // Check if an environment with this platform name already exists
+      const existingEnv = state.environments.find(
+        (e) => e.name.trim().toLowerCase() === envName.trim().toLowerCase()
+      );
 
-      const toAdd: KeyValueField[] = [];
-      variables.forEach((v) => {
-        if (!existingKeys.has(v.key)) {
-          toAdd.push({
-            id: genId(),
-            key: v.key,
-            value: v.defaultValue || "",
-            enabled: true,
-          });
+      if (existingEnv) {
+        const existingKeys = new Set(existingEnv.variables.map((v) => v.key.trim()));
+        const toAdd: KeyValueField[] = [];
+        variables.forEach((v) => {
+          if (!existingKeys.has(v.key.trim())) {
+            toAdd.push({
+              id: genId(),
+              key: v.key.trim(),
+              value: v.defaultValue || "",
+              enabled: true,
+            });
+          }
+        });
+
+        if (toAdd.length > 0) {
+          const cleaned = existingEnv.variables.filter((v) => v.key.trim() !== "" || v.value.trim() !== "");
+          const newVars = [...cleaned, ...toAdd, createEmptyField()];
+          state.setEnvironmentVars(existingEnv.id, newVars);
         }
+
+        // Set as active environment
+        state.setActiveEnvironment(existingEnv.id);
+
+        useAppStore.getState().addToast({
+          message:
+            toAdd.length > 0
+              ? `Switched to "${existingEnv.name}" and added ${toAdd.length} missing variable${toAdd.length > 1 ? "s" : ""}!`
+              : `Switched to "${existingEnv.name}" environment.`,
+          type: "success",
+          duration: 3500,
+        });
+
+        return existingEnv.id;
+      }
+
+      // Create a brand new dedicated environment for this platform
+      const newEnvId = genId();
+      const initialVars: KeyValueField[] = variables.map((v) => ({
+        id: genId(),
+        key: v.key.trim(),
+        value: v.defaultValue || "",
+        enabled: true,
+      }));
+      initialVars.push(createEmptyField());
+
+      const newEnv: Environment = {
+        id: newEnvId,
+        name: envName,
+        variables: initialVars,
+      };
+
+      const updatedEnvs = [...state.environments, newEnv];
+      saveStoredEnvironments(updatedEnvs);
+      saveStoredActiveEnvId(newEnvId);
+
+      set({
+        environments: updatedEnvs,
+        activeEnvironmentId: newEnvId,
       });
 
-      if (toAdd.length === 0) {
-        useAppStore.getState().addToast({
-          message: `All variables for ${platformName || "platform"} already exist in your environment.`,
-          type: "info",
-          duration: 3000,
-        });
-        return;
-      }
-
-      const cleanedCurrent = currentVars.filter((v) => v.key.trim() !== "" || v.value.trim() !== "");
-      const newVars = [...cleanedCurrent, ...toAdd, createEmptyField()];
-
-      if (isTargetEnvActive && targetEnv) {
-        state.setEnvironmentVars(targetEnv.id, newVars);
-      } else {
-        state.setEnvVars(newVars);
-      }
-
       useAppStore.getState().addToast({
-        message: `Added ${toAdd.length} template variable${toAdd.length > 1 ? "s" : ""} for ${platformName || "platform"}!`,
+        message: `Created "${newEnv.name}" environment with ${variables.length} template variable${variables.length > 1 ? "s" : ""}!`,
         type: "success",
         duration: 3500,
       });
+
+      return newEnvId;
     },
 
     saveCustomPreset: (preset) => {
