@@ -1,4 +1,4 @@
-import { validateUrlForSSRF } from "../src/utils/ssrfGuard";
+import { validateUrlForSSRF } from "../src/utils/ssrfGuard.js";
 
 export const config = {
   runtime: "edge",
