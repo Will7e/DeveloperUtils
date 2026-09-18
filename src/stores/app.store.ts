@@ -3,7 +3,8 @@
 // ============================================================
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { createEncryptedStorage } from "@/services/encrypted-storage.service";
 import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
@@ -1174,6 +1175,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "intab-app-state",
+      storage: createJSONStorage(() => createEncryptedStorage()),
       onRehydrateStorage: () => (state) => {
         if (state && state.workflows && Array.isArray(state.workflows)) {
           state.workflows = state.workflows.map((w) => ({

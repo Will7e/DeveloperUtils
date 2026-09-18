@@ -8,6 +8,7 @@
 import { loader } from "@monaco-editor/react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { useApiTesterStore } from "@/stores/api-tester.store";
+import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
 
 declare global {
@@ -62,7 +63,14 @@ export function bootstrapApp(): Promise<void> {
     // 2. Monaco runtime initialization (critical for compiler, api-tester, formatters, diff)
     const monacoPromise = initMonacoRuntime();
 
-    // 3. Page-specific store hydration
+    // 3. Encrypted app store rehydration (comparators, diff, formatters, files)
+    const appStorePromise = Promise.resolve(
+      useAppStore.persist?.rehydrate ? useAppStore.persist.rehydrate() : undefined
+    ).catch((err: unknown) => {
+      console.warn("App store rehydration note:", err);
+    });
+
+    // 4. Page-specific store hydration
     let pagePromise: Promise<unknown>;
     if (isApiTester) {
       // Must await api tester store before revealing the /api-tester view
@@ -74,8 +82,8 @@ export function bootstrapApp(): Promise<void> {
       pagePromise = Promise.resolve();
     }
 
-    // 4. Critical tasks to wait for before opening the single loading gate
-    const criticalTasks = [vaultPromise, monacoPromise, pagePromise];
+    // 5. Critical tasks to wait for before opening the single loading gate
+    const criticalTasks = [vaultPromise, monacoPromise, appStorePromise, pagePromise];
 
     // Cap the waiting time to 2.2 seconds maximum to prevent hanging on slow/offline networks
     const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2200));
