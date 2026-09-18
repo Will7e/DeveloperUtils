@@ -1,4 +1,5 @@
 import { TabState, HistoryItem, ImportedCollection, Environment, KeyValueField } from "./api-tester.store";
+import type { LibraryPreset } from "@/features/api-tester/data/preset-library.data";
 
 export interface StorageAdapter {
   getTabs(): Promise<{ tabs: TabState[]; activeTabId: string } | null>;
@@ -18,6 +19,9 @@ export interface StorageAdapter {
 
   getActiveEnvId(): Promise<string | null>;
   saveActiveEnvId(id: string | null): Promise<void>;
+
+  getCustomPresets(): Promise<LibraryPreset[]>;
+  saveCustomPresets(presets: LibraryPreset[]): Promise<void>;
 }
 
 // Simulate network latency (0ms for now so it doesn't feel sluggish, but uses Promises to simulate async)
@@ -140,6 +144,25 @@ export class LocalStorageAdapter implements StorageAdapter {
       localStorage.setItem("devutils_api_active_env", JSON.stringify(id));
     } catch (e) {
       console.error("Failed to save active env id", e);
+    }
+  }
+
+  async getCustomPresets(): Promise<LibraryPreset[]> {
+    await delay(0);
+    try {
+      const saved = localStorage.getItem("devutils_api_custom_presets");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async saveCustomPresets(presets: LibraryPreset[]): Promise<void> {
+    await delay(0);
+    try {
+      localStorage.setItem("devutils_api_custom_presets", JSON.stringify(presets));
+    } catch (e) {
+      console.error("Failed to save custom presets", e);
     }
   }
 }

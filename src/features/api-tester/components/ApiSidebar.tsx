@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useMemo } from "react";
 import {
   Globe,
   Sparkles,
@@ -11,18 +11,21 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  BookmarkPlus,
+  Layers,
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useApiTesterStore, type ImportedRequest } from "@/stores/api-tester.store";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
-import { PRESETS, formatRelativeTime } from "../constants";
-import type { ApiPreset } from "../constants";
+import { formatRelativeTime } from "../constants";
+import { LIBRARY_PRESETS, type LibraryPreset, type PlatformId } from "../data/preset-library.data";
 
 interface ApiSidebarProps {
   onOpenSettings: () => void;
+  onOpenLibrary: () => void;
 }
 
-export function ApiSidebar({ onOpenSettings }: ApiSidebarProps) {
+export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
   const store = useApiTesterStore();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState(
@@ -41,6 +44,47 @@ export function ApiSidebar({ onOpenSettings }: ApiSidebarProps) {
     "devutils_api_sidebar_collections",
     false
   );
+
+  const [sidebarPlatform, setSidebarPlatform] = useState<PlatformId>("all");
+
+  const quickPlatforms: Array<{ id: PlatformId; label: string }> = [
+    { id: "all", label: "All" },
+    { id: "entra", label: "Entra" },
+    { id: "azure", label: "Azure" },
+    { id: "google", label: "Google" },
+    { id: "ai", label: "AI" },
+    { id: "mock", label: "Mocks" },
+  ];
+
+  const displayedPresets = useMemo(() => {
+    const combined = [...LIBRARY_PRESETS, ...(store.customPresets || [])];
+    if (sidebarPlatform === "all") return combined.slice(0, 8);
+    return combined.filter((p) => p.platform === sidebarPlatform).slice(0, 10);
+  }, [sidebarPlatform, store.customPresets]);
+
+  const handleSaveActiveTabToLibrary = () => {
+    const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
+    if (!activeTab) return;
+    const newCustomPreset: LibraryPreset = {
+      id: `custom-${Date.now()}`,
+      name: activeTab.name || "Custom Request",
+      platform: "custom",
+      platformName: "My Presets",
+      category: "Custom",
+      method: activeTab.method,
+      url: activeTab.url,
+      description: `Saved from active tab on ${new Date().toLocaleDateString()}`,
+      params: activeTab.params.filter((p) => p.key.trim() !== "").map((p) => ({ key: p.key, value: p.value })),
+      headers: activeTab.headers.filter((h) => h.key.trim() !== "").map((h) => ({ key: h.key, value: h.value })),
+      bodyType: activeTab.bodyType,
+      bodyValue: activeTab.bodyValue,
+      rawType: activeTab.rawType,
+      authType: activeTab.authType,
+      authConfig: activeTab.authConfig,
+      tags: ["custom", activeTab.method.toLowerCase()],
+    };
+    store.saveCustomPreset(newCustomPreset);
+  };
 
   const folderInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -184,10 +228,10 @@ export function ApiSidebar({ onOpenSettings }: ApiSidebarProps) {
       />
 
       <div className="api-sidebar-content">
-        {/* Presets Section */}
+        {/* Presets & API Library Section */}
         <SidebarSection
-          icon={<Sparkles className="h-4 w-4" />}
-          title="Mock API Presets"
+          icon={<Sparkles className="h-4 w-4 text-accent" />}
+          title="API Library"
           isOpen={presetsOpen}
           onToggle={() => {
             if (sidebarCollapsed) {
@@ -198,26 +242,90 @@ export function ApiSidebar({ onOpenSettings }: ApiSidebarProps) {
             }
           }}
           collapsed={sidebarCollapsed}
+          actions={
+            !sidebarCollapsed ? (
+              <div style={{ display: "flex", gap: "4px" }}>
+                <SimpleTooltip content="Save Active Tab as Custom Preset">
+                  <button
+                    className="api-clear-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSaveActiveTabToLibrary();
+                    }}
+                    style={{ padding: "2px 4px" }}
+                    title="Save active tab to presets"
+                  >
+                    <BookmarkPlus className="h-3 w-3 text-yellow" />
+                  </button>
+                </SimpleTooltip>
+                <SimpleTooltip content="Open Full Preset Library">
+                  <button
+                    className="api-clear-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenLibrary();
+                    }}
+                    style={{ padding: "2px 4px" }}
+                    title="Browse preset library"
+                  >
+                    <Layers className="h-3 w-3 text-accent" />
+                  </button>
+                </SimpleTooltip>
+              </div>
+            ) : undefined
+          }
         >
           <div className="api-sidebar-section-body-inner">
-            {PRESETS.map((preset: ApiPreset, index: number) => (
-              <button
-                key={index}
-                className="api-preset-card"
-                onClick={() => store.loadPreset(preset)}
-                title={preset.description}
-              >
-                <span
-                  className={`api-badge api-badge-${preset.method.toLowerCase()}`}
+            {/* Primary Browse Button */}
+            <button
+              className="api-sidebar-browse-library-btn"
+              onClick={onOpenLibrary}
+            >
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                <span>Browse Library</span>
+              </div>
+              <span className="api-sidebar-library-count">
+                {LIBRARY_PRESETS.length + (store.customPresets?.length || 0)}
+              </span>
+            </button>
+
+            {/* Quick Platform Filter Pills */}
+            <div className="api-sidebar-quick-pills">
+              {quickPlatforms.map((qp) => (
+                <button
+                  key={qp.id}
+                  className={`api-sidebar-quick-pill ${
+                    sidebarPlatform === qp.id ? "api-sidebar-quick-pill-active" : ""
+                  }`}
+                  onClick={() => setSidebarPlatform(qp.id)}
                 >
-                  {preset.method}
-                </span>
-                <div className="api-item-info">
-                  <span className="api-item-url">{preset.name}</span>
-                  <span className="api-item-meta">{preset.url}</span>
-                </div>
-              </button>
-            ))}
+                  {qp.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Preset Cards */}
+            <div className="api-sidebar-presets-list">
+              {displayedPresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  className="api-preset-card"
+                  onClick={() => store.loadLibraryPreset(preset)}
+                  title={`${preset.name}\n${preset.description}`}
+                >
+                  <span
+                    className={`api-badge api-badge-${preset.method.toLowerCase()}`}
+                  >
+                    {preset.method}
+                  </span>
+                  <div className="api-item-info">
+                    <span className="api-item-url">{preset.name}</span>
+                    <span className="api-item-meta">{preset.url}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </SidebarSection>
 

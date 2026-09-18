@@ -10,7 +10,7 @@ import React, {
   useMemo,
 } from "react";
 import { type OnMount } from "@monaco-editor/react";
-import { Globe, ChevronDown, Download, Check } from "lucide-react";
+import { Globe, ChevronDown, Download, Check, Sparkles } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -28,6 +28,7 @@ import { CurlImportDrawer } from "./components/CurlImportDrawer";
 import { CodeSnippetDrawer } from "./components/CodeSnippetDrawer";
 import { SettingsModal } from "./components/SettingsModal";
 import { ExportModal } from "./components/ExportModal";
+import { ApiLibraryModal } from "./components/ApiLibraryModal";
 import { useResizablePane } from "./hooks/useResizablePane";
 
 export function ApiTester() {
@@ -152,6 +153,7 @@ export function ApiTester() {
   const [showCodeSnippet, setShowCodeSnippet] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showEnvVarsModal, setShowEnvVarsModal] = useState(false);
+  const [showLibraryModal, setShowLibraryModal] = useState(false);
 
   // Environment dropdown state
   const [showEnvDropdown, setShowEnvDropdown] = useState(false);
@@ -174,9 +176,14 @@ export function ApiTester() {
     return () => clearInterval(timer);
   }, []);
 
-  // Keyboard shortcut: Cmd+Enter / Ctrl+Enter to trigger execution
+  // Keyboard shortcut: Cmd+Enter (Send), Cmd+Shift+L (Presets Library)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "L" || e.key === "l")) {
+        e.preventDefault();
+        setShowLibraryModal((prev) => !prev);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         const active = useApiTesterStore
@@ -280,7 +287,10 @@ export function ApiTester() {
 
   return (
     <div className="api-tester-container">
-      <ApiSidebar onOpenSettings={() => setShowEnvVarsModal(true)} />
+      <ApiSidebar
+        onOpenSettings={() => setShowEnvVarsModal(true)}
+        onOpenLibrary={() => setShowLibraryModal(true)}
+      />
 
       <main className="api-main">
         <WorkspaceTabBar
@@ -304,6 +314,17 @@ export function ApiTester() {
           newTabTooltip="New Request Tab"
           rightContent={
             <>
+              <SimpleTooltip content="API Preset Library (Ctrl/Cmd+Shift+L)">
+                <button
+                  className="toolbar-action-btn"
+                  onClick={() => setShowLibraryModal(true)}
+                  style={{ color: "var(--accent)" }}
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <span className="toolbar-action-label">Presets</span>
+                </button>
+              </SimpleTooltip>
+
               <div className="tabs-toolbar-sep" />
               <button
                 ref={envBtnRef}
@@ -513,6 +534,11 @@ export function ApiTester() {
         <SettingsModal
           isOpen={showEnvVarsModal}
           onClose={() => setShowEnvVarsModal(false)}
+        />
+
+        <ApiLibraryModal
+          isOpen={showLibraryModal}
+          onClose={() => setShowLibraryModal(false)}
         />
       </main>
     </div>

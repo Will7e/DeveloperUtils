@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import JSZip from "jszip";
 import { useAppStore } from "./app.store";
+import type { LibraryPreset, EnvVariableTemplate } from "@/features/api-tester/data/preset-library.data";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
 export type BodyType = "none" | "json" | "form-data" | "raw";
@@ -210,6 +211,14 @@ interface ApiTesterState {
   removeEnvironment: (id: string) => void;
   setActiveEnvironment: (id: string | null) => void;
   setEnvironmentVars: (id: string, vars: KeyValueField[]) => void;
+
+  // Preset Library
+  customPresets: LibraryPreset[];
+  loadLibraryPreset: (preset: LibraryPreset) => void;
+  importPlatformCollection: (platformName: string, presets: LibraryPreset[]) => void;
+  injectEnvironmentVariables: (variables: EnvVariableTemplate[], platformName?: string) => void;
+  saveCustomPreset: (preset: LibraryPreset) => void;
+  deleteCustomPreset: (id: string) => void;
 }
 
 // Generate unique ID
@@ -407,16 +416,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     envVars: [createEmptyField()],
     environments: [],
     activeEnvironmentId: null,
+    customPresets: [],
 
     init: async () => {
       if (get().isInitialized) return;
-      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId] = await Promise.all([
+      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId, customPresets] = await Promise.all([
         apiStorage.getTabs(),
         apiStorage.getHistory(),
         apiStorage.getCollections(),
         apiStorage.getEnvVars(),
         apiStorage.getEnvironments(),
-        apiStorage.getActiveEnvId()
+        apiStorage.getActiveEnvId(),
+        apiStorage.getCustomPresets(),
       ]);
 
       const normalizedTabs = storedTabs
@@ -445,7 +456,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         collections,
         envVars: envVars.length > 0 ? envVars : [createEmptyField()],
         environments,
-        activeEnvironmentId
+        activeEnvironmentId,
+        customPresets: customPresets || [],
       });
     },
 
@@ -1660,6 +1672,160 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         const updated = state.environments.map(e => e.id === id ? { ...e, variables: vars } : e);
         saveStoredEnvironments(updated);
         return { environments: updated };
+      });
+    },
+
+    // ── Preset Library Actions ───────────────────────────────────
+    loadLibraryPreset: (preset) => {
+      const tabId = genId();
+      set((state) => {
+        const newTab = createNewTab(preset.name);
+        newTab.id = tabId;
+        newTab.method = preset.method;
+        newTab.url = preset.url;
+        newTab.bodyType = preset.bodyType || "none";
+        newTab.bodyValue = preset.bodyValue || "";
+        newTab.rawType = preset.rawType || "application/json";
+
+        if (preset.params && preset.params.length > 0) {
+          newTab.params = [
+            ...preset.params.map((p) => ({ id: genId(), key: p.key, value: p.value, enabled: true })),
+            createEmptyField(),
+          ];
+        } else {
+          newTab.params = [createEmptyField()];
+        }
+
+        if (preset.headers && preset.headers.length > 0) {
+          newTab.headers = [
+            ...preset.headers.map((h) => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
+            createEmptyField(),
+          ];
+        } else {
+          newTab.headers = [createEmptyField()];
+        }
+
+        newTab.authType = preset.authType || "none";
+        newTab.authConfig = preset.authConfig
+          ? { ...defaultAuthConfig, ...preset.authConfig }
+          : { ...defaultAuthConfig };
+
+        return {
+          tabs: [...state.tabs, newTab],
+          activeTabId: newTab.id,
+        };
+      });
+
+      if (preset.params && preset.params.length > 0) {
+        get().syncUrlFromParams();
+      } else {
+        get().syncParamsFromUrl(preset.url);
+      }
+      persistTabs();
+
+      useAppStore.getState().addToast({
+        message: `Added "${preset.name}" to API Tester`,
+        type: "success",
+        duration: 2500,
+      });
+    },
+
+    importPlatformCollection: (platformName, presets) => {
+      const importedRequests: ImportedRequest[] = presets.map((preset) => ({
+        id: genId(),
+        name: preset.name,
+        method: preset.method,
+        url: preset.url,
+        params: (preset.params || []).map((p) => ({ id: genId(), key: p.key, value: p.value, enabled: true })),
+        headers: (preset.headers || []).map((h) => ({ id: genId(), key: h.key, value: h.value, enabled: true })),
+        bodyType: preset.bodyType || "none",
+        bodyValue: preset.bodyValue || "",
+        formParams: [],
+        rawType: preset.rawType || "application/json",
+        authType: preset.authType || "none",
+        authConfig: preset.authConfig ? { ...defaultAuthConfig, ...preset.authConfig } : { ...defaultAuthConfig },
+      }));
+
+      get().importCollection(platformName, importedRequests);
+
+      useAppStore.getState().addToast({
+        message: `Imported ${presets.length} presets into "${platformName}" collection!`,
+        type: "success",
+        duration: 3000,
+      });
+    },
+
+    injectEnvironmentVariables: (variables, platformName) => {
+      if (!variables || variables.length === 0) return;
+      const state = get();
+      const isTargetEnvActive = !!state.activeEnvironmentId;
+      const targetEnv = isTargetEnvActive
+        ? state.environments.find((e) => e.id === state.activeEnvironmentId)
+        : null;
+
+      const currentVars = targetEnv ? targetEnv.variables : state.envVars;
+      const existingKeys = new Set(currentVars.map((v) => v.key.trim()));
+
+      const toAdd: KeyValueField[] = [];
+      variables.forEach((v) => {
+        if (!existingKeys.has(v.key)) {
+          toAdd.push({
+            id: genId(),
+            key: v.key,
+            value: v.defaultValue || "",
+            enabled: true,
+          });
+        }
+      });
+
+      if (toAdd.length === 0) {
+        useAppStore.getState().addToast({
+          message: `All variables for ${platformName || "platform"} already exist in your environment.`,
+          type: "info",
+          duration: 3000,
+        });
+        return;
+      }
+
+      const cleanedCurrent = currentVars.filter((v) => v.key.trim() !== "" || v.value.trim() !== "");
+      const newVars = [...cleanedCurrent, ...toAdd, createEmptyField()];
+
+      if (isTargetEnvActive && targetEnv) {
+        state.setEnvironmentVars(targetEnv.id, newVars);
+      } else {
+        state.setEnvVars(newVars);
+      }
+
+      useAppStore.getState().addToast({
+        message: `Added ${toAdd.length} template variable${toAdd.length > 1 ? "s" : ""} for ${platformName || "platform"}!`,
+        type: "success",
+        duration: 3500,
+      });
+    },
+
+    saveCustomPreset: (preset) => {
+      set((state) => {
+        const updated = [preset, ...state.customPresets.filter((p) => p.id !== preset.id)];
+        apiStorage.saveCustomPresets(updated);
+        return { customPresets: updated };
+      });
+      useAppStore.getState().addToast({
+        message: `Saved "${preset.name}" to My Presets!`,
+        type: "success",
+        duration: 2500,
+      });
+    },
+
+    deleteCustomPreset: (id) => {
+      set((state) => {
+        const updated = state.customPresets.filter((p) => p.id !== id);
+        apiStorage.saveCustomPresets(updated);
+        return { customPresets: updated };
+      });
+      useAppStore.getState().addToast({
+        message: "Preset deleted from My Presets",
+        type: "info",
+        duration: 2000,
       });
     }
   };
