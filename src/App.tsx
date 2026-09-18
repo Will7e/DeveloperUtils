@@ -15,6 +15,8 @@ import { ToastContainer } from "@/features/toast/ToastContainer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAppStore } from "@/stores/app.store";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { VaultGuard } from "@/components/vault/VaultGuard";
+import { useVaultStore } from "@/services/vault.service";
 
 // Lazy-loaded routes for code splitting
 const DashboardPage = lazy(() => import("@/pages/DashboardPage").then(m => ({ default: m.DashboardPage })));
@@ -29,6 +31,8 @@ const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ de
 // Pre-initialize Monaco and register custom themes early to prevent initial light-theme fallback
 loader.init().then((monaco) => {
   setupMonacoTheme(monaco);
+}).catch((err) => {
+  console.warn("Monaco early initialization note:", err);
 });
 
 function PageLoader() {
@@ -54,6 +58,17 @@ function AppContent() {
     document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
+
+  // Poke vault auto-lock timer on user activity
+  const pokeActivity = useVaultStore((s) => s.pokeActivity);
+  useEffect(() => {
+    const events = ["mousedown", "keydown", "scroll", "touchstart"] as const;
+    const handler = () => pokeActivity();
+    events.forEach((e) => window.addEventListener(e, handler, { passive: true }));
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, handler));
+    };
+  }, [pokeActivity]);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -85,7 +100,9 @@ function AppContent() {
 function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <VaultGuard>
+        <AppContent />
+      </VaultGuard>
     </BrowserRouter>
   );
 }

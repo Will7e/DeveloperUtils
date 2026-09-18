@@ -24,7 +24,8 @@ import {
   Columns,
   FileCode2,
   Minus,
-  Sparkles,
+  AlignLeft,
+  ScanSearch,
   Search,
   Check,
   Copy,
@@ -626,7 +627,7 @@ export function DiffChecker() {
                   )}
                 >
                   {isAutoDetectActive ? (
-                    <Sparkles className="h-3.5 w-3.5 text-accent" />
+                    <ScanSearch className="h-3.5 w-3.5 text-accent" />
                   ) : (
                     <FileCode2 className="h-3.5 w-3.5" />
                   )}
@@ -662,7 +663,7 @@ export function DiffChecker() {
                   }}
                 >
                   <div className="flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-accent" />
+                    <ScanSearch className="h-3.5 w-3.5 text-accent" />
                     <span>Auto-Detect</span>
                   </div>
                   {detection.confidence > 0 && (
@@ -703,7 +704,7 @@ export function DiffChecker() {
                 {isFormatting ? (
                   <DevUtilsLoader size="xs" />
                 ) : (
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <AlignLeft className="h-3.5 w-3.5 text-accent" />
                 )}
                 <span>Format</span>
               </button>

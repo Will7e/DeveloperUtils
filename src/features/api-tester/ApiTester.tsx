@@ -10,7 +10,7 @@ import React, {
   useMemo,
 } from "react";
 import { type OnMount } from "@monaco-editor/react";
-import { Globe, ChevronDown, Download, Check, Sparkles } from "lucide-react";
+import { Globe, ChevronDown, Download, Check, Library } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -320,7 +320,7 @@ export function ApiTester() {
                   onClick={() => setShowLibraryModal(true)}
                   style={{ color: "var(--accent)" }}
                 >
-                  <Sparkles className="h-3.5 w-3.5 text-accent" />
+                  <Library className="h-3.5 w-3.5 text-accent" />
                   <span className="toolbar-action-label">Presets</span>
                 </button>
               </SimpleTooltip>

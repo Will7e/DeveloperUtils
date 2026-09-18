@@ -11,7 +11,9 @@ import {
   FileCode2, 
   ChevronDown, 
   ExternalLink, 
-  Sparkles, 
+  BookOpen,
+  Zap,
+  Star,
   Wrench,
   Search,
   ArrowRight,
@@ -302,7 +304,7 @@ function ApiDocumentationView({
                       }}
                     >
                       {method.name}()
-                      {isMatch && <Sparkles size={10} className="text-yellow shrink-0 ml-0.5" />}
+                      {isMatch && <Star size={10} className="text-yellow fill-yellow shrink-0 ml-0.5" />}
                     </a>
                   );
                 })}
@@ -434,7 +436,7 @@ function MethodCard({
               ({method.parameters.map(p => p.split(" ")[0]).join(", ")})
             </span>
           </h3>
-          {isHighlighted && <Sparkles size={13} className="text-yellow shrink-0 animate-pulse" />}
+          {isHighlighted && <Star size={13} className="text-yellow fill-yellow shrink-0 animate-pulse" />}
         </div>
         <ChevronDown className={cn("lib-method-chevron", !isExpanded && "lib-method-chevron-collapsed")} />
       </div>
@@ -665,7 +667,7 @@ function onChange(control, oldValue, newValue, isLoading) {
         <div className="lib-hub-hero-glow" />
         <div className="relative z-10">
           <div className="lib-hub-hero-badge">
-            <Sparkles className="w-3.5 h-3.5" />
+            <BookOpen className="w-3.5 h-3.5" />
             <span>Developer Reference & Code Recipes</span>
           </div>
 
@@ -784,7 +786,7 @@ function onChange(control, oldValue, newValue, isLoading) {
       <div className="lib-hub-section">
         <div className="lib-hub-section-header">
           <h2 className="lib-hub-section-title">
-            <Sparkles className="w-4 h-4 text-yellow" />
+            <Zap className="w-4 h-4 text-yellow" />
             <span>Essential APIs & Quick Start</span>
           </h2>
           <span className="lib-hub-section-count">Most Used Enterprise Classes</span>

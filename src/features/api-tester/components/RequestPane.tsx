@@ -9,7 +9,7 @@ import {
   Lock,
   Plus,
   Trash2,
-  Sparkles,
+  AlignLeft,
   ShieldCheck,
   FileCode2,
   FileJson,
@@ -355,7 +355,7 @@ export function RequestPane({
                   onClick={() => store.formatActiveTabJsonBody()}
                   title="Beautify/Format JSON string"
                 >
-                  <Sparkles className="h-3 w-3 text-yellow" />
+                  <AlignLeft className="h-3 w-3 text-yellow" />
                   <span>Format</span>
                 </button>
                 <EditorErrorBoundary fallbackMessage="Failed to load body editor.">

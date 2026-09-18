@@ -15,7 +15,7 @@ import {
   Plus,
   Globe,
   Layers,
-  Sparkles,
+  Library,
   Bot,
   Terminal,
   Code2,
@@ -179,7 +179,7 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
         <aside className="api-library-sidebar">
           <div className="api-library-sidebar-header">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-accent" />
+              <Library className="h-4 w-4 text-accent" />
               <span className="font-semibold text-sm text-[var(--text-1)]">Preset Library</span>
             </div>
             <span className="api-library-badge-count">{allPresets.length} items</span>

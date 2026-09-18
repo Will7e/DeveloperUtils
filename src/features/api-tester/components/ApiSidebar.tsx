@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo } from "react";
 import {
   Globe,
-  Sparkles,
+  Library,
   History,
   Folder,
   FileJson,
@@ -230,7 +230,7 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
       <div className="api-sidebar-content">
         {/* Presets & API Library Section */}
         <SidebarSection
-          icon={<Sparkles className="h-4 w-4 text-accent" />}
+          icon={<Library className="h-4 w-4 text-accent" />}
           title="API Library"
           isOpen={presetsOpen}
           onToggle={() => {
@@ -282,7 +282,7 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
               onClick={onOpenLibrary}
             >
               <div className="flex items-center gap-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                <Library className="h-3.5 w-3.5 text-accent" />
                 <span>Browse Library</span>
               </div>
               <span className="api-sidebar-library-count">

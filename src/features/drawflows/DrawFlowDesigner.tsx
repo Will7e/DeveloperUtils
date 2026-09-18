@@ -7,7 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import { Excalidraw, MainMenu, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { Sparkles } from "lucide-react";
+import { Library } from "lucide-react";
 
 import { useAppStore } from "@/stores/app.store";
 import { DrawFlowToolbar } from "./DrawFlowToolbar";
@@ -353,7 +353,7 @@ export function DrawFlowDesigner() {
             <MainMenu.DefaultItems.ClearCanvas />
             <MainMenu.Separator />
             <MainMenu.Item
-              icon={<Sparkles className="w-4 h-4 text-accent" />}
+              icon={<Library className="w-4 h-4 text-accent" />}
               onSelect={() => setIsLibraryModalOpen(true)}
             >
               Community Libraries
