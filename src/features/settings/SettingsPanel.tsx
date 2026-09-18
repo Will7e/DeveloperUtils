@@ -525,7 +525,7 @@ export function SettingsPanel() {
                         Application Theme
                       </span>
                     </label>
-                    <span className="settings-sublabel">Toggle between Obsidian Dark and Slate Light</span>
+                    <span className="settings-sublabel">Toggle between Obsidian Dark and Soft Neutral Light</span>
                   </div>
                   <div className="settings-control">
                     <button

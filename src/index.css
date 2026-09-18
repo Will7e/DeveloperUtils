@@ -154,50 +154,52 @@
 html.light {
   color-scheme: light;
 
-  --bg-0: #f8fafc;
-  /* Crisp Slate 50 Canvas */
+  --bg-0: #f1f3f6;
+  /* Soft Neutral Canvas (GitHub/Linear inspired, eliminates glare) */
   --bg-1: #ffffff;
-  /* Pristine White Surface */
-  --bg-2: #f1f5f9;
-  /* Slate 100 Elevated Surface */
-  --bg-3: #e2e8f0;
-  /* Slate 200 Subdued Border / Highlight */
-  --bg-4: #cbd5e1;
-  /* Slate 300 Controls */
-  --bg-hover: rgba(0, 0, 0, 0.05);
+  /* Clean Surface / Card Background */
+  --bg-2: #e8ecf1;
+  /* Elevated Surface / Input background / Active secondary */
+  --bg-3: #d9dfe7;
+  /* Subdued Border / Highlight / Hover secondary */
+  --bg-4: #cbd3dc;
+  /* Muted Divider / Controls */
+  --bg-hover: rgba(15, 23, 42, 0.04);
 
-  --border-1: rgba(0, 0, 0, 0.08);
-  --border-2: rgba(0, 0, 0, 0.14);
-  --border-accent: rgba(2, 132, 199, 0.40);
+  --border-1: rgba(15, 23, 42, 0.08);
+  /* Soft hairline border */
+  --border-2: rgba(15, 23, 42, 0.14);
+  /* Medium contrast border */
+  --border-accent: rgba(2, 132, 199, 0.35);
 
   --text-0: #0f172a;
-  /* Deep Obsidian Text */
-  --text-1: #0f172a;
-  /* Primary Text (15:1 contrast) */
-  --text-2: #334155;
-  /* Secondary Subtext (9:1 contrast) */
+  /* Deep Charcoal Slate for prominent titles */
+  --text-1: #1e293b;
+  /* Soft Charcoal Slate primary text (eliminates harsh high-contrast glare) */
+  --text-2: #475569;
+  /* Secondary Subtext (7:1 contrast) */
   --text-3: #64748b;
-  /* Tertiary / Hints (4.7:1 WCAG AA compliant on white) */
+  /* Tertiary / Hints (4.7:1 WCAG AA compliant) */
 
   --accent: #0284c7;
-  /* Rich Sky 600 */
+  /* Ocean Sky 600 */
   --accent-dim: #0369a1;
-  --accent-glow: rgba(2, 132, 199, 0.14);
+  --accent-glow: rgba(2, 132, 199, 0.12);
 
   --green: #059669;
-  --green-dim: rgba(5, 150, 105, 0.10);
+  --green-dim: rgba(5, 150, 105, 0.09);
   --red: #dc2626;
-  --red-dim: rgba(220, 38, 38, 0.09);
+  --red-dim: rgba(220, 38, 38, 0.08);
   --yellow: #d97706;
-  --yellow-dim: rgba(217, 119, 6, 0.10);
+  --yellow-dim: rgba(217, 119, 6, 0.09);
   --blue: #2563eb;
-  --blue-dim: rgba(37, 99, 235, 0.10);
+  --blue-dim: rgba(37, 99, 235, 0.09);
   --purple: #7c3aed;
-  --purple-dim: rgba(124, 58, 237, 0.10);
+  --purple-dim: rgba(124, 58, 237, 0.09);
   --pink: #db2777;
-  --pink-dim: rgba(219, 39, 119, 0.10);
+  --pink-dim: rgba(219, 39, 119, 0.09);
   --teal: #0d9488;
-  --teal-dim: rgba(13, 148, 136, 0.10);
+  --teal-dim: rgba(13, 148, 136, 0.09);
 
   /* shadcn compat */
   --background: var(--bg-0);
@@ -275,14 +277,67 @@ html.light .nav-item-indicator {
 
 /* ---- Light: Run Button ---- */
 html.light .run-btn {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10), 0 0 12px rgba(2, 132, 199, 0.15);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 12px rgba(2, 132, 199, 0.12);
 }
 
 html.light .run-btn:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 18px rgba(2, 132, 199, 0.25);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 18px rgba(2, 132, 199, 0.20);
 }
 
-/* ---- Light: Tabs Run Button overrides removed ---- */
+/* ---- Light: Layout Frames (Activity Bar, Tabs Bar, Status Bar) ---- */
+html.light .activity-bar {
+  background: #f6f8fa;
+  border-right-color: var(--border-1);
+}
+
+html.light .activity-bar-divider {
+  background: var(--border-1);
+}
+
+html.light .nav-item {
+  color: var(--text-2);
+}
+
+html.light .nav-item:hover {
+  background: rgba(15, 23, 42, 0.04);
+  color: var(--text-1);
+}
+
+html.light .nav-item-active {
+  background: #ffffff;
+  color: var(--text-1);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+html.light .tabs-bar {
+  background: #f6f8fa;
+  border-bottom-color: var(--border-1);
+}
+
+html.light .tabs-toolbar {
+  background: #f6f8fa;
+}
+
+html.light .tab {
+  color: var(--text-2);
+}
+
+html.light .tab:hover {
+  color: var(--text-1);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+html.light .tab-active {
+  background: var(--bg-1);
+  color: var(--text-1);
+  box-shadow: 0 -1px 0 var(--border-1);
+}
+
+html.light .status-bar {
+  background: #f6f8fa;
+  border-top-color: var(--border-1);
+}
 
 /* ---- Light: Resize Handle ---- */
 html.light .resize-handle-indicator {
@@ -290,16 +345,11 @@ html.light .resize-handle-indicator {
 }
 
 html.light .resize-handle:hover .resize-handle-indicator {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.30);
 }
 
 html.light .resize-handle:active .resize-handle-indicator {
-  background: #0f172a;
-}
-
-/* ---- Light: Tab Active ---- */
-html.light .tab-active {
-  background: var(--bg-1);
+  background: var(--accent);
 }
 
 /* ---- Light: Dropdowns & Modals ---- */
@@ -437,9 +487,50 @@ html.light .lib-method-desc {
   color: #475569;
 }
 
-/* ---- Light: Library View Header Gradient ---- */
+/* ---- Light: Library View Header ---- */
 html.light .lib-view-header {
-  background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  background: var(--bg-1);
+  border-bottom-color: var(--border-1);
+}
+
+/* ---- Light: Library Sidebar & Cards ---- */
+html.light .lib-sidebar {
+  background: #f6f8fa;
+  border-right-color: var(--border-1);
+}
+
+html.light .lib-sidebar-header {
+  background: #f6f8fa;
+  border-bottom-color: var(--border-1);
+}
+
+html.light .lib-method-card {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+html.light .lib-method-card:hover {
+  border-color: var(--border-2);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+html.light .lib-toc {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+html.light .lib-toc-item {
+  background: var(--bg-2);
+  border-color: var(--border-1);
+  color: var(--text-2);
+}
+
+html.light .lib-toc-item:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+  border-color: var(--accent);
 }
 
 /* ---- Light: Library View Empty Glow ---- */
@@ -481,32 +572,32 @@ html.light .dash-hero-accent {
 
 html.light .dash-tool-card {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
+  background: var(--bg-1);
+  border-color: var(--border-1);
 }
 
 html.light .dash-tool-card::before {
-  background: linear-gradient(135deg, rgba(0, 0, 0, 0.04), transparent 60%);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.02), transparent 60%);
 }
 
 html.light .dash-tool-card:hover {
-  border-color: rgba(0, 0, 0, 0.18);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  border-color: var(--border-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(15, 23, 42, 0.04);
 }
 
 html.light .dash-card-pill {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
-  color: #475569;
+  background: var(--bg-2);
+  border-color: var(--border-1);
+  color: var(--text-2);
 }
 
 /* ---- Light: Workflow Canvas ---- */
 html.light .wf-canvas-wrapper {
-  background-color: #f1f5f9;
+  background-color: var(--bg-0);
   background-image:
-    radial-gradient(circle at top right, rgba(2, 132, 199, 0.05), transparent 50%),
-    radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.05), transparent 50%),
-    linear-gradient(to bottom right, #f8fafc, #f1f5f9);
+    radial-gradient(circle at top right, rgba(2, 132, 199, 0.04), transparent 50%),
+    radial-gradient(circle at bottom left, rgba(124, 58, 237, 0.04), transparent 50%),
+    linear-gradient(to bottom right, #f1f3f6, #e8ecf1);
   box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.02);
 }
 
