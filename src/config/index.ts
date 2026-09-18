@@ -198,6 +198,6 @@ print(f"\\nCharacter count in '{word}': {char_count}")
 export const APP_CONFIG = {
   name: "InTab",
   version: "1.0.0",
-  description: "Private client-side developer workspace",
+  description: "Everyday developer tools right in your browser tab",
   repository: "https://github.com/intab",
 };

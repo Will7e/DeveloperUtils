@@ -198,49 +198,37 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
         sidebarCollapsed ? "api-sidebar-collapsed" : ""
       }`}
     >
-      <div
-        className="api-sidebar-header"
-        style={{
-          justifyContent: "space-between",
-          paddingRight: sidebarCollapsed ? "0" : "8px",
-          paddingLeft: sidebarCollapsed ? "0" : "16px",
-          display: "flex",
-          alignItems: "center",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            justifyContent: sidebarCollapsed ? "center" : "flex-start",
-            width: sidebarCollapsed ? "100%" : "auto",
-          }}
-        >
-          {sidebarCollapsed ? (
-            <button
-              className="api-sidebar-footer-icon-btn"
-              onClick={() => setSidebarCollapsed(false)}
-              title="Expand Sidebar"
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </button>
-          ) : (
-            <>
-              <Globe className="h-4 w-4 text-accent" />
-              <span>API Client</span>
-            </>
-          )}
+      <div className="api-sidebar-header">
+        <div className="api-sidebar-header-brand">
+          <div className="api-sidebar-brand-icon-wrap">
+            <Globe className="h-4 w-4 text-accent" />
+          </div>
+          <span className="api-sidebar-header-title">API Client</span>
         </div>
-        {!sidebarCollapsed && (
+
+        <SimpleTooltip
+          content={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          side={sidebarCollapsed ? "right" : "bottom"}
+        >
           <button
-            className="api-sidebar-footer-icon-btn"
-            onClick={() => setSidebarCollapsed(true)}
-            title="Collapse Sidebar"
+            className="api-sidebar-toggle-btn"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            aria-label={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           >
-            <PanelLeftClose className="h-4 w-4" />
+            <div className="api-sidebar-toggle-icon-wrap">
+              <PanelLeftClose
+                className={`api-sidebar-toggle-icon api-sidebar-toggle-icon-close ${
+                  sidebarCollapsed ? "api-sidebar-toggle-icon-hidden" : ""
+                }`}
+              />
+              <PanelLeftOpen
+                className={`api-sidebar-toggle-icon api-sidebar-toggle-icon-open ${
+                  !sidebarCollapsed ? "api-sidebar-toggle-icon-hidden" : ""
+                }`}
+              />
+            </div>
           </button>
-        )}
+        </SimpleTooltip>
       </div>
 
       <input
@@ -575,25 +563,22 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
       </div>
 
       {/* Sidebar Footer */}
-      <div
-        className="api-sidebar-footer"
-        style={{
-          justifyContent: sidebarCollapsed ? "center" : "flex-start",
-          padding: sidebarCollapsed ? "12px 0" : "12px 16px",
-        }}
-      >
-        <button
-          className={
-            sidebarCollapsed
-              ? "api-sidebar-footer-icon-btn"
-              : "api-sidebar-footer-btn"
-          }
-          title="API Tester Settings"
-          onClick={onOpenSettings}
+      <div className="api-sidebar-footer">
+        <SimpleTooltip
+          content="API Tester Settings"
+          side={sidebarCollapsed ? "right" : "top"}
         >
-          <Settings className="h-4 w-4" />
-          {!sidebarCollapsed && <span>Settings</span>}
-        </button>
+          <button
+            className="api-sidebar-footer-btn"
+            onClick={onOpenSettings}
+            aria-label="API Tester Settings"
+          >
+            <div className="api-sidebar-footer-icon-wrap">
+              <Settings className="h-4 w-4 api-sidebar-settings-icon" />
+            </div>
+            <span className="api-sidebar-footer-label">Settings</span>
+          </button>
+        </SimpleTooltip>
       </div>
     </aside>
   );
@@ -621,38 +606,50 @@ function SidebarSection({
   bodyStyle?: React.CSSProperties;
   children: React.ReactNode;
 }) {
+  const headerContent = (
+    <div
+      className="api-sidebar-section-header"
+      onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <div className="api-sidebar-section-left">
+        <div className="api-sidebar-section-icon-wrap">{icon}</div>
+        <span className="api-sidebar-section-title">{title}</span>
+      </div>
+      <div className="api-sidebar-section-right">
+        {actions && (
+          <div
+            className="api-sidebar-section-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {actions}
+          </div>
+        )}
+        <ChevronRight
+          className={`h-3 w-3 api-sidebar-section-chevron ${
+            isOpen ? "api-sidebar-section-chevron-open" : ""
+          }`}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <div className="api-sidebar-section" style={style}>
-      <div
-        className="api-sidebar-section-header"
-        onClick={onToggle}
-        title={collapsed ? title : ""}
-        style={{
-          justifyContent: collapsed ? "center" : "space-between",
-          padding: collapsed ? "12px 0" : "8px 8px",
-        }}
-      >
-        <div
-          className="api-sidebar-section-left"
-          style={{
-            justifyContent: collapsed ? "center" : "flex-start",
-            width: collapsed ? "100%" : "auto",
-          }}
-        >
-          {!collapsed && (
-            <ChevronRight
-              className={`h-3 w-3 api-sidebar-section-chevron ${
-                isOpen ? "api-sidebar-section-chevron-open" : ""
-              }`}
-            />
-          )}
-          {icon}
-          {!collapsed && (
-            <span className="api-sidebar-section-title">{title}</span>
-          )}
-        </div>
-        {actions}
-      </div>
+      {collapsed ? (
+        <SimpleTooltip content={title} side="right">
+          {headerContent}
+        </SimpleTooltip>
+      ) : (
+        headerContent
+      )}
       <div
         className={`api-sidebar-section-body ${
           isOpen && !collapsed ? "api-sidebar-section-body-open" : ""

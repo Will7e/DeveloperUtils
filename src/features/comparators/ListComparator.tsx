@@ -71,7 +71,7 @@ export function ListComparator() {
   }, [currentThemeSetting]);
 
   const handleEditorMount = useCallback(
-    (_side: "a" | "b") => (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
+    (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
       monacoRef.current = monaco;
       setupMonacoTheme(monaco);
       const initTheme = useAppStore.getState().editorSettings.theme;
@@ -243,7 +243,7 @@ export function ListComparator() {
                     language="list-comparator"
                     value={inputA}
                     onChange={(val) => updateSessionInput(activeSession.id, "a", val || "")}
-                    onMount={handleEditorMount("a")}
+                    onMount={handleEditorMount}
                     theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
                     options={monacoOptions}
                     loading={<EditorLoadingFallback message="Loading List editor..." />}
@@ -305,7 +305,7 @@ export function ListComparator() {
                     language="list-comparator"
                     value={inputB}
                     onChange={(val) => updateSessionInput(activeSession.id, "b", val || "")}
-                    onMount={handleEditorMount("b")}
+                    onMount={handleEditorMount}
                     theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
                     options={monacoOptions}
                     loading={<EditorLoadingFallback message="Loading List editor..." />}

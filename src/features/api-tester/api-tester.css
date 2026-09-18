@@ -38,6 +38,9 @@
   flex-shrink: 0;
   height: 100%;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
 }
 
 .api-sidebar-collapsed {
@@ -45,23 +48,121 @@
 }
 
 .api-sidebar-header {
-  padding: 14px 16px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.api-sidebar-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.api-sidebar-collapsed .api-sidebar-header-brand {
+  opacity: 0;
+  transform: translateX(-12px);
+  pointer-events: none;
+  width: 0;
+  min-width: 0;
+  gap: 0;
+}
+
+.api-sidebar-brand-icon-wrap {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.api-sidebar-header-title {
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-2);
+}
+
+.api-sidebar-toggle-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
   flex-shrink: 0;
+}
+
+.api-sidebar-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.api-sidebar-toggle-btn:active {
+  transform: scale(0.92);
+}
+
+.api-sidebar-toggle-icon-wrap {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.api-sidebar-toggle-icon {
+  position: absolute;
+  inset: 0;
+  width: 16px;
+  height: 16px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg) scale(1);
+  opacity: 1;
+}
+
+.api-sidebar-toggle-icon-close.api-sidebar-toggle-icon-hidden {
+  transform: rotate(-90deg) scale(0.5);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.api-sidebar-toggle-icon-open.api-sidebar-toggle-icon-hidden {
+  transform: rotate(90deg) scale(0.5);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .api-sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  overflow-x: hidden;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -69,35 +170,74 @@
 
 /* ── Sidebar Footer ───────────────────────────────────────── */
 .api-sidebar-footer {
-  padding: 12px 16px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
   border-top: 1px solid var(--border-1);
   display: flex;
   align-items: center;
-  gap: 8px;
   background: var(--bg-1);
   flex-shrink: 0;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .api-sidebar-footer-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2);
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   border: none;
   cursor: pointer;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  transition: all 0.2s;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--text-2);
+  transition: background 0.15s ease, color 0.15s ease;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .api-sidebar-footer-btn:hover {
   background: var(--bg-hover);
   color: var(--text-1);
+}
+
+.api-sidebar-footer-icon-wrap {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.api-sidebar-settings-icon {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.api-sidebar-footer-btn:hover .api-sidebar-settings-icon {
+  transform: rotate(45deg);
+}
+
+.api-sidebar-footer-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.api-sidebar-collapsed .api-sidebar-footer-label {
+  opacity: 0;
+  transform: translateX(-10px);
+  pointer-events: none;
+  width: 0;
 }
 
 .api-sidebar-footer-icon-btn {
@@ -123,17 +263,22 @@
 .api-sidebar-section {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .api-sidebar-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 8px;
+  height: 36px;
+  padding: 0;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background 0.15s;
+  transition: background 0.15s ease;
   user-select: none;
+  overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .api-sidebar-section-header:hover {
@@ -143,7 +288,26 @@
 .api-sidebar-section-left {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.api-sidebar-section-icon-wrap {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.api-sidebar-section-header:hover .api-sidebar-section-icon-wrap {
+  transform: scale(1.08);
 }
 
 .api-sidebar-section-title {
@@ -152,6 +316,40 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-3);
+  transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 1;
+  transform: translateX(0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.api-sidebar-collapsed .api-sidebar-section-title {
+  opacity: 0;
+  transform: translateX(-10px);
+  pointer-events: none;
+  width: 0;
+}
+
+.api-sidebar-section-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.api-sidebar-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.api-sidebar-collapsed .api-sidebar-section-right {
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  display: none;
 }
 
 .api-sidebar-section-chevron {
@@ -1754,6 +1952,15 @@ html.light .api-sidebar-footer-icon-btn {
 html.light .api-sidebar-footer-icon-btn:hover {
   background: var(--bg-hover);
   color: var(--accent);
+}
+
+html.light .api-sidebar-toggle-btn {
+  color: var(--text-3);
+}
+
+html.light .api-sidebar-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
 }
 
 /* Sidebar Section Headers */

@@ -26,7 +26,6 @@ import { useAppStore } from "@/stores/app.store";
 import {
   compareEnvs,
   maskValue,
-  type EnvDiffItem,
   type EnvDiffType,
 } from "./comparatorsUtils";
 
@@ -75,7 +74,7 @@ export function EnvComparator() {
   }, [currentThemeSetting]);
 
   const handleEditorMount = useCallback(
-    (_side: "a" | "b") => (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
+    (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
       monacoRef.current = monaco;
       setupMonacoTheme(monaco);
       const initTheme = useAppStore.getState().editorSettings.theme;
@@ -242,7 +241,7 @@ export function EnvComparator() {
                     language="dotenv"
                     value={inputA}
                     onChange={(val) => updateSessionInput(activeSession.id, "a", val || "")}
-                    onMount={handleEditorMount("a")}
+                    onMount={handleEditorMount}
                     theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
                     options={monacoOptions}
                     loading={<EditorLoadingFallback message="Loading .env editor..." />}
@@ -286,7 +285,7 @@ export function EnvComparator() {
                     language="dotenv"
                     value={inputB}
                     onChange={(val) => updateSessionInput(activeSession.id, "b", val || "")}
-                    onMount={handleEditorMount("b")}
+                    onMount={handleEditorMount}
                     theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
                     options={monacoOptions}
                     loading={<EditorLoadingFallback message="Loading .env editor..." />}

@@ -25,7 +25,6 @@ import { useAppStore } from "@/stores/app.store";
 import {
   parseJsonLenient,
   deepCompareJson,
-  type JsonDiffItem,
   type JsonDiffType,
 } from "./comparatorsUtils";
 
