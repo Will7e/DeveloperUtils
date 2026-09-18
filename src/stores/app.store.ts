@@ -502,12 +502,24 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ outputPanelOpen: !state.outputPanelOpen }));
       },
 
+      setOutputPanelOpen: (open) => {
+        set({ outputPanelOpen: open });
+      },
+
       toggleSettings: () => {
         set((state) => ({ settingsOpen: !state.settingsOpen }));
       },
 
       toggleCommandPalette: () => {
         set((state) => ({ commandPaletteOpen: !state.commandPaletteOpen }));
+      },
+
+      openCommandPalette: () => {
+        set({ commandPaletteOpen: true });
+      },
+
+      closeCommandPalette: () => {
+        set({ commandPaletteOpen: false });
       },
 
       updateEditorSettings: (settings) => {

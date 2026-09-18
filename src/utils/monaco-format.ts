@@ -87,6 +87,33 @@ export function registerMonacoFormatShortcut(
     useAppStore.getState().toggleOutputPanel();
   });
 
+  // Add Cmd+Option navigation shortcuts across Monaco instances
+  const navShortcuts = [
+    { key: monaco.KeyCode.Digit1, path: "/" },
+    { key: monaco.KeyCode.Digit2, path: "/compiler" },
+    { key: monaco.KeyCode.Digit3, path: "/api-tester" },
+    { key: monaco.KeyCode.Digit4, path: "/formatters" },
+    { key: monaco.KeyCode.Digit5, path: "/comparators" },
+    { key: monaco.KeyCode.Digit6, path: "/diff" },
+    { key: monaco.KeyCode.Digit7, path: "/library" },
+    { key: monaco.KeyCode.Digit8, path: "/drawflows" },
+  ];
+  navShortcuts.forEach(({ key, path }) => {
+    editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | key, () => {
+      window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: path }));
+    });
+  });
+
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyT, () => {
+    window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/api-tester" }));
+  });
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyD, () => {
+    window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/diff" }));
+  });
+  editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyW, () => {
+    window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/drawflows" }));
+  });
+
   // Add to editor action menu / context menu
   const actionDisposable = editorInstance.addAction({
     id: "devutils.formatDocument",

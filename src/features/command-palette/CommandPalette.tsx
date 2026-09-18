@@ -44,6 +44,7 @@ interface PaletteAction {
 export function CommandPalette() {
   const commandPaletteOpen = useAppStore((s) => s.commandPaletteOpen);
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
+  const closeCommandPalette = useAppStore((s) => s.closeCommandPalette);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const createFile = useAppStore((s) => s.createFile);
@@ -59,6 +60,7 @@ export function CommandPalette() {
   const addOutputEntry = useAppStore((s) => s.addOutputEntry);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
   const createFormatterFile = useAppStore((s) => s.createFormatterFile);
   const createComparatorSession = useAppStore((s) => s.createComparatorSession);
   const createDiffSession = useAppStore((s) => s.createDiffSession);
@@ -101,7 +103,16 @@ export function CommandPalette() {
         shortcut: "⌘J",
         category: "View",
         icon: <Terminal style={{ width: 14, height: 14 }} />,
-        action: () => toggleOutputPanel(),
+        action: () => {
+          const pathname = window.location.pathname;
+          if (pathname !== "/" && !pathname.startsWith("/compiler")) {
+            useAppStore.getState().setOutputPanelOpen(true);
+            navigate("/compiler");
+            addToast({ message: "Console opened in Compiler", type: "info", duration: 1500 });
+          } else {
+            toggleOutputPanel();
+          }
+        },
       },
       {
         id: "open-settings",
@@ -229,7 +240,10 @@ export function CommandPalette() {
         shortcut: "⌘B",
         category: "View",
         icon: <Settings style={{ width: 14, height: 14 }} />,
-        action: () => toggleSidebar(),
+        action: () => {
+          toggleSidebarCollapse();
+          toggleSidebar();
+        },
       },
       {
         id: "new-json-formatter",
@@ -391,7 +405,8 @@ export function CommandPalette() {
     return actions.filter(
       (a) =>
         a.label.toLowerCase().includes(q) ||
-        a.category.toLowerCase().includes(q)
+        a.category.toLowerCase().includes(q) ||
+        (a.shortcut && a.shortcut.toLowerCase().includes(q))
     );
   }, [actions, query]);
 
@@ -441,12 +456,22 @@ export function CommandPalette() {
     }
   }, [validSelectedIndex]);
 
+  const executeAction = useCallback(
+    (actionItem: PaletteAction) => {
+      closeCommandPalette();
+      setTimeout(() => {
+        actionItem.action();
+      }, 10);
+    },
+    [closeCommandPalette]
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent | KeyboardEvent) => {
       if (flatOrdered.length === 0) {
         if (e.key === "Escape") {
           e.preventDefault();
-          toggleCommandPalette();
+          closeCommandPalette();
         }
         return;
       }
@@ -461,18 +486,17 @@ export function CommandPalette() {
         e.preventDefault();
         const actionItem = flatOrdered[validSelectedIndex];
         if (actionItem) {
-          toggleCommandPalette();
-          actionItem.action();
+          executeAction(actionItem);
         }
       } else if (e.key === "Escape") {
         e.preventDefault();
-        toggleCommandPalette();
+        closeCommandPalette();
       }
     },
-    [flatOrdered, validSelectedIndex, toggleCommandPalette]
+    [flatOrdered, validSelectedIndex, executeAction, closeCommandPalette]
   );
 
-  // Global window listener so keyboard actions work even if input loses focus
+  // Global window listener in capture phase so keys work everywhere and never double-trigger
   useEffect(() => {
     if (!commandPaletteOpen) return;
 
@@ -484,12 +508,14 @@ export function CommandPalette() {
         e.key === "Escape" ||
         e.key === "Tab"
       ) {
+        e.preventDefault();
+        e.stopPropagation();
         handleKeyDown(e);
       }
     };
 
-    window.addEventListener("keydown", onGlobalKeyDown);
-    return () => window.removeEventListener("keydown", onGlobalKeyDown);
+    window.addEventListener("keydown", onGlobalKeyDown, true);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown, true);
   }, [commandPaletteOpen, handleKeyDown]);
 
   if (!commandPaletteOpen) return null;
@@ -497,7 +523,7 @@ export function CommandPalette() {
   let globalCounter = 0;
 
   return (
-    <div className="palette-overlay" onClick={toggleCommandPalette}>
+    <div className="palette-overlay" onClick={closeCommandPalette}>
       <div className="palette-container" onClick={(e) => e.stopPropagation()}>
         <div className="palette-input-row">
           <input
@@ -510,10 +536,9 @@ export function CommandPalette() {
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            onKeyDown={handleKeyDown}
           />
           <SimpleTooltip content="Close Palette (Esc)" side="left">
-            <button className="palette-close" onClick={toggleCommandPalette}>
+            <button className="palette-close" onClick={closeCommandPalette}>
               <X style={{ width: 14, height: 14 }} />
             </button>
           </SimpleTooltip>
@@ -533,10 +558,7 @@ export function CommandPalette() {
                       key={item.id}
                       type="button"
                       className={`palette-item ${idx === validSelectedIndex ? "palette-item-active" : ""}`}
-                      onClick={() => {
-                        toggleCommandPalette();
-                        item.action();
-                      }}
+                      onClick={() => executeAction(item)}
                       onMouseEnter={() => setSelectedIndex(idx)}
                     >
                       <span className="palette-item-icon">{item.icon}</span>

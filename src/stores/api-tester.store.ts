@@ -4,6 +4,7 @@
 
 import { create } from "zustand";
 import JSZip from "jszip";
+import { useAppStore } from "./app.store";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS";
 export type BodyType = "none" | "json" | "form-data" | "raw";
@@ -383,6 +384,20 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     debouncedSaveTabs(tabs, activeTabId);
   };
 
+  // Helper: simplify mutating properties on the active tab
+  const updateActiveTab = (
+    updater: Partial<TabState> | ((tab: TabState) => Partial<TabState>)
+  ) => {
+    set((state) => ({
+      tabs: state.tabs.map((t) =>
+        t.id === state.activeTabId
+          ? { ...t, ...(typeof updater === "function" ? updater(t) : updater) }
+          : t
+      ),
+    }));
+    persistTabs();
+  };
+
   return {
     isInitialized: false,
     tabs: [initialTab],
@@ -575,84 +590,29 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     },
 
     setMethod: (method) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, method } : t)),
-      }));
-      persistTabs();
+      updateActiveTab({ method });
     },
     
     setUrl: (url) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, url } : t)),
-      }));
+      updateActiveTab({ url });
       get().syncParamsFromUrl(url);
-      persistTabs();
     },
 
-    setBodyType: (bodyType) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyType } : t)),
-      }));
-      persistTabs();
-    },
-    setBodyValue: (bodyValue) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, bodyValue } : t)),
-      }));
-      persistTabs();
-    },
-    setRawType: (rawType) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, rawType } : t)),
-      }));
-      persistTabs();
-    },
-    setAuthType: (authType) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authType } : t)),
-      }));
-      persistTabs();
-    },
-    setAuthConfig: (config) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, authConfig: { ...t.authConfig, ...config } } : t)),
-      }));
-      persistTabs();
-    },
+    setBodyType: (bodyType) => updateActiveTab({ bodyType }),
+    setBodyValue: (bodyValue) => updateActiveTab({ bodyValue }),
+    setRawType: (rawType) => updateActiveTab({ rawType }),
+    setAuthType: (authType) => updateActiveTab({ authType }),
+    setAuthConfig: (config) =>
+      updateActiveTab((t) => ({ authConfig: { ...t.authConfig, ...config } })),
 
     // ── Protocol & Proxy ───────────────────────────────────────
-    setProtocol: (protocol) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, protocol } : t)),
-      }));
-      persistTabs();
-    },
-    setUseProxy: (useProxy) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, useProxy } : t)),
-      }));
-      persistTabs();
-    },
-    toggleProxy: () => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, useProxy: !t.useProxy } : t)),
-      }));
-      persistTabs();
-    },
+    setProtocol: (protocol) => updateActiveTab({ protocol }),
+    setUseProxy: (useProxy) => updateActiveTab({ useProxy }),
+    toggleProxy: () => updateActiveTab((t) => ({ useProxy: !t.useProxy })),
 
     // ── GraphQL ────────────────────────────────────────────────
-    setGraphqlQuery: (query) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, graphqlQuery: query } : t)),
-      }));
-      persistTabs();
-    },
-    setGraphqlVariables: (vars) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, graphqlVariables: vars } : t)),
-      }));
-      persistTabs();
-    },
+    setGraphqlQuery: (query) => updateActiveTab({ graphqlQuery: query }),
+    setGraphqlVariables: (vars) => updateActiveTab({ graphqlVariables: vars }),
 
     // ── WebSocket ──────────────────────────────────────────────
     connectWs: () => {
@@ -759,11 +719,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       }));
     },
 
-    clearWsMessages: () => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => t.id === state.activeTabId ? { ...t, wsMessages: [] } : t),
-      }));
-    },
+    clearWsMessages: () => updateActiveTab({ wsMessages: [] }),
 
     stopActiveRequest: (tabId) => {
       const controller = activeControllers.get(tabId);
@@ -774,98 +730,68 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       set((state) => ({
         tabs: state.tabs.map((t) => t.id === tabId ? { ...t, loading: false, sseActive: false } : t),
       }));
+      useAppStore.getState().addToast({
+        message: "Request cancelled",
+        type: "info",
+        duration: 2000,
+      });
     },
 
     // Params actions
-    addParam: () => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, params: [...t.params, createEmptyField()] } : t)),
-      }));
-      persistTabs();
-    },
+    addParam: () =>
+      updateActiveTab((t) => ({ params: [...t.params, createEmptyField()] })),
     updateParam: (id, updates) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) =>
-          t.id === state.activeTabId
-            ? { ...t, params: t.params.map((p) => (p.id === id ? { ...p, ...updates } : p)) }
-            : t
-        ),
+      updateActiveTab((t) => ({
+        params: t.params.map((p) => (p.id === id ? { ...p, ...updates } : p)),
       }));
       get().syncUrlFromParams();
-      persistTabs();
     },
     removeParam: (id) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => {
-          if (t.id === state.activeTabId) {
-            const filtered = t.params.filter((p) => p.id !== id);
-            return { ...t, params: filtered.length === 0 ? [createEmptyField()] : filtered };
-          }
-          return t;
-        }),
-      }));
+      updateActiveTab((t) => {
+        const filtered = t.params.filter((p) => p.id !== id);
+        return {
+          params: filtered.length === 0 ? [createEmptyField()] : filtered,
+        };
+      });
       get().syncUrlFromParams();
-      persistTabs();
     },
 
     // Headers actions
-    addHeader: () => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, headers: [...t.headers, createEmptyField()] } : t)),
-      }));
-      persistTabs();
-    },
+    addHeader: () =>
+      updateActiveTab((t) => ({ headers: [...t.headers, createEmptyField()] })),
     updateHeader: (id, updates) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) =>
-          t.id === state.activeTabId
-            ? { ...t, headers: t.headers.map((h) => (h.id === id ? { ...h, ...updates } : h)) }
-            : t
-        ),
+      updateActiveTab((t) => ({
+        headers: t.headers.map((h) => (h.id === id ? { ...h, ...updates } : h)),
       }));
-      persistTabs();
     },
     removeHeader: (id) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => {
-          if (t.id === state.activeTabId) {
-            const filtered = t.headers.filter((h) => h.id !== id);
-            return { ...t, headers: filtered.length === 0 ? [createEmptyField()] : filtered };
-          }
-          return t;
-        }),
-      }));
-      persistTabs();
+      updateActiveTab((t) => {
+        const filtered = t.headers.filter((h) => h.id !== id);
+        return {
+          headers: filtered.length === 0 ? [createEmptyField()] : filtered,
+        };
+      });
     },
 
     // Form Data actions
-    addFormParam: () => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => (t.id === state.activeTabId ? { ...t, formParams: [...t.formParams, createEmptyField()] } : t)),
-      }));
-      persistTabs();
-    },
+    addFormParam: () =>
+      updateActiveTab((t) => ({
+        formParams: [...t.formParams, createEmptyField()],
+      })),
     updateFormParam: (id, updates) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) =>
-          t.id === state.activeTabId
-            ? { ...t, formParams: t.formParams.map((f) => (f.id === id ? { ...f, ...updates } : f)) }
-            : t
+      updateActiveTab((t) => ({
+        formParams: t.formParams.map((f) =>
+          f.id === id ? { ...f, ...updates } : f
         ),
       }));
-      persistTabs();
     },
     removeFormParam: (id) => {
-      set((state) => ({
-        tabs: state.tabs.map((t) => {
-          if (t.id === state.activeTabId) {
-            const filtered = t.formParams.filter((f) => f.id !== id);
-            return { ...t, formParams: filtered.length === 0 ? [createEmptyField()] : filtered };
-          }
-          return t;
-        }),
-      }));
-      persistTabs();
+      updateActiveTab((t) => {
+        const filtered = t.formParams.filter((f) => f.id !== id);
+        return {
+          formParams: filtered.length === 0 ? [createEmptyField()] : filtered,
+        };
+      });
     },
 
     // Sync logic: URL -> Params with high-efficiency stable diff checking

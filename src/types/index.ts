@@ -170,8 +170,11 @@ export interface AppState {
   toggleSidebar: () => void;
   toggleSidebarCollapse: () => void;
   toggleOutputPanel: () => void;
+  setOutputPanelOpen: (open: boolean) => void;
   toggleSettings: () => void;
   toggleCommandPalette: () => void;
+  openCommandPalette: () => void;
+  closeCommandPalette: () => void;
   updateEditorSettings: (settings: Partial<EditorSettings>) => void;
 
   addToast: (toast: Omit<Toast, "id">) => void;

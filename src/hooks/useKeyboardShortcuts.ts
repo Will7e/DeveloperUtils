@@ -30,6 +30,8 @@ export function useKeyboardShortcuts() {
   const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
   const cancelExecution = useAppStore((s) => s.cancelExecution);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
+  const closeCommandPalette = useAppStore((s) => s.closeCommandPalette);
 
   const activeFile = files.find((f) => f.id === activeFileId);
 
@@ -185,6 +187,7 @@ export function useKeyboardShortcuts() {
       // Ctrl/Cmd + B = Toggle sidebar
       if (mod && (keyLower === "b" || e.code === "KeyB")) {
         e.preventDefault();
+        toggleSidebarCollapse();
         toggleSidebar();
         return;
       }
@@ -192,7 +195,14 @@ export function useKeyboardShortcuts() {
       // Ctrl/Cmd + J = Toggle output panel
       if (mod && (keyLower === "j" || e.code === "KeyJ")) {
         e.preventDefault();
-        toggleOutputPanel();
+        const pathname = window.location.pathname;
+        if (pathname !== "/" && !pathname.startsWith("/compiler")) {
+          useAppStore.getState().setOutputPanelOpen(true);
+          navigate("/compiler");
+          addToast({ message: "Console opened in Compiler", type: "info", duration: 1500 });
+        } else {
+          toggleOutputPanel();
+        }
         return;
       }
 
@@ -203,66 +213,142 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // App Navigation (Cmd/Ctrl + Option + 1-8 / t, d, w)
-      if (mod && e.altKey) {
-        switch (keyLower) {
-          case "1":
+      // App Navigation (Cmd/Ctrl + Option + 1-8 / t, d, w, or Option + 1-8 outside inputs)
+      const isTextInput = () => {
+        const active = document.activeElement;
+        if (!active) return false;
+        const tag = active.tagName.toLowerCase();
+        return tag === "input" || tag === "textarea" || (active as HTMLElement).isContentEditable;
+      };
+
+      const isAltNav = (mod && e.altKey) || (e.altKey && !mod && !isTextInput());
+
+      if (isAltNav) {
+        const closePaletteIfOpen = () => {
+          closeCommandPalette();
+        };
+
+        // 1. Dashboard
+        if (e.code === "Digit1" || e.code === "Numpad1" || keyLower === "1" || e.key === "¡") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/");
+          addToast({ message: "Navigated to Dashboard", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 2. Compiler
+        if (e.code === "Digit2" || e.code === "Numpad2" || keyLower === "2" || e.key === "™" || e.key === "@" || e.key === "²") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/compiler");
+          addToast({ message: "Navigated to Compiler", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 3. API Tester
+        if (e.code === "Digit3" || e.code === "Numpad3" || keyLower === "3" || e.key === "£" || e.key === "³") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/api-tester");
+          addToast({ message: "Navigated to API Tester", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 4. Formatters
+        if (e.code === "Digit4" || e.code === "Numpad4" || keyLower === "4" || e.key === "¢" || e.key === "$") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/formatters");
+          addToast({ message: "Navigated to Formatters", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 5. Comparators
+        if (e.code === "Digit5" || e.code === "Numpad5" || keyLower === "5" || e.key === "∞" || e.key === "€") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/comparators");
+          addToast({ message: "Navigated to Comparators", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 6. Diff Checker
+        if (e.code === "Digit6" || e.code === "Numpad6" || keyLower === "6" || e.key === "§") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/diff");
+          addToast({ message: "Navigated to Diff Checker", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 7. Library
+        if (e.code === "Digit7" || e.code === "Numpad7" || keyLower === "7" || e.key === "¶" || e.key === "|") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/library");
+          addToast({ message: "Navigated to Code Library", type: "info", duration: 1500 });
+          return;
+        }
+
+        // 8. DrawFlows
+        if (e.code === "Digit8" || e.code === "Numpad8" || keyLower === "8" || e.key === "•" || e.key === "[") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/drawflows");
+          addToast({ message: "Navigated to DrawFlows", type: "info", duration: 1500 });
+          return;
+        }
+
+        // Quick creators: t, d, w (only with mod + altKey to prevent conflicts)
+        if (mod && e.altKey) {
+          if (e.code === "KeyT" || keyLower === "t" || e.key === "†") {
             e.preventDefault();
-            navigate("/");
-            return;
-          case "2":
-            e.preventDefault();
-            navigate("/compiler");
-            return;
-          case "3":
-            e.preventDefault();
-            navigate("/api-tester");
-            return;
-          case "4":
-            e.preventDefault();
-            navigate("/formatters");
-            return;
-          case "5":
-            e.preventDefault();
-            navigate("/comparators");
-            return;
-          case "6":
-            e.preventDefault();
-            navigate("/diff");
-            return;
-          case "7":
-            e.preventDefault();
-            navigate("/library");
-            return;
-          case "8":
-            e.preventDefault();
-            navigate("/drawflows");
-            return;
-          
-          // Quick creators
-          case "t":
-            e.preventDefault();
+            closePaletteIfOpen();
             useApiTesterStore.getState().addTab();
             navigate("/api-tester");
+            addToast({ message: "New API Request tab created", type: "success", duration: 1500 });
             return;
-          case "d":
+          }
+          if (e.code === "KeyD" || keyLower === "d" || e.key === "∂") {
             e.preventDefault();
+            closePaletteIfOpen();
             useAppStore.getState().createDiffSession();
             navigate("/diff");
+            addToast({ message: "New Diff Session created", type: "success", duration: 1500 });
             return;
-          case "w":
+          }
+          if (e.code === "KeyW" || keyLower === "w" || e.key === "∑") {
             e.preventDefault();
+            closePaletteIfOpen();
             useAppStore.getState().createWorkflow();
             navigate("/drawflows");
+            addToast({ message: "New DrawFlow Diagram created", type: "success", duration: 1500 });
             return;
+          }
         }
       }
     },
-    [activeFile, isRunning, outputPanelOpen, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, navigate]
+    [activeFile, isRunning, outputPanelOpen, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, closeCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, toggleSidebarCollapse, navigate]
   );
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
+
+  // Support global navigation events from Monaco editor or components
+  useEffect(() => {
+    const handleNavEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<string>;
+      if (customEvent.detail) {
+        if (useAppStore.getState().commandPaletteOpen) {
+          useAppStore.getState().toggleCommandPalette();
+        }
+        navigate(customEvent.detail);
+      }
+    };
+    window.addEventListener("devutils:navigate", handleNavEvent);
+    return () => window.removeEventListener("devutils:navigate", handleNavEvent);
+  }, [navigate]);
 }
