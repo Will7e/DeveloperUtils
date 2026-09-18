@@ -16,15 +16,54 @@ const HOP_BY_HOP_HEADERS = new Set([
   "host",
 ]);
 
+/**
+ * Checks if the incoming request Origin is an authorized InTab origin.
+ * Prevents third-party malicious sites from abusing InTab as an open anonymous proxy.
+ */
+function isAllowedOrigin(originStr: string | null): boolean {
+  if (!originStr) return true; // Direct same-origin request (no Origin header)
+  try {
+    const o = new URL(originStr);
+    const host = o.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.endsWith(".localhost") ||
+      host === "intab.dev" ||
+      host.endsWith(".intab.dev") ||
+      host === "vercel.app" ||
+      host.endsWith(".vercel.app")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default async function handler(req: Request): Promise<Response> {
-  const origin = req.headers.get("origin") || "*";
+  const origin = req.headers.get("origin");
+
+  // Enforce origin validation to prevent open relay abuse
+  if (origin && !isAllowedOrigin(origin)) {
+    return new Response(
+      JSON.stringify({
+        error: `Forbidden cross-origin proxy request: Origin '${origin}' is not authorized.`,
+        code: "CROSS_ORIGIN_FORBIDDEN",
+      }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  const allowedOriginHeader = origin || "*";
 
   // CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
-        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Origin": allowedOriginHeader,
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
         "Access-Control-Allow-Headers": "*",
         "Access-Control-Expose-Headers": "*",
@@ -42,7 +81,7 @@ export default async function handler(req: Request): Promise<Response> {
         status: 400,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Origin": allowedOriginHeader,
           "Access-Control-Expose-Headers": "*",
         },
       });
@@ -64,14 +103,14 @@ export default async function handler(req: Request): Promise<Response> {
           status: 403,
           headers: {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Origin": allowedOriginHeader,
             "Access-Control-Expose-Headers": "*",
           },
         }
       );
     }
 
-    const validUrl = new URL(ssrfCheck.normalizedUrl);
+    let validUrl = new URL(ssrfCheck.normalizedUrl);
 
     // Assemble headers
     const forwardHeaders = new Headers();
@@ -100,16 +139,62 @@ export default async function handler(req: Request): Promise<Response> {
 
     forwardHeaders.set("host", validUrl.host);
 
-    const method = req.method.toUpperCase();
+    let method = req.method.toUpperCase();
     const canHaveBody = method !== "GET" && method !== "HEAD";
     const body = canHaveBody ? req.body : undefined;
 
-    const upstreamRes = await fetch(validUrl.toString(), {
-      method,
-      headers: forwardHeaders,
-      body,
-      redirect: "follow",
-    });
+    // Safe Redirect Loop: Prevent SSRF bypass via 301/302/307/308 redirects to cloud metadata
+    const MAX_REDIRECTS = 3;
+    let upstreamRes: Response | null = null;
+
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      upstreamRes = await fetch(validUrl.toString(), {
+        method: hop === 0 ? method : (upstreamRes?.status === 303 ? "GET" : method),
+        headers: forwardHeaders,
+        body: hop === 0 ? body : undefined,
+        redirect: "manual",
+      });
+
+      if ([301, 302, 303, 307, 308].includes(upstreamRes.status)) {
+        const location = upstreamRes.headers.get("location");
+        if (!location) break;
+
+        const resolvedRedirectUrl = new URL(location, validUrl).toString();
+        const redirectCheck = validateUrlForSSRF(resolvedRedirectUrl, {
+          allowLocalhost: false,
+          allowPrivateSubnets: false,
+        });
+
+        if (!redirectCheck.allowed || !redirectCheck.normalizedUrl) {
+          return new Response(
+            JSON.stringify({
+              error: `SSRF Blocked: Redirect target prohibited: ${redirectCheck.reason || "Forbidden redirect target"}`,
+              code: "SSRF_REDIRECT_BLOCKED",
+            }),
+            {
+              status: 403,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": allowedOriginHeader,
+              },
+            }
+          );
+        }
+
+        validUrl = new URL(redirectCheck.normalizedUrl);
+        forwardHeaders.set("host", validUrl.host);
+        if (upstreamRes.status === 303) {
+          method = "GET";
+        }
+        continue;
+      }
+
+      break;
+    }
+
+    if (!upstreamRes) {
+      throw new Error("No response received from target");
+    }
 
     const resHeaders = new Headers();
     upstreamRes.headers.forEach((val, key) => {
@@ -125,7 +210,7 @@ export default async function handler(req: Request): Promise<Response> {
       }
     });
 
-    resHeaders.set("Access-Control-Allow-Origin", origin);
+    resHeaders.set("Access-Control-Allow-Origin", allowedOriginHeader);
     resHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS");
     resHeaders.set("Access-Control-Allow-Headers", "*");
     resHeaders.set("Access-Control-Expose-Headers", "*");
@@ -143,7 +228,7 @@ export default async function handler(req: Request): Promise<Response> {
         status: 502,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": origin,
+          "Access-Control-Allow-Origin": allowedOriginHeader,
           "Access-Control-Expose-Headers": "*",
         },
       }

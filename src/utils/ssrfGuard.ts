@@ -245,6 +245,19 @@ export function validateUrlForSSRF(
     }
   }
 
+  // 5b. Detect embedded IPs in DNS rebinding / wildcard domains (e.g., 127.0.0.1.nip.io, 169.254.169.254.sslip.io)
+  const embeddedIpMatch = rawHostname.match(/(?:^|\.)(\d{1,3}(?:[.-]\d{1,3}){3})(?:\.|$)/);
+  if (embeddedIpMatch && embeddedIpMatch[1]) {
+    const dottedIp = embeddedIpMatch[1].replace(/-/g, ".");
+    const embeddedOctets = parseNumericIpv4(dottedIp);
+    if (embeddedOctets && isRestrictedIpv4(embeddedOctets, options)) {
+      return {
+        allowed: false,
+        reason: `Target hostname contains restricted IP address '${dottedIp}' via DNS wildcard/rebinding service`,
+      };
+    }
+  }
+
   // 6. Check numeric / decimal / octal IPv4
   const ipv4Octets = parseNumericIpv4(rawHostname);
   if (ipv4Octets) {

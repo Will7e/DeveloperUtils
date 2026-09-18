@@ -388,28 +388,50 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   // ── History ─────────────────────────────────────────────
-  // Security: Strip auth from history entirely. History records
-  // *what* was called, not *with which credentials*.
+  // Security: Strip auth & redact sensitive parameters/headers from history.
+  // History records *what* was called, not *with which credentials*.
 
   async getHistory(): Promise<HistoryItem[]> {
     return this.fallback.getHistory();
   }
 
   async saveHistory(history: HistoryItem[]): Promise<void> {
+    const sensitiveParamRegex = /^(.*_)?(key|token|secret|password|auth|sig|signature|access|cred)(_.*)?$/i;
+    const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|cookie|set-cookie|cf-access-client-secret|x-amz-security-token)$/i;
+
     // Sanitize: remove auth credentials from history entries
-    const sanitized = history.map((item) => ({
-      ...item,
-      authConfig: undefined,
-      authType: item.authType ? item.authType : undefined,
-      // Redact Authorization headers from history
-      headers: item.headers?.map((h) => {
-        const lowerKey = h.key.toLowerCase();
-        if (lowerKey === "authorization" || lowerKey === "x-api-key" || lowerKey === "proxy-authorization") {
-          return { ...h, value: "••••••" };
+    const sanitized = history.map((item) => {
+      let safeUrl = item.url;
+      try {
+        if (safeUrl && (safeUrl.startsWith("http://") || safeUrl.startsWith("https://"))) {
+          const u = new URL(safeUrl);
+          let modified = false;
+          for (const [key] of Array.from(u.searchParams.entries())) {
+            if (sensitiveParamRegex.test(key)) {
+              u.searchParams.set(key, "••••••");
+              modified = true;
+            }
+          }
+          if (modified) safeUrl = u.toString();
         }
-        return h;
-      }),
-    }));
+      } catch {
+        // Leave URL as is if parsing fails
+      }
+
+      return {
+        ...item,
+        url: safeUrl,
+        authConfig: undefined,
+        authType: item.authType ? item.authType : undefined,
+        // Redact Authorization and token headers from history
+        headers: item.headers?.map((h) => {
+          if (sensitiveHeaderRegex.test(h.key.trim())) {
+            return { ...h, value: "••••••" };
+          }
+          return h;
+        }),
+      };
+    });
     return this.fallback.saveHistory(sanitized);
   }
 

@@ -42,17 +42,19 @@ export function HtmlPreview() {
 
   const handleOpenExternal = () => {
     if (!activeFile) return;
-    // Inject protective CSP meta tag into opened preview blob to prevent parent window/storage access
-    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https:; script-src 'unsafe-inline' 'unsafe-eval' https: blob:; style-src 'unsafe-inline' https:; img-src * data: blob:; font-src * data:; connect-src *;">`;
+    // Inject strict sandbox CSP to ensure isolation from parent resources
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https: data:; style-src 'unsafe-inline' https: data:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src *;">`;
     let content = activeFile.content;
     if (content.includes("<head>")) {
       content = content.replace("<head>", `<head>\n  ${cspMeta}`);
     } else {
       content = `${cspMeta}\n${content}`;
     }
-    const blob = new Blob([content], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank", "noopener,noreferrer");
+
+    // Using a data: URL guarantees an opaque 'null' origin in modern browsers,
+    // preventing any scripts in the preview from accessing InTab's localStorage, cookies, or same-origin APIs.
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(content)}`;
+    window.open(dataUrl, "_blank", "noopener,noreferrer");
   };
 
   if (!isHtml) return null;

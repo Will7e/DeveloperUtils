@@ -155,16 +155,59 @@ export function apiProxyPlugin(): Plugin {
           // Set host header to target host
           forwardHeaders["host"] = validUrl.host;
 
-          // Perform upstream fetch via Node.js
-          const method = (req.method || "GET").toUpperCase();
-          const canHaveBody = method !== "GET" && method !== "HEAD";
+          // Perform upstream fetch via Node.js with safe redirect loop
+          let currentMethod = (req.method || "GET").toUpperCase();
+          const canHaveBody = currentMethod !== "GET" && currentMethod !== "HEAD";
+          const initialBody = canHaveBody && bodyBuffer && bodyBuffer.length > 0 ? bodyBuffer : undefined;
 
-          const upstreamRes = await fetch(validUrl.toString(), {
-            method,
-            headers: forwardHeaders,
-            body: canHaveBody && bodyBuffer && bodyBuffer.length > 0 ? bodyBuffer : undefined,
-            redirect: "follow",
-          });
+          const MAX_REDIRECTS = 3;
+          let upstreamRes: Response | null = null;
+          let activeTargetUrl = validUrl;
+
+          for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            upstreamRes = await fetch(activeTargetUrl.toString(), {
+              method: hop === 0 ? currentMethod : (upstreamRes?.status === 303 ? "GET" : currentMethod),
+              headers: forwardHeaders,
+              body: hop === 0 ? initialBody : undefined,
+              redirect: "manual",
+            });
+
+            if ([301, 302, 303, 307, 308].includes(upstreamRes.status)) {
+              const location = upstreamRes.headers.get("location");
+              if (!location) break;
+
+              const resolvedRedirectUrl = new URL(location, activeTargetUrl).toString();
+              const redirectCheck = validateUrlForSSRF(resolvedRedirectUrl, {
+                allowLocalhost: true,
+                allowPrivateSubnets: true,
+              });
+
+              if (!redirectCheck.allowed || !redirectCheck.normalizedUrl) {
+                res.statusCode = 403;
+                res.setHeader("Content-Type", "application/json");
+                res.end(
+                  JSON.stringify({
+                    error: `SSRF Blocked: Redirect target prohibited: ${redirectCheck.reason || "Forbidden redirect target"}`,
+                    code: "SSRF_REDIRECT_BLOCKED",
+                  })
+                );
+                return;
+              }
+
+              activeTargetUrl = new URL(redirectCheck.normalizedUrl);
+              forwardHeaders["host"] = activeTargetUrl.host;
+              if (upstreamRes.status === 303) {
+                currentMethod = "GET";
+              }
+              continue;
+            }
+
+            break;
+          }
+
+          if (!upstreamRes) {
+            throw new Error("No response from target server");
+          }
 
           // Forward response status
           res.statusCode = upstreamRes.status;
