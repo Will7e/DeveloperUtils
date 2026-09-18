@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <!-- Content Security Policy — Secured while allowing trusted developer runtime CDNs -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
+    content="default-src 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" href="/logo.png" />
@@ -20,6 +20,7 @@
 
   <!-- SEO -->
   <title>InTab — Developer Tools in Your Browser</title>
+  <link rel="canonical" href="https://in-tab.se/" />
   <meta name="description"
     content="Everyday developer tools that run right in your browser tab. Code runner, API tester, diff checker, formatters, and whiteboard diagrams—fast, private, and offline." />
   <meta name="keywords" content="InTab, developer tools, code editor, compiler, API tester, diff checker, formatters, client-side, privacy, offline" />
@@ -28,6 +29,7 @@
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
   <meta property="og:title" content="InTab — Developer Tools in Your Browser" />
+  <meta property="og:url" content="https://in-tab.se/" />
   <meta property="og:description"
     content="Everyday developer tools that run right in your browser tab. Code runner, API tester, diff checker, formatters, and whiteboard diagrams—fast, private, and offline." />
   <meta property="og:site_name" content="InTab" />
@@ -35,6 +37,7 @@
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="InTab — Developer Tools in Your Browser" />
+  <meta name="twitter:url" content="https://in-tab.se/" />
   <meta name="twitter:description"
     content="Everyday developer tools that run right in your browser tab. Code runner, API tester, diff checker, formatters, and whiteboard diagrams—fast, private, and offline." />
 
@@ -171,11 +174,16 @@
   <!-- Prevent theme flashing on load -->
   <script>
     try {
-      const stateStr = localStorage.getItem('intab-app-state') || localStorage.getItem('devutils-app-state');
-      if (stateStr) {
-        const state = JSON.parse(stateStr);
-        if (state && state.state && state.state.editorSettings && state.state.editorSettings.theme === 'light') {
-          document.documentElement.classList.add('light');
+      const theme = localStorage.getItem('intab_theme') || localStorage.getItem('devutils_theme');
+      if (theme === 'light') {
+        document.documentElement.classList.add('light');
+      } else if (!theme) {
+        const stateStr = localStorage.getItem('intab-app-state') || localStorage.getItem('devutils-app-state');
+        if (stateStr) {
+          const state = JSON.parse(stateStr);
+          if (state && state.state && state.state.editorSettings && state.state.editorSettings.theme === 'light') {
+            document.documentElement.classList.add('light');
+          }
         }
       }
     } catch (e) {}

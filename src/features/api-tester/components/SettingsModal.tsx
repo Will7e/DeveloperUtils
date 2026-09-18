@@ -419,8 +419,27 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-1)", marginBottom: "2px" }}>
                       Custom Proxy URL
                     </div>
-                    <div style={{ fontSize: "11px", color: "var(--text-3)" }}>
+                    <div style={{ fontSize: "11px", color: "var(--text-3)", marginBottom: "8px" }}>
                       Optional override for static hosting (e.g. GitHub Pages) or custom workers.
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#f59e0b",
+                        background: "rgba(245, 158, 11, 0.08)",
+                        border: "1px solid rgba(245, 158, 11, 0.25)",
+                        borderRadius: "6px",
+                        padding: "8px 10px",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "6px",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      <Shield className="h-3.5 w-3.5 shrink-0 mt-0.5 text-yellow" />
+                      <span>
+                        <strong>Security Notice:</strong> All request URLs, payloads, and authorization headers (including bearer tokens & passwords) are routed through this proxy endpoint. Only configure servers you own or trust.
+                      </span>
                     </div>
                   </div>
 

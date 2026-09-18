@@ -31,6 +31,8 @@ async function loadTypeScriptCompiler(): Promise<TSModule> {
     try {
       const script = document.createElement("script");
       script.src = "https://cdn.jsdelivr.net/npm/typescript@5.5.4/lib/typescript.min.js";
+      script.integrity = "sha384-ZpynyeRTntpnyPnOEFURvjfBRu26zrASCWaWwuvHYAxPh8s3xAuhKVVDj7TUoGRQ";
+      script.crossOrigin = "anonymous";
       script.async = true;
 
       script.onload = () => {
@@ -45,7 +47,7 @@ async function loadTypeScriptCompiler(): Promise<TSModule> {
 
       script.onerror = () => {
         tsLoadPromise = null;
-        reject(new Error("Failed to load TypeScript compiler from CDN"));
+        reject(new Error("Failed to load TypeScript compiler from CDN. Please check your network connection."));
       };
 
       document.head.appendChild(script);

@@ -29,6 +29,8 @@ function isAllowedOrigin(originStr: string | null): boolean {
       host === "localhost" ||
       host === "127.0.0.1" ||
       host.endsWith(".localhost") ||
+      host === "in-tab.se" ||
+      host.endsWith(".in-tab.se") ||
       host === "intab.dev" ||
       host.endsWith(".intab.dev") ||
       host === "vercel.app" ||

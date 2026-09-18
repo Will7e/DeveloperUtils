@@ -1634,12 +1634,18 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       if (tabsToExport.length === 0) return;
       
       const zip = new JSZip();
+      const sensitiveKeyRegex = /^(.*_)?(key|token|secret|password|auth|sig|signature|access|cred)(_.*)?$/i;
+      const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|cookie|set-cookie|cf-access-client-secret|secret|password|token)$/i;
+
       tabsToExport.forEach(tab => {
         let authConfigToExport = { ...tab.authConfig };
         let headersToExport = [...tab.headers];
+        let paramsToExport = [...tab.params];
+        let urlToExport = tab.url;
+        let bodyValueToExport = tab.bodyValue;
 
         if (sanitizeSecrets) {
-          // Sanitize sensitive authConfig fields
+          // 1. Sanitize sensitive authConfig fields
           authConfigToExport = {
             bearerToken: authConfigToExport.bearerToken ? "••••••••" : "",
             basicUsername: authConfigToExport.basicUsername || "",
@@ -1649,25 +1655,74 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
             apiKeyPlacement: authConfigToExport.apiKeyPlacement || "header",
           };
 
-          // Sanitize sensitive headers (Authorization, X-API-Key, etc.)
+          // 2. Sanitize headers (Authorization, X-API-Key, Cookies, etc.)
           headersToExport = headersToExport.map(h => {
-            const lowerKey = h.key.toLowerCase().trim();
-            if (["authorization", "proxy-authorization", "x-api-key", "api-key", "secret"].includes(lowerKey)) {
+            if (sensitiveHeaderRegex.test(h.key.trim())) {
               return { ...h, value: "••••••••" };
             }
             return h;
           });
+
+          // 3. Sanitize explicit query params list
+          paramsToExport = paramsToExport.map(p => {
+            if (sensitiveKeyRegex.test(p.key.trim())) {
+              return { ...p, value: "••••••••" };
+            }
+            return p;
+          });
+
+          // 4. Sanitize URL query string
+          try {
+            if (urlToExport && (urlToExport.startsWith("http://") || urlToExport.startsWith("https://"))) {
+              const u = new URL(urlToExport);
+              let modified = false;
+              for (const [k] of Array.from(u.searchParams.entries())) {
+                if (sensitiveKeyRegex.test(k)) {
+                  u.searchParams.set(k, "••••••••");
+                  modified = true;
+                }
+              }
+              if (modified) urlToExport = u.toString();
+            }
+          } catch {
+            // Ignore URL parse error
+          }
+
+          // 5. Sanitize JSON request body
+          if (tab.bodyType === "json" && bodyValueToExport) {
+            try {
+              const parsed = JSON.parse(bodyValueToExport);
+              const maskDeep = (val: unknown): unknown => {
+                if (Array.isArray(val)) return val.map(maskDeep);
+                if (typeof val === "object" && val !== null) {
+                  const out: Record<string, unknown> = {};
+                  for (const [k, v] of Object.entries(val)) {
+                    if (sensitiveKeyRegex.test(k) && typeof v === "string") {
+                      out[k] = "••••••••";
+                    } else {
+                      out[k] = maskDeep(v);
+                    }
+                  }
+                  return out;
+                }
+                return val;
+              };
+              bodyValueToExport = JSON.stringify(maskDeep(parsed), null, 2);
+            } catch {
+              // Leave raw body if not valid JSON
+            }
+          }
         }
 
         const exportData = {
           id: tab.id,
           name: tab.name,
           method: tab.method,
-          url: tab.url,
-          params: tab.params,
+          url: urlToExport,
+          params: paramsToExport,
           headers: headersToExport,
           bodyType: tab.bodyType,
-          bodyValue: tab.bodyValue,
+          bodyValue: bodyValueToExport,
           formParams: tab.formParams,
           rawType: tab.rawType,
           authType: tab.authType,

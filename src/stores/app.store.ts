@@ -537,6 +537,18 @@ export const useAppStore = create<AppState>()(
       },
 
       updateEditorSettings: (settings) => {
+        if (settings.theme && typeof window !== "undefined" && window.localStorage) {
+          try {
+            localStorage.setItem("intab_theme", settings.theme);
+            if (settings.theme === "light") {
+              document.documentElement.classList.add("light");
+            } else {
+              document.documentElement.classList.remove("light");
+            }
+          } catch {
+            // Ignore storage write error
+          }
+        }
         set((state) => ({
           editorSettings: { ...state.editorSettings, ...settings },
         }));
@@ -1177,6 +1189,13 @@ export const useAppStore = create<AppState>()(
       name: "intab-app-state",
       storage: createJSONStorage(() => createEncryptedStorage()),
       onRehydrateStorage: () => (state) => {
+        if (state?.editorSettings?.theme && typeof window !== "undefined" && window.localStorage) {
+          try {
+            localStorage.setItem("intab_theme", state.editorSettings.theme);
+          } catch {
+            // Ignore storage write error
+          }
+        }
         if (state && state.workflows && Array.isArray(state.workflows)) {
           state.workflows = state.workflows.map((w) => ({
             ...w,
