@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   Check,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
@@ -108,6 +109,8 @@ export function SettingsPanel() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("editor");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [pendingCleanup, setPendingCleanup] = useState<CleanupTarget | null>(null);
+  const [cleaningState, setCleaningState] = useState<"idle" | "cleaning" | "done">("idle");
+  const [resettingState, setResettingState] = useState<"idle" | "resetting" | "done">("idle");
   const [storageUsage, setStorageUsage] = useState(() => getLocalStorageUsage());
   const [isRefreshingStorage, setIsRefreshingStorage] = useState(false);
 
@@ -189,6 +192,9 @@ export function SettingsPanel() {
   }, [settingsOpen, activeTab]);
 
   const handleExecuteCleanup = (target: CleanupTarget) => {
+    if (cleaningState !== "idle") return;
+    setCleaningState("cleaning");
+
     let closedCount = 0;
 
     if (target === "all" || target === "comparators") {
@@ -224,9 +230,8 @@ export function SettingsPanel() {
       }
     }
 
-    setPendingCleanup(null);
-
     setTimeout(() => {
+      setCleaningState("done");
       setStorageUsage(getLocalStorageUsage());
       addToast({
         message:
@@ -235,7 +240,32 @@ export function SettingsPanel() {
             : "No inactive tabs were found to close",
         type: "success",
       });
-    }, 120);
+
+      setTimeout(() => {
+        setPendingCleanup(null);
+        setCleaningState("idle");
+      }, 600);
+    }, 550);
+  };
+
+  const handleResetData = () => {
+    if (resettingState !== "idle") return;
+    setResettingState("resetting");
+
+    setTimeout(() => {
+      resetVault();
+      setStorageUsage(getLocalStorageUsage());
+      setResettingState("done");
+      addToast({
+        message: "Saved API credentials and environment secrets wiped",
+        type: "success",
+      });
+
+      setTimeout(() => {
+        setShowResetConfirm(false);
+        setResettingState("idle");
+      }, 600);
+    }, 550);
   };
 
   // Close on Escape key press
@@ -847,19 +877,35 @@ export function SettingsPanel() {
                     <div className="settings-subform-btns">
                       <button
                         type="button"
+                        disabled={cleaningState !== "idle"}
                         onClick={() => handleExecuteCleanup(pendingCleanup)}
-                        className="settings-subform-action-btn flex items-center justify-center gap-1.5"
+                        className="settings-subform-action-btn flex items-center justify-center gap-1.5 transition-all disabled:opacity-80"
                       >
-                        <CheckCircle2 size={12} />
-                        <span>
-                          Confirm & Close {cleanupTargetsConfig[pendingCleanup].count} Tab
-                          {cleanupTargetsConfig[pendingCleanup].count === 1 ? "" : "s"}
-                        </span>
+                        {cleaningState === "cleaning" ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Closing Tabs...</span>
+                          </>
+                        ) : cleaningState === "done" ? (
+                          <>
+                            <CheckCircle2 size={13} />
+                            <span>Tabs Cleaned!</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 size={12} />
+                            <span>
+                              Confirm & Close {cleanupTargetsConfig[pendingCleanup].count} Tab
+                              {cleanupTargetsConfig[pendingCleanup].count === 1 ? "" : "s"}
+                            </span>
+                          </>
+                        )}
                       </button>
                       <button
                         type="button"
+                        disabled={cleaningState !== "idle"}
                         onClick={() => setPendingCleanup(null)}
-                        className="settings-subform-cancel"
+                        className="settings-subform-cancel disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -901,19 +947,29 @@ export function SettingsPanel() {
                   <div className="settings-subform-btns">
                     <button
                       type="button"
-                      onClick={() => {
-                        resetVault();
-                        setShowResetConfirm(false);
-                        toggleSettings();
-                      }}
-                      className="settings-subform-danger-btn"
+                      disabled={resettingState !== "idle"}
+                      onClick={handleResetData}
+                      className="settings-subform-danger-btn flex items-center justify-center gap-1.5 transition-all disabled:opacity-80"
                     >
-                      Yes, Clear Stored Data
+                      {resettingState === "resetting" ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Clearing Data...</span>
+                        </>
+                      ) : resettingState === "done" ? (
+                        <>
+                          <CheckCircle2 size={13} />
+                          <span>Data Cleared!</span>
+                        </>
+                      ) : (
+                        <span>Yes, Clear Stored Data</span>
+                      )}
                     </button>
                     <button
                       type="button"
+                      disabled={resettingState !== "idle"}
                       onClick={() => setShowResetConfirm(false)}
-                      className="settings-subform-cancel"
+                      className="settings-subform-cancel disabled:opacity-50"
                     >
                       Cancel
                     </button>
