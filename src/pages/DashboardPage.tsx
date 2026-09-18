@@ -1,190 +1,195 @@
 // ============================================================
-// Dashboard Page — Premium landing with tool navigation
+// Dashboard Page — Ultra-Clean Zero-Scroll Bento Console
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork, FileDiff, ShieldCheck } from "lucide-react";
+import {
+  Code2,
+  Globe,
+  GitFork,
+  Columns,
+  FileDiff,
+  FileCode,
+  BookOpen,
+  ShieldCheck,
+  ArrowUpRight,
+} from "lucide-react";
 import { InTabLogo } from "@/components/ui/intab-logo";
 
-interface ToolCardProps {
-  to?: string;
+interface ToolItem {
+  id: string;
+  to: string;
+  title: string;
+  description: string;
   icon: React.ReactNode;
   iconColor: string;
   glowColor: string;
-  title: string;
-  description: string;
-  available?: boolean;
+  pills: string[];
+  spanClass: string;
 }
 
-function ToolCard({ to, icon, iconColor, glowColor, title, description, available = false }: ToolCardProps) {
-  const content = (
-    <>
-      <div className="dash-card-header">
-        <div className="dash-card-icon" style={{ background: glowColor }}>
-          <span style={{ color: iconColor }}>{icon}</span>
-        </div>
-        {!available && <span className="dash-card-badge">Coming Soon</span>}
-        {available && <ArrowRight className="dash-card-arrow" />}
-      </div>
-      <div className="dash-card-body">
-        <h3 className="dash-card-title">{title}</h3>
-        <p className="dash-card-desc">{description}</p>
-      </div>
-    </>
-  );
+const TOOLS: ToolItem[] = [
+  // Top Row: 3 Workspace Studios (each spans 4 columns out of 12)
+  {
+    id: "compiler",
+    to: "/compiler",
+    title: "Code Compiler",
+    description: "Write and run code in your browser with live HTML preview.",
+    icon: <Code2 className="h-4 w-4" />,
+    iconColor: "var(--accent)",
+    glowColor: "rgba(99, 102, 241, 0.18)",
+    pills: ["JS / TS", "HTML / CSS", "Live Run"],
+    spanClass: "dash-col-4",
+  },
+  {
+    id: "api-tester",
+    to: "/api-tester",
+    title: "API Tester",
+    description: "Send HTTP requests, test endpoints, and save environment variables.",
+    icon: <Globe className="h-4 w-4" />,
+    iconColor: "#a855f7",
+    glowColor: "rgba(168, 85, 247, 0.18)",
+    pills: ["REST Client", "Headers & Auth", "History"],
+    spanClass: "dash-col-4",
+  },
+  {
+    id: "drawflows",
+    to: "/drawflows",
+    title: "DrawFlow Studio",
+    description: "Build flowcharts, draw system architectures, and export Mermaid charts.",
+    icon: <GitFork className="h-4 w-4" />,
+    iconColor: "#2dd4bf",
+    glowColor: "rgba(45, 212, 191, 0.18)",
+    pills: ["Flowcharts", "Architecture", "Mermaid"],
+    spanClass: "dash-col-4",
+  },
 
-  if (available && to) {
-    return (
-      <Link to={to} className="dash-card dash-card-active">
-        {content}
-      </Link>
-    );
-  }
-
-  return (
-    <div className="dash-card dash-card-disabled">
-      {content}
-    </div>
-  );
-}
+  // Bottom Row: 4 Essential Utilities (each spans 3 columns out of 12)
+  {
+    id: "comparators",
+    to: "/comparators",
+    title: "Comparators",
+    description: "Compare lists, diff JSON objects, and find missing .env keys.",
+    icon: <Columns className="h-4 w-4" />,
+    iconColor: "#0ea5e9",
+    glowColor: "rgba(14, 165, 233, 0.18)",
+    pills: ["Lists & Sets", "JSON Diff", ".env Keys"],
+    spanClass: "dash-col-3",
+  },
+  {
+    id: "diff",
+    to: "/diff",
+    title: "Diff Check",
+    description: "Compare text and code side-by-side with highlighted changes.",
+    icon: <FileDiff className="h-4 w-4" />,
+    iconColor: "#f472b6",
+    glowColor: "rgba(244, 114, 182, 0.18)",
+    pills: ["Side-by-Side", "Unified", "Syntax"],
+    spanClass: "dash-col-3",
+  },
+  {
+    id: "formatters",
+    to: "/formatters",
+    title: "Formatters",
+    description: "Clean up, validate, and minify messy JSON and XML data.",
+    icon: <FileCode className="h-4 w-4" />,
+    iconColor: "#10b981",
+    glowColor: "rgba(16, 185, 129, 0.18)",
+    pills: ["JSON & XML", "Prettify", "Minify"],
+    spanClass: "dash-col-3",
+  },
+  {
+    id: "library",
+    to: "/library",
+    title: "API Library",
+    description: "Search ServiceNow API classes, documentation, and code examples.",
+    icon: <BookOpen className="h-4 w-4" />,
+    iconColor: "#f59e0b",
+    glowColor: "rgba(245, 158, 11, 0.18)",
+    pills: ["ServiceNow", "1,500+ APIs"],
+    spanClass: "dash-col-3",
+  },
+];
 
 export function DashboardPage() {
   return (
     <div className="dash-page">
       <div className="dash-container">
-        {/* Hero Section */}
+        {/* Compact Hero Section */}
         <div className="dash-hero">
-          <div className="dash-hero-logo">
-            <InTabLogo size={64} className="dash-hero-icon" />
-          </div>
-          <div className="dash-hero-badge">
-            <ShieldCheck className="h-3.5 w-3.5 text-slate-300" />
-            <span>100% Client-Side Suite</span>
+          <div className="dash-hero-logo-wrap">
+            <div className="dash-hero-logo-glow" />
+            <InTabLogo size={42} className="dash-hero-icon" />
           </div>
           <h1 className="dash-hero-title">
-            Welcome to <span className="dash-hero-accent">InTab</span>
+            Everyday developer tools, right in your{" "}
+            <span className="dash-hero-accent">browser</span>
           </h1>
           <p className="dash-hero-subtitle">
-            A private, all-in-one developer workspace. Everything runs directly in your browser tab—zero servers, zero data saved anywhere else.
+            Format JSON, compare files, test APIs, and write code directly on your machine.
           </p>
         </div>
 
-        {/* Stats Row */}
-        <div className="dash-stats">
-          <div className="dash-stat">
-            <span className="dash-stat-value">4</span>
-            <span className="dash-stat-label">Languages</span>
-          </div>
-          <div className="dash-stat-divider" />
-          <div className="dash-stat">
-            <span className="dash-stat-value">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-            </span>
-            <span className="dash-stat-label">100% In-Browser</span>
-          </div>
-          <div className="dash-stat-divider" />
-          <div className="dash-stat">
-            <span className="dash-stat-value">0</span>
-            <span className="dash-stat-label">Data Saved to Cloud</span>
-          </div>
+        {/* Bento Grid */}
+        <div className="dash-bento-grid">
+          {TOOLS.map((tool) => (
+            <Link
+              key={tool.id}
+              to={tool.to}
+              className={`dash-tool-card ${tool.spanClass}`}
+              style={{ "--card-glow": tool.glowColor } as React.CSSProperties}
+            >
+              <div
+                className="dash-card-glow"
+                style={{ background: tool.glowColor }}
+              />
+
+              <div className="dash-card-top">
+                <div className="dash-card-title-group">
+                  <div
+                    className="dash-card-icon-wrap"
+                    style={{
+                      background: tool.glowColor,
+                      color: tool.iconColor,
+                    }}
+                  >
+                    {tool.icon}
+                  </div>
+                  <h3 className="dash-card-title">{tool.title}</h3>
+                </div>
+                <div className="dash-card-arrow-wrap">
+                  <ArrowUpRight className="dash-card-arrow" />
+                </div>
+              </div>
+
+              <p className="dash-card-desc">{tool.description}</p>
+
+              <div className="dash-card-pills">
+                {tool.pills.map((pill, i) => (
+                  <span key={i} className="dash-card-pill">
+                    {pill}
+                  </span>
+                ))}
+              </div>
+            </Link>
+          ))}
         </div>
 
-        {/* Available Features Section */}
-        <div className="dash-section">
-          <div className="dash-section-header">
-            <Rocket className="h-4 w-4 text-accent" />
-            <h2>Available Features</h2>
+        {/* Minimal Bottom Bar */}
+        <div className="dash-footer-bar">
+          <div className="dash-footer-item">
+            <span className="dash-status-dot" />
+            <span>100% In-Browser Execution</span>
           </div>
-          <div className="dash-grid">
-            <ToolCard
-              to="/compiler"
-              icon={<Code2 className="h-5 w-5" />}
-              iconColor="var(--accent)"
-              glowColor="var(--accent-glow)"
-              title="Cloud Compiler"
-              description="Browser-based IDE supporting 4 languages with live HTML preview."
-              available
-            />
-
-            <ToolCard
-              to="/formatters"
-              icon={<FileCode className="h-5 w-5" />}
-              iconColor="var(--green)"
-              glowColor="var(--green-dim)"
-              title="Formatters"
-              description="Format, minify, and validate JSON and XML payloads."
-              available
-            />
-            <ToolCard
-              to="/comparators"
-              icon={<Columns className="h-5 w-5" />}
-              iconColor="var(--blue)"
-              glowColor="var(--blue-dim)"
-              title="Comparators"
-              description="Compare lists & sets, semantic JSON objects, and .env configuration files."
-              available
-            />
-            <ToolCard
-              to="/diff"
-              icon={<FileDiff className="h-5 w-5" />}
-              iconColor="var(--pink, #f472b6)"
-              glowColor="var(--pink-dim, rgba(244, 114, 182, 0.12))"
-              title="Diff Check"
-              description="Side-by-side or inline code diff viewer with syntax highlighting."
-              available
-            />
-            <ToolCard
-              to="/library"
-              icon={<BookOpen className="h-5 w-5" />}
-              iconColor="var(--purple)"
-              glowColor="var(--purple-dim)"
-              title="API Library"
-              description="Searchable ServiceNow API reference with 1,500+ classes and code examples."
-              available
-            />
-            <ToolCard
-              to="/drawflows"
-              icon={<GitFork className="h-5 w-5" />}
-              iconColor="var(--teal, #2dd4bf)"
-              glowColor="var(--teal-dim, rgba(45, 212, 191, 0.12))"
-              title="DrawFlow Studio"
-              description="Visual drag-and-drop diagramming and workflow builder."
-              available
-            />
-            <ToolCard
-              to="/api-tester"
-              icon={<Globe className="h-5 w-5" />}
-              iconColor="var(--purple)"
-              glowColor="var(--purple-dim)"
-              title="API Tester"
-              description="Lightweight client-side API exploration and debugging."
-              available
-            />
+          <span className="dash-footer-divider">•</span>
+          <div className="dash-footer-item">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Encrypted at Rest</span>
           </div>
-        </div>
-
-        {/* Future Roadmap Section */}
-        <div className="dash-section">
-          <div className="dash-section-header">
-            <Zap className="h-4 w-4 text-text-3" />
-            <h2>Future Roadmap</h2>
-          </div>
-          <div className="dash-grid">
-            <ToolCard
-              icon={<Terminal className="h-5 w-5" />}
-              iconColor="var(--blue)"
-              glowColor="var(--blue-dim)"
-              title="Terminal Shell"
-              description="Sandboxed environment for CLI prototyping."
-            />
-
-            <ToolCard
-              icon={<Cpu className="h-5 w-5" />}
-              iconColor="var(--accent)"
-              glowColor="var(--accent-glow)"
-              title="System Monitor"
-              description="Real-time resource allocation and performance metrics."
-            />
+          <span className="dash-footer-divider">•</span>
+          <div className="dash-footer-item">
+            <kbd className="dash-kbd">⌘K</kbd>
+            <span>Command Palette</span>
           </div>
         </div>
       </div>
