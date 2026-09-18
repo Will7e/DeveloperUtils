@@ -1,16 +1,16 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { LoadingState } from "@/components/ui/loading-state";
-import { 
-  Copy, 
-  Check, 
-  Code2, 
-  Server, 
-  Monitor, 
-  ArrowLeftRight, 
-  FileCode2, 
-  ChevronDown, 
-  ExternalLink, 
+import {
+  Copy,
+  Check,
+  Code2,
+  Server,
+  Monitor,
+  ArrowLeftRight,
+  FileCode2,
+  ChevronDown,
+  ExternalLink,
   BookOpen,
   Zap,
   Star,
@@ -130,8 +130,8 @@ export function LibraryView() {
   // If no API is selected, render the Welcome / Discovery Hub
   if (!selectedApi) {
     return (
-      <LibraryDiscoveryHub 
-        onSelectApi={(name) => setSelectedId(name)} 
+      <LibraryDiscoveryHub
+        onSelectApi={(name) => setSelectedId(name)}
         onSearch={(query) => setSearchQuery(query)}
         addToast={addToast}
         createFile={createFile}
@@ -196,8 +196,8 @@ function ApiDocumentationView({
           {/* Top Row: Navigation Breadcrumbs */}
           <div className="flex items-center justify-between gap-4 mb-2">
             <div className="lib-breadcrumbs mb-0">
-              <button 
-                className="lib-breadcrumb-link flex items-center gap-1 font-medium hover:text-accent" 
+              <button
+                className="lib-breadcrumb-link flex items-center gap-1 font-medium hover:text-accent"
                 onClick={onBackToHub}
                 title="Return to Developer Library Hub"
               >
@@ -228,10 +228,10 @@ function ApiDocumentationView({
               </div>
               <span
                 className="lib-view-type-badge"
-                style={{ 
-                  color: badge.color, 
-                  background: badge.bg, 
-                  borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)` 
+                style={{
+                  color: badge.color,
+                  background: badge.bg,
+                  borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)`
                 }}
               >
                 {badge.icon}
@@ -252,8 +252,8 @@ function ApiDocumentationView({
                   onChange={(e) => setMethodFilter(e.target.value)}
                 />
                 {methodFilter && (
-                  <button 
-                    className="lib-method-filter-clear" 
+                  <button
+                    className="lib-method-filter-clear"
                     onClick={() => setMethodFilter("")}
                     title="Clear filter"
                   >
@@ -293,7 +293,7 @@ function ApiDocumentationView({
               <div className="lib-toc-list">
                 {selectedApi.methods.map((method) => {
                   const isMatch = (q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q))) ||
-                                  (methodFilter && method.name.toLowerCase().includes(methodFilter.toLowerCase()));
+                    (methodFilter && method.name.toLowerCase().includes(methodFilter.toLowerCase()));
                   return (
                     <a
                       key={method.name}
@@ -319,13 +319,13 @@ function ApiDocumentationView({
               filteredMethods.map((method, idx) => {
                 const isMatch = q && (method.name.toLowerCase().includes(q) || method.description.toLowerCase().includes(q));
                 return (
-                  <MethodCard 
-                    key={method.name} 
+                  <MethodCard
+                    key={method.name}
                     apiName={selectedApi.name}
-                    method={method} 
-                    index={idx} 
-                    addToast={addToast} 
-                    badgeColor={badge.color} 
+                    method={method}
+                    index={idx}
+                    addToast={addToast}
+                    badgeColor={badge.color}
                     isHighlighted={!!isMatch}
                     searchQuery={q || methodFilter}
                     forceExpanded={expandAll}
@@ -363,13 +363,13 @@ function ApiDocumentationView({
    Method Card Component
    ============================================================ */
 
-function MethodCard({ 
+function MethodCard({
   apiName,
-  method, 
-  index, 
-  addToast, 
-  badgeColor, 
-  isHighlighted, 
+  method,
+  index,
+  addToast,
+  badgeColor,
+  isHighlighted,
   searchQuery,
   forceExpanded,
   createFile,
@@ -409,9 +409,9 @@ function MethodCard({
     try {
       const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const parts = text.split(new RegExp(`(${escapedQuery})`, "gi"));
-      return parts.map((part, i) => 
-        part.toLowerCase() === query.toLowerCase() 
-          ? <mark key={i} className="lib-search-highlight">{part}</mark> 
+      return parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase()
+          ? <mark key={i} className="lib-search-highlight">{part}</mark>
           : part
       );
     } catch {
@@ -575,12 +575,12 @@ function MethodCard({
    WELCOME & DISCOVERY HUB (When no API is selected)
    ============================================================ */
 
-function LibraryDiscoveryHub({ 
+function LibraryDiscoveryHub({
   onSelectApi,
   onSearch,
   addToast,
   createFile,
-}: { 
+}: {
   onSelectApi: (name: string) => void;
   onSearch: (query: string) => void;
   addToast: (toast: Omit<Toast, "id">) => void;
@@ -725,7 +725,7 @@ function onChange(control, oldValue, newValue, isLoading) {
 
           <h1 className="lib-hub-hero-title">ServiceNow Developer Hub</h1>
           <p className="lib-hub-hero-desc">
-            Explore 125+ verified ServiceNow APIs, 720+ method signatures, and production-tested snippets. 
+            Explore 125+ verified ServiceNow APIs, 720+ method signatures, and production-tested snippets.
             Test any script immediately in the local JavaScript compiler or copy straight into your workspace.
           </p>
 
@@ -752,7 +752,7 @@ function onChange(control, oldValue, newValue, isLoading) {
         </div>
 
         <div className="lib-cat-grid">
-          <div 
+          <div
             className="lib-cat-card"
             onClick={() => onSelectApi("GlideRecord")}
           >
@@ -772,7 +772,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             </div>
           </div>
 
-          <div 
+          <div
             className="lib-cat-card"
             onClick={() => onSelectApi("g_form")}
           >
@@ -792,7 +792,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             </div>
           </div>
 
-          <div 
+          <div
             className="lib-cat-card"
             onClick={() => onSelectApi("GlideAjax")}
           >
@@ -812,7 +812,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             </div>
           </div>
 
-          <div 
+          <div
             className="lib-cat-card"
             onClick={() => onSelectApi("JSON")}
           >
@@ -857,10 +857,10 @@ function onChange(control, oldValue, newValue, isLoading) {
                   <span className="lib-essential-name">{api.name}</span>
                   <span
                     className="lib-view-type-badge"
-                    style={{ 
-                      color: badge.color, 
-                      background: badge.bg, 
-                      borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)` 
+                    style={{
+                      color: badge.color,
+                      background: badge.bg,
+                      borderColor: `color-mix(in srgb, ${badge.color} 30%, transparent)`
                     }}
                   >
                     {badge.icon}
@@ -1084,10 +1084,10 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
    EXCALIDRAW COMMUNITY GALLERY
    ============================================================ */
 
-function ExcalidrawLibraryGallery({ 
-  searchQuery, 
-}: { 
-  searchQuery: string; 
+function ExcalidrawLibraryGallery({
+  searchQuery,
+}: {
+  searchQuery: string;
 }) {
   const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1158,7 +1158,7 @@ function ExcalidrawLibraryGallery({
         </div>
 
         <div className="lib-excal-header-actions">
-          <button 
+          <button
             className="lib-excal-studio-btn"
             onClick={() => navigate("/drawflows")}
           >
@@ -1185,16 +1185,16 @@ function ExcalidrawLibraryGallery({
             {activeCategory === "added"
               ? "Browse the collections and click \"Add to DrawFlow\" to make shape packs ready in DrawFlow Studio."
               : searchQuery
-              ? `No shape packs found for "${searchQuery}".`
-              : "No items found in this collection category."}
+                ? `No shape packs found for "${searchQuery}".`
+                : "No items found in this collection category."}
           </p>
         </div>
       ) : (
         <div className="lib-excal-grid">
           {filteredLibraries.map((lib) => (
-            <ExcalidrawCard 
-              key={lib.id} 
-              lib={lib} 
+            <ExcalidrawCard
+              key={lib.id}
+              lib={lib}
             />
           ))}
         </div>
@@ -1203,10 +1203,10 @@ function ExcalidrawLibraryGallery({
   );
 }
 
-function ExcalidrawCard({ 
-  lib, 
-}: { 
-  lib: ExcalidrawLibraryItem; 
+function ExcalidrawCard({
+  lib,
+}: {
+  lib: ExcalidrawLibraryItem;
 }) {
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);

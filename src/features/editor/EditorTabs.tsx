@@ -210,11 +210,11 @@ export function EditorTabs() {
 
   const handleCopy = useCallback(() => {
     if (!activeFile) return;
-    
+
     navigator.clipboard.writeText(activeFile.content);
     setIsCopied(true);
     addToast({ message: "Content copied to clipboard", type: "success", duration: 2000 });
-    
+
     setTimeout(() => {
       setIsCopied(false);
     }, 2000);

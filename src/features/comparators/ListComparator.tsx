@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
-import { 
-  Columns, 
-  Trash2, 
-  Copy, 
-  Check, 
-  Search, 
+import {
+  Columns,
+  Trash2,
+  Copy,
+  Check,
+  Search,
   Download,
   Info,
   Settings2,
@@ -14,15 +14,15 @@ import {
   Plus,
   X
 } from "lucide-react";
-import { 
-  Panel, 
-  Group as PanelGroup, 
-  Separator as PanelResizeHandle 
+import {
+  Panel,
+  Group as PanelGroup,
+  Separator as PanelResizeHandle
 } from "react-resizable-panels";
-import { 
-  Tooltip, 
-  TooltipTrigger, 
-  TooltipContent 
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent
 } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -269,9 +269,9 @@ export function ListComparator() {
             <div className="tabs-toolbar-sep" />
 
             <ActionTooltip content="Reset both input lists">
-              <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => { 
-                updateSessionInput(activeSession.id, "a", ""); 
-                updateSessionInput(activeSession.id, "b", ""); 
+              <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => {
+                updateSessionInput(activeSession.id, "a", "");
+                updateSessionInput(activeSession.id, "b", "");
               }}>
                 <Trash2 className="h-3.5 w-3.5" />
                 Clear
@@ -360,21 +360,21 @@ export function ListComparator() {
             {/* Results Section */}
             <div className="list-comparator-results h-full">
               <div className="results-tabs">
-                <button 
+                <button
                   className={cn("results-tab", activeTab === "aOnly" && "active")}
                   onClick={() => setActiveTab("aOnly")}
                 >
                   Only in A
                   <span className="tab-badge">{comparisonResults.aOnly.length}</span>
                 </button>
-                <button 
+                <button
                   className={cn("results-tab", activeTab === "bOnly" && "active")}
                   onClick={() => setActiveTab("bOnly")}
                 >
                   Only in B
                   <span className="tab-badge">{comparisonResults.bOnly.length}</span>
                 </button>
-                <button 
+                <button
                   className={cn("results-tab", activeTab === "both" && "active")}
                   onClick={() => setActiveTab("both")}
                 >
@@ -385,9 +385,9 @@ export function ListComparator() {
                 <div className="ml-auto flex items-center gap-2 px-2">
                   <div className="relative">
                     <Search className="h-3 w-3 absolute left-2 top-1/2 -translate-y-1/2 text-text-3" />
-                    <input 
-                      type="text" 
-                      className="results-search" 
+                    <input
+                      type="text"
+                      className="results-search"
                       placeholder="Filter results..."
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}

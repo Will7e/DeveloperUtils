@@ -18,10 +18,10 @@ import { useAppStore } from "@/stores/app.store";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
 import { cn } from "@/lib/utils";
-import { 
-  Tooltip, 
-  TooltipTrigger, 
-  TooltipContent 
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent
 } from "@/components/ui/tooltip";
 
 interface ActionTooltipProps {

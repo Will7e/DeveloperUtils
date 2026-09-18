@@ -63,7 +63,7 @@ interface ActionTooltipProps {
   side?: "top" | "bottom" | "left" | "right";
 }
 
-const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
+const ActionTooltip = React.memo(({ children, content, side = "top" }: ActionTooltipProps) => (
   <Tooltip>
     <TooltipTrigger asChild>
       {children}
@@ -72,7 +72,8 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
       <p>{content}</p>
     </TooltipContent>
   </Tooltip>
-);
+));
+ActionTooltip.displayName = "ActionTooltip";
 
 interface DiffStats {
   additions: number;
@@ -592,6 +593,39 @@ export function DiffChecker() {
   const origLineCount = localOriginal ? localOriginal.split("\n").length : 0;
   const modLineCount = localModified ? localModified.split("\n").length : 0;
 
+  const diffEditorOptions: editor.IDiffEditorConstructionOptions = useMemo(
+    () => ({
+      renderSideBySide: diffSettings.renderSideBySide,
+      ignoreTrimWhitespace: diffSettings.ignoreTrimWhitespace,
+      enableSplitViewResizing: diffSettings.enableSplitViewResizing,
+      originalEditable: true,
+      readOnly: false,
+      fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      minimap: { enabled: false },
+      lineNumbers: "on",
+      smoothScrolling: true,
+      cursorBlinking: "smooth",
+      cursorSmoothCaretAnimation: "on",
+      renderLineHighlight: "all",
+      scrollBeyondLastLine: false,
+      automaticLayout: false, // ResizeObserver handles explicit layout without interval polling
+      padding: { top: 8, bottom: 8 },
+      scrollbar: {
+        verticalScrollbarSize: 7,
+        horizontalScrollbarSize: 7,
+      },
+      diffWordWrap: diffSettings.wordWrap ? "on" : "off",
+      renderOverviewRuler: true,
+    }),
+    [
+      diffSettings.renderSideBySide,
+      diffSettings.ignoreTrimWhitespace,
+      diffSettings.enableSplitViewResizing,
+      diffSettings.wordWrap,
+    ]
+  );
+
   return (
     <div className="diff-checker-container">
       {/* 1. Reusable Workspace Tab Bar */}
@@ -948,30 +982,7 @@ export function DiffChecker() {
           modified={activeSession.modified}
           onMount={handleDiffEditorMount}
           theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
-          options={{
-            renderSideBySide: diffSettings.renderSideBySide,
-            ignoreTrimWhitespace: diffSettings.ignoreTrimWhitespace,
-            enableSplitViewResizing: diffSettings.enableSplitViewResizing,
-            originalEditable: true,
-            readOnly: false,
-            fontSize: 13,
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            minimap: { enabled: false },
-            lineNumbers: "on",
-            smoothScrolling: true,
-            cursorBlinking: "smooth",
-            cursorSmoothCaretAnimation: "on",
-            renderLineHighlight: "all",
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            padding: { top: 8, bottom: 8 },
-            scrollbar: {
-              verticalScrollbarSize: 7,
-              horizontalScrollbarSize: 7,
-            },
-            diffWordWrap: diffSettings.wordWrap ? "on" : "off",
-            renderOverviewRuler: true,
-          }}
+          options={diffEditorOptions}
           loading={<EditorLoadingFallback message="Loading diff editor..." />}
         />
       </div>

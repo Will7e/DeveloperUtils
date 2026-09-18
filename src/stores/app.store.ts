@@ -548,7 +548,7 @@ export const useAppStore = create<AppState>()(
           toasts: state.toasts.filter((t) => t.id !== id),
         }));
       },
-      
+
       createFormatterFile: (type, name) => {
         const id = generateId();
         const newFile = { id, name: name || `Untitled.${type}`, content: "" };
@@ -673,7 +673,7 @@ export const useAppStore = create<AppState>()(
           },
         }));
       },
-      
+
       setOutputFlash: (flash) => {
         set({ outputFlash: flash });
         if (flash) {
@@ -682,7 +682,7 @@ export const useAppStore = create<AppState>()(
           }, 800);
         }
       },
-      
+
       setFormatterType: (type) => {
         set({ formatterType: type });
       },
@@ -916,7 +916,7 @@ export const useAppStore = create<AppState>()(
       setLibrarySelectedItemId: (id) => {
         set({ librarySelectedItemId: id });
       },
-      
+
       setLibrarySearchQuery: (query) => {
         set({ librarySearchQuery: query });
       },
@@ -1091,38 +1091,38 @@ export const useAppStore = create<AppState>()(
             ...w,
             elements: Array.isArray(w.elements)
               ? w.elements.map((rawEl: unknown) => {
-                  const el = rawEl as Record<string, unknown> | null;
-                  if (!el) return rawEl;
-                  let modified = false;
-                  const newEl = { ...el };
-                  if (el.strokeColor === "#f8fafc") {
-                    newEl.strokeColor = "#1e1e1e";
-                    modified = true;
-                  }
-                  if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
-                    newEl.strokeColor = "#0284c7";
-                    newEl.backgroundColor = "#e0f2fe";
-                    modified = true;
-                  }
-                  if (el.id === "node-action" && el.backgroundColor === "#04785722") {
-                    newEl.strokeColor = "#059669";
-                    newEl.backgroundColor = "#dcfce7";
-                    modified = true;
-                  }
-                  if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
-                    newEl.strokeColor = "#0284c7";
-                    modified = true;
-                  }
-                  if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
-                    newEl.strokeColor = "#64748b";
-                    modified = true;
-                  }
-                  if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
-                    newEl.strokeColor = "#0284c7";
-                    modified = true;
-                  }
-                  return modified ? newEl : rawEl;
-                })
+                const el = rawEl as Record<string, unknown> | null;
+                if (!el) return rawEl;
+                let modified = false;
+                const newEl = { ...el };
+                if (el.strokeColor === "#f8fafc") {
+                  newEl.strokeColor = "#1e1e1e";
+                  modified = true;
+                }
+                if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
+                  newEl.strokeColor = "#0284c7";
+                  newEl.backgroundColor = "#e0f2fe";
+                  modified = true;
+                }
+                if (el.id === "node-action" && el.backgroundColor === "#04785722") {
+                  newEl.strokeColor = "#059669";
+                  newEl.backgroundColor = "#dcfce7";
+                  modified = true;
+                }
+                if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
+                  newEl.strokeColor = "#0284c7";
+                  modified = true;
+                }
+                if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
+                  newEl.strokeColor = "#64748b";
+                  modified = true;
+                }
+                if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
+                  newEl.strokeColor = "#0284c7";
+                  modified = true;
+                }
+                return modified ? newEl : rawEl;
+              })
               : w.elements,
           }));
         }

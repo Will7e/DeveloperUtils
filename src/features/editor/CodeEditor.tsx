@@ -70,7 +70,7 @@ export function CodeEditor() {
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
         const state = useAppStore.getState();
         const activeFile = state.files.find((f) => f.id === state.activeFileId);
-        
+
         if (!activeFile) return;
         const content = editor.getValue();
 
@@ -80,28 +80,28 @@ export function CodeEditor() {
             editor.setValue(formatted);
             state.updateFileContent(activeFile.id, formatted);
             state.saveFile(activeFile.id);
-            state.addToast({ 
-              message: "Formatted & saved", 
-              type: "success", 
-              duration: 1500 
+            state.addToast({
+              message: "Formatted & saved",
+              type: "success",
+              duration: 1500
             });
           } catch (error) {
             state.updateFileContent(activeFile.id, content);
             state.saveFile(activeFile.id);
             const msg = error instanceof Error ? error.message : "formatting error";
-            state.addToast({ 
-              message: `Saved (${msg})`, 
-              type: "info", 
-              duration: 2000 
+            state.addToast({
+              message: `Saved (${msg})`,
+              type: "info",
+              duration: 2000
             });
           }
         } else {
           state.updateFileContent(activeFile.id, content);
           state.saveFile(activeFile.id);
-          state.addToast({ 
-            message: "Saved", 
-            type: "info", 
-            duration: 1500 
+          state.addToast({
+            message: "Saved",
+            type: "info",
+            duration: 1500
           });
         }
       });
@@ -163,8 +163,8 @@ export function CodeEditor() {
   // Get Monaco language mapping
 
   return (
-    <div 
-      className="flex-1 relative w-full h-full min-w-0 min-h-0" 
+    <div
+      className="flex-1 relative w-full h-full min-w-0 min-h-0"
       ref={containerRef}
     >
       <Editor

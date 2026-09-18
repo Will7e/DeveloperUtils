@@ -67,8 +67,7 @@ export function bootstrapApp(): Promise<void> {
         console.warn("API Tester store init note:", err);
       });
     } else {
-      // Pre-warm API Tester in background without blocking current page
-      useApiTesterStore.getState().init().catch(() => {});
+      // Don't eagerly init API Tester on other routes — it will init when navigating to /api-tester
       pagePromise = Promise.resolve();
     }
 

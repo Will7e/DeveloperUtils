@@ -30,17 +30,16 @@ import { bootstrapApp } from "@/services/bootstrap.service";
 // Pre-initialize critical services and coordinate single loading screen
 bootstrapApp();
 
-// Pre-warm lazy routes during idle time so client navigation is instantaneous
+// Pre-warm only lightweight lazy routes during idle time.
+// Heavy routes (DrawFlows ~1.1MB, Library ~324KB, ApiTester ~180KB) are
+// loaded on-demand when the user navigates to them.
 if (typeof window !== "undefined") {
   const prewarm = () => {
     import("@/pages/DashboardPage");
     import("@/pages/CompilerPage");
-    import("@/pages/ApiTesterPage");
     import("@/pages/FormattersPage");
     import("@/pages/ComparatorsPage");
     import("@/pages/DiffCheckerPage");
-    import("@/pages/LibraryPage");
-    import("@/pages/DrawFlowPage");
   };
   if ("requestIdleCallback" in window) {
     window.requestIdleCallback(prewarm, { timeout: 3000 });

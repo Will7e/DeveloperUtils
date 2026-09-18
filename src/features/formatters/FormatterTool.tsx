@@ -8,12 +8,12 @@ import { parseJsonRobust, formatJsonRobust, JsonFormatOptions } from "./jsonUtil
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
-import { 
-  FileJson, 
-  FileCode, 
-  Copy, 
-  Trash2, 
-  Check, 
+import {
+  FileJson,
+  FileCode,
+  Copy,
+  Trash2,
+  Check,
   AlertCircle,
   Minimize2,
   Maximize2,
@@ -29,15 +29,15 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
-import { 
-  Panel, 
-  Group as PanelGroup, 
-  Separator as PanelResizeHandle 
+import {
+  Panel,
+  Group as PanelGroup,
+  Separator as PanelResizeHandle
 } from "react-resizable-panels";
-import { 
-  Tooltip, 
-  TooltipContent, 
-  TooltipTrigger 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger
 } from "@/components/ui/tooltip";
 
 interface ActionTooltipProps {
@@ -72,7 +72,7 @@ export function FormatterTool() {
   const reorderFiles = useAppStore((s) => s.reorderFormatterFiles);
   const addToast = useAppStore((s) => s.addToast);
   const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
-  
+
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
@@ -116,7 +116,7 @@ export function FormatterTool() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = React.useRef<HTMLDivElement>(null);
-  
+
   const [expandVersion, setExpandVersion] = useState(0);
   const [expandTarget, setExpandTarget] = useState(true);
 
@@ -315,13 +315,13 @@ export function FormatterTool() {
           <h2 className="text-sm font-semibold">
             {type.toUpperCase()} Formatter
           </h2>
-          
+
           <div className="toolbar-sep mx-2" />
-          
+
           {/* Type Dropdown */}
           <div className="relative" ref={dropdownRef}>
             <ActionTooltip content="Switch between JSON and XML" side="bottom">
-              <button 
+              <button
                 className={cn(
                   "formatter-type-btn",
                   showTypeDropdown && "formatter-type-btn-active"
@@ -346,10 +346,10 @@ export function FormatterTool() {
             {showTypeDropdown && (
               <div className="formatter-dropdown">
                 <div className="formatter-dropdown-title">Select Format</div>
-                <button 
+                <button
                   className={cn("formatter-dropdown-item", type === "json" && "active")}
-                  onClick={() => { 
-                    setType("json"); 
+                  onClick={() => {
+                    setType("json");
                     setShowTypeDropdown(false);
                   }}
                 >
@@ -357,10 +357,10 @@ export function FormatterTool() {
                   <span>JSON Formatter</span>
                   {type === "json" && <div className="active-dot" />}
                 </button>
-                <button 
+                <button
                   className={cn("formatter-dropdown-item", type === "xml" && "active")}
-                  onClick={() => { 
-                    setType("xml"); 
+                  onClick={() => {
+                    setType("xml");
                     setShowTypeDropdown(false);
                   }}
                 >
@@ -372,11 +372,11 @@ export function FormatterTool() {
             )}
           </div>
         </div>
-        
+
         <div className="toolbar-right">
           <ActionTooltip content={`Load sample ${type.toUpperCase()}`} side="bottom">
-            <button 
-              className="toolbar-btn" 
+            <button
+              className="toolbar-btn"
               onClick={handleSample}
             >
               Sample
@@ -385,8 +385,8 @@ export function FormatterTool() {
           <div className="toolbar-sep" />
           <div className="flex items-center gap-1.5">
             <ActionTooltip content={`Prettify ${type.toUpperCase()} (⌘S)`} side="bottom">
-              <button 
-                className="toolbar-btn" 
+              <button
+                className="toolbar-btn"
                 onClick={handleFormat}
                 disabled={!currentInput.trim()}
               >
@@ -394,11 +394,11 @@ export function FormatterTool() {
                 Format
               </button>
             </ActionTooltip>
-            
+
             {type === "json" && (
               <div className="relative" ref={settingsRef}>
                 <ActionTooltip content="Format Settings" side="bottom">
-                  <button 
+                  <button
                     className={cn(
                       "toolbar-btn px-2 flex items-center justify-center transition-all",
                       showSettings ? "bg-bg-3 text-text-1 border-accent" : "text-text-3"
@@ -409,14 +409,14 @@ export function FormatterTool() {
                     <Settings2 className="h-3.5 w-3.5" />
                   </button>
                 </ActionTooltip>
-                
+
                 {showSettings && (
                   <div className="formatter-settings-popover">
                     <div className="formatter-settings-header">
                       <Settings2 className="h-3.5 w-3.5 text-accent" />
                       <span>Format Settings</span>
                     </div>
-                    
+
                     <div className="formatter-settings-body">
                       <div className="formatter-setting-row">
                         <div className="formatter-setting-label">
@@ -424,7 +424,7 @@ export function FormatterTool() {
                           <span className="desc">Indentation spaces</span>
                         </div>
                         <div className="formatter-setting-control relative">
-                          <select 
+                          <select
                             className="formatter-setting-select"
                             value={jsonSettings.tabSize}
                             onChange={(e) => setJsonSettings({ ...jsonSettings, tabSize: parseInt(e.target.value) })}
@@ -435,13 +435,13 @@ export function FormatterTool() {
                           <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--text-3)] pointer-events-none" />
                         </div>
                       </div>
-                      
+
                       <div className="formatter-setting-row">
                         <div className="formatter-setting-label">
                           <span className="title">Sort Keys</span>
                           <span className="desc">Alphabetical order</span>
                         </div>
-                        <button 
+                        <button
                           className={cn(
                             "formatter-setting-toggle",
                             jsonSettings.sortKeys && "active"
@@ -458,8 +458,8 @@ export function FormatterTool() {
             )}
           </div>
           <ActionTooltip content={`Minify ${type.toUpperCase()}`} side="bottom">
-            <button 
-              className="toolbar-btn" 
+            <button
+              className="toolbar-btn"
               onClick={handleMinify}
               disabled={!currentInput || !!error}
             >
@@ -468,8 +468,8 @@ export function FormatterTool() {
             </button>
           </ActionTooltip>
           <ActionTooltip content="Copy to clipboard" side="bottom">
-            <button 
-              className="toolbar-btn" 
+            <button
+              className="toolbar-btn"
               onClick={handleCopy}
               disabled={!currentInput}
             >
@@ -478,8 +478,8 @@ export function FormatterTool() {
             </button>
           </ActionTooltip>
           <ActionTooltip content="Clear current input" side="bottom">
-            <button 
-              className="toolbar-btn text-red hover:bg-red-dim" 
+            <button
+              className="toolbar-btn text-red hover:bg-red-dim"
               onClick={handleClear}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -489,7 +489,7 @@ export function FormatterTool() {
         </div>
       </div>
 
-      <div 
+      <div
         className={cn(
           "json-formatter-content",
           isPreviewFullscreen && "fullscreen-preview"
@@ -563,76 +563,76 @@ export function FormatterTool() {
           <Panel defaultSize={50} minSize={20}>
             <div className="json-output-section h-full">
               <div className="section-header-row">
-            <div className="section-label flex items-center">
-              Preview
-            </div>
-            
-            <div className="flex items-center gap-2">
-              {type === "json" && !error && Boolean(data) && (
-                <div className="flex items-center bg-[var(--bg-1)] border border-[var(--border-1)] rounded-[6px] p-0.5 shadow-sm">
-                  <ActionTooltip content="Expand All" side="top">
-                    <button className="preview-action-btn" onClick={handleExpandAll}>
-                      <Plus className="h-3.5 w-3.5" />
-                    </button>
-                  </ActionTooltip>
-                  <div className="w-[1px] h-3.5 bg-[var(--border-2)] mx-0.5" />
-                  <ActionTooltip content="Collapse All" side="top">
-                    <button className="preview-action-btn" onClick={handleCollapseAll}>
-                      <Minus className="h-3.5 w-3.5" />
-                    </button>
-                  </ActionTooltip>
+                <div className="section-label flex items-center">
+                  Preview
                 </div>
-              )}
 
-              <div className="w-[1px] h-4 bg-[var(--border-1)] mx-1" />
-
-              <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
-                <button 
-                  className="preview-fullscreen-btn"
-                  onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
-                >
-                  {isPreviewFullscreen ? (
-                    <Shrink className="h-3.5 w-3.5" />
-                  ) : (
-                    <Expand className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2">
+                  {type === "json" && !error && Boolean(data) && (
+                    <div className="flex items-center bg-[var(--bg-1)] border border-[var(--border-1)] rounded-[6px] p-0.5 shadow-sm">
+                      <ActionTooltip content="Expand All" side="top">
+                        <button className="preview-action-btn" onClick={handleExpandAll}>
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
+                      </ActionTooltip>
+                      <div className="w-[1px] h-3.5 bg-[var(--border-2)] mx-0.5" />
+                      <ActionTooltip content="Collapse All" side="top">
+                        <button className="preview-action-btn" onClick={handleCollapseAll}>
+                          <Minus className="h-3.5 w-3.5" />
+                        </button>
+                      </ActionTooltip>
+                    </div>
                   )}
-                </button>
-              </ActionTooltip>
-            </div>
-          </div>
-          
-          <div className="json-tree-container">
-            {error ? (
-              <div className="json-error-state">
-                <AlertCircle className="h-5 w-5 text-red" />
-                <div className="json-error-message">
-                  <div className="font-semibold mb-1">Invalid {type.toUpperCase()}</div>
-                  <div className="text-xs opacity-70">{error}</div>
+
+                  <div className="w-[1px] h-4 bg-[var(--border-1)] mx-1" />
+
+                  <ActionTooltip content={isPreviewFullscreen ? "Exit Fullscreen" : "Fullscreen Preview"} side="left">
+                    <button
+                      className="preview-fullscreen-btn"
+                      onClick={() => setIsPreviewFullscreen(!isPreviewFullscreen)}
+                    >
+                      {isPreviewFullscreen ? (
+                        <Shrink className="h-3.5 w-3.5" />
+                      ) : (
+                        <Expand className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </ActionTooltip>
                 </div>
               </div>
-            ) : data ? (
-              <div className="json-tree-scroll">
-                {type === "json" ? (
-                  <JsonTreeView 
-                    data={data} 
-                    expandVersion={expandVersion} 
-                    expandTarget={expandTarget} 
-                  />
+
+              <div className="json-tree-container">
+                {error ? (
+                  <div className="json-error-state">
+                    <AlertCircle className="h-5 w-5 text-red" />
+                    <div className="json-error-message">
+                      <div className="font-semibold mb-1">Invalid {type.toUpperCase()}</div>
+                      <div className="text-xs opacity-70">{error}</div>
+                    </div>
+                  </div>
+                ) : data ? (
+                  <div className="json-tree-scroll">
+                    {type === "json" ? (
+                      <JsonTreeView
+                        data={data}
+                        expandVersion={expandVersion}
+                        expandTarget={expandTarget}
+                      />
+                    ) : (
+                      <XmlTreeView data={data as XmlTreeNode | string} />
+                    )}
+                  </div>
                 ) : (
-                  <XmlTreeView data={data as XmlTreeNode | string} />
+                  <div className="json-empty-state">
+                    <Code2 className="h-10 w-10 opacity-10 mb-3" />
+                    <p>Paste {type.toUpperCase()} on the left to begin formatting</p>
+                  </div>
                 )}
               </div>
-            ) : (
-              <div className="json-empty-state">
-                <Code2 className="h-10 w-10 opacity-10 mb-3" />
-                <p>Paste {type.toUpperCase()} on the left to begin formatting</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </Panel>
-    </PanelGroup>
-  </div>
-</div>
+            </div>
+          </Panel>
+        </PanelGroup>
+      </div>
+    </div>
   );
 }
