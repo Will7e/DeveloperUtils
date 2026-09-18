@@ -154,25 +154,10 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <Globe
                   className={`h-4 w-4 shrink-0 api-settings-env-icon ${
-                    effectiveEnvId === "global" ? "text-accent" : ""
+                    activeEnvironmentId === null ? "api-settings-env-icon-active" : ""
                   }`}
                 />
                 <span className="truncate">Global Variables</span>
-                {activeEnvironmentId === null && (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      padding: "1px 5px",
-                      borderRadius: "4px",
-                      fontWeight: 600,
-                      background: "rgba(59, 130, 246, 0.15)",
-                      color: "var(--accent)",
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    ACTIVE
-                  </span>
-                )}
               </div>
               <span className="api-settings-count-pill">
                 {envVars.filter((v) => v.key.trim()).length}
@@ -197,25 +182,10 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <Database
                       className={`h-4 w-4 shrink-0 api-settings-env-icon ${
-                        isActive ? "text-accent" : ""
+                        isCurrentlyActive ? "api-settings-env-icon-active" : ""
                       }`}
                     />
                     <span className="truncate">{env.name}</span>
-                    {isCurrentlyActive && (
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          padding: "1px 5px",
-                          borderRadius: "4px",
-                          fontWeight: 600,
-                          background: "rgba(59, 130, 246, 0.15)",
-                          color: "var(--accent)",
-                          letterSpacing: "0.02em",
-                        }}
-                      >
-                        ACTIVE
-                      </span>
-                    )}
                   </div>
                   <span className="api-settings-count-pill">{count}</span>
                 </button>
@@ -251,23 +221,11 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <Shield
                   className={`h-4 w-4 shrink-0 api-settings-env-icon ${
-                    effectiveEnvId === "network" ? "text-accent" : ""
+                    effectiveEnvId === "network" ? "text-accent" : "api-settings-env-icon-active"
                   }`}
                 />
                 <span className="truncate">Proxy & CORS</span>
               </div>
-              <span
-                style={{
-                  fontSize: "10px",
-                  padding: "1px 6px",
-                  borderRadius: "4px",
-                  fontWeight: 600,
-                  background: "rgba(34, 197, 94, 0.15)",
-                  color: "#22c55e",
-                }}
-              >
-                READY
-              </span>
             </button>
           </div>
 
@@ -286,34 +244,53 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
           <div className="api-settings-topbar">
             <div className="api-settings-topbar-info">
               {effectiveEnvId === "network" ? (
-                <div>
-                  <h2 className="api-settings-title">Proxy & CORS</h2>
-                  <p className="api-settings-subtitle">
-                    Manage network proxy routing to bypass browser CORS restrictions.
-                  </p>
+                <div className="flex items-center gap-2.5">
+                  <Shield className="h-5 w-5 api-settings-env-icon-active shrink-0" />
+                  <div>
+                    <h2 className="api-settings-title">Proxy & CORS</h2>
+                    <p className="api-settings-subtitle">
+                      Manage network proxy routing to bypass browser CORS restrictions.
+                    </p>
+                  </div>
                 </div>
               ) : effectiveEnvId === "global" ? (
-                <div>
-                  <h2 className="api-settings-title">Global Variables</h2>
-                  <p className="api-settings-subtitle">
-                    Variables available across all requests regardless of active environment.
-                  </p>
+                <div className="flex items-center gap-2.5">
+                  <Globe
+                    className={`h-5 w-5 shrink-0 ${
+                      activeEnvironmentId === null ? "api-settings-env-icon-active" : ""
+                    }`}
+                    style={{ color: activeEnvironmentId === null ? "#22c55e" : "var(--text-3)" }}
+                  />
+                  <div>
+                    <h2 className="api-settings-title">Global Variables</h2>
+                    <p className="api-settings-subtitle">
+                      Variables available across all requests regardless of active environment.
+                    </p>
+                  </div>
                 </div>
               ) : (
-                <div>
-                  <input
-                    type="text"
-                    value={currentEnv?.name || ""}
-                    onChange={(e) =>
-                      updateEnvironment(effectiveEnvId, e.target.value)
-                    }
-                    className="api-settings-title-input"
-                    placeholder="Environment Name"
-                    title="Click to rename environment"
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <Database
+                    className={`h-5 w-5 shrink-0 ${
+                      activeEnvironmentId === effectiveEnvId ? "api-settings-env-icon-active" : ""
+                    }`}
+                    style={{ color: activeEnvironmentId === effectiveEnvId ? "#22c55e" : "var(--text-3)" }}
                   />
-                  <p className="api-settings-subtitle">
-                    Environment-specific variables override Global variables.
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <input
+                      type="text"
+                      value={currentEnv?.name || ""}
+                      onChange={(e) =>
+                        updateEnvironment(effectiveEnvId, e.target.value)
+                      }
+                      className="api-settings-title-input"
+                      placeholder="Environment Name"
+                      title="Click to rename environment"
+                    />
+                    <p className="api-settings-subtitle">
+                      Environment-specific variables override Global variables.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -321,26 +298,8 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
             <div className="api-settings-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               {effectiveEnvId !== "network" && (
                 <>
-                  {/* Active Toggle / Status */}
-                  {(effectiveEnvId === "global" ? activeEnvironmentId === null : activeEnvironmentId === effectiveEnvId) ? (
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "4px 8px",
-                        borderRadius: "4px",
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        background: "rgba(34, 197, 94, 0.15)",
-                        color: "#22c55e",
-                        border: "1px solid rgba(34, 197, 94, 0.25)",
-                      }}
-                    >
-                      <Check className="h-3 w-3" />
-                      <span>Active Environment</span>
-                    </span>
-                  ) : (
+                  {/* Set as Active Button (only when not active) */}
+                  {!(effectiveEnvId === "global" ? activeEnvironmentId === null : activeEnvironmentId === effectiveEnvId) && (
                     <button
                       type="button"
                       onClick={() => setActiveEnvironment(effectiveEnvId === "global" ? null : effectiveEnvId)}
@@ -400,50 +359,32 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 {/* Built-in Proxy Card */}
                 <div className="api-settings-card" style={{ padding: "16px" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <div
-                        style={{
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "8px",
-                          background: "rgba(59, 130, 246, 0.12)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "var(--accent)",
-                        }}
-                      >
-                        <Server className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-1)" }}>
-                          Built-in CORS Proxy
-                        </div>
-                        <div style={{ fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "5px" }}>
-                          <span>Endpoint:</span>
-                          <code style={{ color: "var(--accent)", background: "var(--bg-2)", padding: "1px 5px", borderRadius: "3px" }}>
-                            /api/proxy
-                          </code>
-                        </div>
-                      </div>
-                    </div>
-                    <span
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                    <div
                       style={{
-                        fontSize: "11px",
-                        padding: "3px 8px",
-                        borderRadius: "999px",
-                        fontWeight: 600,
-                        background: "rgba(34, 197, 94, 0.15)",
-                        color: "#22c55e",
+                        width: "32px",
+                        height: "32px",
+                        borderRadius: "8px",
+                        background: "rgba(34, 197, 94, 0.12)",
                         display: "flex",
                         alignItems: "center",
-                        gap: "4px",
+                        justifyContent: "center",
+                        color: "#22c55e",
                       }}
                     >
-                      <Check className="h-3 w-3" />
-                      Active
-                    </span>
+                      <Server className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-1)" }}>
+                        Built-in CORS Proxy
+                      </div>
+                      <div style={{ fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "5px" }}>
+                        <span>Endpoint:</span>
+                        <code style={{ color: "var(--accent)", background: "var(--bg-2)", padding: "1px 5px", borderRadius: "3px" }}>
+                          /api/proxy
+                        </code>
+                      </div>
+                    </div>
                   </div>
 
                   <div
