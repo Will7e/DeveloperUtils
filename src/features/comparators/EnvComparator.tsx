@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Search,
   Download,
@@ -17,6 +17,9 @@ import {
   Group as PanelGroup,
   Separator as PanelResizeHandle,
 } from "react-resizable-panels";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -49,6 +52,7 @@ export function EnvComparator() {
   const activeSessionId = useAppStore((s) => s.activeComparatorSessionId);
   const updateSessionInput = useAppStore((s) => s.updateComparatorSessionInput);
   const addToast = useAppStore((s) => s.addToast);
+  const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
   const inputA = activeSession.a;
@@ -58,6 +62,48 @@ export function EnvComparator() {
   const [searchQuery, setSearchQuery] = useState("");
   const [maskSecrets, setMaskSecrets] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+
+  // Handle Monaco theme dynamic switching
+  useEffect(() => {
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(
+        currentThemeSetting === "light" ? "intab-light" : "intab-dark"
+      );
+    }
+  }, [currentThemeSetting]);
+
+  const handleEditorMount = useCallback(
+    (_side: "a" | "b") => (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
+      monacoRef.current = monaco;
+      setupMonacoTheme(monaco);
+      const initTheme = useAppStore.getState().editorSettings.theme;
+      monaco.editor.setTheme(initTheme === "light" ? "intab-light" : "intab-dark");
+    },
+    []
+  );
+
+  const monacoOptions = useMemo(
+    () => ({
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      wordWrap: "on" as const,
+      padding: { top: 8, bottom: 8 },
+      fontSize: 12,
+      fontFamily: "var(--font-mono)",
+      lineNumbers: "on" as const,
+      renderLineHighlight: "all" as const,
+      tabSize: 2,
+      automaticLayout: true,
+      scrollbar: {
+        useShadows: false,
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8,
+      },
+    }),
+    []
+  );
 
   // Compute Env Diff
   const diffResult = useMemo(() => {
@@ -119,31 +165,26 @@ export function EnvComparator() {
     text += `# Generated on ${new Date().toLocaleString()}\n`;
     text += `# Missing in B: ${diffResult.stats.missingInB} | Extra in B: ${diffResult.stats.missingInA} | Mismatched: ${diffResult.stats.mismatch} | Matched: ${diffResult.stats.matched}\n\n`;
 
-    diffResult.items.forEach((item) => {
-      if (item.status === "missing_in_b") {
-        text += `[MISSING IN B] ${item.key}=${item.valueA}\n`;
-      } else if (item.status === "missing_in_a") {
-        text += `[EXTRA IN B]    ${item.key}=${item.valueB}\n`;
-      } else if (item.status === "mismatch") {
-        text += `[DIFFERENT]   ${item.key}: (A) "${item.valueA}" !== (B) "${item.valueB}"\n`;
-      } else {
-        text += `[MATCHED]     ${item.key}=${item.valueA}\n`;
-      }
+    filteredItems.forEach((item) => {
+      text += `[${item.status.toUpperCase()}] ${item.key}\n`;
+      text += `  A: ${item.valueA ?? "(not set)"}\n`;
+      text += `  B: ${item.valueB ?? "(not set)"}\n\n`;
     });
 
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `env_comparison_${Date.now()}.txt`;
+    a.download = `env_comparison_${Date.now()}.env`;
     a.click();
     URL.revokeObjectURL(url);
-    addToast({ message: "Exported .env report", type: "info" });
+    addToast({ message: "Exported comparison report", type: "info" });
   };
 
   // Search match highlighter
-  const renderHighlightedText = (text: string, query: string) => {
-    if (!query.trim()) return text;
+  const renderHighlightedText = (text?: string, query?: string) => {
+    if (!text) return "";
+    if (!query || !query.trim()) return text;
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const parts = text.split(new RegExp(`(${escaped})`, "gi"));
     return parts.map((part, i) =>
@@ -175,7 +216,7 @@ export function EnvComparator() {
           <PanelGroup orientation="horizontal">
             {/* Input A Panel */}
             <Panel defaultSize={50} minSize={25}>
-              <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col">
+              <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col min-w-0">
                 <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
                   <span className="section-label font-medium text-xs text-text-1">
                     Environment A (Reference / Staging)
@@ -194,13 +235,24 @@ export function EnvComparator() {
                     </button>
                   </ActionTooltip>
                 </div>
-                <textarea
-                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
-                  placeholder="Paste reference .env here... e.g. PORT=3000"
-                  value={inputA}
-                  onChange={(e) => updateSessionInput(activeSession.id, "a", e.target.value)}
-                  spellCheck={false}
-                />
+                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                  <Editor
+                    className="monaco-wrapper"
+                    height="100%"
+                    language="dotenv"
+                    value={inputA}
+                    onChange={(val) => updateSessionInput(activeSession.id, "a", val || "")}
+                    onMount={handleEditorMount("a")}
+                    theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
+                    options={monacoOptions}
+                    loading={<EditorLoadingFallback message="Loading .env editor..." />}
+                  />
+                  {!inputA.trim() && (
+                    <div className="pointer-events-none absolute left-14 top-2 text-xs font-mono text-text-3 select-none">
+                      Paste reference .env here... e.g. PORT=3000
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
 
@@ -208,7 +260,7 @@ export function EnvComparator() {
 
             {/* Input B Panel */}
             <Panel defaultSize={50} minSize={25}>
-              <div className="comparator-input-panel h-full flex flex-col">
+              <div className="comparator-input-panel h-full flex flex-col min-w-0">
                 <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
                   <span className="section-label font-medium text-xs text-text-1">
                     Environment B (Target / Production)
@@ -227,13 +279,24 @@ export function EnvComparator() {
                     </button>
                   </ActionTooltip>
                 </div>
-                <textarea
-                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
-                  placeholder="Paste target .env here... e.g. PORT=8080"
-                  value={inputB}
-                  onChange={(e) => updateSessionInput(activeSession.id, "b", e.target.value)}
-                  spellCheck={false}
-                />
+                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                  <Editor
+                    className="monaco-wrapper"
+                    height="100%"
+                    language="dotenv"
+                    value={inputB}
+                    onChange={(val) => updateSessionInput(activeSession.id, "b", val || "")}
+                    onMount={handleEditorMount("b")}
+                    theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
+                    options={monacoOptions}
+                    loading={<EditorLoadingFallback message="Loading .env editor..." />}
+                  />
+                  {!inputB.trim() && (
+                    <div className="pointer-events-none absolute left-14 top-2 text-xs font-mono text-text-3 select-none">
+                      Paste target .env here... e.g. PORT=8080
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
           </PanelGroup>

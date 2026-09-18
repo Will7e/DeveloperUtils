@@ -33,6 +33,7 @@ export function setupMonacoTheme(monaco: Monaco) {
       { token: "operator", foreground: "cbd5e1" },
       { token: "regexp", foreground: "fb923c" },
       { token: "identifier", foreground: "f9fafb" },
+      { token: "delimiter", foreground: "94a3b8" },
     ],
     colors: {
       "editor.background": "#111827",
@@ -84,6 +85,7 @@ export function setupMonacoTheme(monaco: Monaco) {
       { token: "operator", foreground: "475569" },
       { token: "regexp", foreground: "ea580c" },
       { token: "identifier", foreground: "0f172a" },
+      { token: "delimiter", foreground: "64748b" },
     ],
     colors: {
       "editor.background": "#ffffff",
@@ -119,6 +121,59 @@ export function setupMonacoTheme(monaco: Monaco) {
   };
   monaco.editor.defineTheme("intab-light", lightThemeConfig);
   monaco.editor.defineTheme("devutils-light", lightThemeConfig);
+
+  // Register custom .env (dotenv) language if not already present
+  const registeredLanguages = monaco.languages.getLanguages();
+  if (!registeredLanguages.some((l: { id: string }) => l.id === "dotenv")) {
+    monaco.languages.register({ id: "dotenv" });
+    monaco.languages.setMonarchTokensProvider("dotenv", {
+      defaultToken: "",
+      tokenPostfix: ".env",
+      tokenizer: {
+        root: [
+          // Comments starting with #
+          [/^\s*#.*$/, "comment"],
+          // Key = Value
+          [/^\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*(=)/, ["type", "operator"]],
+          // Strings with quotes
+          [/"([^"\\]|\\.)*"/, "string"],
+          [/'([^'\\]|\\.)*'/, "string"],
+          // URLs
+          [/https?:\/\/[^\s]+/, "string"],
+          // Booleans & Null
+          [/\b(true|false|null|undefined)\b/i, "keyword"],
+          // Numbers
+          [/\b\d+(\.\d+)?\b/, "number"],
+          // Trailing comments
+          [/\s+#.*$/, "comment"],
+        ],
+      },
+    });
+  }
+
+  // Register custom List Comparator language for item highlighting
+  if (!registeredLanguages.some((l: { id: string }) => l.id === "list-comparator")) {
+    monaco.languages.register({ id: "list-comparator" });
+    monaco.languages.setMonarchTokensProvider("list-comparator", {
+      defaultToken: "",
+      tokenPostfix: ".list",
+      tokenizer: {
+        root: [
+          // Comments
+          [/^\s*(#|\/\/).*$/, "comment"],
+          // Quoted strings
+          [/"([^"\\]|\\.)*"/, "string"],
+          [/'([^'\\]|\\.)*'/, "string"],
+          // Delimiters
+          [/[,;|]/, "delimiter"],
+          // Numbers
+          [/\b\d+(\.\d+)?\b/, "number"],
+          // Tokens / IDs
+          [/\b[a-zA-Z_][a-zA-Z0-9_.-]*\b/, "identifier"],
+        ],
+      },
+    });
+  }
 
   // Automatically register Cmd+S / Ctrl+S and Shift+Alt+F formatting for every created editor
   const monacoAny = monaco as unknown as { __intabFormatListenerAttached?: boolean; __devutilsFormatListenerAttached?: boolean };

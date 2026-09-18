@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   Copy,
   Check,
@@ -15,6 +15,9 @@ import {
   Group as PanelGroup,
   Separator as PanelResizeHandle,
 } from "react-resizable-panels";
+import Editor, { type OnMount } from "@monaco-editor/react";
+import { setupMonacoTheme } from "@/utils/monaco-theme";
+import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import {
   Tooltip,
   TooltipTrigger,
@@ -50,10 +53,53 @@ export function ListComparator() {
   const updateSessionInput = useAppStore((s) => s.updateComparatorSessionInput);
   const comparatorSettings = useAppStore((s) => s.comparatorSettings);
   const addToast = useAppStore((s) => s.addToast);
+  const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
 
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ComparisonType>("aOnly");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+
+  // Handle Monaco theme dynamic switching
+  useEffect(() => {
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(
+        currentThemeSetting === "light" ? "intab-light" : "intab-dark"
+      );
+    }
+  }, [currentThemeSetting]);
+
+  const handleEditorMount = useCallback(
+    (_side: "a" | "b") => (_editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
+      monacoRef.current = monaco;
+      setupMonacoTheme(monaco);
+      const initTheme = useAppStore.getState().editorSettings.theme;
+      monaco.editor.setTheme(initTheme === "light" ? "intab-light" : "intab-dark");
+    },
+    []
+  );
+
+  const monacoOptions = useMemo(
+    () => ({
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      wordWrap: "on" as const,
+      padding: { top: 8, bottom: 8 },
+      fontSize: 12,
+      fontFamily: "var(--font-mono)",
+      lineNumbers: "on" as const,
+      renderLineHighlight: "all" as const,
+      tabSize: 2,
+      automaticLayout: true,
+      scrollbar: {
+        useShadows: false,
+        verticalScrollbarSize: 8,
+        horizontalScrollbarSize: 8,
+      },
+    }),
+    []
+  );
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
   const inputA = activeSession.a;
@@ -148,12 +194,12 @@ export function ListComparator() {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <PanelGroup orientation="vertical">
-        {/* Top: Dual Inputs */}
+        {/* Top: Dual List Inputs */}
         <Panel defaultSize={42} minSize={20}>
           <PanelGroup orientation="horizontal">
             {/* List A Panel */}
             <Panel defaultSize={50} minSize={20}>
-              <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col">
+              <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col min-w-0">
                 <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
@@ -190,13 +236,24 @@ export function ListComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <textarea
-                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
-                  placeholder="Paste List A here... (comma, newline, or semicolon delimited)"
-                  value={inputA}
-                  onChange={(e) => updateSessionInput(activeSession.id, "a", e.target.value)}
-                  spellCheck={false}
-                />
+                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                  <Editor
+                    className="monaco-wrapper"
+                    height="100%"
+                    language="list-comparator"
+                    value={inputA}
+                    onChange={(val) => updateSessionInput(activeSession.id, "a", val || "")}
+                    onMount={handleEditorMount("a")}
+                    theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
+                    options={monacoOptions}
+                    loading={<EditorLoadingFallback message="Loading List editor..." />}
+                  />
+                  {!inputA.trim() && (
+                    <div className="pointer-events-none absolute left-14 top-2 text-xs font-mono text-text-3 select-none">
+                      Paste List A here... (comma, newline, or semicolon delimited)
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
 
@@ -204,7 +261,7 @@ export function ListComparator() {
 
             {/* List B Panel */}
             <Panel defaultSize={50} minSize={20}>
-              <div className="comparator-input-panel h-full flex flex-col">
+              <div className="comparator-input-panel h-full flex flex-col min-w-0">
                 <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="section-label font-medium text-xs text-text-1">
@@ -241,13 +298,24 @@ export function ListComparator() {
                     </ActionTooltip>
                   </div>
                 </div>
-                <textarea
-                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
-                  placeholder="Paste List B here... (comma, newline, or semicolon delimited)"
-                  value={inputB}
-                  onChange={(e) => updateSessionInput(activeSession.id, "b", e.target.value)}
-                  spellCheck={false}
-                />
+                <div className="flex-1 w-full min-h-0 relative bg-bg-0">
+                  <Editor
+                    className="monaco-wrapper"
+                    height="100%"
+                    language="list-comparator"
+                    value={inputB}
+                    onChange={(val) => updateSessionInput(activeSession.id, "b", val || "")}
+                    onMount={handleEditorMount("b")}
+                    theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
+                    options={monacoOptions}
+                    loading={<EditorLoadingFallback message="Loading List editor..." />}
+                  />
+                  {!inputB.trim() && (
+                    <div className="pointer-events-none absolute left-14 top-2 text-xs font-mono text-text-3 select-none">
+                      Paste List B here... (comma, newline, or semicolon delimited)
+                    </div>
+                  )}
+                </div>
               </div>
             </Panel>
           </PanelGroup>
