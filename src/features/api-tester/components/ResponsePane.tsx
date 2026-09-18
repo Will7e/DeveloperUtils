@@ -290,8 +290,8 @@ export function ResponsePane({
                       }}
                     >
                       <li>
-                        Use a CORS proxy (enable the Shield icon in the URL bar
-                        to route via corsproxy.io).
+                        Enable the <strong>CORS Proxy</strong> (click the Shield icon in the URL bar
+                        to route requests through the built-in proxy).
                       </li>
                       <li>
                         Use the built-in <strong>Mock API Presets</strong> which

@@ -7,6 +7,10 @@ import {
   BookOpen,
   X,
   Check,
+  Shield,
+  Server,
+  Lock,
+  FileText,
 } from "lucide-react";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -29,19 +33,32 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
   const updateEnvironment = useApiTesterStore((s) => s.updateEnvironment);
   const removeEnvironment = useApiTesterStore((s) => s.removeEnvironment);
   const setEnvironmentVars = useApiTesterStore((s) => s.setEnvironmentVars);
+  const customProxyUrl = useApiTesterStore((s) => s.customProxyUrl);
+  const setCustomProxyUrl = useApiTesterStore((s) => s.setCustomProxyUrl);
+
+  const [proxyUrlInput, setProxyUrlInput] = useState<string>(() => customProxyUrl || "");
+  const [proxySavedMessage, setProxySavedMessage] = useState<boolean>(false);
+  const [prevProxyUrl, setPrevProxyUrl] = useState<string | null>(customProxyUrl);
+
+  if (prevProxyUrl !== customProxyUrl) {
+    setPrevProxyUrl(customProxyUrl);
+    setProxyUrlInput(customProxyUrl || "");
+  }
 
   // Sync selected scope when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      if (initialEnvId && (initialEnvId === "global" || environments.some((e) => e.id === initialEnvId))) {
-        setSettingsEnvId(initialEnvId);
-      } else if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
-        setSettingsEnvId(activeEnvironmentId);
-      } else {
-        setSettingsEnvId("global");
-      }
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+  if (!prevIsOpen && isOpen) {
+    setPrevIsOpen(true);
+    if (initialEnvId && (initialEnvId === "global" || environments.some((e) => e.id === initialEnvId))) {
+      setSettingsEnvId(initialEnvId);
+    } else if (activeEnvironmentId && environments.some((e) => e.id === activeEnvironmentId)) {
+      setSettingsEnvId(activeEnvironmentId);
+    } else {
+      setSettingsEnvId("global");
     }
-  }, [isOpen, initialEnvId, activeEnvironmentId, environments]);
+  } else if (prevIsOpen && !isOpen) {
+    setPrevIsOpen(false);
+  }
 
   // Close on Escape key
   useEffect(() => {
@@ -61,6 +78,7 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
   // Fallback to global if active environment was deleted (derived state)
   const isEnvValid =
     settingsEnvId === "global" ||
+    settingsEnvId === "network" ||
     environments.some((e) => e.id === settingsEnvId);
   const effectiveEnvId = isEnvValid ? settingsEnvId : "global";
 
@@ -218,6 +236,39 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
               <Plus className="h-3.5 w-3.5 shrink-0" />
               <span>Add Environment</span>
             </button>
+
+            {/* Network Section */}
+            <div className="api-settings-nav-label" style={{ marginTop: "16px" }}>
+              Network & Proxy
+            </div>
+            <button
+              type="button"
+              onClick={() => setSettingsEnvId("network")}
+              className={`api-settings-env-btn ${
+                effectiveEnvId === "network" ? "api-settings-env-btn-active" : ""
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <Shield
+                  className={`h-4 w-4 shrink-0 api-settings-env-icon ${
+                    effectiveEnvId === "network" ? "text-accent" : ""
+                  }`}
+                />
+                <span className="truncate">Proxy & CORS</span>
+              </div>
+              <span
+                style={{
+                  fontSize: "10px",
+                  padding: "1px 6px",
+                  borderRadius: "4px",
+                  fontWeight: 600,
+                  background: "rgba(34, 197, 94, 0.15)",
+                  color: "#22c55e",
+                }}
+              >
+                READY
+              </span>
+            </button>
           </div>
 
           {/* Sidebar Footer */}
@@ -234,7 +285,14 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
           {/* Top Bar Header */}
           <div className="api-settings-topbar">
             <div className="api-settings-topbar-info">
-              {effectiveEnvId === "global" ? (
+              {effectiveEnvId === "network" ? (
+                <div>
+                  <h2 className="api-settings-title">Proxy & CORS</h2>
+                  <p className="api-settings-subtitle">
+                    Manage network proxy routing to bypass browser CORS restrictions.
+                  </p>
+                </div>
+              ) : effectiveEnvId === "global" ? (
                 <div>
                   <h2 className="api-settings-title">Global Variables</h2>
                   <p className="api-settings-subtitle">
@@ -261,63 +319,67 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
             </div>
 
             <div className="api-settings-topbar-actions" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              {/* Active Toggle / Status */}
-              {(effectiveEnvId === "global" ? activeEnvironmentId === null : activeEnvironmentId === effectiveEnvId) ? (
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    padding: "4px 8px",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    background: "rgba(34, 197, 94, 0.15)",
-                    color: "#22c55e",
-                    border: "1px solid rgba(34, 197, 94, 0.25)",
-                  }}
-                >
-                  <Check className="h-3 w-3" />
-                  <span>Active Environment</span>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setActiveEnvironment(effectiveEnvId === "global" ? null : effectiveEnvId)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "4px 10px",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    fontWeight: 500,
-                    background: "var(--bg-2)",
-                    color: "var(--text-1)",
-                    border: "1px solid var(--border-1)",
-                    cursor: "pointer",
-                    transition: "all 0.15s ease",
-                  }}
-                >
-                  <Check className="h-3.5 w-3.5 text-accent" />
-                  <span>Set as Active</span>
-                </button>
-              )}
+              {effectiveEnvId !== "network" && (
+                <>
+                  {/* Active Toggle / Status */}
+                  {(effectiveEnvId === "global" ? activeEnvironmentId === null : activeEnvironmentId === effectiveEnvId) ? (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 8px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        background: "rgba(34, 197, 94, 0.15)",
+                        color: "#22c55e",
+                        border: "1px solid rgba(34, 197, 94, 0.25)",
+                      }}
+                    >
+                      <Check className="h-3 w-3" />
+                      <span>Active Environment</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setActiveEnvironment(effectiveEnvId === "global" ? null : effectiveEnvId)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        padding: "4px 10px",
+                        borderRadius: "4px",
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        background: "var(--bg-2)",
+                        color: "var(--text-1)",
+                        border: "1px solid var(--border-1)",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <Check className="h-3.5 w-3.5 text-accent" />
+                      <span>Set as Active</span>
+                    </button>
+                  )}
 
-              {effectiveEnvId !== "global" && (
-                <SimpleTooltip content="Delete Environment">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      removeEnvironment(effectiveEnvId);
-                      setSettingsEnvId("global");
-                    }}
-                    className="api-settings-delete-btn"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span>Delete</span>
-                  </button>
-                </SimpleTooltip>
+                  {effectiveEnvId !== "global" && (
+                    <SimpleTooltip content="Delete Environment">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removeEnvironment(effectiveEnvId);
+                          setSettingsEnvId("global");
+                        }}
+                        className="api-settings-delete-btn"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete</span>
+                      </button>
+                    </SimpleTooltip>
+                  )}
+                </>
               )}
               <SimpleTooltip content="Close (Esc)">
                 <button
@@ -334,8 +396,158 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
 
           {/* Body */}
           <div className="api-settings-body">
-            {/* Variables Table Card */}
-            <div className="api-settings-card">
+            {effectiveEnvId === "network" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {/* Built-in Proxy Card */}
+                <div className="api-settings-card" style={{ padding: "16px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          borderRadius: "8px",
+                          background: "rgba(59, 130, 246, 0.12)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "var(--accent)",
+                        }}
+                      >
+                        <Server className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-1)" }}>
+                          Built-in CORS Proxy
+                        </div>
+                        <div style={{ fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "5px" }}>
+                          <span>Endpoint:</span>
+                          <code style={{ color: "var(--accent)", background: "var(--bg-2)", padding: "1px 5px", borderRadius: "3px" }}>
+                            /api/proxy
+                          </code>
+                        </div>
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        padding: "3px 8px",
+                        borderRadius: "999px",
+                        fontWeight: 600,
+                        background: "rgba(34, 197, 94, 0.15)",
+                        color: "#22c55e",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <Check className="h-3 w-3" />
+                      Active
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "20px",
+                      padding: "10px 12px",
+                      background: "var(--bg-2)",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-1)",
+                      fontSize: "11px",
+                      color: "var(--text-2)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <Lock className="h-3.5 w-3.5 text-accent shrink-0" />
+                      <span>Private & Local (no 3rd-party servers)</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <FileText className="h-3.5 w-3.5 text-accent shrink-0" />
+                      <span>Full response headers & streaming</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom Proxy URL Card */}
+                <div className="api-settings-card" style={{ padding: "16px" }}>
+                  <div style={{ marginBottom: "10px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-1)", marginBottom: "2px" }}>
+                      Custom Proxy URL
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--text-3)" }}>
+                      Optional override for static hosting (e.g. GitHub Pages) or custom workers.
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input
+                      type="text"
+                      className="api-settings-input"
+                      placeholder="https://my-proxy.workers.dev/?url="
+                      value={proxyUrlInput}
+                      onChange={(e) => setProxyUrlInput(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "7px 10px",
+                        fontSize: "12px",
+                        background: "var(--bg-2)",
+                        border: "1px solid var(--border-1)",
+                        borderRadius: "6px",
+                        color: "var(--text-1)",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomProxyUrl(proxyUrlInput.trim() ? proxyUrlInput.trim() : null);
+                        setProxySavedMessage(true);
+                        setTimeout(() => setProxySavedMessage(false), 2000);
+                      }}
+                      style={{
+                        padding: "7px 14px",
+                        fontSize: "12px",
+                        fontWeight: 600,
+                        borderRadius: "6px",
+                        background: "var(--accent)",
+                        color: "#fff",
+                        border: "none",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {proxySavedMessage ? "Saved" : "Save"}
+                    </button>
+                    {customProxyUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProxyUrlInput("");
+                          setCustomProxyUrl(null);
+                          setProxySavedMessage(true);
+                          setTimeout(() => setProxySavedMessage(false), 2000);
+                        }}
+                        style={{
+                          padding: "7px 10px",
+                          fontSize: "12px",
+                          borderRadius: "6px",
+                          background: "var(--bg-2)",
+                          color: "var(--text-2)",
+                          border: "1px solid var(--border-1)",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Variables Table Card */}
+                <div className="api-settings-card">
               {/* Table Column Headers */}
               <div className="api-settings-card-header">
                 <div className="api-settings-cell-check">
@@ -476,24 +688,26 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
               </div>
             </div>
 
-            {/* How to use Environment Variables Callout */}
-            <div className="api-settings-callout">
-              <div className="api-settings-callout-icon">
-                <BookOpen className="h-4 w-4" />
-              </div>
-              <div className="api-settings-callout-content">
-                <div className="api-settings-callout-title">
-                  Using Environment Variables
+                {/* How to use Environment Variables Callout */}
+                <div className="api-settings-callout">
+                  <div className="api-settings-callout-icon">
+                    <BookOpen className="h-4 w-4" />
+                  </div>
+                  <div className="api-settings-callout-content">
+                    <div className="api-settings-callout-title">
+                      Using Environment Variables
+                    </div>
+                    <div className="api-settings-callout-desc">
+                      Insert{" "}
+                      <code className="api-settings-callout-code">
+                        &#123;&#123;variable_name&#125;&#125;
+                      </code>{" "}
+                      anywhere in the URL bar, Headers, Query Parameters, or Body. The variable value will be automatically substituted when sending the request.
+                    </div>
+                  </div>
                 </div>
-                <div className="api-settings-callout-desc">
-                  Insert{" "}
-                  <code className="api-settings-callout-code">
-                    &#123;&#123;variable_name&#125;&#125;
-                  </code>{" "}
-                  anywhere in the URL bar, Headers, Query Parameters, or Body. The variable value will be automatically substituted when sending the request.
-                </div>
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
       </div>

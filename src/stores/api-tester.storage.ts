@@ -27,6 +27,9 @@ export interface StorageAdapter {
 
   getAddedPresetIds(): Promise<string[]>;
   saveAddedPresetIds(ids: string[]): Promise<void>;
+
+  getCustomProxyUrl(): Promise<string | null>;
+  saveCustomProxyUrl(url: string | null): Promise<void>;
 }
 
 // ── Sensitive field definitions ─────────────────────────────
@@ -253,6 +256,27 @@ export class LocalStorageAdapter implements StorageAdapter {
       localStorage.setItem("devutils_api_added_preset_ids", JSON.stringify(ids));
     } catch (e) {
       console.error("Failed to save added preset ids", e);
+    }
+  }
+
+  async getCustomProxyUrl(): Promise<string | null> {
+    try {
+      const saved = localStorage.getItem("devutils_api_custom_proxy");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveCustomProxyUrl(url: string | null): Promise<void> {
+    try {
+      if (url && url.trim()) {
+        localStorage.setItem("devutils_api_custom_proxy", JSON.stringify(url.trim()));
+      } else {
+        localStorage.removeItem("devutils_api_custom_proxy");
+      }
+    } catch (e) {
+      console.error("Failed to save custom proxy url", e);
     }
   }
 }
@@ -546,6 +570,14 @@ export class EncryptedStorageAdapter implements StorageAdapter {
 
   async saveAddedPresetIds(ids: string[]): Promise<void> {
     return this.fallback.saveAddedPresetIds(ids);
+  }
+
+  async getCustomProxyUrl(): Promise<string | null> {
+    return this.fallback.getCustomProxyUrl();
+  }
+
+  async saveCustomProxyUrl(url: string | null): Promise<void> {
+    return this.fallback.saveCustomProxyUrl(url);
   }
 }
 

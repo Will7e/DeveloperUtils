@@ -40,7 +40,7 @@ export function UrlBar({
     return environments.find((e) => e.id === activeEnvironmentId)?.variables || [];
   }, [activeEnvironmentId, environments]);
 
-  const hasEnvVars = /(?:\{\{|\%7B\%7B)[^}%]+(?:%7D%7D|\}\})/i.test(activeTab.url);
+  const hasEnvVars = /(?:\{\{|%7B%7B)[^}%]+(?:%7D%7D|\}\})/i.test(activeTab.url);
   const resolvedUrl = useMemo(() => {
     if (!hasEnvVars) return "";
     return substituteEnvVars(activeTab.url, store.envVars, activeEnvVars);
@@ -186,7 +186,7 @@ export function UrlBar({
               <SimpleTooltip
                 content={
                   activeTab.useProxy
-                    ? "CORS Proxy: ENABLED (Routing via corsproxy.io)"
+                    ? "CORS Proxy: ENABLED (Bypasses CORS restrictions)"
                     : "CORS Proxy: DISABLED (Direct browser request)"
                 }
               >

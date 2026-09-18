@@ -223,6 +223,10 @@ interface ApiTesterState {
   addPresetToSidebar: (presetId: string) => void;
   removePresetFromSidebar: (presetId: string) => void;
   togglePresetInSidebar: (presetId: string) => void;
+
+  // Network & Proxy Settings
+  customProxyUrl: string | null;
+  setCustomProxyUrl: (url: string | null) => void;
 }
 
 // Generate unique ID
@@ -328,7 +332,7 @@ export function substituteEnvVars(text: string, globalVars: KeyValueField[], act
   activeEnabled.forEach(v => varMap.set(v.key.trim(), v.value));
   
   // Match both literal {{var}} and URL-encoded %7B%7Bvar%7D%7D
-  return text.replace(/(?:\{\{|\%7B\%7B)\s*([^}%]+?)\s*(?:\}\}|\%7D\%7D)/gi, (match, key) => {
+  return text.replace(/(?:\{\{|%7B%7B)\s*([^}%]+?)\s*(?:\}\}|%7D%7D)/gi, (match, key) => {
     const cleanKey = key.trim();
     return varMap.has(cleanKey) ? varMap.get(cleanKey)! : match;
   });
@@ -423,10 +427,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     activeEnvironmentId: null,
     customPresets: [],
     addedPresetIds: [],
+    customProxyUrl: null,
 
     init: async () => {
       if (get().isInitialized) return;
-      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId, customPresets, addedPresetIds] = await Promise.all([
+      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId, customPresets, addedPresetIds, customProxyUrl] = await Promise.all([
         apiStorage.getTabs(),
         apiStorage.getHistory(),
         apiStorage.getCollections(),
@@ -435,6 +440,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         apiStorage.getActiveEnvId(),
         apiStorage.getCustomPresets(),
         apiStorage.getAddedPresetIds(),
+        apiStorage.getCustomProxyUrl(),
       ]);
 
       const normalizedTabs = storedTabs
@@ -474,6 +480,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         activeEnvironmentId: validActiveEnvId,
         customPresets: customPresets || [],
         addedPresetIds: addedPresetIds || [],
+        customProxyUrl: customProxyUrl || null,
       });
     },
 
@@ -637,6 +644,10 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     setProtocol: (protocol) => updateActiveTab({ protocol }),
     setUseProxy: (useProxy) => updateActiveTab({ useProxy }),
     toggleProxy: () => updateActiveTab((t) => ({ useProxy: !t.useProxy })),
+    setCustomProxyUrl: (url) => {
+      apiStorage.saveCustomProxyUrl(url);
+      set({ customProxyUrl: url });
+    },
 
     // ── GraphQL ────────────────────────────────────────────────
     setGraphqlQuery: (query) => updateActiveTab({ graphqlQuery: query }),
@@ -1080,9 +1091,26 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       computedHeaders = authed.headers;
       let finalUrl = authed.url;
 
-      // CORS Proxy: route through proxy if enabled
+      // CORS Proxy: route through first-party proxy (or custom proxy) if enabled
       if (tab.useProxy) {
-        finalUrl = `https://corsproxy.io/?url=${encodeURIComponent(finalUrl)}`;
+        const customProxy = state.customProxyUrl?.trim();
+        if (customProxy) {
+          if (customProxy.includes("{url}")) {
+            finalUrl = customProxy.replace("{url}", encodeURIComponent(finalUrl));
+          } else if (customProxy.endsWith("=") || customProxy.endsWith("?")) {
+            finalUrl = `${customProxy}${encodeURIComponent(finalUrl)}`;
+          } else {
+            finalUrl = `${customProxy}?url=${encodeURIComponent(finalUrl)}`;
+          }
+        } else {
+          finalUrl = `/api/proxy?url=${encodeURIComponent(finalUrl)}`;
+        }
+
+        try {
+          computedHeaders["x-proxy-headers"] = encodeURIComponent(JSON.stringify(computedHeaders));
+        } catch {
+          // Ignore serialization failure
+        }
       }
 
       // Determine effective method: GraphQL always uses POST
