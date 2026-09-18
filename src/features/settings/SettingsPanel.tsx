@@ -16,6 +16,13 @@ import {
   Sliders,
   HardDrive,
   RefreshCw,
+  Columns,
+  GitCompare,
+  FileCode2,
+  Layers,
+  CheckCircle2,
+  Check,
+  Sparkles,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
@@ -29,8 +36,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 interface SettingsDropdownProps<T extends string | number> {
   value: T;
@@ -48,7 +57,7 @@ function SettingsDropdown<T extends string | number>({
   const selectedOption = options.find((o) => o.value === value) || options[0];
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <button className={`settings-select flex items-center justify-between ${className}`}>
           <span className="truncate">{selectedOption?.label}</span>
@@ -59,6 +68,7 @@ function SettingsDropdown<T extends string | number>({
         {options.map((opt) => (
           <DropdownMenuItem
             key={String(opt.value)}
+            onSelect={() => onChange(opt.value)}
             onClick={() => onChange(opt.value)}
             className="cursor-pointer text-xs"
           >
@@ -86,6 +96,7 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
 );
 
 type SettingsTab = "editor" | "experience" | "security";
+type CleanupTarget = "all" | "comparators" | "diff" | "formatters" | "files";
 
 export function SettingsPanel() {
   const settingsOpen = useAppStore((s) => s.settingsOpen);
@@ -96,13 +107,79 @@ export function SettingsPanel() {
   const resetVault = useVaultStore((s) => s.resetVault);
   const [activeTab, setActiveTab] = useState<SettingsTab>("editor");
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [pendingCleanup, setPendingCleanup] = useState<CleanupTarget | null>(null);
   const [storageUsage, setStorageUsage] = useState(() => getLocalStorageUsage());
+  const [isRefreshingStorage, setIsRefreshingStorage] = useState(false);
 
+  const handleRefreshStorage = () => {
+    setIsRefreshingStorage(true);
+    setStorageUsage(getLocalStorageUsage());
+    setTimeout(() => {
+      setIsRefreshingStorage(false);
+    }, 650);
+  };
+
+  const comparatorSessions = useAppStore((s) => s.comparatorSessions);
   const activeComparatorSessionId = useAppStore((s) => s.activeComparatorSessionId);
   const closeOtherComparatorSessions = useAppStore((s) => s.closeOtherComparatorSessions);
+
+  const diffSessions = useAppStore((s) => s.diffSessions);
   const activeDiffSessionId = useAppStore((s) => s.activeDiffSessionId);
   const closeOtherDiffSessions = useAppStore((s) => s.closeOtherDiffSessions);
+
+  const formatterFiles = useAppStore((s) => s.formatterFiles);
+  const activeFormatterFileId = useAppStore((s) => s.activeFormatterFileId);
+  const closeOtherFormatterFiles = useAppStore((s) => s.closeOtherFormatterFiles);
+
+  const files = useAppStore((s) => s.files);
+  const activeFileId = useAppStore((s) => s.activeFileId);
+  const closeOtherFiles = useAppStore((s) => s.closeOtherFiles);
+
   const addToast = useAppStore((s) => s.addToast);
+
+  // Inactive tab counts
+  const inactiveComparators = Math.max(0, (comparatorSessions?.length || 0) - 1);
+  const inactiveDiffs = Math.max(0, (diffSessions?.length || 0) - 1);
+  const inactiveFormatters =
+    Math.max(0, (formatterFiles?.json?.length || 0) - 1) +
+    Math.max(0, (formatterFiles?.xml?.length || 0) - 1);
+  const inactiveFiles = Math.max(0, (files?.length || 0) - 1);
+  const totalInactive = inactiveComparators + inactiveDiffs + inactiveFormatters + inactiveFiles;
+
+  const cleanupTargetsConfig: Record<
+    CleanupTarget,
+    {
+      label: string;
+      count: number;
+      description: string;
+    }
+  > = {
+    all: {
+      label: "All Features",
+      count: totalInactive,
+      description: `This will close all ${totalInactive} inactive background tabs across Comparators, Diff Checker, Formatters, and Code Editor. Your currently open active tabs in each tool will remain untouched.`,
+    },
+    comparators: {
+      label: "Comparators Suite",
+      count: inactiveComparators,
+      description: `This will close ${inactiveComparators} inactive comparator tab${inactiveComparators === 1 ? "" : "s"}. Your active comparator session will remain open.`,
+    },
+    diff: {
+      label: "Diff Checker",
+      count: inactiveDiffs,
+      description: `This will close ${inactiveDiffs} inactive diff tab${inactiveDiffs === 1 ? "" : "s"}. Your active diff comparison session will remain open.`,
+    },
+    formatters: {
+      label: "Formatters (JSON & XML)",
+      count: inactiveFormatters,
+      description: `This will close ${inactiveFormatters} inactive formatter file tab${inactiveFormatters === 1 ? "" : "s"}. Your active formatter document will remain open.`,
+    },
+    files: {
+      label: "Code Editor Files",
+      count: inactiveFiles,
+      description: `This will close ${inactiveFiles} background file tab${inactiveFiles === 1 ? "" : "s"} in the code editor. Your currently open file will remain open.`,
+    },
+  };
 
   // Refresh storage meter when settings opens or active tab is security
   useEffect(() => {
@@ -111,13 +188,51 @@ export function SettingsPanel() {
     }
   }, [settingsOpen, activeTab]);
 
-  const handlePruneInactiveSessions = () => {
-    closeOtherComparatorSessions(activeComparatorSessionId);
-    closeOtherDiffSessions(activeDiffSessionId);
+  const handleExecuteCleanup = (target: CleanupTarget) => {
+    let closedCount = 0;
+
+    if (target === "all" || target === "comparators") {
+      if (comparatorSessions && comparatorSessions.length > 1) {
+        closedCount += comparatorSessions.length - 1;
+        closeOtherComparatorSessions(activeComparatorSessionId);
+      }
+    }
+
+    if (target === "all" || target === "diff") {
+      if (diffSessions && diffSessions.length > 1) {
+        closedCount += diffSessions.length - 1;
+        closeOtherDiffSessions(activeDiffSessionId);
+      }
+    }
+
+    if (target === "all" || target === "formatters") {
+      if (formatterFiles?.json && formatterFiles.json.length > 1) {
+        closedCount += formatterFiles.json.length - 1;
+        closeOtherFormatterFiles("json", activeFormatterFileId.json);
+      }
+      if (formatterFiles?.xml && formatterFiles.xml.length > 1) {
+        closedCount += formatterFiles.xml.length - 1;
+        closeOtherFormatterFiles("xml", activeFormatterFileId.xml);
+      }
+    }
+
+    if (target === "all" || target === "files") {
+      if (files && files.length > 1) {
+        const keepId = activeFileId || files[0]!.id;
+        closedCount += files.length - 1;
+        closeOtherFiles(keepId);
+      }
+    }
+
+    setPendingCleanup(null);
+
     setTimeout(() => {
       setStorageUsage(getLocalStorageUsage());
       addToast({
-        message: "Cleaned up inactive comparator & diff sessions",
+        message:
+          closedCount > 0
+            ? `Cleaned up ${closedCount} inactive tab${closedCount === 1 ? "" : "s"} (${cleanupTargetsConfig[target].label})`
+            : "No inactive tabs were found to close",
         type: "success",
       });
     }, 120);
@@ -563,30 +678,194 @@ export function SettingsPanel() {
                     </span>
                     <button
                       type="button"
-                      className="text-accent hover:underline flex items-center gap-1 cursor-pointer"
-                      onClick={() => setStorageUsage(getLocalStorageUsage())}
+                      className="text-accent hover:underline flex items-center gap-1 cursor-pointer transition-opacity disabled:opacity-60"
+                      onClick={handleRefreshStorage}
+                      disabled={isRefreshingStorage}
                     >
-                      <RefreshCw className="h-3 w-3" /> Refresh
+                      <RefreshCw
+                        className={cn(
+                          "h-3 w-3",
+                          isRefreshingStorage && "refresh-spin-anim"
+                        )}
+                      />
+                      <span>{isRefreshingStorage ? "Refreshed" : "Refresh"}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Clean Inactive Sessions */}
+                {/* Clean Inactive Sessions Dropdown */}
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <label className="settings-label">Clean Inactive Tabs</label>
+                    <div className="flex items-center gap-2">
+                      <label className="settings-label">Clean Inactive Tabs</label>
+                      {totalInactive > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-medium">
+                          {totalInactive} idle
+                        </span>
+                      )}
+                    </div>
                     <span className="settings-sublabel">
-                      Close background comparator & diff tabs to free browser storage
+                      Close background tabs across features to free browser storage
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="settings-action-btn"
-                    onClick={handlePruneInactiveSessions}
-                  >
-                    Clean Up Tabs
-                  </button>
+
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="settings-action-btn flex items-center gap-1.5"
+                      >
+                        <span>Clean Up Tabs</span>
+                        <ChevronDown className="h-3 w-3 opacity-70" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-[230px] p-1.5">
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-3">
+                        Select tool to clean
+                      </div>
+
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("all");
+                        }}
+                        onClick={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("all");
+                        }}
+                        disabled={totalInactive === 0}
+                        className="flex items-center justify-between cursor-pointer py-1.5 text-xs font-medium"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Layers className="h-3.5 w-3.5 text-accent" />
+                          <span>All Features</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-2 font-mono">
+                          {totalInactive}
+                        </span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuSeparator />
+
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("comparators");
+                        }}
+                        onClick={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("comparators");
+                        }}
+                        disabled={inactiveComparators === 0}
+                        className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Columns className="h-3.5 w-3.5 text-text-2" />
+                          <span>Comparators Suite</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-2 font-mono">
+                          {inactiveComparators}
+                        </span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("diff");
+                        }}
+                        onClick={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("diff");
+                        }}
+                        disabled={inactiveDiffs === 0}
+                        className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <GitCompare className="h-3.5 w-3.5 text-text-2" />
+                          <span>Diff Checker</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-2 font-mono">
+                          {inactiveDiffs}
+                        </span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("formatters");
+                        }}
+                        onClick={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("formatters");
+                        }}
+                        disabled={inactiveFormatters === 0}
+                        className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileCode2 className="h-3.5 w-3.5 text-text-2" />
+                          <span>Formatters</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-2 font-mono">
+                          {inactiveFormatters}
+                        </span>
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("files");
+                        }}
+                        onClick={() => {
+                          setShowResetConfirm(false);
+                          setPendingCleanup("files");
+                        }}
+                        disabled={inactiveFiles === 0}
+                        className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Code2 className="h-3.5 w-3.5 text-text-2" />
+                          <span>Code Editor</span>
+                        </div>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-text-2 font-mono">
+                          {inactiveFiles}
+                        </span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
+
+                {/* Cleanup Confirmation Subform */}
+                {pendingCleanup && (
+                  <div className="settings-vault-subform">
+                    <div className="settings-subform-title text-accent">
+                      <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+                      <span>Confirm Clean Up: {cleanupTargetsConfig[pendingCleanup].label}</span>
+                    </div>
+                    <p className="settings-subform-warning">
+                      {cleanupTargetsConfig[pendingCleanup].description}
+                    </p>
+                    <div className="settings-subform-btns">
+                      <button
+                        type="button"
+                        onClick={() => handleExecuteCleanup(pendingCleanup)}
+                        className="settings-subform-action-btn flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle2 size={12} />
+                        <span>
+                          Confirm & Close {cleanupTargetsConfig[pendingCleanup].count} Tab
+                          {cleanupTargetsConfig[pendingCleanup].count === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingCleanup(null)}
+                        className="settings-subform-cancel"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="settings-row">
                   <div className="settings-row-info">
@@ -598,7 +877,10 @@ export function SettingsPanel() {
                   <button
                     type="button"
                     className="settings-action-btn danger"
-                    onClick={() => setShowResetConfirm(true)}
+                    onClick={() => {
+                      setShowResetConfirm(true);
+                      setPendingCleanup(null);
+                    }}
                   >
                     <Trash2 size={12} />
                     Clear Data

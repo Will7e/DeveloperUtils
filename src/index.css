@@ -2798,6 +2798,23 @@ html.light .settings-action-btn:hover {
   opacity: 0.9;
 }
 
+.settings-subform-action-btn {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.settings-subform-action-btn:hover {
+  opacity: 0.9;
+}
+
 .settings-footer {
   padding: 10px 20px;
   border-top: 1px solid var(--border-1);
@@ -3506,7 +3523,7 @@ html.light .loader-bar-fill {
 
 .intab-tooltip,
 .devutils-tooltip {
-  z-index: 9999;
+  z-index: 100003;
   overflow: hidden;
   padding: 6px 12px;
   font-family: var(--font-sans);
@@ -5341,7 +5358,7 @@ html.light .comparator-mode-btn.active {
    ============================================================ */
 
 .dropdown-content {
-  z-index: 9999;
+  z-index: 100002;
   min-width: 180px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
@@ -5368,7 +5385,7 @@ html.light .comparator-mode-btn.active {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
+  min-height: 32px;
   padding: 0 12px;
   font-size: 12px;
   color: var(--text-2);
@@ -5384,6 +5401,12 @@ html.light .comparator-mode-btn.active {
 .dropdown-item[data-highlighted] {
   background: var(--bg-hover);
   color: var(--text-1);
+}
+
+.dropdown-item[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .dropdown-item[data-state="checked"] {
@@ -5421,7 +5444,7 @@ html.light .comparator-mode-btn.active {
 }
 
 .tab-context-menu {
-  z-index: 9999;
+  z-index: 100002;
   min-width: 195px;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
@@ -8086,7 +8109,15 @@ html.light .vault-container {
     0 0 80px -20px rgba(2, 132, 199, 0.08);
 }
 
+@keyframes refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-
-
-
+.refresh-spin-anim {
+  animation: refresh-spin 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
