@@ -223,7 +223,6 @@
 .api-history-card:hover {
   background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
   border-color: var(--border-1);
-  transform: translateX(4px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
@@ -572,6 +571,7 @@
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
   height: 42px;
+  padding: 0 4px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   /* removed overflow: hidden to allow dropdowns to show */
 }
@@ -584,30 +584,33 @@
 
 .api-omnibox-divider {
   width: 1px;
-  height: 24px;
+  height: 20px;
   background: var(--border-1);
   flex-shrink: 0;
+  margin: 0 4px;
 }
 
 .api-method-dropdown-container {
   position: relative;
   display: flex;
+  align-items: center;
   height: 100%;
 }
 
 .api-method-select {
-  height: 100%;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 10px;
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   color: var(--text-1);
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.15s ease, color 0.15s ease;
   outline: none;
-  min-width: 105px;
+  min-width: 95px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -615,17 +618,10 @@
   letter-spacing: 0.5px;
 }
 
-.api-method-select:focus-visible {
+.api-method-select:focus-visible,
+.api-method-select:hover,
+.api-method-select.api-method-select-open {
   background: var(--bg-hover);
-}
-
-.api-method-select:hover {
-  background: var(--bg-hover);
-}
-
-.api-omnibox > .api-method-dropdown-container:first-child .api-method-select {
-  border-top-left-radius: var(--radius-md);
-  border-bottom-left-radius: var(--radius-md);
 }
 
 /* Method select color variants */
@@ -1758,8 +1754,10 @@ html.light .api-auth-type-btn-active {
   background: rgba(2, 132, 199, 0.10);
 }
 
-html.light .api-method-select {
-  background: var(--bg-2);
+html.light .api-method-select:hover,
+html.light .api-method-select:focus-visible,
+html.light .api-method-select.api-method-select-open {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 html.light .api-curl-btn {
@@ -2311,6 +2309,8 @@ html.light .api-editor-format-btn:hover {
   color: var(--accent) !important;
   font-family: var(--font-mono);
   font-weight: 700;
+  height: 32px;
+  border-radius: var(--radius-sm);
 }
 
 /* ── Resizable Panel Handle ────────────────────────────────── */

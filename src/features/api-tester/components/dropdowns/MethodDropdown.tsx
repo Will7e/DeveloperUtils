@@ -21,7 +21,9 @@ export function MethodDropdown({
     <div className="api-method-dropdown-container" ref={dropdownRef}>
       <button
         type="button"
-        className={methodSelectClass}
+        className={`${methodSelectClass} ${
+          isOpen ? "api-method-select-open" : ""
+        }`}
         onClick={() => setIsOpen(!isOpen)}
       >
         <span>{value}</span>

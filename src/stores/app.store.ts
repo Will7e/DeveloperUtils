@@ -56,7 +56,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 280,
     y: 140,
-    strokeColor: "#38bdf8",
+    strokeColor: "#0284c7",
     backgroundColor: "transparent",
     width: 320,
     height: 36,
@@ -92,7 +92,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 280,
     y: 185,
-    strokeColor: "#94a3b8",
+    strokeColor: "#64748b",
     backgroundColor: "transparent",
     width: 440,
     height: 24,
@@ -128,8 +128,8 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 280,
     y: 250,
-    strokeColor: "#0ea5e9",
-    backgroundColor: "#0369a122",
+    strokeColor: "#0284c7",
+    backgroundColor: "#e0f2fe",
     width: 160,
     height: 60,
     seed: 20001,
@@ -155,7 +155,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 315,
     y: 270,
-    strokeColor: "#f8fafc",
+    strokeColor: "#1e1e1e",
     backgroundColor: "transparent",
     width: 90,
     height: 20,
@@ -191,7 +191,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 440,
     y: 280,
-    strokeColor: "#38bdf8",
+    strokeColor: "#0284c7",
     backgroundColor: "transparent",
     width: 80,
     height: 0,
@@ -227,8 +227,8 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 520,
     y: 250,
-    strokeColor: "#10b981",
-    backgroundColor: "#04785722",
+    strokeColor: "#059669",
+    backgroundColor: "#dcfce7",
     width: 180,
     height: 60,
     seed: 40001,
@@ -254,7 +254,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 540,
     y: 270,
-    strokeColor: "#f8fafc",
+    strokeColor: "#1e1e1e",
     backgroundColor: "transparent",
     width: 140,
     height: 20,
@@ -1085,6 +1085,48 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "devutils-app-state",
+      onRehydrateStorage: () => (state) => {
+        if (state && state.workflows && Array.isArray(state.workflows)) {
+          state.workflows = state.workflows.map((w) => ({
+            ...w,
+            elements: Array.isArray(w.elements)
+              ? w.elements.map((rawEl: unknown) => {
+                  const el = rawEl as Record<string, unknown> | null;
+                  if (!el) return rawEl;
+                  let modified = false;
+                  const newEl = { ...el };
+                  if (el.strokeColor === "#f8fafc") {
+                    newEl.strokeColor = "#1e1e1e";
+                    modified = true;
+                  }
+                  if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
+                    newEl.strokeColor = "#0284c7";
+                    newEl.backgroundColor = "#e0f2fe";
+                    modified = true;
+                  }
+                  if (el.id === "node-action" && el.backgroundColor === "#04785722") {
+                    newEl.strokeColor = "#059669";
+                    newEl.backgroundColor = "#dcfce7";
+                    modified = true;
+                  }
+                  if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
+                    newEl.strokeColor = "#0284c7";
+                    modified = true;
+                  }
+                  if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
+                    newEl.strokeColor = "#64748b";
+                    modified = true;
+                  }
+                  if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
+                    newEl.strokeColor = "#0284c7";
+                    modified = true;
+                  }
+                  return modified ? newEl : rawEl;
+                })
+              : w.elements,
+          }));
+        }
+      },
       partialize: (state) => ({
         files: state.files,
         activeFileId: state.activeFileId,

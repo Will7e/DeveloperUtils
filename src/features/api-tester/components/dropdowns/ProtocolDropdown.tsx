@@ -25,13 +25,8 @@ export function ProtocolDropdown({
     >
       <button
         type="button"
-        className="api-method-select api-method-select-get"
-        style={{
-          width: "100%",
-          justifyContent: "space-between",
-          padding: "0 12px",
-          color: "var(--text-1)",
-        }}
+        className={`api-method-select ${isOpen ? "api-method-select-open" : ""}`}
+        style={{ width: "100%" }}
         onClick={() => setIsOpen(!isOpen)}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>

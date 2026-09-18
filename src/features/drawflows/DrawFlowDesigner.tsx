@@ -27,6 +27,48 @@ type UnwrapInitialData<T> = T extends (...args: never[]) => infer R
   : NonNullable<T>;
 type ExcalidrawInitialData = UnwrapInitialData<ExcalidrawProps["initialData"]>;
 
+/**
+ * Ensures workflow elements have high-contrast, theme-compatible colors
+ * across both light and dark modes in Excalidraw's inversion engine.
+ */
+export function sanitizeWorkflowElements(elements: readonly unknown[] = []): unknown[] {
+  return elements.map((rawEl) => {
+    const el = rawEl as Record<string, unknown> | null;
+    if (!el) return rawEl;
+    let modified = false;
+    const newEl = { ...el };
+
+    if (el.strokeColor === "#f8fafc") {
+      newEl.strokeColor = "#1e1e1e";
+      modified = true;
+    }
+    if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
+      newEl.strokeColor = "#0284c7";
+      newEl.backgroundColor = "#e0f2fe";
+      modified = true;
+    }
+    if (el.id === "node-action" && el.backgroundColor === "#04785722") {
+      newEl.strokeColor = "#059669";
+      newEl.backgroundColor = "#dcfce7";
+      modified = true;
+    }
+    if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
+      newEl.strokeColor = "#0284c7";
+      modified = true;
+    }
+    if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
+      newEl.strokeColor = "#64748b";
+      modified = true;
+    }
+    if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
+      newEl.strokeColor = "#0284c7";
+      modified = true;
+    }
+
+    return modified ? newEl : rawEl;
+  });
+}
+
 export function DrawFlowDesigner() {
   const [excalidrawAPI, setExcalidrawAPI] = useState<ExcalidrawImperativeAPI | null>(null);
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState<boolean>(false);
@@ -83,8 +125,9 @@ export function DrawFlowDesigner() {
       if (targetWorkflow) {
         isUpdatingSceneRef.current = true;
         const { theme: _staleTheme, ...cleanAppState } = targetWorkflow.appState || {};
+        const sanitizedElements = sanitizeWorkflowElements(targetWorkflow.elements || []);
         excalidrawAPI.updateScene({
-          elements: (targetWorkflow.elements || []) as Parameters<typeof excalidrawAPI.updateScene>[0]["elements"],
+          elements: sanitizedElements as Parameters<typeof excalidrawAPI.updateScene>[0]["elements"],
           appState: {
             ...cleanAppState,
             theme: isDark ? "dark" : "light",
@@ -102,6 +145,30 @@ export function DrawFlowDesigner() {
       prevWorkflowIdRef.current = activeWorkflowId;
     }
   }, [activeWorkflowId, workflows, excalidrawAPI, isDark, flushPendingSave]);
+
+  // Auto-heal any legacy elements in the current active canvas on initial load / API ready
+  useEffect(() => {
+    if (!excalidrawAPI) return;
+    const sceneElements = excalidrawAPI.getSceneElements();
+    const needsHealing = sceneElements.some(
+      (el) =>
+        el.strokeColor === "#f8fafc" ||
+        (el.id === "node-start" && el.backgroundColor === "#0369a122") ||
+        (el.id === "node-action" && el.backgroundColor === "#04785722") ||
+        (el.id === "welcome-title" && el.strokeColor === "#38bdf8") ||
+        (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") ||
+        (el.id === "arrow-1" && el.strokeColor === "#38bdf8")
+    );
+    if (needsHealing) {
+      const healed = sanitizeWorkflowElements(sceneElements);
+      excalidrawAPI.updateScene({
+        elements: healed as Parameters<typeof excalidrawAPI.updateScene>[0]["elements"],
+      });
+      if (activeWorkflowId) {
+        updateWorkflowExcalidraw(activeWorkflowId, [...healed]);
+      }
+    }
+  }, [excalidrawAPI, activeWorkflowId, updateWorkflowExcalidraw]);
 
   // Sync canvas theme when global app theme changes
   useEffect(() => {
@@ -269,7 +336,7 @@ export function DrawFlowDesigner() {
           onLibraryChange={handleLibraryChange}
           theme={isDark ? "dark" : "light"}
           initialData={{
-            elements: (activeWorkflow?.elements || []) as ExcalidrawInitialData["elements"],
+            elements: sanitizeWorkflowElements(activeWorkflow?.elements || []) as ExcalidrawInitialData["elements"],
             appState: {
               ...(activeWorkflow?.appState || {}),
               openSidebar: activeWorkflow?.appState?.openSidebar ?? null,
