@@ -24,6 +24,9 @@ export interface StorageAdapter {
 
   getCustomPresets(): Promise<LibraryPreset[]>;
   saveCustomPresets(presets: LibraryPreset[]): Promise<void>;
+
+  getAddedPresetIds(): Promise<string[]>;
+  saveAddedPresetIds(ids: string[]): Promise<void>;
 }
 
 // ── Sensitive field definitions ─────────────────────────────
@@ -233,6 +236,23 @@ export class LocalStorageAdapter implements StorageAdapter {
       localStorage.setItem("devutils_api_custom_presets", JSON.stringify(presets));
     } catch (e) {
       console.error("Failed to save custom presets", e);
+    }
+  }
+
+  async getAddedPresetIds(): Promise<string[]> {
+    try {
+      const saved = localStorage.getItem("devutils_api_added_preset_ids");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async saveAddedPresetIds(ids: string[]): Promise<void> {
+    try {
+      localStorage.setItem("devutils_api_added_preset_ids", JSON.stringify(ids));
+    } catch (e) {
+      console.error("Failed to save added preset ids", e);
     }
   }
 }
@@ -518,6 +538,14 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     } catch (e) {
       console.error("Failed to save encrypted custom presets", e);
     }
+  }
+
+  async getAddedPresetIds(): Promise<string[]> {
+    return this.fallback.getAddedPresetIds();
+  }
+
+  async saveAddedPresetIds(ids: string[]): Promise<void> {
+    return this.fallback.saveAddedPresetIds(ids);
   }
 }
 

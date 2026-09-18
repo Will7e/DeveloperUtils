@@ -4,9 +4,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
-import { loader } from "@monaco-editor/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { LoadingState } from "@/components/ui/loading-state";
 import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
@@ -14,7 +12,6 @@ import { CommandPalette } from "@/features/command-palette/CommandPalette";
 import { ToastContainer } from "@/features/toast/ToastContainer";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useAppStore } from "@/stores/app.store";
-import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { VaultGuard } from "@/components/vault/VaultGuard";
 import { useVaultStore } from "@/services/vault.service";
 
@@ -28,22 +25,34 @@ const LibraryPage = lazy(() => import("@/pages/LibraryPage").then(m => ({ defaul
 const DrawFlowPage = lazy(() => import("@/pages/DrawFlowPage").then(m => ({ default: m.DrawFlowPage })));
 const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ default: m.ApiTesterPage })));
 
-// Pre-initialize Monaco and register custom themes early to prevent initial light-theme fallback
-loader.init().then((monaco) => {
-  setupMonacoTheme(monaco);
-}).catch((err) => {
-  console.warn("Monaco early initialization note:", err);
-});
+import { bootstrapApp } from "@/services/bootstrap.service";
+
+// Pre-initialize critical services and coordinate single loading screen
+bootstrapApp();
+
+// Pre-warm lazy routes during idle time so client navigation is instantaneous
+if (typeof window !== "undefined") {
+  const prewarm = () => {
+    import("@/pages/DashboardPage");
+    import("@/pages/CompilerPage");
+    import("@/pages/ApiTesterPage");
+    import("@/pages/FormattersPage");
+    import("@/pages/ComparatorsPage");
+    import("@/pages/DiffCheckerPage");
+    import("@/pages/LibraryPage");
+    import("@/pages/DrawFlowPage");
+  };
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(prewarm, { timeout: 3000 });
+  } else {
+    setTimeout(prewarm, 1000);
+  }
+}
 
 function PageLoader() {
   return (
     <div className="flex-1 flex items-center justify-center w-full h-full min-h-screen bg-bg-0 relative">
       <TopLoadingBar />
-      <LoadingState
-        fullPage
-        message="Loading workspace..."
-        description="Initializing workspace environment"
-      />
     </div>
   );
 }

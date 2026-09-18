@@ -10,10 +10,11 @@ import React, {
   useMemo,
 } from "react";
 import { type OnMount } from "@monaco-editor/react";
-import { Globe, ChevronDown, Download, Check, Library } from "lucide-react";
+import { Globe, ChevronDown, Download, Check } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { LoadingState } from "@/components/ui/loading-state";
+import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { useApiTesterStore } from "@/stores/api-tester.store";
@@ -275,7 +276,8 @@ export function ApiTester() {
   // Loading state during store initialization or when no active tab exists
   if (!store.isInitialized || !activeTab) {
     return (
-      <div className="api-tester-container flex items-center justify-center p-8">
+      <div className="api-tester-container flex flex-col items-center justify-center p-8 relative">
+        <TopLoadingBar />
         <LoadingState
           size="lg"
           title="Loading Workspace..."
@@ -314,18 +316,6 @@ export function ApiTester() {
           newTabTooltip="New Request Tab"
           rightContent={
             <>
-              <SimpleTooltip content="API Preset Library (Ctrl/Cmd+Shift+L)">
-                <button
-                  className="toolbar-action-btn"
-                  onClick={() => setShowLibraryModal(true)}
-                  style={{ color: "var(--accent)" }}
-                >
-                  <Library className="h-3.5 w-3.5 text-accent" />
-                  <span className="toolbar-action-label">Presets</span>
-                </button>
-              </SimpleTooltip>
-
-              <div className="tabs-toolbar-sep" />
               <button
                 ref={envBtnRef}
                 onClick={() => {

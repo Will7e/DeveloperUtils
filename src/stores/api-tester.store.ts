@@ -214,11 +214,15 @@ interface ApiTesterState {
 
   // Preset Library
   customPresets: LibraryPreset[];
+  addedPresetIds: string[];
   loadLibraryPreset: (preset: LibraryPreset) => void;
   importPlatformCollection: (platformName: string, presets: LibraryPreset[]) => void;
   injectEnvironmentVariables: (variables: EnvVariableTemplate[], platformName?: string) => void;
   saveCustomPreset: (preset: LibraryPreset) => void;
   deleteCustomPreset: (id: string) => void;
+  addPresetToSidebar: (presetId: string) => void;
+  removePresetFromSidebar: (presetId: string) => void;
+  togglePresetInSidebar: (presetId: string) => void;
 }
 
 // Generate unique ID
@@ -417,10 +421,11 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
     environments: [],
     activeEnvironmentId: null,
     customPresets: [],
+    addedPresetIds: [],
 
     init: async () => {
       if (get().isInitialized) return;
-      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId, customPresets] = await Promise.all([
+      const [storedTabs, history, collections, envVars, environments, activeEnvironmentId, customPresets, addedPresetIds] = await Promise.all([
         apiStorage.getTabs(),
         apiStorage.getHistory(),
         apiStorage.getCollections(),
@@ -428,6 +433,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         apiStorage.getEnvironments(),
         apiStorage.getActiveEnvId(),
         apiStorage.getCustomPresets(),
+        apiStorage.getAddedPresetIds(),
       ]);
 
       const normalizedTabs = storedTabs
@@ -458,6 +464,7 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         environments,
         activeEnvironmentId,
         customPresets: customPresets || [],
+        addedPresetIds: addedPresetIds || [],
       });
     },
 
@@ -1827,6 +1834,42 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
         type: "info",
         duration: 2000,
       });
+    },
+
+    addPresetToSidebar: (presetId: string) => {
+      set((state) => {
+        if (state.addedPresetIds.includes(presetId)) return state;
+        const updated = [...state.addedPresetIds, presetId];
+        apiStorage.saveAddedPresetIds(updated);
+        return { addedPresetIds: updated };
+      });
+      useAppStore.getState().addToast({
+        message: "Added preset to sidebar!",
+        type: "success",
+        duration: 2000,
+      });
+    },
+
+    removePresetFromSidebar: (presetId: string) => {
+      set((state) => {
+        const updated = state.addedPresetIds.filter((id) => id !== presetId);
+        apiStorage.saveAddedPresetIds(updated);
+        return { addedPresetIds: updated };
+      });
+      useAppStore.getState().addToast({
+        message: "Removed preset from sidebar",
+        type: "info",
+        duration: 2000,
+      });
+    },
+
+    togglePresetInSidebar: (presetId: string) => {
+      const state = get();
+      if (state.addedPresetIds.includes(presetId)) {
+        state.removePresetFromSidebar(presetId);
+      } else {
+        state.addPresetToSidebar(presetId);
+      }
     }
   };
 });

@@ -207,20 +207,24 @@
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 
-  <!-- Hide loading screen once app mounts -->
+  <!-- Controlled dismiss of loading screen -->
   <script>
-    const observer = new MutationObserver(() => {
-      const root = document.getElementById('root');
-      if (root && root.children.length > 0) {
-        const loader = document.getElementById('loading-screen');
-        if (loader) {
-          loader.classList.add('hidden');
-          setTimeout(() => loader.remove(), 500);
-        }
-        observer.disconnect();
+    window.__DEVUTILS_DISMISS_LOADER__ = function() {
+      if (window.__DEVUTILS_LOADER_DISMISSED__) return;
+      window.__DEVUTILS_LOADER_DISMISSED__ = true;
+      const loader = document.getElementById('loading-screen');
+      if (loader) {
+        loader.classList.add('hidden');
+        setTimeout(() => {
+          try { loader.remove(); } catch (e) {}
+        }, 500);
       }
-    });
-    observer.observe(document.getElementById('root'), { childList: true });
+    };
+
+    // Safety fallback: guarantee loading screen is dismissed even if network stalls
+    setTimeout(() => {
+      window.__DEVUTILS_DISMISS_LOADER__();
+    }, 3500);
   </script>
 </body>
 

@@ -4,7 +4,6 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { Suspense } from "react";
-import { LoadingState } from "@/components/ui/loading-state";
 import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import {
   Home,
@@ -239,14 +238,9 @@ export function MainLayout() {
       <main className="main-content relative">
         <Suspense
           fallback={
-            <>
+            <div className="flex-1 flex flex-col w-full h-full relative">
               <TopLoadingBar />
-              <LoadingState
-                fullPage
-                message="Loading workspace..."
-                description="Preparing tools and editor components"
-              />
-            </>
+            </div>
           }
         >
           <Outlet />

@@ -382,6 +382,8 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
               <div className="api-library-cards-grid">
                 {filteredPresets.map((preset) => {
                   const isCopied = copiedCurlId === preset.id;
+                  const isAdded = store.addedPresetIds.includes(preset.id) || preset.platform === "custom";
+
                   return (
                     <div
                       key={preset.id}
@@ -425,6 +427,20 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
                             </button>
                           </SimpleTooltip>
 
+                          {preset.platform !== "custom" && (
+                            <SimpleTooltip content={isAdded ? "Remove from Sidebar" : "Add to Sidebar"}>
+                              <button
+                                className={`api-library-card-icon-btn ${isAdded ? "text-accent" : ""}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  store.togglePresetInSidebar(preset.id);
+                                }}
+                              >
+                                <Bookmark className={`h-3.5 w-3.5 ${isAdded ? "fill-accent text-accent" : ""}`} />
+                              </button>
+                            </SimpleTooltip>
+                          )}
+
                           {preset.platform === "custom" && (
                             <SimpleTooltip content="Delete Custom Preset">
                               <button
@@ -452,20 +468,60 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
                         <code>{preset.url}</code>
                       </div>
 
-                      {/* Card Footer: Category tag & Add to Tester Button */}
+                      {/* Card Footer: Category tag & Action Buttons */}
                       <div className="api-library-card-footer">
                         <span className="api-library-card-category">{preset.category}</span>
 
-                        <button
-                          className="api-library-add-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddToTester(preset);
-                          }}
-                        >
-                          <Plus className="h-3 w-3" />
-                          <span>Add to Test</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="api-library-card-test-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddToTester(preset);
+                            }}
+                            title="Load request into active tab"
+                          >
+                            <span>Test</span>
+                          </button>
+
+                          {preset.platform === "custom" ? (
+                            <button
+                              className="api-library-added-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                store.deleteCustomPreset(preset.id);
+                              }}
+                              title="Delete custom preset"
+                            >
+                              <Trash2 className="h-3 w-3 text-red" />
+                              <span>Delete</span>
+                            </button>
+                          ) : isAdded ? (
+                            <button
+                              className="api-library-added-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                store.removePresetFromSidebar(preset.id);
+                              }}
+                              title="Remove from sidebar presets"
+                            >
+                              <Check className="h-3 w-3 text-green" />
+                              <span>Added</span>
+                            </button>
+                          ) : (
+                            <button
+                              className="api-library-add-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                store.addPresetToSidebar(preset.id);
+                              }}
+                              title="Add to sidebar presets"
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>Add Preset</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
@@ -619,6 +675,29 @@ export function ApiLibraryModal({ isOpen, onClose }: ApiLibraryModalProps) {
 
               {/* Inspector Footer Actions */}
               <div className="api-library-inspector-footer">
+                {inspectingPreset.platform !== "custom" && (
+                  <button
+                    className={`flex items-center gap-1.5 text-xs py-2 px-3 rounded-md transition-all ${
+                      store.addedPresetIds.includes(inspectingPreset.id)
+                        ? "bg-accent/15 text-accent border border-accent/30"
+                        : "api-btn-secondary"
+                    }`}
+                    onClick={() => store.togglePresetInSidebar(inspectingPreset.id)}
+                  >
+                    {store.addedPresetIds.includes(inspectingPreset.id) ? (
+                      <>
+                        <Check className="h-3.5 w-3.5 text-green" />
+                        <span>In Sidebar Presets</span>
+                      </>
+                    ) : (
+                      <>
+                        <Bookmark className="h-3.5 w-3.5" />
+                        <span>Add to Sidebar</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
                 <button
                   className="api-btn-secondary flex items-center gap-1.5 text-xs py-2 px-3"
                   onClick={() => handleCopyCurl(inspectingPreset)}

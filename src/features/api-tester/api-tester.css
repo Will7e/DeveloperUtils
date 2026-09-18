@@ -202,6 +202,24 @@
   background: var(--red-dim);
 }
 
+.api-sidebar-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  transition: all 0.18s ease;
+}
+
+.api-sidebar-action-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
 /* ── Preset & History Item Cards ──────────────────────────── */
 .api-preset-card,
 .api-history-card {
@@ -1704,9 +1722,232 @@
 }
 
 /* ── Light Mode Overrides ─────────────────────────────────── */
+/* Sidebar Base & Header */
 html.light .api-sidebar {
   background: var(--bg-1);
   border-right-color: var(--border-1);
+}
+
+html.light .api-sidebar-header {
+  border-bottom-color: var(--border-1);
+  color: var(--text-1);
+}
+
+html.light .api-sidebar-footer {
+  background: var(--bg-1);
+  border-top-color: var(--border-1);
+}
+
+html.light .api-sidebar-footer-btn {
+  color: var(--text-2);
+}
+
+html.light .api-sidebar-footer-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+html.light .api-sidebar-footer-icon-btn {
+  color: var(--text-3);
+}
+
+html.light .api-sidebar-footer-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+/* Sidebar Section Headers */
+html.light .api-sidebar-section-header:hover {
+  background: var(--bg-hover);
+}
+
+html.light .api-sidebar-section-title {
+  color: var(--text-3);
+}
+
+html.light .api-sidebar-section-chevron {
+  color: var(--text-3);
+}
+
+html.light .api-sidebar-action-btn {
+  color: var(--text-3);
+}
+
+html.light .api-sidebar-action-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+html.light .api-clear-btn {
+  color: var(--text-3);
+}
+
+html.light .api-clear-btn:hover {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
+/* Primary Browse Library Button in Sidebar */
+html.light .api-sidebar-browse-library-btn {
+  background: rgba(2, 132, 199, 0.08);
+  border-color: rgba(2, 132, 199, 0.28);
+  color: var(--text-0);
+}
+
+html.light .api-sidebar-browse-library-btn:hover {
+  background: rgba(2, 132, 199, 0.15);
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(2, 132, 199, 0.16);
+}
+
+html.light .api-sidebar-library-count {
+  background: rgba(2, 132, 199, 0.16);
+  color: var(--accent);
+}
+
+/* Quick Platform Filter Pills */
+html.light .api-sidebar-quick-pill {
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-color: var(--border-1);
+}
+
+html.light .api-sidebar-quick-pill:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+html.light .api-sidebar-quick-pill-active {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.3);
+}
+
+/* Preset & History Cards */
+html.light .api-preset-card,
+html.light .api-history-card {
+  background: transparent;
+  border-color: transparent;
+}
+
+html.light .api-preset-card:hover,
+html.light .api-history-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+html.light .api-item-url {
+  color: var(--text-1);
+}
+
+html.light .api-item-meta {
+  color: var(--text-3);
+}
+
+html.light .api-item-time-label {
+  color: var(--text-3);
+}
+
+html.light .api-item-status-ok {
+  color: var(--green);
+}
+
+html.light .api-item-status-err {
+  color: var(--red);
+}
+
+/* Method Badges */
+html.light .api-badge {
+  border: 1px solid transparent;
+}
+
+html.light .api-badge-get {
+  background: rgba(37, 99, 235, 0.10);
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+html.light .api-badge-post {
+  background: rgba(5, 150, 105, 0.10);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.22);
+}
+
+html.light .api-badge-put {
+  background: rgba(124, 58, 237, 0.10);
+  color: #7c3aed;
+  border-color: rgba(124, 58, 237, 0.22);
+}
+
+html.light .api-badge-delete {
+  background: rgba(220, 38, 38, 0.09);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.22);
+}
+
+html.light .api-badge-patch {
+  background: rgba(217, 119, 6, 0.10);
+  color: #d97706;
+  border-color: rgba(217, 119, 6, 0.22);
+}
+
+html.light .api-badge-options,
+html.light .api-badge-head {
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-color: var(--border-2);
+}
+
+/* Collections */
+html.light .api-collection-header {
+  color: var(--text-2);
+}
+
+html.light .api-collection-header:hover {
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+html.light .api-collection-name {
+  color: var(--text-1);
+}
+
+html.light .api-collection-remove {
+  color: var(--text-3);
+}
+
+html.light .api-collection-remove:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+/* History Empty State */
+html.light .api-history-empty {
+  border-color: var(--border-2);
+  background: var(--bg-0);
+  color: var(--text-3);
+}
+
+html.light .api-history-empty-title {
+  color: var(--text-1);
+}
+
+html.light .api-history-empty-desc {
+  color: var(--text-3);
+}
+
+/* Sidebar Scrollbars */
+html.light .api-sidebar-content::-webkit-scrollbar-thumb,
+html.light .api-sidebar-presets-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-color: var(--bg-1);
+}
+
+html.light .api-sidebar-content::-webkit-scrollbar-thumb:hover,
+html.light .api-sidebar-presets-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
 }
 
 html.light .api-url-bar {
@@ -1766,11 +2007,6 @@ html.light .api-curl-btn {
 
 html.light .api-curl-btn:hover {
   background: var(--bg-3);
-}
-
-html.light .api-preset-card:hover,
-html.light .api-history-card:hover {
-  background: rgba(0, 0, 0, 0.03);
 }
 
 html.light .api-send-btn {
@@ -2460,6 +2696,640 @@ html.light .api-editor-format-btn:hover {
   overflow-y: auto;
 }
 
+.api-sidebar-empty-presets {
+  padding: 12px 10px;
+  text-align: center;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-1);
+  background: var(--bg-hover);
+  margin: 4px 0 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.api-sidebar-empty-presets-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.api-sidebar-empty-presets-desc {
+  font-size: 10px;
+  color: var(--text-3);
+  line-height: 1.35;
+  margin: 0;
+}
+
+.api-preset-card-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.api-preset-card-wrapper .api-preset-card {
+  padding-right: 28px;
+}
+
+.api-preset-card-wrapper:hover .api-preset-remove-btn {
+  opacity: 1;
+}
+
+.api-preset-remove-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+  z-index: 2;
+}
+
+.api-preset-remove-btn:hover {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+.api-library-added-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--green);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-library-added-btn:hover {
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: rgba(244, 63, 94, 0.4);
+}
+
+.api-library-card-test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-library-card-test-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+
+/* ── Settings & Environments Modal ────────────────────────── */
+.api-settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  animation: api-fadeIn 0.2s ease-out;
+}
+
+.api-settings-modal-content {
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  width: 95vw;
+  max-width: 920px;
+  height: 640px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-1);
+  animation: api-slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Settings Sidebar ─────────────────────────────────────── */
+.api-settings-sidebar {
+  width: 250px;
+  min-width: 250px;
+  background: var(--bg-0);
+  border-right: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.api-settings-sidebar-header {
+  height: 56px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.api-settings-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.api-settings-header-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.api-settings-sidebar-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.2;
+}
+
+.api-settings-sidebar-subtitle {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.2;
+}
+
+.api-settings-badge-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--bg-2);
+  padding: 2px 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.api-settings-sidebar-nav {
+  padding: 12px 10px;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.api-settings-nav-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-3);
+  padding: 6px 8px 4px;
+  user-select: none;
+}
+
+.api-settings-env-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.api-settings-env-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.api-settings-env-btn-active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+  color: var(--text-1) !important;
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent) !important;
+  font-weight: 600 !important;
+}
+
+.api-settings-env-btn-active .api-settings-env-icon {
+  color: var(--accent) !important;
+}
+
+.api-settings-count-pill {
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: var(--bg-2);
+  color: var(--text-3);
+  min-width: 20px;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.api-settings-env-btn-active .api-settings-count-pill {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.api-settings-add-env-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  border: 1px dashed var(--border-2);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 6px;
+}
+
+.api-settings-add-env-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.api-settings-sidebar-footer {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-0);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.api-settings-sidebar-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.api-settings-tip-code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+/* ── Settings Main Content ────────────────────────────────── */
+.api-settings-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-1);
+  min-width: 0;
+}
+
+.api-settings-topbar {
+  height: 56px;
+  min-height: 56px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bg-1);
+}
+
+.api-settings-topbar-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.api-settings-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-settings-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.api-settings-title-input {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  padding: 2px 6px;
+  margin-left: -6px;
+  outline: none;
+  transition: all 0.15s ease;
+  width: 100%;
+  max-width: 320px;
+}
+
+.api-settings-title-input:hover {
+  background: var(--bg-2);
+  border-color: var(--border-2);
+}
+
+.api-settings-title-input:focus {
+  background: var(--bg-0);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.api-settings-subtitle {
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin: 2px 0 0 0;
+  line-height: 1.2;
+}
+
+.api-settings-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.api-settings-delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--red);
+  background: var(--red-dim);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-settings-delete-btn:hover {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
+  border-color: var(--red);
+}
+
+.api-settings-delete-btn:active {
+  transform: scale(0.97);
+}
+
+.api-settings-body {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Variables Table Card ─────────────────────────────────── */
+.api-settings-card {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-0);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.api-settings-card-header {
+  display: grid;
+  grid-template-columns: 36px 1fr 1fr 36px;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border-1);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.api-settings-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.api-settings-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 1fr 36px;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-1);
+  transition: background 0.12s ease;
+  background: var(--bg-1);
+}
+
+.api-settings-row:last-child {
+  border-bottom: none;
+}
+
+.api-settings-row:hover {
+  background: var(--bg-hover);
+}
+
+.api-settings-row.disabled {
+  opacity: 0.6;
+}
+
+.api-settings-cell-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.api-settings-cell-input {
+  padding: 0 4px;
+}
+
+.api-settings-input {
+  width: 100%;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-1);
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.api-settings-input:hover {
+  background: var(--bg-2);
+  border-color: var(--border-1);
+}
+
+.api-settings-input:focus {
+  background: var(--bg-0);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.api-settings-input-key {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.api-settings-cell-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.api-settings-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-0);
+  border-top: 1px solid var(--border-1);
+}
+
+.api-settings-add-var-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-settings-add-var-btn:hover {
+  background: var(--accent-glow);
+}
+
+.api-settings-stat-text {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+/* ── Empty State ──────────────────────────────────────────── */
+.api-settings-empty {
+  padding: 32px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-3);
+  text-align: center;
+  background: var(--bg-1);
+}
+
+.api-settings-empty-text {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ── Info Callout ─────────────────────────────────────────── */
+.api-settings-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md, 8px);
+}
+
+.api-settings-callout-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.api-settings-callout-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.api-settings-callout-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 3px;
+}
+
+.api-settings-callout-desc {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.api-settings-callout-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
 /* ── Library Modal Structure ──────────────────────────────── */
 .api-library-modal-overlay {
   background: rgba(0, 0, 0, 0.7);
@@ -3021,4 +3891,321 @@ html.light .api-editor-format-btn:hover {
   justify-content: center;
   height: 100%;
   min-height: 280px;
+}
+
+/* ── Light Mode: API Library Modal & Modal Sidebar ───────── */
+html.light .api-library-modal-overlay {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+html.light .api-library-modal-content {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+
+html.light .api-library-sidebar {
+  background: var(--bg-0);
+  border-right-color: var(--border-1);
+}
+
+html.light .api-library-sidebar-header {
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-library-badge-count {
+  background: var(--bg-2);
+  color: var(--text-3);
+}
+
+html.light .api-library-nav-group-label {
+  color: var(--text-3);
+}
+
+html.light .api-library-platform-btn {
+  color: var(--text-2);
+}
+
+html.light .api-library-platform-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+html.light .api-library-platform-btn-active {
+  background: rgba(2, 132, 199, 0.10) !important;
+  color: var(--accent) !important;
+  border-color: rgba(2, 132, 199, 0.30) !important;
+}
+
+html.light .api-library-count-pill {
+  background: var(--bg-2);
+  color: var(--text-3);
+}
+
+html.light .api-library-platform-btn-active .api-library-count-pill {
+  background: rgba(2, 132, 199, 0.16);
+  color: var(--accent);
+}
+
+html.light .api-library-sidebar-footer {
+  border-top-color: var(--border-1);
+  background: var(--bg-0);
+}
+
+html.light .api-library-main {
+  background: var(--bg-1);
+}
+
+html.light .api-library-topbar {
+  background: var(--bg-1);
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-library-search-box {
+  background: var(--bg-0);
+  border-color: var(--border-1);
+}
+
+html.light .api-library-search-box input {
+  color: var(--text-1);
+}
+
+html.light .api-library-clear-search {
+  color: var(--text-3);
+}
+
+html.light .api-library-clear-search:hover {
+  color: var(--text-1);
+}
+
+html.light .api-library-method-chip {
+  background: var(--bg-2);
+  color: var(--text-3);
+}
+
+html.light .api-library-method-chip:hover {
+  color: var(--text-1);
+  background: var(--bg-3);
+}
+
+html.light .api-library-method-chip-active {
+  background: var(--accent) !important;
+  color: #ffffff !important;
+  border-color: var(--accent) !important;
+}
+
+html.light .api-library-platform-banner {
+  background: var(--bg-0);
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-library-banner-btn {
+  background: var(--bg-2);
+  border-color: var(--border-1);
+  color: var(--text-1);
+}
+
+html.light .api-library-banner-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+
+html.light .api-library-card {
+  background: var(--bg-0);
+  border-color: var(--border-1);
+}
+
+html.light .api-library-card:hover {
+  border-color: var(--border-accent);
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+html.light .api-library-card-platform {
+  color: var(--text-3);
+}
+
+html.light .api-library-card-title {
+  color: var(--text-1);
+}
+
+html.light .api-library-card-desc {
+  color: var(--text-2);
+}
+
+html.light .api-library-card-url {
+  background: var(--bg-2);
+  color: var(--text-2);
+}
+
+html.light .api-library-card-icon-btn {
+  color: var(--text-3);
+}
+
+html.light .api-library-card-icon-btn:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+html.light .api-library-inspector-pane {
+  background: var(--bg-0);
+  border-left-color: var(--border-1);
+}
+
+html.light .api-inspector-header {
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-inspector-code-box,
+html.light .api-inspector-table {
+  background: var(--bg-1);
+  border-color: var(--border-1);
+}
+
+html.light .api-inspector-table-header {
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-inspector-table-row {
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-library-tag {
+  background: rgba(2, 132, 199, 0.10);
+  color: var(--accent);
+  border-color: rgba(2, 132, 199, 0.25);
+}
+
+html.light .api-library-inspector-footer {
+  border-top-color: var(--border-1);
+  background: var(--bg-0);
+}
+
+html.light .api-sidebar-empty-presets {
+  border-color: var(--border-2);
+  background: var(--bg-0);
+}
+
+html.light .api-sidebar-empty-presets-title {
+  color: var(--text-1);
+}
+
+html.light .api-sidebar-empty-presets-desc {
+  color: var(--text-3);
+}
+
+html.light .api-preset-remove-btn {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+  color: var(--text-3);
+}
+
+html.light .api-preset-remove-btn:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+html.light .api-library-added-btn {
+  background: rgba(5, 150, 105, 0.12);
+  color: #059669;
+  border-color: rgba(5, 150, 105, 0.3);
+}
+
+html.light .api-library-added-btn:hover {
+  background: rgba(220, 38, 38, 0.10);
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+html.light .api-library-card-test-btn {
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-color: var(--border-1);
+}
+
+html.light .api-library-card-test-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+html.light .api-library-add-btn {
+  color: #ffffff;
+}
+
+/* ── Light Mode: Settings & Environments Modal ────────────── */
+html.light .api-settings-modal-overlay {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+html.light .api-settings-modal-content {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+
+html.light .api-settings-sidebar {
+  background: var(--bg-0);
+  border-right-color: var(--border-1);
+}
+
+html.light .api-settings-sidebar-header {
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-settings-env-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+html.light .api-settings-env-btn-active {
+  background: rgba(2, 132, 199, 0.10) !important;
+  color: var(--accent) !important;
+  border-color: rgba(2, 132, 199, 0.30) !important;
+}
+
+html.light .api-settings-count-pill {
+  background: var(--bg-2);
+  color: var(--text-3);
+}
+
+html.light .api-settings-env-btn-active .api-settings-count-pill {
+  background: rgba(2, 132, 199, 0.16);
+  color: var(--accent);
+}
+
+html.light .api-settings-sidebar-footer {
+  border-top-color: var(--border-1);
+  background: var(--bg-0);
+}
+
+html.light .api-settings-topbar {
+  background: var(--bg-1);
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-settings-card {
+  background: var(--bg-0);
+  border-color: var(--border-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+html.light .api-settings-card-header {
+  background: var(--bg-2);
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-settings-row {
+  background: #ffffff;
+  border-bottom-color: var(--border-1);
+}
+
+html.light .api-settings-row:hover {
+  background: var(--bg-hover);
+}
+
+html.light .api-settings-card-footer {
+  background: var(--bg-0);
+  border-top-color: var(--border-1);
 }
