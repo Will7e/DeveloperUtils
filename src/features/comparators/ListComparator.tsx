@@ -1,47 +1,31 @@
 import React, { useState, useMemo, useCallback } from "react";
-import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import {
-  Columns,
-  Trash2,
   Copy,
   Check,
   Search,
   Download,
   Info,
-  Settings2,
   AlignLeft,
-  ChevronDown,
-  Plus,
-  X
+  Columns,
+  X,
+  Quote,
 } from "lucide-react";
 import {
   Panel,
   Group as PanelGroup,
-  Separator as PanelResizeHandle
+  Separator as PanelResizeHandle,
 } from "react-resizable-panels";
 import {
   Tooltip,
   TooltipTrigger,
-  TooltipContent
+  TooltipContent,
 } from "@/components/ui/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
-
-type ComparisonType = "aOnly" | "bOnly" | "both";
-
-interface ComparisonResults {
-  aOnly: string[];
-  bOnly: string[];
-  both: string[];
-}
+import {
+  compareLists,
+  processRawList,
+} from "./comparatorsUtils";
 
 interface ActionTooltipProps {
   children: React.ReactNode;
@@ -51,137 +35,45 @@ interface ActionTooltipProps {
 
 const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) => (
   <Tooltip>
-    <TooltipTrigger asChild>
-      {children}
-    </TooltipTrigger>
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
     <TooltipContent side={side}>
       <p>{content}</p>
     </TooltipContent>
   </Tooltip>
 );
 
+type ComparisonType = "aOnly" | "bOnly" | "both" | "union";
+
 export function ListComparator() {
-  // Store persistence
   const sessions = useAppStore((s) => s.comparatorSessions);
   const activeSessionId = useAppStore((s) => s.activeComparatorSessionId);
-  const setActiveSession = useAppStore((s) => s.setActiveComparatorSession);
-  const createSession = useAppStore((s) => s.createComparatorSession);
-  const deleteSession = useAppStore((s) => s.deleteComparatorSession);
-  const duplicateComparatorSession = useAppStore((s) => s.duplicateComparatorSession);
-  const closeOtherComparatorSessions = useAppStore((s) => s.closeOtherComparatorSessions);
-  const closeComparatorSessionsToRight = useAppStore((s) => s.closeComparatorSessionsToRight);
-  const closeAllComparatorSessions = useAppStore((s) => s.closeAllComparatorSessions);
-  const renameSession = useAppStore((s) => s.renameComparatorSession);
   const updateSessionInput = useAppStore((s) => s.updateComparatorSessionInput);
-
   const comparatorSettings = useAppStore((s) => s.comparatorSettings);
-  const updateComparatorSettings = useAppStore((s) => s.updateComparatorSettings);
   const addToast = useAppStore((s) => s.addToast);
-  const reorderSessions = useAppStore((s) => s.reorderComparatorSessions);
 
-  // Local runtime state
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ComparisonType>("aOnly");
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0]!;
   const inputA = activeSession.a;
   const inputB = activeSession.b;
 
-  // Standardized Workspace Tabs
-  const tabs: TabItem[] = useMemo(
-    () =>
-      sessions.map((session) => ({
-        id: session.id,
-        name: session.name,
-        icon: (
-          <span className="tab-icon tab-icon-javascript">
-            <Columns className="h-3 w-3" />
-          </span>
-        ),
-        closable: sessions.length > 1,
-      })),
-    [sessions]
-  );
-
-  const handleCopyTabContent = useCallback(
-    (id: string) => {
-      const session = sessions.find((s) => s.id === id);
-      if (session) {
-        const text = `--- List A ---\n${session.a}\n\n--- List B ---\n${session.b}`;
-        navigator.clipboard.writeText(text);
-        addToast({ message: `Copied ${session.name} inputs to clipboard`, type: "success", duration: 1500 });
-      }
-    },
-    [sessions, addToast]
-  );
-
-  const handleCopyTabName = useCallback(
-    (id: string) => {
-      const session = sessions.find((s) => s.id === id);
-      if (session) {
-        navigator.clipboard.writeText(session.name);
-        addToast({ message: "Session name copied", type: "info", duration: 1500 });
-      }
-    },
-    [sessions, addToast]
-  );
-
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
-  // Helper to process list
-  const processList = useCallback((input: string) => {
-    if (!input) return [];
-    let lines = input.split(/[\n\r,;|]+/).map(l => trimWhitespace ? l.trim() : l);
-    lines = lines.filter(l => l.length > 0);
-    return Array.from(new Set(lines));
-  }, [trimWhitespace]);
-
-  const formatInput = useCallback((input: string, key: "a" | "b") => {
-    const list = processList(input);
-    updateSessionInput(activeSession.id, key, list.join("\n"));
-    addToast({ message: "List formatted with newlines", type: "info" });
-  }, [processList, updateSessionInput, activeSession.id, addToast]);
-
-  const comparisonResults = useMemo<ComparisonResults>(() => {
-    const listA = processList(inputA);
-    const listB = processList(inputB);
-
-    const setA = new Set(caseSensitive ? listA : listA.map(s => s.toLowerCase()));
-    const setB = new Set(caseSensitive ? listB : listB.map(s => s.toLowerCase()));
-
-    const aOnly: string[] = [];
-    const bOnly: string[] = [];
-    const both: string[] = [];
-
-    listA.forEach(item => {
-      const checkItem = caseSensitive ? item : item.toLowerCase();
-      if (setB.has(checkItem)) {
-        both.push(item);
-      } else {
-        aOnly.push(item);
-      }
+  // Compute set comparison
+  const comparisonResults = useMemo(() => {
+    return compareLists(inputA, inputB, {
+      caseSensitive,
+      trimWhitespace,
+      sortAlpha,
+      stripQuotes: true,
     });
-
-    listB.forEach(item => {
-      const checkItem = caseSensitive ? item : item.toLowerCase();
-      if (!setA.has(checkItem)) {
-        bOnly.push(item);
-      }
-    });
-
-    if (sortAlpha) {
-      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-      aOnly.sort(collator.compare);
-      bOnly.sort(collator.compare);
-      both.sort(collator.compare);
-    }
-
-    return { aOnly, bOnly, both };
-  }, [inputA, inputB, caseSensitive, sortAlpha, processList]);
+  }, [inputA, inputB, caseSensitive, trimWhitespace, sortAlpha]);
 
   const hasCompared = Boolean(inputA.trim() || inputB.trim());
 
+  // Filtered result list
   const filteredResults = useMemo(() => {
     const current = comparisonResults[activeTab];
     if (!query.trim()) return current;
@@ -189,12 +81,32 @@ export function ListComparator() {
     return current.filter((item: string) => item.toLowerCase().includes(q));
   }, [comparisonResults, activeTab, query]);
 
-  const handleCopy = (content: string[], id: string) => {
+  // Clean & Format inputs with newlines
+  const formatInput = useCallback(
+    (input: string, key: "a" | "b") => {
+      const list = processRawList(input, { trimWhitespace: true, stripQuotes: true });
+      updateSessionInput(activeSession.id, key, list.join("\n"));
+      addToast({
+        message: `Formatted List ${key.toUpperCase()} (${list.length} items)`,
+        type: "info",
+      });
+    },
+    [updateSessionInput, activeSession.id, addToast]
+  );
+
+  const handleCopy = (content: string[], id: string, message = "Copied to clipboard") => {
     if (content.length === 0) return;
     navigator.clipboard.writeText(content.join("\n"));
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-    addToast({ message: "Copied to clipboard", type: "success" });
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+    addToast({ message, type: "success" });
+  };
+
+  const handleCopyQuoted = (item: string, id: string) => {
+    navigator.clipboard.writeText(`"${item}"`);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+    addToast({ message: "Copied with quotes", type: "success" });
   };
 
   const handleExport = () => {
@@ -204,229 +116,393 @@ export function ListComparator() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `comparator_${activeTab}_results.txt`;
+    a.download = `comparator_${activeTab}_${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+    addToast({ message: `Exported ${filteredResults.length} items`, type: "info" });
+  };
+
+  const listACount = comparisonResults.countA;
+  const listBCount = comparisonResults.countB;
+  const activeTabTotal = comparisonResults[activeTab].length;
+
+  // Search match highlighter
+  const renderHighlightedText = (text: string, searchQuery: string) => {
+    if (!searchQuery.trim()) return text;
+    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+    return parts.map((part, i) =>
+      part.toLowerCase() === searchQuery.toLowerCase() ? (
+        <mark
+          key={i}
+          className="bg-accent/25 text-accent font-semibold px-0.5 rounded"
+        >
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
   };
 
   return (
-    <div className="list-comparator-container">
-      <WorkspaceTabBar
-        tabs={tabs}
-        activeTabId={activeSession.id}
-        onSelectTab={setActiveSession}
-        onCloseTab={deleteSession}
-        onNewTab={() => createSession()}
-        onRenameTab={(id, newName) => renameSession(id, newName)}
-        onReorderTabs={(_activeId, _overId, oldIndex, newIndex) =>
-          reorderSessions(oldIndex, newIndex)
-        }
-        onDuplicateTab={duplicateComparatorSession}
-        onCloseOthers={closeOtherComparatorSessions}
-        onCloseToRight={closeComparatorSessionsToRight}
-        onCloseAll={closeAllComparatorSessions}
-        onCopyContent={handleCopyTabContent}
-        onCopyName={handleCopyTabName}
-        newTabTooltip="New Comparison Session"
-        rightContent={
-          <>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="toolbar-btn">
-                  <Settings2 className="h-3.5 w-3.5" />
-                  Settings
-                  <ChevronDown className="h-3 w-3 opacity-50" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Analysis Rules</DropdownMenuLabel>
-                <DropdownMenuCheckboxItem
-                  checked={caseSensitive}
-                  onCheckedChange={(checked) => updateComparatorSettings({ caseSensitive: checked })}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  Case Sensitive
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                  checked={trimWhitespace}
-                  onCheckedChange={(checked) => updateComparatorSettings({ trimWhitespace: checked })}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  Trim Whitespace
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Display</DropdownMenuLabel>
-                <DropdownMenuCheckboxItem
-                  checked={sortAlpha}
-                  onCheckedChange={(checked) => updateComparatorSettings({ sortAlpha: checked })}
-                  onSelect={(e) => e.preventDefault()}
-                >
-                  Natural Sort Order
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            <div className="tabs-toolbar-sep" />
-
-            <ActionTooltip content="Reset both input lists">
-              <button className="toolbar-btn text-red hover:bg-red-dim" onClick={() => {
-                updateSessionInput(activeSession.id, "a", "");
-                updateSessionInput(activeSession.id, "b", "");
-              }}>
-                <Trash2 className="h-3.5 w-3.5" />
-                Clear
-              </button>
-            </ActionTooltip>
-
-            <div className="tabs-toolbar-sep" />
-
-            <ActionTooltip content="Results update automatically as you type">
-              <div className="tabs-run-btn opacity-80 cursor-default">
-                <Check className="h-3 w-3" />
-                <span>Live Synced</span>
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <PanelGroup orientation="vertical">
+        {/* Top: Dual Inputs */}
+        <Panel defaultSize={42} minSize={20}>
+          <PanelGroup orientation="horizontal">
+            {/* List A Panel */}
+            <Panel defaultSize={50} minSize={20}>
+              <div className="comparator-input-panel h-full border-r border-border-1 flex flex-col">
+                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="section-label font-medium text-xs text-text-1">
+                      List A
+                    </span>
+                    <span className="tab-badge bg-bg-2 text-text-2">
+                      {listACount} items
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <ActionTooltip content="Format separators & quotes to clean newlines">
+                      <button
+                        className="toolbar-icon-btn"
+                        onClick={() => formatInput(inputA, "a")}
+                        disabled={!inputA.trim()}
+                      >
+                        <AlignLeft className="h-3.5 w-3.5" />
+                      </button>
+                    </ActionTooltip>
+                    <ActionTooltip content="Copy List A to clipboard">
+                      <button
+                        className="toolbar-icon-btn"
+                        onClick={() =>
+                          handleCopy(processRawList(inputA), "list-a", "Copied List A")
+                        }
+                        disabled={listACount === 0}
+                      >
+                        {copiedId === "list-a" ? (
+                          <Check className="h-3.5 w-3.5 text-green" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </ActionTooltip>
+                  </div>
+                </div>
+                <textarea
+                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
+                  placeholder="Paste List A here... (comma, newline, or semicolon delimited)"
+                  value={inputA}
+                  onChange={(e) => updateSessionInput(activeSession.id, "a", e.target.value)}
+                  spellCheck={false}
+                />
               </div>
-            </ActionTooltip>
-          </>
-        }
-      />
+            </Panel>
 
-      <div className="list-comparator-content">
-        <PanelGroup orientation="vertical">
-          <Panel defaultSize={45} minSize={20}>
-            <PanelGroup orientation="horizontal">
-              {/* List A Panel */}
-              <Panel defaultSize={50} minSize={20}>
-                <div className="comparator-input-panel h-full">
-                  <div className="section-header-row">
-                    <div className="section-label">List A ({processList(inputA).length} items)</div>
-                    <div className="flex items-center gap-1">
-                      <ActionTooltip content="Convert commas/separators to newlines">
-                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputA, "a")}>
-                          <AlignLeft className="h-3.5 w-3.5" />
-                        </button>
-                      </ActionTooltip>
-                      <ActionTooltip content="Copy List A to clipboard">
-                        <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputA), "list-a")}>
-                          {copied === "list-a" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
-                        </button>
-                      </ActionTooltip>
-                    </div>
+            <PanelResizeHandle className="comparator-resize-handle-h" />
+
+            {/* List B Panel */}
+            <Panel defaultSize={50} minSize={20}>
+              <div className="comparator-input-panel h-full flex flex-col">
+                <div className="section-header-row px-3 py-2 bg-bg-1 border-b border-border-1 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="section-label font-medium text-xs text-text-1">
+                      List B
+                    </span>
+                    <span className="tab-badge bg-bg-2 text-text-2">
+                      {listBCount} items
+                    </span>
                   </div>
-                  <textarea
-                    className="comparator-textarea"
-                    placeholder="Paste List A here..."
-                    value={inputA}
-                    onChange={(e) => updateSessionInput(activeSession.id, "a", e.target.value)}
-                    spellCheck={false}
-                  />
-                </div>
-              </Panel>
-
-              <PanelResizeHandle className="comparator-resize-handle-h" />
-
-              {/* List B Panel */}
-              <Panel defaultSize={50} minSize={20}>
-                <div className="comparator-input-panel h-full">
-                  <div className="section-header-row">
-                    <div className="section-label">List B ({processList(inputB).length} items)</div>
-                    <div className="flex items-center gap-1">
-                      <ActionTooltip content="Convert commas/separators to newlines">
-                        <button className="toolbar-icon-btn" onClick={() => formatInput(inputB, "b")}>
-                          <AlignLeft className="h-3.5 w-3.5" />
-                        </button>
-                      </ActionTooltip>
-                      <ActionTooltip content="Copy List B to clipboard">
-                        <button className="toolbar-icon-btn" onClick={() => handleCopy(processList(inputB), "list-b")}>
-                          {copied === "list-b" ? <Check className="h-3.5 w-3.5 text-green" /> : <Copy className="h-3.5 w-3.5" />}
-                        </button>
-                      </ActionTooltip>
-                    </div>
+                  <div className="flex items-center gap-1">
+                    <ActionTooltip content="Format separators & quotes to clean newlines">
+                      <button
+                        className="toolbar-icon-btn"
+                        onClick={() => formatInput(inputB, "b")}
+                        disabled={!inputB.trim()}
+                      >
+                        <AlignLeft className="h-3.5 w-3.5" />
+                      </button>
+                    </ActionTooltip>
+                    <ActionTooltip content="Copy List B to clipboard">
+                      <button
+                        className="toolbar-icon-btn"
+                        onClick={() =>
+                          handleCopy(processRawList(inputB), "list-b", "Copied List B")
+                        }
+                        disabled={listBCount === 0}
+                      >
+                        {copiedId === "list-b" ? (
+                          <Check className="h-3.5 w-3.5 text-green" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </ActionTooltip>
                   </div>
-                  <textarea
-                    className="comparator-textarea"
-                    placeholder="Paste List B here..."
-                    value={inputB}
-                    onChange={(e) => updateSessionInput(activeSession.id, "b", e.target.value)}
-                    spellCheck={false}
-                  />
                 </div>
-              </Panel>
-            </PanelGroup>
-          </Panel>
-
-          <PanelResizeHandle className="comparator-resize-handle-v" />
-
-          <Panel defaultSize={55} minSize={20}>
-            {/* Results Section */}
-            <div className="list-comparator-results h-full">
-              <div className="results-tabs">
-                <button
-                  className={cn("results-tab", activeTab === "aOnly" && "active")}
-                  onClick={() => setActiveTab("aOnly")}
-                >
-                  Only in A
-                  <span className="tab-badge">{comparisonResults.aOnly.length}</span>
-                </button>
-                <button
-                  className={cn("results-tab", activeTab === "bOnly" && "active")}
-                  onClick={() => setActiveTab("bOnly")}
-                >
-                  Only in B
-                  <span className="tab-badge">{comparisonResults.bOnly.length}</span>
-                </button>
-                <button
-                  className={cn("results-tab", activeTab === "both" && "active")}
-                  onClick={() => setActiveTab("both")}
-                >
-                  Common
-                  <span className="tab-badge">{comparisonResults.both.length}</span>
-                </button>
-
-                <div className="ml-auto flex items-center gap-2 px-2">
-                  <div className="relative">
-                    <Search className="h-3 w-3 absolute left-2 top-1/2 -translate-y-1/2 text-text-3" />
-                    <input
-                      type="text"
-                      className="results-search"
-                      placeholder="Filter results..."
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                    />
-                  </div>
-                  <ActionTooltip content="Download results as .txt">
-                    <button className="toolbar-icon-btn" onClick={handleExport}>
-                      <Download className="h-3.5 w-3.5" />
-                    </button>
-                  </ActionTooltip>
-                </div>
+                <textarea
+                  className="comparator-textarea flex-1 p-3 font-mono text-xs bg-bg-0 text-text-1 resize-none outline-none focus:ring-1 focus:ring-accent"
+                  placeholder="Paste List B here... (comma, newline, or semicolon delimited)"
+                  value={inputB}
+                  onChange={(e) => updateSessionInput(activeSession.id, "b", e.target.value)}
+                  spellCheck={false}
+                />
               </div>
+            </Panel>
+          </PanelGroup>
+        </Panel>
 
-              <div className="results-list-container">
-                {!hasCompared && !inputA && !inputB ? (
-                  <div className="results-empty">
-                    <Settings2 className="h-8 w-8 opacity-10 mb-2" />
-                    <p>Paste your lists and click "Compare Now"</p>
-                  </div>
-                ) : filteredResults.length === 0 ? (
-                  <div className="results-empty">
-                    <Info className="h-8 w-8 opacity-10 mb-2" />
-                    <p>{hasCompared ? "No items found for this category" : "Click 'Compare Now' to analyze"}</p>
-                  </div>
-                ) : (
-                  <div className="results-scroll">
-                    {filteredResults.map((item: string, idx: number) => (
-                      <div key={idx} className="result-item">
-                        <span className="result-idx">{idx + 1}</span>
-                        <span className="result-text">{item}</span>
-                      </div>
-                    ))}
-                  </div>
+        <PanelResizeHandle className="comparator-resize-handle-v" />
+
+        {/* Bottom: Premium Results Section */}
+        <Panel defaultSize={58} minSize={20}>
+          <div className="list-comparator-results h-full flex flex-col bg-bg-1">
+            {/* Results Filter Toolbar */}
+            <div className="results-tabs">
+              <button
+                className={cn(
+                  "results-tab tab-aOnly",
+                  activeTab === "aOnly" && "active"
                 )}
+                onClick={() => setActiveTab("aOnly")}
+              >
+                <span className="h-2 w-2 rounded-full bg-green inline-block flex-shrink-0" />
+                <span>Only in A</span>
+                <span className="tab-badge">
+                  {comparisonResults.aOnly.length}
+                </span>
+              </button>
+
+              <button
+                className={cn(
+                  "results-tab tab-bOnly",
+                  activeTab === "bOnly" && "active"
+                )}
+                onClick={() => setActiveTab("bOnly")}
+              >
+                <span className="h-2 w-2 rounded-full bg-red inline-block flex-shrink-0" />
+                <span>Only in B</span>
+                <span className="tab-badge">
+                  {comparisonResults.bOnly.length}
+                </span>
+              </button>
+
+              <button
+                className={cn(
+                  "results-tab tab-both",
+                  activeTab === "both" && "active"
+                )}
+                onClick={() => setActiveTab("both")}
+              >
+                <span className="h-2 w-2 rounded-full bg-blue inline-block flex-shrink-0" />
+                <span>Common (Overlap)</span>
+                <span className="tab-badge">
+                  {comparisonResults.both.length}
+                </span>
+              </button>
+
+              <button
+                className={cn(
+                  "results-tab tab-union",
+                  activeTab === "union" && "active"
+                )}
+                onClick={() => setActiveTab("union")}
+              >
+                <span className="h-2 w-2 rounded-full bg-purple inline-block flex-shrink-0" />
+                <span>Total Unique Union</span>
+                <span className="tab-badge">
+                  {comparisonResults.totalUnique}
+                </span>
+              </button>
+
+              {/* Right Tools: Search, Copy, Download */}
+              <div className="ml-auto flex items-center gap-2">
+                <div className="results-search-wrap">
+                  <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-text-3 pointer-events-none" />
+                  <input
+                    type="text"
+                    className="results-search"
+                    placeholder="Search results..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  {query && (
+                    <button
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-text-3 hover:text-text-1 p-0.5"
+                      onClick={() => setQuery("")}
+                      title="Clear search"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+
+                {query && (
+                  <span className="text-[10px] font-mono text-text-3 bg-bg-2 px-1.5 py-0.5 rounded border border-border-1 whitespace-nowrap">
+                    {filteredResults.length} / {activeTabTotal}
+                  </span>
+                )}
+
+                <ActionTooltip content={`Copy all ${filteredResults.length} items in current view`}>
+                  <button
+                    className="toolbar-btn text-xs"
+                    onClick={() =>
+                      handleCopy(
+                        filteredResults,
+                        "copy-active-tab",
+                        `Copied ${filteredResults.length} items`
+                      )
+                    }
+                    disabled={filteredResults.length === 0}
+                  >
+                    {copiedId === "copy-active-tab" ? (
+                      <Check className="h-3 w-3 text-green" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                    <span>Copy All</span>
+                  </button>
+                </ActionTooltip>
+
+                <ActionTooltip content="Download results as .txt">
+                  <button
+                    className="toolbar-icon-btn"
+                    onClick={handleExport}
+                    disabled={filteredResults.length === 0}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
+                </ActionTooltip>
               </div>
             </div>
-          </Panel>
-        </PanelGroup>
-      </div>
+
+            {/* Results Table Header */}
+            <div className="results-table-header">
+              <div className="w-12 text-center text-text-3 font-mono text-[10px]">#</div>
+              <div className="flex-1 px-2">Item Content</div>
+              <div className="w-24 text-right pr-6 hidden sm:block text-text-3 font-mono text-[10px]">Length</div>
+              <div className="w-20 text-right pr-2">Actions</div>
+            </div>
+
+            {/* List Result Items */}
+            <div className="results-list-container">
+              {!hasCompared && !inputA && !inputB ? (
+                <div className="results-empty">
+                  <div className="h-12 w-12 rounded-xl bg-bg-2 flex items-center justify-center border border-border-1 mb-3">
+                    <Columns className="h-6 w-6 text-accent opacity-80" />
+                  </div>
+                  <p className="font-semibold text-sm text-text-1">Paste your lists to compare</p>
+                  <p className="text-xs text-text-3 mt-1 max-w-sm text-center">
+                    Set operations run automatically as you type to identify unique differences, missing items, and intersections.
+                  </p>
+                </div>
+              ) : filteredResults.length === 0 ? (
+                <div className="results-empty">
+                  <div className="h-10 w-10 rounded-xl bg-bg-2 flex items-center justify-center border border-border-1 mb-2">
+                    <Info className="h-5 w-5 text-text-3" />
+                  </div>
+                  <p className="font-medium text-sm text-text-2">No items found</p>
+                  <p className="text-xs text-text-3 mt-0.5">
+                    {query ? (
+                      <span>
+                        No matches for "{query}".{" "}
+                        <button
+                          className="text-accent hover:underline font-medium"
+                          onClick={() => setQuery("")}
+                        >
+                          Clear search
+                        </button>
+                      </span>
+                    ) : (
+                      "No elements exist in this category."
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <div className="results-scroll">
+                  {filteredResults.map((item: string, idx: number) => (
+                    <div key={`${activeTab}-${idx}`} className="result-row group">
+                      {/* Index Gutter */}
+                      <div className="result-row-idx text-center font-mono text-text-3 text-[11px] select-none">
+                        {idx + 1}
+                      </div>
+
+                      {/* Content with Search Highlighting */}
+                      <div className="result-row-content px-2 font-mono text-xs select-text">
+                        {renderHighlightedText(item, query)}
+                      </div>
+
+                      {/* Item Length badge */}
+                      <div className="w-24 text-right pr-6 hidden sm:block font-mono text-[10.5px] text-text-3 opacity-60 group-hover:opacity-100">
+                        {item.length} chars
+                      </div>
+
+                      {/* Row Hover Actions */}
+                      <div className="result-row-actions w-20 justify-end pr-2">
+                        <ActionTooltip content="Copy item">
+                          <button
+                            className="toolbar-icon-btn h-6 w-6"
+                            onClick={() =>
+                              handleCopy([item], `item-${idx}`, `Copied: ${item}`)
+                            }
+                          >
+                            {copiedId === `item-${idx}` ? (
+                              <Check className="h-3 w-3 text-green" />
+                            ) : (
+                              <Copy className="h-3 w-3" />
+                            )}
+                          </button>
+                        </ActionTooltip>
+
+                        <ActionTooltip content='Copy with quotes ("item")'>
+                          <button
+                            className="toolbar-icon-btn h-6 w-6"
+                            onClick={() =>
+                              handleCopyQuoted(item, `quote-${idx}`)
+                            }
+                          >
+                            {copiedId === `quote-${idx}` ? (
+                              <Check className="h-3 w-3 text-green" />
+                            ) : (
+                              <Quote className="h-3 w-3" />
+                            )}
+                          </button>
+                        </ActionTooltip>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Results Footer Bar */}
+            <div className="results-footer-bar">
+              <div className="flex items-center gap-2">
+                <span>
+                  Showing {filteredResults.length} of {activeTabTotal} items
+                </span>
+                <span className="opacity-40">•</span>
+                <span className="capitalize">
+                  Category:{" "}
+                  {activeTab === "aOnly"
+                    ? "Unique to A"
+                    : activeTab === "bOnly"
+                    ? "Unique to B"
+                    : activeTab === "both"
+                    ? "Common Elements"
+                    : "Total Union"}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-text-3">
+                  Delimiters: newlines, commas, semicolons, pipes
+                </span>
+              </div>
+            </div>
+          </div>
+        </Panel>
+      </PanelGroup>
     </div>
   );
 }

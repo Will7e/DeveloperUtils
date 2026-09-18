@@ -50,6 +50,7 @@ export interface ComparatorSession {
   name: string;
   a: string;
   b: string;
+  mode?: "list" | "json" | "env";
 }
 
 /** A single session in the diff checker tool */
@@ -196,7 +197,7 @@ export interface AppState {
   setFormatterType: (type: "json" | "xml") => void;
 
   // Comparator actions
-  createComparatorSession: (name?: string) => void;
+  createComparatorSession: (name?: string, mode?: "list" | "json" | "env") => void;
   duplicateComparatorSession: (id: string) => void;
   deleteComparatorSession: (id: string) => void;
   closeOtherComparatorSessions: (id: string) => void;
@@ -204,6 +205,8 @@ export interface AppState {
   closeAllComparatorSessions: () => void;
   setActiveComparatorSession: (id: string) => void;
   updateComparatorSessionInput: (id: string, side: "a" | "b", input: string) => void;
+  updateComparatorSessionMode: (id: string, mode: "list" | "json" | "env") => void;
+  swapComparatorSessionInputs: (id: string) => void;
   renameComparatorSession: (id: string, name: string) => void;
   reorderComparatorSessions: (fromIndex: number, toIndex: number) => void;
   updateComparatorSettings: (settings: Partial<AppState["comparatorSettings"]>) => void;

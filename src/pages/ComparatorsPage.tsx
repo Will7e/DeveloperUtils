@@ -1,9 +1,9 @@
-import { ListComparator } from "@/features/comparators/ListComparator";
+import { ComparatorsSuite } from "@/features/comparators/ComparatorsSuite";
 
 export function ComparatorsPage() {
   return (
     <div className="page-container h-full flex flex-col">
-      <ListComparator />
+      <ComparatorsSuite />
     </div>
   );
 }

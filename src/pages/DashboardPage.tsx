@@ -120,8 +120,8 @@ export function DashboardPage() {
               icon={<Columns className="h-5 w-5" />}
               iconColor="var(--blue)"
               glowColor="var(--blue-dim)"
-              title="List Comparator"
-              description="Compare two text lists to spot unique items and common entries."
+              title="Comparators"
+              description="Compare lists & sets, semantic JSON objects, and .env configuration files."
               available
             />
             <ToolCard

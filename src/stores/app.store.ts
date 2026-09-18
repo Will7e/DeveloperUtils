@@ -4,7 +4,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings } from "@/types";
+import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
@@ -37,7 +37,7 @@ const initialFile = createDefaultFile("javascript");
 
 const initialJsonFile = { id: generateId(), name: "Untitled.json", content: "" };
 const initialXmlFile = { id: generateId(), name: "Untitled.xml", content: "" };
-const initialComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+const initialComparatorSession: ComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "", mode: "list" };
 const initialDiffSession: DiffSession = { id: generateId(), name: "Diff Check", original: "", modified: "", language: "plaintext", autoDetect: true };
 const initialDiffSettings: DiffSettings = { renderSideBySide: true, ignoreTrimWhitespace: true, enableSplitViewResizing: true, autoFormatOnPaste: true, wordWrap: false };
 
@@ -700,9 +700,20 @@ export const useAppStore = create<AppState>()(
         set({ formatterType: type });
       },
 
-      createComparatorSession: (name) => {
+      createComparatorSession: (name, mode = "list") => {
         const id = generateId();
-        const newSession = { id, name: name || "List Compare", a: "", b: "" };
+        const defaultNames: Record<string, string> = {
+          list: "List Compare",
+          json: "JSON Compare",
+          env: ".env Compare",
+        };
+        const newSession: ComparatorSession = {
+          id,
+          name: name || defaultNames[mode] || "Compare",
+          a: "",
+          b: "",
+          mode,
+        };
         set((state) => ({
           comparatorSessions: [...state.comparatorSessions, newSession],
           activeComparatorSessionId: id
@@ -731,7 +742,7 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const remaining = state.comparatorSessions.filter(s => s.id !== id);
           if (remaining.length === 0) {
-            const newSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+            const newSession: ComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "", mode: "list" };
             return {
               comparatorSessions: [newSession],
               activeComparatorSessionId: newSession.id
@@ -766,7 +777,7 @@ export const useAppStore = create<AppState>()(
       },
 
       closeAllComparatorSessions: () => {
-        const newSession = { id: generateId(), name: "List Compare", a: "", b: "" };
+        const newSession: ComparatorSession = { id: generateId(), name: "List Compare", a: "", b: "", mode: "list" };
         set({
           comparatorSessions: [newSession],
           activeComparatorSessionId: newSession.id,
@@ -781,6 +792,22 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           comparatorSessions: state.comparatorSessions.map(s =>
             s.id === id ? { ...s, [side]: input } : s
+          )
+        }));
+      },
+
+      updateComparatorSessionMode: (id, mode) => {
+        set((state) => ({
+          comparatorSessions: state.comparatorSessions.map(s =>
+            s.id === id ? { ...s, mode } : s
+          )
+        }));
+      },
+
+      swapComparatorSessionInputs: (id) => {
+        set((state) => ({
+          comparatorSessions: state.comparatorSessions.map(s =>
+            s.id === id ? { ...s, a: s.b, b: s.a } : s
           )
         }));
       },
