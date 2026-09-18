@@ -1,6 +1,6 @@
 const input = `{
-  "id": "dev-utils-001",
-  "name": "Developer Utilities",
+  "id": "intab-001",
+  "name": "InTab Utilities",
   "version": 1.0.0,
   "features": [
     {

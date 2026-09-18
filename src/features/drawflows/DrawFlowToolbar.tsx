@@ -1,5 +1,5 @@
 // ============================================================
-// DrawFlowToolbar — Standard DeveloperUtils Tabs & Actions
+// DrawFlowToolbar — Standard InTab Tabs & Actions
 // ============================================================
 
 import { useCallback, useState, useMemo } from "react";
@@ -46,7 +46,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const closeAllWorkflows = useAppStore((s) => s.closeAllWorkflows);
   const setActiveWorkflow = useAppStore((s) => s.setActiveWorkflow);
   const renameWorkflow = useAppStore((s) => s.renameWorkflow);
-  const updateWorkflowExcalidraw = useAppStore((s) => s.updateWorkflowExcalidraw);
+  const updateWorkflowDrawFlow = useAppStore((s) => s.updateWorkflowDrawFlow || s.updateWorkflowExcalidraw);
   const addToast = useAppStore((s) => s.addToast);
   const reorderWorkflows = useAppStore((s) => s.reorderWorkflows);
 
@@ -60,10 +60,10 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
     if (!excalidrawAPI) return;
     excalidrawAPI.resetScene();
     if (activeWorkflowId) {
-      updateWorkflowExcalidraw(activeWorkflowId, []);
+      updateWorkflowDrawFlow(activeWorkflowId, []);
     }
     addToast({ message: "Canvas cleared", type: "info" });
-  }, [excalidrawAPI, activeWorkflowId, updateWorkflowExcalidraw, addToast]);
+  }, [excalidrawAPI, activeWorkflowId, updateWorkflowDrawFlow, addToast]);
 
   const handleExportJSON = useCallback(() => {
     if (!activeWorkflow || !excalidrawAPI) return;
@@ -73,9 +73,9 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
 
     const data = JSON.stringify(
       {
-        type: "excalidraw",
+        type: "drawflow",
         version: 2,
-        source: "DeveloperUtils DrawFlow",
+        source: "InTab DrawFlow",
         elements,
         appState: {
           viewBackgroundColor: appState.viewBackgroundColor,
@@ -93,10 +93,10 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.excalidraw`;
+    link.download = `${activeWorkflow.name.replace(/\s+/g, "_").toLowerCase()}.drawflow`;
     link.click();
     URL.revokeObjectURL(url);
-    addToast({ message: "DrawFlow exported as .excalidraw", type: "success" });
+    addToast({ message: "DrawFlow exported as .drawflow", type: "success" });
   }, [activeWorkflow, excalidrawAPI, addToast]);
 
   const handleExportPNG = useCallback(async () => {
@@ -164,7 +164,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
   const handleImportJSON = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".json,.excalidraw";
+    input.accept = ".json,.drawflow,.excalidraw";
     input.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
@@ -174,7 +174,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
         const elements = data.elements || (Array.isArray(data) ? data : []);
         const appState = data.appState || {};
         const files = data.files || {};
-        const name = file.name.replace(/\.(json|excalidraw)$/, "");
+        const name = file.name.replace(/\.(json|drawflow|excalidraw)$/, "");
 
         createWorkflow(name, elements, appState, files);
         addToast({ message: `Imported "${name}" successfully`, type: "success" });
@@ -207,9 +207,9 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
       if (wf) {
         const data = JSON.stringify(
           {
-            type: "excalidraw",
+            type: "drawflow",
             version: 2,
-            source: "DeveloperUtils DrawFlow",
+            source: "InTab DrawFlow",
             elements: wf.elements || [],
             appState: wf.appState || {},
             name: wf.name,
@@ -268,7 +268,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                   <span>Import</span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent>Import .excalidraw or JSON diagram</TooltipContent>
+              <TooltipContent>Import .drawflow, .excalidraw or JSON diagram</TooltipContent>
             </Tooltip>
 
             {/* Consolidated Export Dropdown Menu */}
@@ -317,8 +317,8 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                     <Download className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-medium text-text-1">Excalidraw JSON</span>
-                    <span className="text-[10px] text-text-3 truncate">Editable DevUtils .excalidraw project</span>
+                    <span className="text-xs font-medium text-text-1">DrawFlow JSON</span>
+                    <span className="text-[10px] text-text-3 truncate">Editable InTab .drawflow project</span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuContent>

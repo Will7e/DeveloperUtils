@@ -22,5 +22,5 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/excalidraw", "src/ServiceNow*", "src/sn-js-lib"]
+  "exclude": ["src/drawflow", "src/excalidraw", "src/ServiceNow*", "src/sn-js-lib"]
 }

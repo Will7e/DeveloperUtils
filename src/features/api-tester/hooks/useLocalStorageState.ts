@@ -10,7 +10,11 @@ export function useLocalStorageState<T>(
 ): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
     try {
-      const item = window.localStorage.getItem(key);
+      const item =
+        window.localStorage.getItem(key) ??
+        (key.startsWith("intab_")
+          ? window.localStorage.getItem(key.replace("intab_", "devutils_"))
+          : null);
       return item ? JSON.parse(item) : defaultValue;
     } catch {
       return defaultValue;

@@ -1,11 +1,11 @@
 // ============================================================
 // Unified LoadingState Component — Full-page, section, and inline states
-// Powered by DevUtils branded loader (pulsing bolt + gradient text + sliding bar)
+// Powered by InTab branded loader
 // ============================================================
 
 import React from "react";
 import { cn } from "@/lib/utils";
-import { DevUtilsLoader, type DevUtilsLoaderSize } from "./devutils-loader";
+import { InTabLoader, type InTabLoaderSize } from "./intab-loader";
 
 export interface LoadingStateProps {
   /** Primary heading or title */
@@ -15,7 +15,7 @@ export interface LoadingStateProps {
   /** Secondary detailed description text */
   description?: string;
   /** Size variant */
-  size?: DevUtilsLoaderSize;
+  size?: InTabLoaderSize;
   /** Render as full-page or full-container centered layout */
   fullPage?: boolean;
   /** Render as compact inline horizontal layout */
@@ -40,7 +40,7 @@ export function LoadingState({
   className,
 }: LoadingStateProps) {
   // Determine effective loader size based on mode
-  const effectiveSize: DevUtilsLoaderSize =
+  const effectiveSize: InTabLoaderSize =
     size || (fullPage ? "xl" : inline ? "xs" : "md");
   const displayTitle = title || (!description ? message : undefined);
   const displayDescription = description || (title ? message : undefined);
@@ -53,7 +53,7 @@ export function LoadingState({
           className
         )}
       >
-        <DevUtilsLoader
+        <InTabLoader
           size={effectiveSize}
           inline
           icon={icon}
@@ -76,7 +76,7 @@ export function LoadingState({
       {fullPage && <div className="loading-ambient-glow" />}
 
       <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
-        <DevUtilsLoader
+        <InTabLoader
           size={effectiveSize}
           icon={icon}
           title={displayTitle}

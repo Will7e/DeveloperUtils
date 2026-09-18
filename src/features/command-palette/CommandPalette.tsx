@@ -156,14 +156,17 @@ export function CommandPalette() {
           const pathname = window.location.pathname;
 
           if (pathname.startsWith("/formatters")) {
+            window.dispatchEvent(new CustomEvent("intab:format-formatter"));
             window.dispatchEvent(new CustomEvent("devutils:format-formatter"));
             return;
           }
           if (pathname.startsWith("/diff")) {
+            window.dispatchEvent(new CustomEvent("intab:format-diff"));
             window.dispatchEvent(new CustomEvent("devutils:format-diff"));
             return;
           }
           if (pathname.startsWith("/api-tester")) {
+            window.dispatchEvent(new CustomEvent("intab:format-api-tester"));
             window.dispatchEvent(new CustomEvent("devutils:format-api-tester"));
             return;
           }

@@ -66,7 +66,7 @@
 }
 
 /* ============================================================
-   Design System — DevUtils · Clean Minimal IDE
+   Design System — InTab · Clean Minimal IDE
    ============================================================ */
 
 :root {
@@ -253,12 +253,19 @@ html.light .brand-text {
 
 /* ---- Light: Activity Bar Logo ---- */
 html.light .activity-logo {
-  background: linear-gradient(135deg, rgba(2, 132, 199, 0.12), rgba(2, 132, 199, 0.06));
-  box-shadow: 0 0 12px rgba(2, 132, 199, 0.10);
+  background: transparent;
+  box-shadow: none;
+  border: none;
 }
 
-html.light .activity-logo:hover {
-  box-shadow: 0 0 18px rgba(2, 132, 199, 0.20);
+html.light .activity-bar-brand:hover .activity-logo {
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.15));
+}
+
+html.light .activity-bar-brand:hover .activity-brand-text {
+  background: linear-gradient(135deg, #0f172a, #334155);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* ---- Light: Nav Indicator ---- */
@@ -340,6 +347,7 @@ html.light .toast {
 }
 
 /* ---- Light: Tooltips ---- */
+html.light .intab-tooltip,
 html.light .devutils-tooltip {
   background: #1e293b;
   border-color: #334155;
@@ -347,6 +355,7 @@ html.light .devutils-tooltip {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.20);
 }
 
+html.light .intab-tooltip kbd,
 html.light .devutils-tooltip kbd {
   background: rgba(255, 255, 255, 0.12);
   border-color: rgba(255, 255, 255, 0.18);
@@ -458,13 +467,13 @@ html.light .lib-group-count {
 
 /* ---- Light: Dashboard ---- */
 html.light .dash-hero-badge {
-  background: rgba(2, 132, 199, 0.08);
-  border-color: rgba(2, 132, 199, 0.20);
-  color: #0369a1;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #1e293b;
 }
 
 html.light .dash-hero-accent {
-  background: linear-gradient(135deg, #0284c7, #0369a1, #075985);
+  background: linear-gradient(135deg, #0f172a 0%, #334155 50%, #64748b 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -797,6 +806,16 @@ body {
   flex-shrink: 0;
   min-height: 64px;
   overflow: hidden;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-md);
+  transition: opacity 0.2s ease;
+}
+
+.activity-bar-brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .activity-bar-collapsed .activity-bar-brand {
@@ -811,14 +830,25 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(129, 140, 248, 0.15), rgba(167, 139, 250, 0.10));
-  border-radius: var(--radius-md);
-  box-shadow: 0 0 16px rgba(129, 140, 248, 0.15);
-  transition: box-shadow 0.3s;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), filter 0.25s ease;
 }
 
-.activity-logo:hover {
-  box-shadow: 0 0 22px rgba(129, 140, 248, 0.30);
+.activity-bar-brand:hover .activity-logo {
+  transform: scale(1.08);
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.22));
+}
+
+.activity-bar-brand:active .activity-logo {
+  transform: scale(0.95);
+}
+
+.activity-bar-brand:hover .activity-brand-text {
+  background: linear-gradient(135deg, #ffffff, #cbd5e1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .activity-brand-text {
@@ -2812,8 +2842,19 @@ html.light .settings-action-btn:hover {
 }
 
 .status-brand {
-  font-weight: 600;
-  color: var(--text-1);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+html.light .status-brand {
+  background: linear-gradient(135deg, #0f172a 0%, #475569 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .status-dot {
@@ -2832,7 +2873,8 @@ html.light .settings-action-btn:hover {
    UTILITIES
    ============================================================ */
 
-/* DevUtils Unified Brand Loader */
+/* InTab Unified Brand Loader */
+.intab-loader,
 .devutils-loader {
   display: flex;
   flex-direction: column;
@@ -2848,17 +2890,17 @@ html.light .settings-action-btn:hover {
 }
 
 .loader-icon {
-  color: #818cf8;
-  fill: rgba(129, 140, 248, 0.15);
-  animation: loader-pulse 2s ease-in-out infinite;
   flex-shrink: 0;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+  animation: loader-pulse 2s ease-in-out infinite;
 }
 
 .loader-text {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-weight: 700;
   letter-spacing: 0.8px;
-  background: linear-gradient(135deg, #818cf8, #a78bfa, #c4b5fd);
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 25%, #cbd5e1 60%, #94a3b8 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -2867,7 +2909,7 @@ html.light .settings-action-btn:hover {
 .loader-bar-track {
   width: 180px;
   height: 2px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 9999px;
   overflow: hidden;
   position: relative;
@@ -2876,7 +2918,7 @@ html.light .settings-action-btn:hover {
 .loader-bar-fill {
   width: 45%;
   height: 100%;
-  background: linear-gradient(90deg, #6366f1, #818cf8, #a78bfa);
+  background: linear-gradient(90deg, #64748b, #cbd5e1, #ffffff);
   border-radius: 9999px;
   animation: loader-slide 1.2s ease-in-out infinite;
 }
@@ -2884,11 +2926,13 @@ html.light .settings-action-btn:hover {
 @keyframes loader-pulse {
   0%,
   100% {
-    filter: drop-shadow(0 0 0 transparent);
-    opacity: 0.7;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+    transform: scale(1);
+    opacity: 0.85;
   }
   50% {
-    filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.6));
+    filter: drop-shadow(0 4px 16px rgba(255, 255, 255, 0.3)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
+    transform: scale(1.05);
     opacity: 1;
   }
 }
@@ -2902,30 +2946,16 @@ html.light .settings-action-btn:hover {
   }
 }
 
-/* Light Theme Overrides for DevUtils Loader */
+/* Light Theme Overrides for InTab Loader */
 html.light .loader-text {
-  background: linear-gradient(135deg, #0284c7, #0369a1, #075985);
+  background: linear-gradient(135deg, #0f172a 0%, #334155 50%, #64748b 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 html.light .loader-icon {
-  color: #0284c7;
-  fill: rgba(2, 132, 199, 0.12);
-  animation-name: loader-pulse-light;
-}
-
-@keyframes loader-pulse-light {
-  0%,
-  100% {
-    filter: drop-shadow(0 0 0 transparent);
-    opacity: 0.75;
-  }
-  50% {
-    filter: drop-shadow(0 0 8px rgba(2, 132, 199, 0.45));
-    opacity: 1;
-  }
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.18));
 }
 
 html.light .loader-bar-track {
@@ -2933,7 +2963,7 @@ html.light .loader-bar-track {
 }
 
 html.light .loader-bar-fill {
-  background: linear-gradient(90deg, #0ea5e9, #0284c7, #0369a1);
+  background: linear-gradient(90deg, #94a3b8, #475569, #0f172a);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2966,7 +2996,7 @@ html.light .loader-bar-fill {
   width: 240px;
   height: 240px;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
   pointer-events: none;
   filter: blur(28px);
   opacity: 0.65;
@@ -2978,19 +3008,19 @@ html.light .loader-bar-fill {
   top: 0;
   left: 0;
   right: 0;
-  height: 2.5px;
+  height: 2px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    var(--accent) 30%,
-    #38bdf8 60%,
-    var(--accent) 85%,
+    #64748b 25%,
+    #cbd5e1 50%,
+    #ffffff 75%,
     transparent 100%
   );
   background-size: 200% 100%;
   animation: route-progress 1.4s ease-in-out infinite;
   z-index: 50;
-  box-shadow: 0 0 10px var(--accent-glow);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.25);
 }
 
 @keyframes route-progress {
@@ -3474,6 +3504,7 @@ html.light .loader-bar-fill {
    PREMIUM TOOLTIPS
    ============================================================ */
 
+.intab-tooltip,
 .devutils-tooltip {
   z-index: 9999;
   overflow: hidden;
@@ -3501,6 +3532,7 @@ html.light .loader-bar-fill {
 }
 
 /* Keyboard shortcut styling inside tooltips */
+.intab-tooltip kbd,
 .devutils-tooltip kbd {
   display: inline-block;
   padding: 1px 5px;
@@ -3516,23 +3548,28 @@ html.light .loader-bar-fill {
 }
 
 /* Per-side entrance animations */
+.intab-tooltip[data-side="top"],
 .devutils-tooltip[data-side="top"] {
   animation-name: tooltip-in-top;
 }
 
+.intab-tooltip[data-side="bottom"],
 .devutils-tooltip[data-side="bottom"] {
   animation-name: tooltip-in-bottom;
 }
 
+.intab-tooltip[data-side="left"],
 .devutils-tooltip[data-side="left"] {
   animation-name: tooltip-in-left;
 }
 
+.intab-tooltip[data-side="right"],
 .devutils-tooltip[data-side="right"] {
   animation-name: tooltip-in-right;
 }
 
 /* Exit animations */
+.intab-tooltip[data-state="closed"],
 .devutils-tooltip[data-state="closed"] {
   animation-name: tooltip-out;
   animation-duration: 0.1s;
@@ -3901,6 +3938,35 @@ html.light .loader-bar-fill {
   align-items: center;
   text-align: center;
   gap: 16px;
+  position: relative;
+}
+
+.dash-hero-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  position: relative;
+}
+
+.dash-hero-logo::before {
+  content: "";
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.10) 0%, rgba(203, 213, 225, 0.03) 50%, transparent 70%);
+  pointer-events: none;
+  filter: blur(10px);
+}
+
+.dash-hero-icon {
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 16px rgba(255, 255, 255, 0.12));
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dash-hero-icon:hover {
+  transform: scale(1.06) translateY(-2px);
 }
 
 .dash-hero-badge {
@@ -3908,39 +3974,38 @@ html.light .loader-bar-fill {
   align-items: center;
   gap: 8px;
   padding: 6px 16px;
-  background: rgba(14, 165, 233, 0.15);
-  border: 1px solid rgba(14, 165, 233, 0.30);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 9999px;
-  font-size: 12px;
-  /* Increased size */
+  font-size: 11px;
   font-weight: 600;
-  color: #7dd3fc;
-  /* Brighter sky blue for maximum clarity */
+  color: #f1f5f9;
   letter-spacing: 0.8px;
-  /* Increased spacing */
   text-transform: uppercase;
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.1);
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(8px);
 }
 
 .dash-hero-title {
-  font-size: 36px;
+  font-size: 38px;
   font-weight: 800;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.6px;
   color: var(--text-1);
   line-height: 1.2;
 }
 
 .dash-hero-accent {
-  background: linear-gradient(135deg, #0ea5e9, #38bdf8, #7dd3fc);
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 30%, #cbd5e1 60%, #94a3b8 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  filter: drop-shadow(0 2px 18px rgba(255, 255, 255, 0.22));
 }
 
 .dash-hero-subtitle {
   font-size: 15px;
   color: var(--text-2);
-  max-width: 460px;
+  max-width: 480px;
   line-height: 1.6;
 }
 
@@ -4035,7 +4100,7 @@ html.light .loader-bar-fill {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.06), transparent 60%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), transparent 60%);
   opacity: 0;
   transition: opacity 0.3s;
   pointer-events: none;
@@ -4046,11 +4111,10 @@ html.light .loader-bar-fill {
 }
 
 .dash-card-active:hover {
-  border-color: rgba(14, 165, 233, 0.25);
+  border-color: rgba(255, 255, 255, 0.22);
   transform: translateY(-2px);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(14, 165, 233, 0.08);
+    0 12px 40px rgba(0, 0, 0, 0.45),
 }
 
 .dash-card-active:hover::before {
@@ -7526,6 +7590,8 @@ html.light .lang-diff {
   filter: brightness(0.96) !important;
 }
 
+.excalidraw .library-menu-browse-button .intab-lib-badge,
+.excalidraw .library-menu-browse-button .drawflow-lib-badge,
 .excalidraw .library-menu-browse-button .devutils-lib-badge {
   display: inline-flex;
   align-items: center;

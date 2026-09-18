@@ -35,14 +35,14 @@ import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary, ServiceNowMethod, Toast } from "@/types";
 import {
-  getExcalidrawLibraries,
-  getExcalidrawLibraryPreviewUrl,
-  getExcalidrawLibraryCdnPreviewUrl,
+  getDrawFlowLibraries,
+  getDrawFlowLibraryPreviewUrl,
+  getDrawFlowLibraryCdnPreviewUrl,
   fetchAndFormatLibraryItems,
   removeLibraryItemsFromList,
-  EXCALIDRAW_CATEGORIES,
-  type ExcalidrawLibraryItem,
-} from "@/utils/excalidrawLibrary";
+  DRAWFLOW_CATEGORIES,
+  type DrawFlowLibraryItem,
+} from "@/utils/drawflowLibrary";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
@@ -123,8 +123,8 @@ export function LibraryView() {
   // Normalize query
   const q = useMemo(() => searchQuery.toLowerCase().trim().replace(/\(\)$/, ""), [searchQuery]);
 
-  if (libraryTab === "excalidraw") {
-    return <ExcalidrawLibraryGallery searchQuery={searchQuery} />;
+  if (libraryTab === "drawflow" || libraryTab === "excalidraw") {
+    return <DrawFlowLibraryGallery searchQuery={searchQuery} />;
   }
 
   // If no API is selected, render the Welcome / Discovery Hub
@@ -1081,31 +1081,31 @@ const SyntaxLine = React.memo(function SyntaxLine({ line }: { line: string }) {
 });
 
 /* ============================================================
-   EXCALIDRAW COMMUNITY GALLERY
+   DRAWFLOW COMMUNITY GALLERY
    ============================================================ */
 
-function ExcalidrawLibraryGallery({
+function DrawFlowLibraryGallery({
   searchQuery,
 }: {
   searchQuery: string;
 }) {
-  const [libraries, setLibraries] = useState<ExcalidrawLibraryItem[]>([]);
+  const [libraries, setLibraries] = useState<DrawFlowLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const activeCategory = useAppStore((s) => s.libraryExcalidrawCategory);
+  const activeCategory = useAppStore((s) => s.libraryDrawFlowCategory || s.libraryExcalidrawCategory || "all");
   const addToast = useAppStore((s) => s.addToast);
   const navigate = useNavigate();
 
   useEffect(() => {
-    getExcalidrawLibraries().then((data) => {
+    getDrawFlowLibraries().then((data) => {
       setLibraries(data);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+  const storeIds = useAppStore((s) => s.drawflowAddedLibraryIds || s.excalidrawAddedLibraryIds || []);
 
   const categoryLabel = useMemo(() => {
-    const found = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
+    const found = DRAWFLOW_CATEGORIES.find((c) => c.id === activeCategory);
     return found?.label || "All Libraries";
   }, [activeCategory]);
 
@@ -1114,7 +1114,7 @@ function ExcalidrawLibraryGallery({
       if (activeCategory === "added") {
         if (!storeIds.includes(lib.id)) return false;
       } else if (activeCategory !== "all") {
-        const cat = EXCALIDRAW_CATEGORIES.find((c) => c.id === activeCategory);
+        const cat = DRAWFLOW_CATEGORIES.find((c) => c.id === activeCategory);
         if (cat && "keywords" in cat && cat.keywords) {
           const keywords = cat.keywords as readonly string[];
           const matchCat = keywords.some((kw: string) =>
@@ -1171,7 +1171,7 @@ function ExcalidrawLibraryGallery({
       {loading ? (
         <LoadingState
           size="md"
-          message="Loading Excalidraw libraries..."
+          message="Loading DrawFlow libraries..."
           description="Fetching community component packs"
           minHeight={260}
         />
@@ -1192,7 +1192,7 @@ function ExcalidrawLibraryGallery({
       ) : (
         <div className="lib-excal-grid">
           {filteredLibraries.map((lib) => (
-            <ExcalidrawCard
+            <DrawFlowCard
               key={lib.id}
               lib={lib}
             />
@@ -1203,24 +1203,24 @@ function ExcalidrawLibraryGallery({
   );
 }
 
-function ExcalidrawCard({
+function DrawFlowCard({
   lib,
 }: {
-  lib: ExcalidrawLibraryItem;
+  lib: DrawFlowLibraryItem;
 }) {
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);
-  const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
-  const storeLibraryItems = useAppStore((s) => s.excalidrawLibraryItems || []);
-  const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
-  const storeRemove = useAppStore((s) => s.removeExcalidrawAddedLibraryId);
-  const updateStoreLibraryItems = useAppStore((s) => s.updateExcalidrawLibraryItems);
+  const storeIds = useAppStore((s) => s.drawflowAddedLibraryIds || s.excalidrawAddedLibraryIds || []);
+  const storeLibraryItems = useAppStore((s) => s.drawflowLibraryItems || s.excalidrawLibraryItems || []);
+  const storeAdd = useAppStore((s) => s.addDrawFlowAddedLibraryId || s.addExcalidrawAddedLibraryId);
+  const storeRemove = useAppStore((s) => s.removeDrawFlowAddedLibraryId || s.removeExcalidrawAddedLibraryId);
+  const updateStoreLibraryItems = useAppStore((s) => s.updateDrawFlowLibraryItems || s.updateExcalidrawLibraryItems);
   const addToast = useAppStore((s) => s.addToast);
   const [loading, setLoading] = useState(false);
   const isAdded = storeIds.includes(lib.id);
 
-  const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
-  const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+  const previewUrl = getDrawFlowLibraryPreviewUrl(lib.preview);
+  const cdnPreviewUrl = getDrawFlowLibraryCdnPreviewUrl(lib.preview);
 
   const handleAdd = async () => {
     try {

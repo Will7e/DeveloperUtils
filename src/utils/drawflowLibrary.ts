@@ -1,10 +1,10 @@
 // ============================================================
-// Excalidraw Library Helper — Fetch & Load Community Libraries
+// DrawFlow Library Helper — Fetch & Load Community Libraries
 // ============================================================
 
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
-export interface ExcalidrawLibraryItem {
+export interface DrawFlowLibraryItem {
   id: string;
   name: string;
   description: string;
@@ -15,35 +15,38 @@ export interface ExcalidrawLibraryItem {
   updated: string;
   version: number;
 }
+export type ExcalidrawLibraryItem = DrawFlowLibraryItem;
 
-let cachedLibraries: ExcalidrawLibraryItem[] | null = null;
+let cachedLibraries: DrawFlowLibraryItem[] | null = null;
 
 const CDN_BASE_URL = "https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@main/libraries";
 
 /** Get local preview URL using Vite BASE_URL */
-export function getExcalidrawLibraryPreviewUrl(previewPath: string): string {
+export function getDrawFlowLibraryPreviewUrl(previewPath: string): string {
   const cleanPath = previewPath.startsWith("/") ? previewPath.slice(1) : previewPath;
   const baseUrl = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
-  return `${baseUrl}excalidraw-libraries/libraries/${cleanPath}`;
+  return `${baseUrl}drawflow-libraries/libraries/${cleanPath}`;
 }
+export const getExcalidrawLibraryPreviewUrl = getDrawFlowLibraryPreviewUrl;
 
 /** Get fallback CDN preview URL */
-export function getExcalidrawLibraryCdnPreviewUrl(previewPath: string): string {
+export function getDrawFlowLibraryCdnPreviewUrl(previewPath: string): string {
   const cleanPath = previewPath.startsWith("/") ? previewPath.slice(1) : previewPath;
   return `${CDN_BASE_URL}/${cleanPath}`;
 }
+export const getExcalidrawLibraryCdnPreviewUrl = getDrawFlowLibraryCdnPreviewUrl;
 
-/** Fetch all community Excalidraw libraries metadata with local -> CDN fallback */
-export async function getExcalidrawLibraries(): Promise<ExcalidrawLibraryItem[]> {
+/** Fetch all community DrawFlow libraries metadata with local -> CDN fallback */
+export async function getDrawFlowLibraries(): Promise<DrawFlowLibraryItem[]> {
   if (cachedLibraries) return cachedLibraries;
 
   const baseUrl = import.meta.env.BASE_URL.endsWith("/")
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
 
-  const localUrl = `${baseUrl}excalidraw-libraries/libraries.json`;
+  const localUrl = `${baseUrl}drawflow-libraries/libraries.json`;
   const cdnUrl = "https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@main/libraries.json";
 
   // Try local first
@@ -52,28 +55,29 @@ export async function getExcalidrawLibraries(): Promise<ExcalidrawLibraryItem[]>
     const contentType = res.headers.get("content-type") || "";
     if (res.ok && !contentType.includes("text/html")) {
       const text = await res.text();
-      const data: ExcalidrawLibraryItem[] = JSON.parse(text);
+      const data: DrawFlowLibraryItem[] = JSON.parse(text);
       if (Array.isArray(data) && data.length > 0) {
         cachedLibraries = data;
         return data;
       }
     }
   } catch (e) {
-    console.warn("Local Excalidraw libraries fetch failed, falling back to CDN...", e);
+    console.warn("Local DrawFlow libraries fetch failed, falling back to CDN...", e);
   }
 
   // Fallback to CDN
   try {
     const res = await fetch(cdnUrl);
     if (!res.ok) throw new Error(`CDN fetch failed with status ${res.status}`);
-    const data: ExcalidrawLibraryItem[] = await res.json();
+    const data: DrawFlowLibraryItem[] = await res.json();
     cachedLibraries = data;
     return data;
   } catch (err) {
-    console.error("Error loading Excalidraw libraries from local & CDN:", err);
+    console.error("Error loading DrawFlow libraries from local & CDN:", err);
     return [];
   }
 }
+export const getExcalidrawLibraries = getDrawFlowLibraries;
 
 /** Fetch raw library items from local or CDN */
 export async function fetchRawLibraryItems(sourcePath: string): Promise<unknown[]> {
@@ -82,7 +86,7 @@ export async function fetchRawLibraryItems(sourcePath: string): Promise<unknown[
     ? import.meta.env.BASE_URL
     : `${import.meta.env.BASE_URL}/`;
 
-  const localUrl = `${baseUrl}excalidraw-libraries/libraries/${cleanPath}`;
+  const localUrl = `${baseUrl}drawflow-libraries/libraries/${cleanPath}`;
   const cdnUrl = `${CDN_BASE_URL}/${cleanPath}`;
 
   let data: Record<string, unknown> | unknown[] | null = null;
@@ -225,15 +229,15 @@ export async function removeLibraryItemsFromList(
   return { remainingItems, removedCount };
 }
 
-/** Load a specific library (.excalidrawlib) into an Excalidraw canvas instance with fallback */
-export async function loadLibraryToExcalidraw(
+/** Load a specific library into an canvas instance with fallback */
+export async function loadLibraryToDrawFlow(
   sourcePath: string,
-  excalidrawAPI: ExcalidrawImperativeAPI,
+  canvasAPI: ExcalidrawImperativeAPI,
   libId?: string
 ): Promise<number> {
   const formattedItems = await fetchAndFormatLibraryItems(sourcePath, libId);
 
-  await excalidrawAPI.updateLibrary({
+  await canvasAPI.updateLibrary({
     libraryItems: formattedItems as Parameters<ExcalidrawImperativeAPI["updateLibrary"]>[0]["libraryItems"],
     merge: true,
     openLibraryMenu: true,
@@ -241,11 +245,12 @@ export async function loadLibraryToExcalidraw(
 
   return formattedItems.length;
 }
+export const loadLibraryToExcalidraw = loadLibraryToDrawFlow;
 
-/** Remove a specific library's items from an Excalidraw canvas instance */
-export async function removeLibraryFromExcalidraw(
+/** Remove a specific library's items from a canvas instance */
+export async function removeLibraryFromDrawFlow(
   sourcePath: string,
-  excalidrawAPI: ExcalidrawImperativeAPI,
+  canvasAPI: ExcalidrawImperativeAPI,
   libId?: string
 ): Promise<number> {
   const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
@@ -276,7 +281,7 @@ export async function removeLibraryFromExcalidraw(
   let removedCount = 0;
 
   // Use the callback form of updateLibrary to access current items directly
-  await excalidrawAPI.updateLibrary({
+  await canvasAPI.updateLibrary({
     libraryItems: ((currentItems: readonly unknown[]) => {
       const filtered = (currentItems as unknown[]).filter((existingItem: unknown) => {
         if (typeof existingItem !== "object" || existingItem === null) return true;
@@ -323,14 +328,16 @@ export async function removeLibraryFromExcalidraw(
 
   return removedCount;
 }
+export const removeLibraryFromExcalidraw = removeLibraryFromDrawFlow;
 
-export interface ExcalidrawCategoryDef {
+export interface DrawFlowCategoryDef {
   id: string;
   label: string;
   keywords?: string[];
 }
+export type ExcalidrawCategoryDef = DrawFlowCategoryDef;
 
-export const EXCALIDRAW_CATEGORIES: ExcalidrawCategoryDef[] = [
+export const DRAWFLOW_CATEGORIES: DrawFlowCategoryDef[] = [
   { id: "all", label: "All Libraries" },
   { id: "added", label: "Added to DrawFlow" },
   { id: "system", label: "System Design & Cloud", keywords: ["system", "architecture", "cloud", "aws", "gcp", "azure", "kubernetes", "docker", "snowflake"] },
@@ -338,4 +345,4 @@ export const EXCALIDRAW_CATEGORIES: ExcalidrawCategoryDef[] = [
   { id: "icons", label: "Icons & Logos", keywords: ["icon", "logo", "brand", "dev", "tech"] },
   { id: "diagrams", label: "Flowcharts & Diagrams", keywords: ["flowchart", "diagram", "process", "map", "mindmap", "tree", "chart"] },
 ];
-
+export const EXCALIDRAW_CATEGORIES = DRAWFLOW_CATEGORIES;

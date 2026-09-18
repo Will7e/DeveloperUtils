@@ -24,10 +24,10 @@ import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary } from "@/types";
 import { 
-  EXCALIDRAW_CATEGORIES, 
-  getExcalidrawLibraries, 
-  type ExcalidrawLibraryItem 
-} from "@/utils/excalidrawLibrary";
+  DRAWFLOW_CATEGORIES, 
+  getDrawFlowLibraries, 
+  type DrawFlowLibraryItem 
+} from "@/utils/drawflowLibrary";
 import { useNavigate } from "react-router-dom";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
@@ -214,13 +214,13 @@ export function LibrarySidebar() {
   const setSearchQuery = useAppStore((s) => s.setLibrarySearchQuery);
   const libraryTab = useAppStore((s) => s.libraryTab);
   const setLibraryTab = useAppStore((s) => s.setLibraryTab);
-  const excalCategory = useAppStore((s) => s.libraryExcalidrawCategory);
-  const setExcalCategory = useAppStore((s) => s.setLibraryExcalidrawCategory);
-  const storeAddedIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
+  const drawflowCategory = useAppStore((s) => s.libraryDrawFlowCategory || s.libraryExcalidrawCategory || "all");
+  const setDrawFlowCategory = useAppStore((s) => s.setLibraryDrawFlowCategory || s.setLibraryExcalidrawCategory);
+  const storeAddedIds = useAppStore((s) => s.drawflowAddedLibraryIds || s.excalidrawAddedLibraryIds || []);
 
   const [activeChip, setActiveChip] = useState<string>("All");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [excalLibraries, setExcalLibraries] = useState<ExcalidrawLibraryItem[]>([]);
+  const [drawflowLibraries, setDrawflowLibraries] = useState<DrawFlowLibraryItem[]>([]);
   const isSearchMode = searchQuery.trim().length > 0;
   const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
@@ -234,10 +234,10 @@ export function LibrarySidebar() {
   const activeRef = useRef<HTMLButtonElement>(null);
   const resultRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
 
-  // Load Excalidraw libraries for category counts
+  // Load DrawFlow libraries for category counts
   useEffect(() => {
-    getExcalidrawLibraries().then((data) => {
-      setExcalLibraries(data);
+    getDrawFlowLibraries().then((data) => {
+      setDrawflowLibraries(data);
     });
   }, []);
 
@@ -376,23 +376,23 @@ export function LibrarySidebar() {
     return count;
   }, []);
 
-  // Compute Excalidraw counts
-  const excalCounts = useMemo(() => {
+  // Compute DrawFlow counts
+  const drawflowCounts = useMemo(() => {
     const counts: Record<string, number> = { 
-      all: excalLibraries.length,
+      all: drawflowLibraries.length,
       added: storeAddedIds.length,
     };
-    EXCALIDRAW_CATEGORIES.forEach((cat) => {
+    DRAWFLOW_CATEGORIES.forEach((cat) => {
       if (cat.id === "all" || cat.id === "added") return;
       if (cat.keywords) {
-        const matching = excalLibraries.filter((lib) =>
+        const matching = drawflowLibraries.filter((lib) =>
           cat.keywords!.some((kw) => lib.name.toLowerCase().includes(kw) || lib.description.toLowerCase().includes(kw))
         );
         counts[cat.id] = matching.length;
       }
     });
     return counts;
-  }, [excalLibraries, storeAddedIds]);
+  }, [drawflowLibraries, storeAddedIds]);
 
   return (
     <div className="lib-sidebar">
@@ -430,12 +430,12 @@ export function LibrarySidebar() {
             <span className="truncate">ServiceNow</span>
           </button>
           <button
-            className={cn("lib-mode-tab", libraryTab === "excalidraw" && "lib-mode-tab-active")}
-            onClick={() => setLibraryTab("excalidraw")}
-            title="Excalidraw Shapes & Diagrams"
+            className={cn("lib-mode-tab", (libraryTab === "drawflow" || libraryTab === "excalidraw") && "lib-mode-tab-active")}
+            onClick={() => setLibraryTab("drawflow")}
+            title="DrawFlow Shapes & Diagrams"
           >
             <Boxes className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Excalidraw</span>
+            <span className="truncate">DrawFlow</span>
           </button>
         </div>
 
@@ -496,22 +496,22 @@ export function LibrarySidebar() {
 
       {/* Sidebar Content */}
       <div className="lib-sidebar-content">
-        {libraryTab === "excalidraw" ? (
-          /* ---- EXCALIDRAW CATEGORY NAV ---- */
+        {(libraryTab === "drawflow" || libraryTab === "excalidraw") ? (
+          /* ---- DRAWFLOW CATEGORY NAV ---- */
           <div className="lib-excal-nav">
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-text-3">
               Collections
             </div>
-            {EXCALIDRAW_CATEGORIES.map((cat) => {
-              const isActive = excalCategory === cat.id;
-              const count = excalCounts[cat.id] ?? 0;
+            {DRAWFLOW_CATEGORIES.map((cat) => {
+              const isActive = drawflowCategory === cat.id;
+              const count = drawflowCounts[cat.id] ?? 0;
               const icon = EXCAL_ICONS[cat.id] || <LayoutGrid className="w-3.5 h-3.5" />;
 
               return (
                 <button
                   key={cat.id}
                   className={cn("lib-excal-cat-item", isActive && "lib-excal-cat-item-active")}
-                  onClick={() => setExcalCategory(cat.id)}
+                  onClick={() => setDrawFlowCategory(cat.id)}
                 >
                   <span className={cn("shrink-0", isActive ? "text-accent" : "text-text-3")}>
                     {icon}
@@ -688,7 +688,7 @@ export function LibrarySidebar() {
         ) : (
           <>
             <div className="lib-footer-stats">
-              <span>{excalLibraries.length} Collections</span>
+              <span>{drawflowLibraries.length} Collections</span>
             </div>
             <span className="text-[10px] text-accent font-semibold flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />

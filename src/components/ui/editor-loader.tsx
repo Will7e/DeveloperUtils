@@ -1,11 +1,11 @@
 // ============================================================
 // EditorLoadingFallback — Standardized loading placeholder for Monaco editors
-// Powered by DevUtils branded loader (pulsing bolt + gradient text + sliding bar)
+// Powered by InTab branded loader
 // ============================================================
 
 import React from "react";
 import { cn } from "@/lib/utils";
-import { DevUtilsLoader } from "./devutils-loader";
+import { InTabLoader } from "./intab-loader";
 
 export interface EditorLoadingFallbackProps {
   message?: string;
@@ -38,7 +38,7 @@ export function EditorLoadingFallback({
     >
       {showContent && (
         <div className="flex flex-col items-center gap-2.5 px-6 py-4 rounded-xl border border-border-1 bg-bg-1/60 backdrop-blur-md shadow-sm text-center max-w-sm loading-fade-in">
-          <DevUtilsLoader size="sm" showBar />
+          <InTabLoader size="sm" showBar />
           {message && (
             <span className="text-[11px] font-mono text-text-3 tracking-wide mt-0.5">
               {message}

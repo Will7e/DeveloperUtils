@@ -1,5 +1,5 @@
 // ============================================================
-// Core Type Definitions — DevUtils
+// Core Type Definitions — InTab
 // ============================================================
 
 /** Supported programming languages */
@@ -144,8 +144,9 @@ export interface AppState {
   diffSettings: DiffSettings;
   librarySelectedItemId: string | null;
   librarySearchQuery: string;
-  libraryTab: "servicenow" | "excalidraw";
-  libraryExcalidrawCategory: string;
+  libraryTab: "servicenow" | "drawflow" | "excalidraw";
+  libraryDrawFlowCategory: string;
+  libraryExcalidrawCategory?: string;
 
   // Actions
   createFile: (name: string, language: Language, content?: string) => void;
@@ -223,12 +224,15 @@ export interface AppState {
   
   setLibrarySelectedItemId: (id: string | null) => void;
   setLibrarySearchQuery: (query: string) => void;
-  setLibraryTab: (tab: "servicenow" | "excalidraw") => void;
+  setLibraryTab: (tab: "servicenow" | "drawflow" | "excalidraw") => void;
+  setLibraryDrawFlowCategory: (category: string) => void;
   setLibraryExcalidrawCategory: (category: string) => void;
 
-  // Workflow UI & State
+  // Workflow UI & State (DrawFlow)
   workflows: Workflow[];
   activeWorkflowId: string;
+  drawflowLibraryItems?: unknown[];
+  drawflowAddedLibraryIds?: string[];
   excalidrawLibraryItems?: unknown[];
   excalidrawAddedLibraryIds?: string[];
   createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => string;
@@ -240,15 +244,20 @@ export interface AppState {
   setActiveWorkflow: (id: string) => void;
   renameWorkflow: (id: string, name: string) => void;
   reorderWorkflows: (fromIndex: number, toIndex: number) => void;
+  updateWorkflowDrawFlow: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => void;
   updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => void;
+  updateDrawFlowLibraryItems: (libraryItems: unknown[]) => void;
   updateExcalidrawLibraryItems: (libraryItems: unknown[]) => void;
+  addDrawFlowAddedLibraryId: (id: string) => void;
   addExcalidrawAddedLibraryId: (id: string) => void;
+  removeDrawFlowAddedLibraryId: (id: string) => void;
   removeExcalidrawAddedLibraryId: (id: string) => void;
+  clearDrawFlowAddedLibraryIds: () => void;
   clearExcalidrawAddedLibraryIds: () => void;
 }
 
 // ============================================================
-// Workflow Types (Excalidraw)
+// Workflow Types (DrawFlow)
 // ============================================================
 
 export interface Workflow {

@@ -1,16 +1,16 @@
 // ============================================================
-// DevUtilsLoader — Signature branded loading animation
-// Replaces circular spinners with the official DevUtils loader:
-// Pulsing lightning bolt + gradient DevUtils brand + sliding track
+// InTabLoader — Signature branded loading animation
+// Pulsing metallic logo + gradient InTab brand + sliding track
 // ============================================================
 
 import React from "react";
 import { cn } from "@/lib/utils";
 
-export type DevUtilsLoaderSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type InTabLoaderSize = "xs" | "sm" | "md" | "lg" | "xl";
+export type DevUtilsLoaderSize = InTabLoaderSize;
 
-export interface DevUtilsLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
-  size?: DevUtilsLoaderSize;
+export interface InTabLoaderProps extends React.HTMLAttributes<HTMLDivElement> {
+  size?: InTabLoaderSize;
   title?: string;
   message?: string;
   description?: string;
@@ -23,6 +23,7 @@ export interface DevUtilsLoaderProps extends React.HTMLAttributes<HTMLDivElement
   barClassName?: string;
   label?: string;
 }
+export type DevUtilsLoaderProps = InTabLoaderProps;
 
 const SIZE_CONFIG: Record<
   DevUtilsLoaderSize,
@@ -77,14 +78,14 @@ const SIZE_CONFIG: Record<
   },
 };
 
-export function DevUtilsLoader({
+export function InTabLoader({
   size = "md",
   title,
   message,
   description,
   showText,
   showBar,
-  brandText = "DevUtils",
+  brandText = "InTab",
   inline = false,
   icon,
   iconClassName,
@@ -92,7 +93,7 @@ export function DevUtilsLoader({
   label = "Loading...",
   className,
   ...props
-}: DevUtilsLoaderProps) {
+}: InTabLoaderProps) {
   const config = SIZE_CONFIG[size] || SIZE_CONFIG.md;
 
   // Defaults based on size
@@ -103,22 +104,20 @@ export function DevUtilsLoader({
   const displayTitle = title && description ? title : undefined;
   const displayDescription = description;
 
-  const boltIcon = icon || (
-    <svg
-      className={cn("loader-icon", iconClassName)}
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+  const logoIcon = icon || (
+    <img
+      src="/logo.png"
+      alt="InTab"
       width={config.iconSize}
       height={config.iconSize}
+      draggable={false}
+      className={cn("loader-icon select-none object-contain", iconClassName)}
+      style={{
+        width: config.iconSize,
+        height: config.iconSize,
+      }}
       aria-hidden="true"
-    >
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
+    />
   );
 
   // Micro inline mode (e.g. inside compact buttons or single-line status)
@@ -134,7 +133,7 @@ export function DevUtilsLoader({
         )}
         {...props}
       >
-        {boltIcon}
+        {logoIcon}
         {shouldShowText && (
           <span className={cn("loader-text", config.textSizeClass)}>
             {brandText}
@@ -155,12 +154,12 @@ export function DevUtilsLoader({
     <div
       role="status"
       aria-label={label}
-      className={cn("devutils-loader select-none", className)}
+      className={cn("intab-loader devutils-loader select-none", className)}
       {...props}
     >
       {/* Brand Header */}
       <div className={cn("loader-brand", config.gapClass)}>
-        {boltIcon}
+        {logoIcon}
         {shouldShowText && (
           <span className={cn("loader-text", config.textSizeClass)}>
             {brandText}
@@ -207,4 +206,5 @@ export function DevUtilsLoader({
   );
 }
 
-export default DevUtilsLoader;
+export const DevUtilsLoader = InTabLoader;
+export default InTabLoader;

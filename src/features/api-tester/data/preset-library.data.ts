@@ -345,7 +345,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
         impact: "2",
         category: "Software",
         contact_type: "API",
-        comments: "Created automatically via DeveloperUtils API Tester integration.",
+        comments: "Created automatically via InTab API Tester integration.",
       },
       null,
       2
@@ -906,10 +906,10 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     bodyValue: JSON.stringify(
       {
         message: {
-          subject: "Test Message from DevUtils API Tester",
+          subject: "Test Message from InTab API Tester",
           body: {
             contentType: "HTML",
-            content: "<h3>Hello from DevUtils!</h3><p>This message was sent using Microsoft Graph API.</p>",
+            content: "<h3>Hello from InTab!</h3><p>This message was sent using Microsoft Graph API.</p>",
           },
           toRecipients: [
             {
@@ -1975,10 +1975,10 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
         [
           {
             id: 1296269,
-            name: "DeveloperUtils",
-            full_name: "octocat/DeveloperUtils",
+            name: "InTab",
+            full_name: "octocat/InTab",
             private: false,
-            html_url: "https://github.com/octocat/DeveloperUtils",
+            html_url: "https://github.com/octocat/InTab",
             stargazers_count: 328,
             language: "TypeScript",
           },
@@ -2006,8 +2006,8 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     bodyType: "json",
     bodyValue: JSON.stringify(
       {
-        title: "Bug: Issue created via DevUtils API Tester",
-        body: "Automated test issue created from DevUtils API Tester preset library.",
+        title: "Bug: Issue created via InTab API Tester",
+        body: "Automated test issue created from InTab API Tester preset library.",
         labels: ["bug", "test"],
       },
       null,
@@ -2025,10 +2025,10 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
         {
           id: 2019482910,
           number: 142,
-          title: "Bug: Issue created via DevUtils API Tester",
+          title: "Bug: Issue created via InTab API Tester",
           state: "open",
           created_at: "2026-09-18T13:42:00Z",
-          html_url: "https://github.com/octocat/DeveloperUtils/issues/142",
+          html_url: "https://github.com/octocat/InTab/issues/142",
         },
         null,
         2
@@ -2089,7 +2089,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     bodyType: "json",
     bodyValue: JSON.stringify(
       {
-        text: "🚨 Deployment Notification from DevUtils",
+        text: "🚨 Deployment Notification from InTab",
         blocks: [
           {
             type: "header",
@@ -2134,7 +2134,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     bodyValue: JSON.stringify(
       {
         channel: "#alerts",
-        text: "Test message sent via DevUtils API Tester",
+        text: "Test message sent via InTab API Tester",
       },
       null,
       2
@@ -2155,7 +2155,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
           ok: true,
           channel: "C012AB3CD",
           ts: "1718294400.000100",
-          message: { text: "Test message sent via DevUtils API Tester", type: "message", bot_id: "B012AB3CD" },
+          message: { text: "Test message sent via InTab API Tester", type: "message", bot_id: "B012AB3CD" },
         },
         null,
         2
@@ -2244,14 +2244,14 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
       {
         fields: {
           project: { key: "PROJ" },
-          summary: "Feature: Support ServiceNow REST presets in DevUtils",
+          summary: "Feature: Support ServiceNow REST presets in InTab",
           description: {
             type: "doc",
             version: 1,
             content: [
               {
                 type: "paragraph",
-                content: [{ type: "text", text: "Task created from DevUtils API Tester." }],
+                content: [{ type: "text", text: "Task created from InTab API Tester." }],
               },
             ],
           },
@@ -2304,7 +2304,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     ],
     bodyType: "raw",
     rawType: "text/plain",
-    bodyValue: "name=Jane+Doe&email=jane.doe%40example.com&description=Customer+created+from+DevUtils",
+    bodyValue: "name=Jane+Doe&email=jane.doe%40example.com&description=Customer+created+from+InTab",
     authType: "bearer",
     authConfig: { bearerToken: "{{STRIPE_SECRET_KEY}}" },
     tags: ["stripe", "billing", "payments", "customers"],
@@ -2432,7 +2432,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     ],
     headers: [
       { key: "Content-Type", value: "application/json" },
-      { key: "X-Client-Name", value: "DevUtils-API-Tester" },
+      { key: "X-Client-Name", value: "InTab-API-Tester" },
     ],
     bodyType: "json",
     bodyValue: JSON.stringify(
@@ -2453,7 +2453,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
         {
           args: { environment: "production", version: "2.0" },
           data: { test: true, message: "Hello Postman Echo!" },
-          headers: { "x-client-name": "DevUtils-API-Tester", "content-type": "application/json" },
+          headers: { "x-client-name": "InTab-API-Tester", "content-type": "application/json" },
           json: { test: true, message: "Hello Postman Echo!" },
           url: "https://postman-echo.com/post?environment=production&version=2.0",
         },

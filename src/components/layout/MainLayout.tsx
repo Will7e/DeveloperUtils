@@ -5,6 +5,7 @@
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { Suspense } from "react";
 import { TopLoadingBar } from "@/components/ui/top-loading-bar";
+import { InTabLogo } from "@/components/ui/intab-logo";
 import {
   Home,
   Settings,
@@ -108,15 +109,34 @@ export function MainLayout() {
     <div className="main-layout">
       {/* Collapsible Navigation Sidebar */}
       <nav className={cn("activity-bar", sidebarCollapsed && "activity-bar-collapsed")}>
-        {/* Brand */}
-        <div className="activity-bar-brand">
-          <div className="activity-logo">
-            <Zap className="h-5 w-5 text-accent" />
-          </div>
-          <span className={cn("activity-brand-text", sidebarCollapsed && "activity-brand-text-hidden")}>
-            DevUtils
-          </span>
-        </div>
+        {/* Brand / Logo — Click redirects to home */}
+        {(() => {
+          const brandLink = (
+            <Link
+              to="/"
+              className="activity-bar-brand"
+              aria-label="InTab - Home"
+            >
+              <div className="activity-logo">
+                <InTabLogo size={28} />
+              </div>
+              <span className={cn("activity-brand-text", sidebarCollapsed && "activity-brand-text-hidden")}>
+                InTab
+              </span>
+            </Link>
+          );
+
+          return sidebarCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>{brandLink}</TooltipTrigger>
+              <TooltipContent side="right" className="bg-popover border-border shadow-xl">
+                InTab Home
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            brandLink
+          );
+        })()}
 
         {/* Main Navigation */}
         <div className="activity-bar-nav">

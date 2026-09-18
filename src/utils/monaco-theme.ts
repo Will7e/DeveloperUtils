@@ -18,8 +18,8 @@ export function setupMonacoTheme(monaco: Monaco) {
     strict: true,
   });
 
-  // Set custom dark theme
-  monaco.editor.defineTheme("devutils-dark", {
+  // Set custom dark theme (InTab)
+  const darkThemeConfig: editor.IStandaloneThemeData = {
     base: "vs-dark",
     inherit: true,
     rules: [
@@ -65,10 +65,12 @@ export function setupMonacoTheme(monaco: Monaco) {
       "diffEditor.insertedLineBackground": "#10b98118",
       "diffEditor.removedLineBackground": "#f43f5e18",
     },
-  });
+  };
+  monaco.editor.defineTheme("intab-dark", darkThemeConfig);
+  monaco.editor.defineTheme("devutils-dark", darkThemeConfig);
 
-  // Set custom light theme
-  monaco.editor.defineTheme("devutils-light", {
+  // Set custom light theme (InTab)
+  const lightThemeConfig: editor.IStandaloneThemeData = {
     base: "vs",
     inherit: true,
     rules: [
@@ -114,11 +116,14 @@ export function setupMonacoTheme(monaco: Monaco) {
       "diffEditor.insertedLineBackground": "#05966912",
       "diffEditor.removedLineBackground": "#dc262610",
     },
-  });
+  };
+  monaco.editor.defineTheme("intab-light", lightThemeConfig);
+  monaco.editor.defineTheme("devutils-light", lightThemeConfig);
 
   // Automatically register Cmd+S / Ctrl+S and Shift+Alt+F formatting for every created editor
-  const monacoAny = monaco as unknown as { __devutilsFormatListenerAttached?: boolean };
-  if (!monacoAny.__devutilsFormatListenerAttached) {
+  const monacoAny = monaco as unknown as { __intabFormatListenerAttached?: boolean; __devutilsFormatListenerAttached?: boolean };
+  if (!monacoAny.__intabFormatListenerAttached) {
+    monacoAny.__intabFormatListenerAttached = true;
     monacoAny.__devutilsFormatListenerAttached = true;
     monaco.editor.onDidCreateEditor((codeEditor: editor.ICodeEditor) => {
       registerMonacoFormatShortcut(codeEditor as editor.IStandaloneCodeEditor, monaco);

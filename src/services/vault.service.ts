@@ -1,5 +1,5 @@
 // ============================================================
-// Vault Service — Automatic Transparent Encryption for DevUtils
+// Vault Service — Automatic Transparent Encryption for InTab
 // ============================================================
 // Seamlessly encrypts sensitive data (tokens, passwords, headers,
 // environment secrets) at rest using AES-256-GCM without requiring
@@ -17,9 +17,11 @@ import {
 
 // ── Constants ───────────────────────────────────────────────
 
-const VAULT_META_KEY = "devutils_vault_meta";
-const DEVICE_SALT_KEY = "devutils_device_id";
-const CANARY_PLAINTEXT = "devutils-vault-canary-v2";
+const VAULT_META_KEY = "intab_vault_meta";
+const LEGACY_VAULT_META_KEY = "devutils_vault_meta";
+const DEVICE_SALT_KEY = "intab_device_id";
+const LEGACY_DEVICE_SALT_KEY = "devutils_device_id";
+const CANARY_PLAINTEXT = "intab-vault-canary-v2";
 
 interface VaultMeta {
   canary: CipherEnvelope;
@@ -58,12 +60,12 @@ export function getOrCreateDeviceId(): string {
   if (typeof window === "undefined" || !window.localStorage) {
     return "server-static-device-id";
   }
-  let id = localStorage.getItem(DEVICE_SALT_KEY);
+  let id = localStorage.getItem(DEVICE_SALT_KEY) || localStorage.getItem(LEGACY_DEVICE_SALT_KEY);
   if (!id) {
     const bytes = crypto.getRandomValues(new Uint8Array(16));
     id = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-    localStorage.setItem(DEVICE_SALT_KEY, id);
   }
+  localStorage.setItem(DEVICE_SALT_KEY, id);
   return id;
 }
 
@@ -75,7 +77,7 @@ export function getAutomaticKey(): string {
   // Read VITE_VAULT_KEY from Vite environment, with resilient fallback
   const envKey =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (import.meta as any).env?.VITE_VAULT_KEY || "devutils_sec_k9f2m8x4w1q7z5v3_vault";
+    (import.meta as any).env?.VITE_VAULT_KEY || "intab_sec_k9f2m8x4w1q7z5v3_vault";
   const deviceId = getOrCreateDeviceId();
   return `${envKey}:${deviceId}`;
 }
@@ -105,11 +107,19 @@ export const useVaultStore = create<VaultState>((set) => ({
     try {
       const autoKey = getAutomaticKey();
 
-      // Check if there was an earlier manual passphrase vault (e.g. from testing)
-      const rawMeta = localStorage.getItem(VAULT_META_KEY);
+      // Check if there was an earlier vault (e.g. legacy devutils or version 1)
+      const rawMeta = localStorage.getItem(VAULT_META_KEY) || localStorage.getItem(LEGACY_VAULT_META_KEY);
       if (rawMeta) {
         try {
           const meta = JSON.parse(rawMeta);
+          // Check if encrypted with legacy default key
+          const oldDefaultKey = `devutils_sec_k9f2m8x4w1q7z5v3_vault:${getOrCreateDeviceId()}`;
+          if (oldDefaultKey !== autoKey && meta?.canary) {
+            const isOldDefaultPass = await verifyPassphrase(meta.canary, oldDefaultKey, "devutils-vault-canary-v2");
+            if (isOldDefaultPass) {
+              await reEncryptAllData(oldDefaultKey, autoKey);
+            }
+          }
           // If old canary exists and was encrypted with test passphrase "MySecurePass123!"
           if (meta?.canary && meta.version === 1) {
             const isTestPass = await verifyPassphrase(meta.canary, "MySecurePass123!", "devutils-vault-canary-v1");
@@ -143,6 +153,15 @@ export const useVaultStore = create<VaultState>((set) => ({
   resetVault: () => {
     // Clear all encrypted API tester data
     const apiKeys = [
+      "intab_api_tabs",
+      "intab_api_history",
+      "intab_api_collections",
+      "intab_api_env_vars",
+      "intab_api_environments",
+      "intab_api_active_env",
+      "intab_api_custom_presets",
+      "intab_api_added_preset_ids",
+      "intab_api_custom_proxy",
       "devutils_api_tabs",
       "devutils_api_history",
       "devutils_api_collections",
@@ -150,8 +169,12 @@ export const useVaultStore = create<VaultState>((set) => ({
       "devutils_api_environments",
       "devutils_api_active_env",
       "devutils_api_custom_presets",
+      "devutils_api_added_preset_ids",
+      "devutils_api_custom_proxy",
       VAULT_META_KEY,
+      LEGACY_VAULT_META_KEY,
       DEVICE_SALT_KEY,
+      LEGACY_DEVICE_SALT_KEY,
     ];
     apiKeys.forEach((key) => localStorage.removeItem(key));
 
@@ -189,6 +212,12 @@ async function reEncryptAllData(
   newPassphrase: string
 ): Promise<void> {
   const keys = [
+    "intab_api_tabs",
+    "intab_api_history",
+    "intab_api_collections",
+    "intab_api_env_vars",
+    "intab_api_environments",
+    "intab_api_custom_presets",
     "devutils_api_tabs",
     "devutils_api_history",
     "devutils_api_collections",

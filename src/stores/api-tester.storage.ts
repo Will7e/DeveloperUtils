@@ -115,12 +115,48 @@ async function decryptKeyValueFields(
   );
 }
 
+// ── Storage Keys ─────────────────────────────────────────────
+
+export const STORAGE_KEYS = {
+  TABS: "intab_api_tabs",
+  HISTORY: "intab_api_history",
+  COLLECTIONS: "intab_api_collections",
+  ENV_VARS: "intab_api_env_vars",
+  ENVIRONMENTS: "intab_api_environments",
+  ACTIVE_ENV: "intab_api_active_env",
+  CUSTOM_PRESETS: "intab_api_custom_presets",
+  ADDED_PRESET_IDS: "intab_api_added_preset_ids",
+  CUSTOM_PROXY: "intab_api_custom_proxy",
+} as const;
+
+export const LEGACY_STORAGE_KEYS = {
+  TABS: "devutils_api_tabs",
+  HISTORY: "devutils_api_history",
+  COLLECTIONS: "devutils_api_collections",
+  ENV_VARS: "devutils_api_env_vars",
+  ENVIRONMENTS: "devutils_api_environments",
+  ACTIVE_ENV: "devutils_api_active_env",
+  CUSTOM_PRESETS: "devutils_api_custom_presets",
+  ADDED_PRESET_IDS: "devutils_api_added_preset_ids",
+  CUSTOM_PROXY: "devutils_api_custom_proxy",
+} as const;
+
+function getStoredItem(key: string, legacyKey: string): string | null {
+  try {
+    const val = localStorage.getItem(key);
+    if (val !== null) return val;
+    return localStorage.getItem(legacyKey);
+  } catch {
+    return null;
+  }
+}
+
 // ── LocalStorageAdapter (original, kept as fallback) ────────
 
 export class LocalStorageAdapter implements StorageAdapter {
   async getTabs(): Promise<{ tabs: TabState[]; activeTabId: string } | null> {
     try {
-      const saved = localStorage.getItem("devutils_api_tabs");
+      const saved = getStoredItem(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS);
       if (!saved) return null;
       const parsed = JSON.parse(saved) as { tabs: TabState[]; activeTabId: string };
       if (!parsed.tabs || parsed.tabs.length === 0) return null;
@@ -134,7 +170,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   async saveTabs(tabs: TabState[], activeTabId: string): Promise<void> {
     try {
       const serializable = tabs.map(t => ({ ...t, loading: false, error: null, response: null }));
-      localStorage.setItem("devutils_api_tabs", JSON.stringify({ tabs: serializable, activeTabId }));
+      localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify({ tabs: serializable, activeTabId }));
     } catch (e) {
       console.error("Failed to save tabs", e);
     }
@@ -142,7 +178,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getHistory(): Promise<HistoryItem[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_history");
+      const saved = getStoredItem(STORAGE_KEYS.HISTORY, LEGACY_STORAGE_KEYS.HISTORY);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -151,7 +187,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveHistory(history: HistoryItem[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_history", JSON.stringify(history));
+      localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(history));
     } catch (e) {
       console.error("Failed to save history", e);
     }
@@ -159,7 +195,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getCollections(): Promise<ImportedCollection[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_collections");
+      const saved = getStoredItem(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -168,7 +204,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveCollections(collections: ImportedCollection[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_collections", JSON.stringify(collections));
+      localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(collections));
     } catch (e) {
       console.error("Failed to save collections", e);
     }
@@ -176,7 +212,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getEnvVars(): Promise<KeyValueField[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_env_vars");
+      const saved = getStoredItem(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -185,7 +221,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveEnvVars(vars: KeyValueField[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_env_vars", JSON.stringify(vars));
+      localStorage.setItem(STORAGE_KEYS.ENV_VARS, JSON.stringify(vars));
     } catch (e) {
       console.error("Failed to save env vars", e);
     }
@@ -193,7 +229,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getEnvironments(): Promise<Environment[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_environments");
+      const saved = getStoredItem(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -202,7 +238,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveEnvironments(envs: Environment[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_environments", JSON.stringify(envs));
+      localStorage.setItem(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(envs));
     } catch (e) {
       console.error("Failed to save environments", e);
     }
@@ -210,7 +246,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getActiveEnvId(): Promise<string | null> {
     try {
-      const saved = localStorage.getItem("devutils_api_active_env");
+      const saved = getStoredItem(STORAGE_KEYS.ACTIVE_ENV, LEGACY_STORAGE_KEYS.ACTIVE_ENV);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -219,7 +255,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveActiveEnvId(id: string | null): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_active_env", JSON.stringify(id));
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_ENV, JSON.stringify(id));
     } catch (e) {
       console.error("Failed to save active env id", e);
     }
@@ -227,7 +263,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getCustomPresets(): Promise<LibraryPreset[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_custom_presets");
+      const saved = getStoredItem(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -236,7 +272,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveCustomPresets(presets: LibraryPreset[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_custom_presets", JSON.stringify(presets));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(presets));
     } catch (e) {
       console.error("Failed to save custom presets", e);
     }
@@ -244,7 +280,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getAddedPresetIds(): Promise<string[]> {
     try {
-      const saved = localStorage.getItem("devutils_api_added_preset_ids");
+      const saved = getStoredItem(STORAGE_KEYS.ADDED_PRESET_IDS, LEGACY_STORAGE_KEYS.ADDED_PRESET_IDS);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -253,7 +289,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async saveAddedPresetIds(ids: string[]): Promise<void> {
     try {
-      localStorage.setItem("devutils_api_added_preset_ids", JSON.stringify(ids));
+      localStorage.setItem(STORAGE_KEYS.ADDED_PRESET_IDS, JSON.stringify(ids));
     } catch (e) {
       console.error("Failed to save added preset ids", e);
     }
@@ -261,7 +297,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
   async getCustomProxyUrl(): Promise<string | null> {
     try {
-      const saved = localStorage.getItem("devutils_api_custom_proxy");
+      const saved = getStoredItem(STORAGE_KEYS.CUSTOM_PROXY, LEGACY_STORAGE_KEYS.CUSTOM_PROXY);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -271,9 +307,10 @@ export class LocalStorageAdapter implements StorageAdapter {
   async saveCustomProxyUrl(url: string | null): Promise<void> {
     try {
       if (url && url.trim()) {
-        localStorage.setItem("devutils_api_custom_proxy", JSON.stringify(url.trim()));
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_PROXY, JSON.stringify(url.trim()));
       } else {
-        localStorage.removeItem("devutils_api_custom_proxy");
+        localStorage.removeItem(STORAGE_KEYS.CUSTOM_PROXY);
+        localStorage.removeItem(LEGACY_STORAGE_KEYS.CUSTOM_PROXY);
       }
     } catch (e) {
       console.error("Failed to save custom proxy url", e);
@@ -301,7 +338,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     if (!passphrase) return this.fallback.getTabs();
 
     try {
-      const saved = localStorage.getItem("devutils_api_tabs");
+      const saved = getStoredItem(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS);
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       if (!parsed.tabs || parsed.tabs.length === 0) return null;
@@ -344,7 +381,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      localStorage.setItem("devutils_api_tabs", JSON.stringify({ tabs: encrypted, activeTabId }));
+      localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify({ tabs: encrypted, activeTabId }));
     } catch (e) {
       console.error("Failed to save encrypted tabs", e);
     }
@@ -384,7 +421,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     if (!passphrase) return this.fallback.getCollections();
 
     try {
-      const saved = localStorage.getItem("devutils_api_collections");
+      const saved = getStoredItem(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS);
       if (!saved) return [];
       const collections = JSON.parse(saved) as ImportedCollection[];
 
@@ -422,7 +459,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      localStorage.setItem("devutils_api_collections", JSON.stringify(encrypted));
+      localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted collections", e);
     }
@@ -436,7 +473,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     if (!passphrase) return this.fallback.getEnvVars();
 
     try {
-      const saved = localStorage.getItem("devutils_api_env_vars");
+      const saved = getStoredItem(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
       if (!saved) return [];
       const fields = JSON.parse(saved);
       return decryptKeyValueFields(fields, passphrase);
@@ -451,7 +488,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
 
     try {
       const encrypted = await encryptKeyValueFields(vars, passphrase);
-      localStorage.setItem("devutils_api_env_vars", JSON.stringify(encrypted));
+      localStorage.setItem(STORAGE_KEYS.ENV_VARS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted env vars", e);
     }
@@ -465,7 +502,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     if (!passphrase) return this.fallback.getEnvironments();
 
     try {
-      const saved = localStorage.getItem("devutils_api_environments");
+      const saved = getStoredItem(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS);
       if (!saved) return [];
       const envs = JSON.parse(saved) as Environment[];
 
@@ -491,7 +528,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           variables: await encryptKeyValueFields(env.variables, passphrase),
         }))
       );
-      localStorage.setItem("devutils_api_environments", JSON.stringify(encrypted));
+      localStorage.setItem(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted environments", e);
     }
@@ -516,7 +553,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     if (!passphrase) return this.fallback.getCustomPresets();
 
     try {
-      const saved = localStorage.getItem("devutils_api_custom_presets");
+      const saved = getStoredItem(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
       if (!saved) return [];
       const presets = JSON.parse(saved) as LibraryPreset[];
 
@@ -558,7 +595,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           return preset;
         })
       );
-      localStorage.setItem("devutils_api_custom_presets", JSON.stringify(encrypted));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted custom presets", e);
     }
@@ -589,9 +626,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
 export async function migratePlaintextStorage(passphrase: string): Promise<string[]> {
   const migratedKeys: string[] = [];
 
-  // 1. devutils_api_tabs
+  // 1. intab_api_tabs
   try {
-    const rawTabs = localStorage.getItem("devutils_api_tabs");
+    const rawTabs = localStorage.getItem(STORAGE_KEYS.TABS) || localStorage.getItem(LEGACY_STORAGE_KEYS.TABS);
     if (rawTabs) {
       const parsed = JSON.parse(rawTabs);
       if (parsed && Array.isArray(parsed.tabs)) {
@@ -634,19 +671,19 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...t, authConfig: newAuthConfig, headers: newHeaders };
           })
         );
-        if (changed) {
-          localStorage.setItem("devutils_api_tabs", JSON.stringify({ ...parsed, tabs: migratedTabs }));
-          migratedKeys.push("devutils_api_tabs");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.TABS)) {
+          localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify({ ...parsed, tabs: migratedTabs }));
+          migratedKeys.push(STORAGE_KEYS.TABS);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_tabs:", e);
+    console.warn("Auto-migration skipped for intab_api_tabs:", e);
   }
 
-  // 2. devutils_api_history (strip authConfig & sanitize sensitive headers)
+  // 2. intab_api_history (strip authConfig & sanitize sensitive headers)
   try {
-    const rawHist = localStorage.getItem("devutils_api_history");
+    const rawHist = localStorage.getItem(STORAGE_KEYS.HISTORY) || localStorage.getItem(LEGACY_STORAGE_KEYS.HISTORY);
     if (rawHist) {
       const parsed = JSON.parse(rawHist);
       if (Array.isArray(parsed)) {
@@ -672,19 +709,19 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             headers,
           };
         });
-        if (changed) {
-          localStorage.setItem("devutils_api_history", JSON.stringify(sanitized));
-          migratedKeys.push("devutils_api_history");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.HISTORY)) {
+          localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(sanitized));
+          migratedKeys.push(STORAGE_KEYS.HISTORY);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_history:", e);
+    console.warn("Auto-migration skipped for intab_api_history:", e);
   }
 
-  // 3. devutils_api_env_vars
+  // 3. intab_api_env_vars
   try {
-    const rawVars = localStorage.getItem("devutils_api_env_vars");
+    const rawVars = localStorage.getItem(STORAGE_KEYS.ENV_VARS) || localStorage.getItem(LEGACY_STORAGE_KEYS.ENV_VARS);
     if (rawVars) {
       const parsed = JSON.parse(rawVars);
       if (Array.isArray(parsed)) {
@@ -700,19 +737,19 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return v;
           })
         );
-        if (changed) {
-          localStorage.setItem("devutils_api_env_vars", JSON.stringify(encVars));
-          migratedKeys.push("devutils_api_env_vars");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.ENV_VARS)) {
+          localStorage.setItem(STORAGE_KEYS.ENV_VARS, JSON.stringify(encVars));
+          migratedKeys.push(STORAGE_KEYS.ENV_VARS);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_env_vars:", e);
+    console.warn("Auto-migration skipped for intab_api_env_vars:", e);
   }
 
-  // 4. devutils_api_environments
+  // 4. intab_api_environments
   try {
-    const rawEnvs = localStorage.getItem("devutils_api_environments");
+    const rawEnvs = localStorage.getItem(STORAGE_KEYS.ENVIRONMENTS) || localStorage.getItem(LEGACY_STORAGE_KEYS.ENVIRONMENTS);
     if (rawEnvs) {
       const parsed = JSON.parse(rawEnvs);
       if (Array.isArray(parsed)) {
@@ -740,19 +777,19 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...env, variables: newVars };
           })
         );
-        if (changed) {
-          localStorage.setItem("devutils_api_environments", JSON.stringify(encEnvs));
-          migratedKeys.push("devutils_api_environments");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.ENVIRONMENTS)) {
+          localStorage.setItem(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encEnvs));
+          migratedKeys.push(STORAGE_KEYS.ENVIRONMENTS);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_environments:", e);
+    console.warn("Auto-migration skipped for intab_api_environments:", e);
   }
 
-  // 5. devutils_api_collections
+  // 5. intab_api_collections
   try {
-    const rawCols = localStorage.getItem("devutils_api_collections");
+    const rawCols = localStorage.getItem(STORAGE_KEYS.COLLECTIONS) || localStorage.getItem(LEGACY_STORAGE_KEYS.COLLECTIONS);
     if (rawCols) {
       const parsed = JSON.parse(rawCols);
       if (Array.isArray(parsed)) {
@@ -791,19 +828,19 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...col, requests: newRequests };
           })
         );
-        if (changed) {
-          localStorage.setItem("devutils_api_collections", JSON.stringify(encCols));
-          migratedKeys.push("devutils_api_collections");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.COLLECTIONS)) {
+          localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encCols));
+          migratedKeys.push(STORAGE_KEYS.COLLECTIONS);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_collections:", e);
+    console.warn("Auto-migration skipped for intab_api_collections:", e);
   }
 
-  // 6. devutils_api_custom_presets
+  // 6. intab_api_custom_presets
   try {
-    const rawPresets = localStorage.getItem("devutils_api_custom_presets");
+    const rawPresets = localStorage.getItem(STORAGE_KEYS.CUSTOM_PRESETS) || localStorage.getItem(LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
     if (rawPresets) {
       const parsed = JSON.parse(rawPresets);
       if (Array.isArray(parsed)) {
@@ -830,14 +867,14 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return preset;
           })
         );
-        if (changed) {
-          localStorage.setItem("devutils_api_custom_presets", JSON.stringify(encPresets));
-          migratedKeys.push("devutils_api_custom_presets");
+        if (changed || !localStorage.getItem(STORAGE_KEYS.CUSTOM_PRESETS)) {
+          localStorage.setItem(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encPresets));
+          migratedKeys.push(STORAGE_KEYS.CUSTOM_PRESETS);
         }
       }
     }
   } catch (e) {
-    console.warn("Auto-migration skipped for devutils_api_custom_presets:", e);
+    console.warn("Auto-migration skipped for intab_api_custom_presets:", e);
   }
 
   return migratedKeys;

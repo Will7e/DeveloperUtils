@@ -49,7 +49,7 @@ export function CompilerPage() {
     initialSize: 65,
     minSize: 30,
     maxSize: 85,
-    storageKey: "devutils-editor-size",
+    storageKey: "intab-editor-size",
   });
 
   const activeFile = files.find((f) => f.id === activeFileId);
@@ -110,7 +110,7 @@ export function CompilerPage() {
         {/* Status bar */}
         <div className="status-bar">
           <div className="status-left">
-            <span className="status-item status-brand">DevUtils</span>
+            <span className="status-item status-brand">InTab</span>
             {activeFile && (
               <>
                 <span className="status-dot">·</span>

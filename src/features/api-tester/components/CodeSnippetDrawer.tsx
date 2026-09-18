@@ -121,8 +121,8 @@ export function CodeSnippetDrawer({
                   }
                   theme={
                     currentThemeSetting === "light"
-                      ? "devutils-light"
-                      : "devutils-dark"
+                      ? "intab-light"
+                      : "intab-dark"
                   }
                   onMount={handleEditorMount}
                   value={codeSnippet}

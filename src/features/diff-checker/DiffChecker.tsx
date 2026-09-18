@@ -11,7 +11,7 @@ import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
-import { DevUtilsLoader } from "@/components/ui/devutils-loader";
+import { InTabLoader } from "@/components/ui/intab-loader";
 import {
   ArrowLeftRight,
   Trash2,
@@ -369,8 +369,12 @@ export function DiffChecker() {
     const handleExternalFormat = () => {
       handleFormatBothRef.current?.();
     };
+    window.addEventListener("intab:format-diff", handleExternalFormat);
     window.addEventListener("devutils:format-diff", handleExternalFormat);
-    return () => window.removeEventListener("devutils:format-diff", handleExternalFormat);
+    return () => {
+      window.removeEventListener("intab:format-diff", handleExternalFormat);
+      window.removeEventListener("devutils:format-diff", handleExternalFormat);
+    };
   }, []);
 
   // Auto-format on Paste
@@ -429,7 +433,7 @@ export function DiffChecker() {
     setupMonacoTheme(monaco);
 
     const initTheme = useAppStore.getState().editorSettings.theme;
-    monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");
+    monaco.editor.setTheme(initTheme === "light" ? "intab-light" : "intab-dark");
 
     const origEditor = diffEditor.getOriginalEditor();
     const modEditor = diffEditor.getModifiedEditor();
@@ -513,7 +517,7 @@ export function DiffChecker() {
   // Theme change
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(currentThemeSetting === "light" ? "devutils-light" : "devutils-dark");
+      monacoRef.current.editor.setTheme(currentThemeSetting === "light" ? "intab-light" : "intab-dark");
     }
   }, [currentThemeSetting]);
 
@@ -731,7 +735,7 @@ export function DiffChecker() {
                 disabled={isFormatting}
               >
                 {isFormatting ? (
-                  <DevUtilsLoader size="xs" />
+                  <InTabLoader size="xs" />
                 ) : (
                   <AlignLeft className="h-3.5 w-3.5 text-accent" />
                 )}
@@ -987,7 +991,7 @@ export function DiffChecker() {
           original={activeSession.original}
           modified={activeSession.modified}
           onMount={handleDiffEditorMount}
-          theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+          theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
           options={diffEditorOptions}
           loading={<EditorLoadingFallback message="Loading diff editor..." />}
         />

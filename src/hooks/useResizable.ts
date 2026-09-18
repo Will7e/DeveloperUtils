@@ -19,7 +19,11 @@ export function useResizable({
 }: UseResizableOptions) {
   const [size, setSize] = useState(() => {
     if (storageKey) {
-      const saved = localStorage.getItem(storageKey);
+      const saved =
+        localStorage.getItem(storageKey) ||
+        (storageKey.startsWith("intab-")
+          ? localStorage.getItem(storageKey.replace("intab-", "devutils-"))
+          : null);
       if (saved) return Number(saved);
     }
     return initialSize;

@@ -14,7 +14,7 @@ const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
-      className={cn("devutils-tooltip", className)}
+      className={cn("intab-tooltip devutils-tooltip", className)}
       {...props}
     />
   </TooltipPrimitive.Portal>

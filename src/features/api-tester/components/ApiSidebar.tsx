@@ -33,19 +33,19 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
   const store = useApiTesterStore();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorageState(
-    "devutils_api_sidebar_collapsed",
+    "intab_api_sidebar_collapsed",
     false
   );
   const [presetsOpen, setPresetsOpen] = useLocalStorageState(
-    "devutils_api_sidebar_presets",
+    "intab_api_sidebar_presets",
     false
   );
   const [historyOpen, setHistoryOpen] = useLocalStorageState(
-    "devutils_api_sidebar_history",
+    "intab_api_sidebar_history",
     false
   );
   const [collectionsOpen, setCollectionsOpen] = useLocalStorageState(
-    "devutils_api_sidebar_collections",
+    "intab_api_sidebar_collections",
     false
   );
 

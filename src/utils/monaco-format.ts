@@ -100,23 +100,27 @@ export function registerMonacoFormatShortcut(
   ];
   navShortcuts.forEach(({ key, path }) => {
     editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | key, () => {
+      window.dispatchEvent(new CustomEvent("intab:navigate", { detail: path }));
       window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: path }));
     });
   });
 
   editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyT, () => {
+    window.dispatchEvent(new CustomEvent("intab:navigate", { detail: "/api-tester" }));
     window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/api-tester" }));
   });
   editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyD, () => {
+    window.dispatchEvent(new CustomEvent("intab:navigate", { detail: "/diff" }));
     window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/diff" }));
   });
   editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyW, () => {
+    window.dispatchEvent(new CustomEvent("intab:navigate", { detail: "/drawflows" }));
     window.dispatchEvent(new CustomEvent("devutils:navigate", { detail: "/drawflows" }));
   });
 
   // Add to editor action menu / context menu
   const actionDisposable = editorInstance.addAction({
-    id: "devutils.formatDocument",
+    id: "intab.formatDocument",
     label: "Format Document",
     keybindings: [
       monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,

@@ -11,11 +11,11 @@ import { Library } from "lucide-react";
 
 import { useAppStore } from "@/stores/app.store";
 import { DrawFlowToolbar } from "./DrawFlowToolbar";
-import { ExcalidrawLibraryModal } from "./ExcalidrawLibraryModal";
+import { DrawFlowLibraryModal } from "./DrawFlowLibraryModal";
 import {
-  getExcalidrawLibraries,
-  loadLibraryToExcalidraw,
-} from "@/utils/excalidrawLibrary";
+  getDrawFlowLibraries,
+  loadLibraryToDrawFlow,
+} from "@/utils/drawflowLibrary";
 
 type ExcalidrawProps = React.ComponentProps<typeof Excalidraw>;
 type ExcalidrawOnChange = NonNullable<ExcalidrawProps["onChange"]>;
@@ -77,11 +77,11 @@ export function DrawFlowDesigner() {
 
   const workflows = useAppStore((s) => s.workflows);
   const activeWorkflowId = useAppStore((s) => s.activeWorkflowId);
-  const updateWorkflowExcalidraw = useAppStore((s) => s.updateWorkflowExcalidraw);
-  const excalidrawLibraryItems = useAppStore((s) => s.excalidrawLibraryItems);
-  const updateExcalidrawLibraryItems = useAppStore((s) => s.updateExcalidrawLibraryItems);
-  const addExcalidrawAddedLibraryId = useAppStore((s) => s.addExcalidrawAddedLibraryId);
-  const clearExcalidrawAddedLibraryIds = useAppStore((s) => s.clearExcalidrawAddedLibraryIds);
+  const updateWorkflowDrawFlow = useAppStore((s) => s.updateWorkflowDrawFlow || s.updateWorkflowExcalidraw);
+  const drawflowLibraryItems = useAppStore((s) => s.drawflowLibraryItems || s.excalidrawLibraryItems);
+  const updateDrawFlowLibraryItems = useAppStore((s) => s.updateDrawFlowLibraryItems || s.updateExcalidrawLibraryItems);
+  const addDrawFlowAddedLibraryId = useAppStore((s) => s.addDrawFlowAddedLibraryId || s.addExcalidrawAddedLibraryId);
+  const clearDrawFlowAddedLibraryIds = useAppStore((s) => s.clearDrawFlowAddedLibraryIds || s.clearExcalidrawAddedLibraryIds);
   const addToast = useAppStore((s) => s.addToast);
   const appTheme = useAppStore((s) => s.editorSettings.theme);
   const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
@@ -108,10 +108,10 @@ export function DrawFlowDesigner() {
     }
     if (pendingSaveRef.current) {
       const { workflowId, elements, appState, files } = pendingSaveRef.current;
-      updateWorkflowExcalidraw(workflowId, [...elements], appState, files);
+      updateWorkflowDrawFlow(workflowId, [...elements], appState, files);
       pendingSaveRef.current = null;
     }
-  }, [updateWorkflowExcalidraw]);
+  }, [updateWorkflowDrawFlow]);
 
   // Handle active workflow switching smoothly without remounting the entire canvas
   useEffect(() => {
@@ -165,10 +165,10 @@ export function DrawFlowDesigner() {
         elements: healed as Parameters<typeof excalidrawAPI.updateScene>[0]["elements"],
       });
       if (activeWorkflowId) {
-        updateWorkflowExcalidraw(activeWorkflowId, [...healed]);
+        updateWorkflowDrawFlow(activeWorkflowId, [...healed]);
       }
     }
-  }, [excalidrawAPI, activeWorkflowId, updateWorkflowExcalidraw]);
+  }, [excalidrawAPI, activeWorkflowId, updateWorkflowDrawFlow]);
 
   // Sync canvas theme when global app theme changes
   useEffect(() => {
@@ -185,12 +185,12 @@ export function DrawFlowDesigner() {
     const importLibId = searchParams.get("importLib");
     if (!importLibId || !excalidrawAPI) return;
 
-    getExcalidrawLibraries().then((allLibs) => {
+    getDrawFlowLibraries().then((allLibs) => {
       const target = allLibs.find((lib) => lib.id === importLibId);
       if (target) {
-        addExcalidrawAddedLibraryId(target.id);
-        loadLibraryToExcalidraw(target.source, excalidrawAPI, target.id).then((count) => {
-          addToast({ message: `Imported "${target.name}" (${count} shapes) to Excalidraw Library!`, type: "success" });
+        addDrawFlowAddedLibraryId(target.id);
+        loadLibraryToDrawFlow(target.source, excalidrawAPI, target.id).then((count) => {
+          addToast({ message: `Imported "${target.name}" (${count} shapes) to DrawFlow Library!`, type: "success" });
         }).catch(() => {
           addToast({ message: `Failed to load "${target.name}"`, type: "error" });
         });
@@ -249,24 +249,24 @@ export function DrawFlowDesigner() {
         if (isUpdatingSceneRef.current) return;
         if (pendingSaveRef.current) {
           const { workflowId, elements: els, appState: st, files: fls } = pendingSaveRef.current;
-          updateWorkflowExcalidraw(workflowId, [...els], st, fls);
+          updateWorkflowDrawFlow(workflowId, [...els], st, fls);
           pendingSaveRef.current = null;
         }
       }, 250);
     },
-    [activeWorkflowId, updateWorkflowExcalidraw]
+    [activeWorkflowId, updateWorkflowDrawFlow]
   );
 
   // Handle library changes and persist globally
   // When library is fully cleared (reset), also clear the "added" IDs so the modal stays in sync
   const handleLibraryChange: ExcalidrawOnLibraryChange = useCallback(
     (libraryItems) => {
-      updateExcalidrawLibraryItems([...libraryItems]);
+      updateDrawFlowLibraryItems([...libraryItems]);
       if (libraryItems.length === 0) {
-        clearExcalidrawAddedLibraryIds();
+        clearDrawFlowAddedLibraryIds();
       }
     },
-    [updateExcalidrawLibraryItems, clearExcalidrawAddedLibraryIds]
+    [updateDrawFlowLibraryItems, clearDrawFlowAddedLibraryIds]
   );
 
   // Intercept clicks on Excalidraw's "Browse libraries" button and enhance its styling & badge
@@ -285,8 +285,8 @@ export function DrawFlowDesigner() {
     };
 
     const enhanceBrowseButton = (btn: HTMLElement) => {
-      if (btn.dataset.devutilsEnhanced === "true") return;
-      btn.dataset.devutilsEnhanced = "true";
+      if (btn.dataset.intabEnhanced === "true") return;
+      btn.dataset.intabEnhanced = "true";
       btn.setAttribute("title", "Browse & install from 230+ community shape packs");
       btn.innerHTML = `
         <span class="inline-flex items-center justify-center gap-1.5 font-semibold text-xs tracking-wide">
@@ -298,7 +298,7 @@ export function DrawFlowDesigner() {
             <path d="M5 18H3"/>
           </svg>
           <span>Browse libraries</span>
-          <span class="devutils-lib-badge">230+</span>
+          <span class="intab-lib-badge drawflow-lib-badge">230+</span>
         </span>
       `;
     };
@@ -312,7 +312,7 @@ export function DrawFlowDesigner() {
     // Observe DOM changes for when the library sidebar is opened or updated
     const observer = new MutationObserver(() => {
       const btn = container.querySelector<HTMLElement>(".library-menu-browse-button");
-      if (btn && btn.dataset.devutilsEnhanced !== "true") {
+      if (btn && btn.dataset.intabEnhanced !== "true") {
         enhanceBrowseButton(btn);
       }
     });
@@ -343,7 +343,7 @@ export function DrawFlowDesigner() {
               theme: isDark ? "dark" : "light",
             } as unknown as Parameters<NonNullable<typeof excalidrawAPI>["updateScene"]>[0]["appState"],
             files: (activeWorkflow?.files || {}) as ExcalidrawInitialData["files"],
-            libraryItems: (excalidrawLibraryItems || []) as ExcalidrawInitialData["libraryItems"],
+            libraryItems: (drawflowLibraryItems || []) as ExcalidrawInitialData["libraryItems"],
           }}
         >
           <MainMenu>
@@ -373,7 +373,7 @@ export function DrawFlowDesigner() {
             <WelcomeScreen.Hints.HelpHint />
             <WelcomeScreen.Center>
               <WelcomeScreen.Center.Heading>
-                DevUtils DrawFlow Studio
+                InTab DrawFlow Studio
               </WelcomeScreen.Center.Heading>
               <WelcomeScreen.Center.Menu>
                 <WelcomeScreen.Center.MenuItemLoadScene />
@@ -385,10 +385,10 @@ export function DrawFlowDesigner() {
       </div>
 
       {/* Community Library Catalog Modal */}
-      <ExcalidrawLibraryModal
+      <DrawFlowLibraryModal
         isOpen={isLibraryModalOpen}
         onClose={() => setIsLibraryModalOpen(false)}
-        excalidrawAPI={excalidrawAPI}
+        canvasAPI={excalidrawAPI}
       />
     </div>
   );

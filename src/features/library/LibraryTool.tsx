@@ -25,9 +25,10 @@ export function LibraryTool() {
   // Sync initial URL params to store
   useEffect(() => {
     const urlTab = searchParams.get("tab");
-    if (urlTab === "servicenow" || urlTab === "excalidraw") {
-      if (urlTab !== libraryTab) {
-        setLibraryTab(urlTab);
+    if (urlTab === "servicenow" || urlTab === "drawflow" || urlTab === "excalidraw") {
+      const canonicalTab = urlTab === "excalidraw" ? "drawflow" : urlTab;
+      if (canonicalTab !== libraryTab) {
+        setLibraryTab(canonicalTab);
       }
     }
     const urlApi = searchParams.get("api");

@@ -32,7 +32,7 @@ export function CodeEditor() {
 
       // Set initial theme based on settings
       monaco.editor.setTheme(
-        editorSettings.theme === "light" ? "devutils-light" : "devutils-dark"
+        editorSettings.theme === "light" ? "intab-light" : "intab-dark"
       );
 
       // Focus editor
@@ -117,7 +117,7 @@ export function CodeEditor() {
   // Dynamically switch Monaco theme when settings change
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(editorSettings.theme === "light" ? "devutils-light" : "devutils-dark");
+      monacoRef.current.editor.setTheme(editorSettings.theme === "light" ? "intab-light" : "intab-dark");
     }
   }, [editorSettings.theme]);
 
@@ -174,7 +174,7 @@ export function CodeEditor() {
         value={activeFile.content}
         onChange={handleChange}
         onMount={handleEditorMount}
-        theme={editorSettings.theme === "light" ? "devutils-light" : "devutils-dark"}
+        theme={editorSettings.theme === "light" ? "intab-light" : "intab-dark"}
         options={{
           fontSize: editorSettings.fontSize,
           fontFamily: editorSettings.fontFamily,

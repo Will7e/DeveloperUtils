@@ -88,7 +88,7 @@ export function FormatterTool() {
     setupMonacoTheme(monaco);
 
     const initTheme = useAppStore.getState().editorSettings.theme;
-    monaco.editor.setTheme(initTheme === "light" ? "devutils-light" : "devutils-dark");
+    monaco.editor.setTheme(initTheme === "light" ? "intab-light" : "intab-dark");
 
     // Register Cmd+S / Ctrl+S and Shift+Alt+F format shortcut
     registerMonacoFormatShortcut(editor, monaco, {
@@ -106,7 +106,7 @@ export function FormatterTool() {
   // Switch Monaco theme dynamically
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(currentThemeSetting === "light" ? "devutils-light" : "devutils-dark");
+      monacoRef.current.editor.setTheme(currentThemeSetting === "light" ? "intab-light" : "intab-dark");
     }
   }, [currentThemeSetting]);
 
@@ -253,8 +253,12 @@ export function FormatterTool() {
     const handleExternalFormat = () => {
       handleFormatRef.current?.();
     };
+    window.addEventListener("intab:format-formatter", handleExternalFormat);
     window.addEventListener("devutils:format-formatter", handleExternalFormat);
-    return () => window.removeEventListener("devutils:format-formatter", handleExternalFormat);
+    return () => {
+      window.removeEventListener("intab:format-formatter", handleExternalFormat);
+      window.removeEventListener("devutils:format-formatter", handleExternalFormat);
+    };
   }, []);
 
   const handleClear = () => {
@@ -274,8 +278,8 @@ export function FormatterTool() {
   const handleSample = () => {
     if (type === "json") {
       const sample = {
-        id: "dev-utils-001",
-        name: "Developer Utilities",
+        id: "intab-001",
+        name: "InTab Utilities",
         version: "1.0.0",
         features: [
           { name: "Formatter", types: ["JSON", "XML"] },
@@ -286,8 +290,8 @@ export function FormatterTool() {
       updateContent("json", activeFile.id, JSON.stringify(sample, null, 2));
     } else {
       const sample = `<?xml version="1.0" encoding="UTF-8"?>
-<root id="dev-utils-001">
-  <name>Developer Utilities</name>
+<root id="intab-001">
+  <name>InTab Utilities</name>
   <version>1.0.0</version>
   <features>
     <feature name="Formatter">
@@ -527,7 +531,7 @@ export function FormatterTool() {
                       value={currentInput}
                       onChange={(value) => updateContent(type, activeFile.id, value || "")}
                       onMount={handleEditorMount}
-                      theme={currentThemeSetting === "light" ? "devutils-light" : "devutils-dark"}
+                      theme={currentThemeSetting === "light" ? "intab-light" : "intab-dark"}
                       options={{
                         minimap: { enabled: false },
                         scrollBeyondLastLine: false,

@@ -24,7 +24,7 @@ export const PRESETS: ApiPreset[] = [
     params: [],
     headers: [
       { key: "Accept", value: "application/vnd.github.v3+json" },
-      { key: "User-Agent", value: "DevUtils-API-Tester" },
+      { key: "User-Agent", value: "InTab-API-Tester" },
     ],
     bodyType: "none",
     description: "Fetch public profile details for a GitHub user.",

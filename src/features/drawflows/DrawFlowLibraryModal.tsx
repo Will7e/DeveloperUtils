@@ -4,29 +4,32 @@ import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { LoadingState } from "@/components/ui/loading-state";
 import { useAppStore } from "@/stores/app.store";
 import {
-  getExcalidrawLibraries, loadLibraryToExcalidraw, removeLibraryFromExcalidraw,
-  getExcalidrawLibraryPreviewUrl, getExcalidrawLibraryCdnPreviewUrl,
-  type ExcalidrawLibraryItem,
-} from "@/utils/excalidrawLibrary";
+  getDrawFlowLibraries,
+  loadLibraryToDrawFlow,
+  removeLibraryFromDrawFlow,
+  getDrawFlowLibraryPreviewUrl,
+  getDrawFlowLibraryCdnPreviewUrl,
+  type DrawFlowLibraryItem,
+} from "@/utils/drawflowLibrary";
 import { X, Search, Plus, Loader2, Boxes, Trash2 } from "lucide-react";
 
 interface Props { 
   isOpen: boolean; 
   onClose: () => void; 
-  excalidrawAPI: ExcalidrawImperativeAPI | null; 
+  canvasAPI: ExcalidrawImperativeAPI | null; 
 }
 
-export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props) {
-  const [libs, setLibs] = useState<ExcalidrawLibraryItem[]>([]);
+export function DrawFlowLibraryModal({ isOpen, onClose, canvasAPI }: Props) {
+  const [libs, setLibs] = useState<DrawFlowLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const toast = useAppStore((s) => s.addToast);
-  const storeIds = useAppStore((s) => s.excalidrawAddedLibraryIds || []);
-  const storeAdd = useAppStore((s) => s.addExcalidrawAddedLibraryId);
-  const storeRemove = useAppStore((s) => s.removeExcalidrawAddedLibraryId);
+  const storeIds = useAppStore((s) => s.drawflowAddedLibraryIds || s.excalidrawAddedLibraryIds || []);
+  const storeAdd = useAppStore((s) => s.addDrawFlowAddedLibraryId || s.addExcalidrawAddedLibraryId);
+  const storeRemove = useAppStore((s) => s.removeDrawFlowAddedLibraryId || s.removeExcalidrawAddedLibraryId);
 
   const isAdded = useCallback((id: string) => storeIds.includes(id) || added.has(id), [storeIds, added]);
 
@@ -34,7 +37,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
     if (isOpen) {
       setAdded(new Set()); // Reset local session state; store is the source of truth
       setLoading(true);
-      getExcalidrawLibraries().then((d) => { 
+      getDrawFlowLibraries().then((d) => { 
         setLibs(d); 
         setLoading(false); 
       }).catch(() => setLoading(false));
@@ -51,13 +54,13 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
     );
   }, [libs, search]);
 
-  const handleAdd = async (lib: ExcalidrawLibraryItem) => {
-    if (!excalidrawAPI || isAdded(lib.id)) return;
+  const handleAdd = async (lib: DrawFlowLibraryItem) => {
+    if (!canvasAPI || isAdded(lib.id)) return;
     try {
       setLoadingId(lib.id);
-      const n = await loadLibraryToExcalidraw(lib.source, excalidrawAPI, lib.id);
+      const n = await loadLibraryToDrawFlow(lib.source, canvasAPI, lib.id);
       setAdded((p) => new Set(p).add(lib.id));
-      storeAdd(lib.id);
+      if (storeAdd) storeAdd(lib.id);
       toast({ message: `Added "${lib.name}" (${n} shapes) to canvas`, type: "success" });
     } catch {
       toast({ message: `Failed to load "${lib.name}"`, type: "error" });
@@ -66,13 +69,13 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
     }
   };
 
-  const handleRemove = async (lib: ExcalidrawLibraryItem) => {
-    if (!excalidrawAPI || !isAdded(lib.id)) return;
+  const handleRemove = async (lib: DrawFlowLibraryItem) => {
+    if (!canvasAPI || !isAdded(lib.id)) return;
     try {
       setRemovingId(lib.id);
-      const n = await removeLibraryFromExcalidraw(lib.source, excalidrawAPI, lib.id);
+      const n = await removeLibraryFromDrawFlow(lib.source, canvasAPI, lib.id);
       setAdded((p) => { const next = new Set(p); next.delete(lib.id); return next; });
-      storeRemove(lib.id);
+      if (storeRemove) storeRemove(lib.id);
       toast({ message: `Removed "${lib.name}" (${n} shapes) from canvas`, type: "success" });
     } catch {
       toast({ message: `Failed to remove "${lib.name}"`, type: "error" });
@@ -93,7 +96,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
               <Boxes className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-text-1">Excalidraw Libraries</h2>
+              <h2 className="text-base font-bold text-text-1">DrawFlow Libraries</h2>
               <p className="text-[11px] text-text-3">Browse and add community component packs directly to your canvas</p>
             </div>
           </div>
@@ -137,7 +140,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
                 const isLoading = loadingId === lib.id;
 
                 return (
-                  <ModalExcalidrawCard
+                  <ModalDrawFlowCard
                     key={lib.id}
                     lib={lib}
                     isAdded={addedItem}
@@ -157,7 +160,7 @@ export function ExcalidrawLibraryModal({ isOpen, onClose, excalidrawAPI }: Props
   );
 }
 
-function ModalExcalidrawCard({
+function ModalDrawFlowCard({
   lib,
   isAdded,
   isLoading,
@@ -165,7 +168,7 @@ function ModalExcalidrawCard({
   onAdd,
   onRemove,
 }: {
-  lib: ExcalidrawLibraryItem;
+  lib: DrawFlowLibraryItem;
   isAdded: boolean;
   isLoading: boolean;
   isRemoving: boolean;
@@ -175,8 +178,8 @@ function ModalExcalidrawCard({
   const [imgError, setImgError] = useState(false);
   const [triedCdn, setTriedCdn] = useState(false);
 
-  const previewUrl = getExcalidrawLibraryPreviewUrl(lib.preview);
-  const cdnPreviewUrl = getExcalidrawLibraryCdnPreviewUrl(lib.preview);
+  const previewUrl = getDrawFlowLibraryPreviewUrl(lib.preview);
+  const cdnPreviewUrl = getDrawFlowLibraryCdnPreviewUrl(lib.preview);
 
   return (
     <div className="lib-excal-card">
@@ -237,4 +240,5 @@ function ModalExcalidrawCard({
   );
 }
 
-export default ExcalidrawLibraryModal;
+export const ExcalidrawLibraryModal = DrawFlowLibraryModal;
+export default DrawFlowLibraryModal;

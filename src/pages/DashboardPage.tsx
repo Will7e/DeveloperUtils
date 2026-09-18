@@ -3,7 +3,8 @@
 // ============================================================
 
 import { Link } from "react-router-dom";
-import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork, FileDiff } from "lucide-react";
+import { Zap, Code2, Terminal, Cpu, Globe, ArrowRight, FileCode, Rocket, Columns, BookOpen, GitFork, FileDiff, ShieldCheck } from "lucide-react";
+import { InTabLogo } from "@/components/ui/intab-logo";
 
 interface ToolCardProps {
   to?: string;
@@ -53,15 +54,18 @@ export function DashboardPage() {
       <div className="dash-container">
         {/* Hero Section */}
         <div className="dash-hero">
+          <div className="dash-hero-logo">
+            <InTabLogo size={64} className="dash-hero-icon" />
+          </div>
           <div className="dash-hero-badge">
-            <Zap className="h-3.5 w-3.5" />
-            <span>Developer Workspace</span>
+            <ShieldCheck className="h-3.5 w-3.5 text-slate-300" />
+            <span>100% Client-Side Suite</span>
           </div>
           <h1 className="dash-hero-title">
-            Welcome to <span className="dash-hero-accent">DevUtils</span>
+            Welcome to <span className="dash-hero-accent">InTab</span>
           </h1>
           <p className="dash-hero-subtitle">
-            An all-in-one developer workspace with essential tools for building, debugging, and testing.
+            A private, all-in-one developer workspace. Everything runs directly in your browser tab—zero servers, zero data saved anywhere else.
           </p>
         </div>
 
@@ -74,14 +78,14 @@ export function DashboardPage() {
           <div className="dash-stat-divider" />
           <div className="dash-stat">
             <span className="dash-stat-value">
-              <Globe className="h-4 w-4" />
+              <ShieldCheck className="h-4 w-4 text-emerald-400" />
             </span>
-            <span className="dash-stat-label">Cloud Execution</span>
+            <span className="dash-stat-label">100% In-Browser</span>
           </div>
           <div className="dash-stat-divider" />
           <div className="dash-stat">
-            <span className="dash-stat-value">∞</span>
-            <span className="dash-stat-label">Projects</span>
+            <span className="dash-stat-value">0</span>
+            <span className="dash-stat-label">Data Saved to Cloud</span>
           </div>
         </div>
 

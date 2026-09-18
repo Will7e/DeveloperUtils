@@ -68,14 +68,14 @@ const createDefaultWorkflowElements = (): unknown[] => [
     updated: 1,
     link: null,
     locked: false,
-    text: "DevUtils DrawFlow Studio",
+    text: "InTab DrawFlow Studio",
     fontSize: 24,
     fontFamily: 1,
     textAlign: "left",
     verticalAlign: "top",
     baseline: 20,
     containerId: null,
-    originalText: "DevUtils DrawFlow Studio",
+    originalText: "InTab DrawFlow Studio",
     lineHeight: 1.25,
   },
   {
@@ -104,14 +104,14 @@ const createDefaultWorkflowElements = (): unknown[] => [
     updated: 1,
     link: null,
     locked: false,
-    text: "Draw diagrams, flowcharts, and architecture specs with Excalidraw.",
+    text: "Draw diagrams, flowcharts, and architecture specs with DrawFlow.",
     fontSize: 14,
     fontFamily: 1,
     textAlign: "left",
     verticalAlign: "top",
     baseline: 12,
     containerId: null,
-    originalText: "Draw diagrams, flowcharts, and architecture specs with Excalidraw.",
+    originalText: "Draw diagrams, flowcharts, and architecture specs with DrawFlow.",
     lineHeight: 1.25,
   },
   {
@@ -287,6 +287,18 @@ const initialWorkflow: Workflow = {
   updatedAt: Date.now(),
 };
 
+// Migrate legacy storage key if needed
+try {
+  if (typeof window !== "undefined" && window.localStorage) {
+    const legacy = window.localStorage.getItem("devutils-app-state");
+    if (legacy && !window.localStorage.getItem("intab-app-state")) {
+      window.localStorage.setItem("intab-app-state", legacy);
+    }
+  }
+} catch {
+  // Ignore localStorage errors
+}
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -321,6 +333,7 @@ export const useAppStore = create<AppState>()(
       librarySelectedItemId: null,
       librarySearchQuery: "",
       libraryTab: "servicenow",
+      libraryDrawFlowCategory: "all",
       libraryExcalidrawCategory: "all",
       workflows: [initialWorkflow],
       activeWorkflowId: initialWorkflow.id,
@@ -925,8 +938,12 @@ export const useAppStore = create<AppState>()(
         set({ libraryTab: tab, librarySelectedItemId: null, librarySearchQuery: "" });
       },
 
+      setLibraryDrawFlowCategory: (category) => {
+        set({ libraryDrawFlowCategory: category, libraryExcalidrawCategory: category });
+      },
+
       setLibraryExcalidrawCategory: (category) => {
-        set({ libraryExcalidrawCategory: category });
+        set({ libraryDrawFlowCategory: category, libraryExcalidrawCategory: category });
       },
 
       // Workflow actions
@@ -1053,6 +1070,14 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      updateWorkflowDrawFlow: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
+        const { theme: _staleTheme, ...cleanAppState } = appState || {};
+        set((state) => ({
+          workflows: state.workflows.map((w) =>
+            w.id === workflowId ? { ...w, elements, appState: cleanAppState, files, updatedAt: Date.now() } : w
+          ),
+        }));
+      },
       updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
         const { theme: _staleTheme, ...cleanAppState } = appState || {};
         set((state) => ({
@@ -1062,29 +1087,66 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
+      drawflowLibraryItems: [],
       excalidrawLibraryItems: [],
-      updateExcalidrawLibraryItems: (items: unknown[]) => {
-        set({ excalidrawLibraryItems: items });
+      updateDrawFlowLibraryItems: (items: unknown[]) => {
+        set({ drawflowLibraryItems: items, excalidrawLibraryItems: items });
       },
+      updateExcalidrawLibraryItems: (items: unknown[]) => {
+        set({ drawflowLibraryItems: items, excalidrawLibraryItems: items });
+      },
+
+      drawflowAddedLibraryIds: [],
       excalidrawAddedLibraryIds: [],
+      addDrawFlowAddedLibraryId: (id: string) => {
+        set((state) => {
+          const list = state.drawflowAddedLibraryIds || state.excalidrawAddedLibraryIds || [];
+          const updated = list.includes(id) ? list : [...list, id];
+          return {
+            drawflowAddedLibraryIds: updated,
+            excalidrawAddedLibraryIds: updated,
+          };
+        });
+      },
       addExcalidrawAddedLibraryId: (id: string) => {
-        set((state) => ({
-          excalidrawAddedLibraryIds: state.excalidrawAddedLibraryIds?.includes(id)
-            ? state.excalidrawAddedLibraryIds
-            : [...(state.excalidrawAddedLibraryIds || []), id],
-        }));
+        set((state) => {
+          const list = state.drawflowAddedLibraryIds || state.excalidrawAddedLibraryIds || [];
+          const updated = list.includes(id) ? list : [...list, id];
+          return {
+            drawflowAddedLibraryIds: updated,
+            excalidrawAddedLibraryIds: updated,
+          };
+        });
+      },
+      removeDrawFlowAddedLibraryId: (id: string) => {
+        set((state) => {
+          const list = state.drawflowAddedLibraryIds || state.excalidrawAddedLibraryIds || [];
+          const filtered = list.filter((libId) => libId !== id);
+          return {
+            drawflowAddedLibraryIds: filtered,
+            excalidrawAddedLibraryIds: filtered,
+          };
+        });
       },
       removeExcalidrawAddedLibraryId: (id: string) => {
-        set((state) => ({
-          excalidrawAddedLibraryIds: (state.excalidrawAddedLibraryIds || []).filter((libId) => libId !== id),
-        }));
+        set((state) => {
+          const list = state.drawflowAddedLibraryIds || state.excalidrawAddedLibraryIds || [];
+          const filtered = list.filter((libId) => libId !== id);
+          return {
+            drawflowAddedLibraryIds: filtered,
+            excalidrawAddedLibraryIds: filtered,
+          };
+        });
+      },
+      clearDrawFlowAddedLibraryIds: () => {
+        set({ drawflowAddedLibraryIds: [], excalidrawAddedLibraryIds: [] });
       },
       clearExcalidrawAddedLibraryIds: () => {
-        set({ excalidrawAddedLibraryIds: [] });
+        set({ drawflowAddedLibraryIds: [], excalidrawAddedLibraryIds: [] });
       },
     }),
     {
-      name: "devutils-app-state",
+      name: "intab-app-state",
       onRehydrateStorage: () => (state) => {
         if (state && state.workflows && Array.isArray(state.workflows)) {
           state.workflows = state.workflows.map((w) => ({
@@ -1144,9 +1206,12 @@ export const useAppStore = create<AppState>()(
         diffSettings: state.diffSettings,
         librarySelectedItemId: state.librarySelectedItemId,
         librarySearchQuery: state.librarySearchQuery,
+        libraryDrawFlowCategory: state.libraryDrawFlowCategory,
         libraryExcalidrawCategory: state.libraryExcalidrawCategory,
         workflows: state.workflows,
         activeWorkflowId: state.activeWorkflowId,
+        drawflowLibraryItems: state.drawflowLibraryItems,
+        drawflowAddedLibraryIds: state.drawflowAddedLibraryIds,
         excalidrawLibraryItems: state.excalidrawLibraryItems,
         excalidrawAddedLibraryIds: state.excalidrawAddedLibraryIds,
       }),

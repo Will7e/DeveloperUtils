@@ -24,7 +24,7 @@ export const LANGUAGE_CONFIGS: Record<Language, LanguageConfig> = {
     icon: "JS",
     monacoLanguage: "javascript",
     extension: ".js",
-    defaultCode: `// JavaScript — DevUtils
+    defaultCode: `// JavaScript — InTab
 // Write your code and press Cmd+Enter to run
 
 function fibonacci(n) {
@@ -54,7 +54,7 @@ console.log("  Sum:", sum);
     icon: "TS",
     monacoLanguage: "typescript",
     extension: ".ts",
-    defaultCode: `// TypeScript — DevUtils
+    defaultCode: `// TypeScript — InTab
 // Full type checking powered by the TypeScript compiler
 
 interface User {
@@ -94,7 +94,7 @@ console.log("  Array:", identity([1, 2, 3]));
     icon: "PY",
     monacoLanguage: "python",
     extension: ".py",
-    defaultCode: `# Python — DevUtils
+    defaultCode: `# Python — InTab
 # Powered by Pyodide (CPython compiled to WebAssembly)
 
 def fibonacci(n):
@@ -122,7 +122,7 @@ print(f"  Evens: {evens}")
 print(f"  Sum: {sum(numbers)}")
 
 # Dictionary comprehension
-word = "DevUtils"
+word = "InTab"
 char_count = {c: word.count(c) for c in set(word.lower())}
 print(f"\\nCharacter count in '{word}': {char_count}")
 `,
@@ -138,7 +138,7 @@ print(f"\\nCharacter count in '{word}': {char_count}")
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevUtils Preview</title>
+  <title>InTab Preview</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -185,7 +185,7 @@ print(f"\\nCharacter count in '{word}': {char_count}")
 </head>
 <body>
   <div class="card">
-    <h1>DevUtils</h1>
+    <h1>InTab</h1>
     <p>Edit this HTML and see the live preview update in real-time. Style it, script it, make it yours.</p>
     <span class="badge">Live Preview</span>
   </div>
@@ -196,8 +196,8 @@ print(f"\\nCharacter count in '{word}': {char_count}")
 
 /** Application metadata */
 export const APP_CONFIG = {
-  name: "DevUtils",
+  name: "InTab",
   version: "1.0.0",
-  description: "Browser-based code compiler & editor",
-  repository: "https://github.com/devutils",
+  description: "Private client-side developer workspace",
+  repository: "https://github.com/intab",
 };

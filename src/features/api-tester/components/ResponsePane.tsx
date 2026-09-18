@@ -423,8 +423,8 @@ export function ResponsePane({
                         language={responseLang}
                         theme={
                           currentThemeSetting === "light"
-                            ? "devutils-light"
-                            : "devutils-dark"
+                            ? "intab-light"
+                            : "intab-dark"
                         }
                         onMount={handleEditorMount}
                         value={prettyBody}

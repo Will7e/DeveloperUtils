@@ -370,8 +370,8 @@ export function RequestPane({
                     language="json"
                     theme={
                       currentThemeSetting === "light"
-                        ? "devutils-light"
-                        : "devutils-dark"
+                        ? "intab-light"
+                        : "intab-dark"
                     }
                     onMount={handleEditorMount}
                     value={activeTab.bodyValue}
@@ -455,8 +455,8 @@ export function RequestPane({
                     language={activeTab.rawType.split("/")[1] || "text"}
                     theme={
                       currentThemeSetting === "light"
-                        ? "devutils-light"
-                        : "devutils-dark"
+                        ? "intab-light"
+                        : "intab-dark"
                     }
                     onMount={handleEditorMount}
                     value={activeTab.bodyValue}
@@ -515,8 +515,8 @@ export function RequestPane({
                       language="graphql"
                       theme={
                         currentThemeSetting === "light"
-                          ? "devutils-light"
-                          : "devutils-dark"
+                          ? "intab-light"
+                          : "intab-dark"
                       }
                       onMount={handleGraphqlEditorMount}
                       value={activeTab.graphqlQuery || ""}
@@ -564,8 +564,8 @@ export function RequestPane({
                       language="json"
                       theme={
                         currentThemeSetting === "light"
-                          ? "devutils-light"
-                          : "devutils-dark"
+                          ? "intab-light"
+                          : "intab-dark"
                       }
                       onMount={handleEditorMount}
                       value={activeTab.graphqlVariables || ""}
@@ -637,8 +637,8 @@ export function RequestPane({
                   language="json"
                   theme={
                     currentThemeSetting === "light"
-                      ? "devutils-light"
-                      : "devutils-dark"
+                      ? "intab-light"
+                      : "intab-dark"
                   }
                   onMount={handleEditorMount}
                   value={wsMessageText}

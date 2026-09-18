@@ -12,6 +12,9 @@ import { useVaultStore } from "@/services/vault.service";
 
 declare global {
   interface Window {
+    __INTAB_DISMISS_LOADER__?: () => void;
+    __INTAB_LOADER_DISMISSED__?: boolean;
+    __INTAB_BOOTSTRAP_PROMISE__?: Promise<void>;
     __DEVUTILS_DISMISS_LOADER__?: () => void;
     __DEVUTILS_LOADER_DISMISSED__?: boolean;
     __DEVUTILS_BOOTSTRAP_PROMISE__?: Promise<void>;
@@ -83,12 +86,17 @@ export function bootstrapApp(): Promise<void> {
     ]);
 
     // 5. Trigger a smooth fade-out of the single splash screen
-    if (typeof window !== "undefined" && window.__DEVUTILS_DISMISS_LOADER__) {
-      window.__DEVUTILS_DISMISS_LOADER__();
+    if (typeof window !== "undefined") {
+      if (window.__INTAB_DISMISS_LOADER__) {
+        window.__INTAB_DISMISS_LOADER__();
+      } else if (window.__DEVUTILS_DISMISS_LOADER__) {
+        window.__DEVUTILS_DISMISS_LOADER__();
+      }
     }
   })();
 
   if (typeof window !== "undefined") {
+    window.__INTAB_BOOTSTRAP_PROMISE__ = bootstrapPromise;
     window.__DEVUTILS_BOOTSTRAP_PROMISE__ = bootstrapPromise;
   }
 
