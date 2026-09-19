@@ -126,26 +126,19 @@ export const CURATED_MODELS: ModelInfo[] = [
 
   // Google Gemini
   {
-    id: "gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
     provider: "gemini",
     contextWindow: "1M context",
-    description: "Next-gen lightning-fast multimodal reasoning with 1M context",
+    description: "Google's latest, most capable Flash model for coding, agents, and complex workflows",
     isDefault: true,
   },
   {
-    id: "gemini-2.0-pro-exp-02-05",
-    name: "Gemini 2.0 Pro Experimental",
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
     provider: "gemini",
-    contextWindow: "2M context",
-    description: "Frontier coding and complex reasoning with 2M context window",
-  },
-  {
-    id: "gemini-1.5-pro",
-    name: "Gemini 1.5 Pro",
-    provider: "gemini",
-    contextWindow: "2M context",
-    description: "Massive context analysis and nuanced problem solving",
+    contextWindow: "1M context",
+    description: "Google's recommended high-speed multimodal reasoning model with 1M context",
   },
 ];
 

@@ -9,9 +9,8 @@ import type { ChatMessage, ChatSkill } from "../types";
  */
 export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   // Google Gemini
-  "gemini-2.0-flash": 1048576, // 1M tokens
-  "gemini-2.0-pro-exp-02-05": 2097152, // 2M tokens
-  "gemini-1.5-pro": 2097152, // 2M tokens
+  "gemini-3.8-flash": 1048576, // 1M tokens
+  "gemini-3.6-flash": 1048576, // 1M tokens
 
   // OpenAI
   "gpt-4o": 128000,

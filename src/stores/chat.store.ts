@@ -68,6 +68,9 @@ export interface ChatStoreState {
   deleteSkill: (id: string) => void;
 }
 
+const isSupportedGeminiModel = (m?: string) =>
+  m === "gemini-3.8-flash" || m === "gemini-3.6-flash";
+
 const DEFAULT_SETTINGS: ChatSettings = {
   activeProvider: "openai",
   activeModel: "gpt-4o",
@@ -109,11 +112,15 @@ export const useChatStore = create<ChatStoreState>()(
           currentSettings.activeProvider ||
           currentSettings.defaultProvider ||
           "openai";
-        const chosenModel =
+        let chosenModel =
           model ||
           currentSettings.activeModel ||
           currentSettings.defaultModel ||
           "gpt-4o";
+
+        if (chosenProvider === "gemini" && !isSupportedGeminiModel(chosenModel)) {
+          chosenModel = "gemini-3.8-flash";
+        }
 
         const newId = generateId();
         const newConversation: ChatConversation = {
@@ -142,6 +149,11 @@ export const useChatStore = create<ChatStoreState>()(
         const found = get().conversations.find((c) => c.id === id);
         if (!found) return;
 
+        let modelToUse = found.model;
+        if (found.provider === "gemini" && !isSupportedGeminiModel(modelToUse)) {
+          modelToUse = "gemini-3.8-flash";
+        }
+
         set((state) => ({
           activeConversationId: id,
           streamingContent: "",
@@ -150,7 +162,7 @@ export const useChatStore = create<ChatStoreState>()(
           settings: {
             ...state.settings,
             activeProvider: found.provider || state.settings.activeProvider,
-            activeModel: found.model || state.settings.activeModel,
+            activeModel: modelToUse || state.settings.activeModel,
           },
         }));
       },
@@ -421,11 +433,22 @@ export const useChatStore = create<ChatStoreState>()(
         const persisted = persistedState as Partial<ChatStoreState> | undefined;
         const persistedSettings = persisted?.settings;
 
+        let activeModel = persistedSettings?.activeModel || DEFAULT_SETTINGS.activeModel;
+        let defaultModel = persistedSettings?.defaultModel || DEFAULT_SETTINGS.defaultModel;
+        const activeProvider = persistedSettings?.activeProvider || DEFAULT_SETTINGS.activeProvider;
+
+        if (activeProvider === "gemini" && !isSupportedGeminiModel(activeModel)) {
+          activeModel = "gemini-3.8-flash";
+        }
+        if (defaultModel.startsWith("gemini") && !isSupportedGeminiModel(defaultModel)) {
+          defaultModel = "gemini-3.8-flash";
+        }
+
         const mergedSettings: ChatSettings = {
-          activeProvider: persistedSettings?.activeProvider || DEFAULT_SETTINGS.activeProvider,
-          activeModel: persistedSettings?.activeModel || DEFAULT_SETTINGS.activeModel,
+          activeProvider,
+          activeModel,
           defaultProvider: persistedSettings?.defaultProvider || DEFAULT_SETTINGS.defaultProvider,
-          defaultModel: persistedSettings?.defaultModel || DEFAULT_SETTINGS.defaultModel,
+          defaultModel,
           apiKeys: {
             openai: persistedSettings?.apiKeys?.openai || "",
             anthropic: persistedSettings?.apiKeys?.anthropic || "",
@@ -446,13 +469,21 @@ export const useChatStore = create<ChatStoreState>()(
           useProxy: Boolean(persistedSettings?.useProxy),
         };
 
+        const sanitizedConversations = (Array.isArray(persisted?.conversations)
+          ? persisted.conversations
+          : currentState.conversations
+        ).map((conv) => {
+          if (conv.provider === "gemini" && !isSupportedGeminiModel(conv.model)) {
+            return { ...conv, model: "gemini-3.8-flash" };
+          }
+          return conv;
+        });
+
         return {
           ...currentState,
           ...persisted,
           settings: mergedSettings,
-          conversations: Array.isArray(persisted?.conversations)
-            ? persisted.conversations
-            : currentState.conversations,
+          conversations: sanitizedConversations,
           activeConversationId: persisted?.activeConversationId ?? currentState.activeConversationId,
         };
       },

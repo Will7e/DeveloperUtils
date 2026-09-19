@@ -173,7 +173,7 @@ const TOOLS: ToolFeature[] = [
     description:
       "A ChatGPT-style workspace for debugging, architecture discussions, and writing code. Real-time streaming with 1-click code block copying, multi-session history, and local vault encryption.",
     highlights: [
-      "Multi-provider support for GPT-4o, Claude 3.7 Sonnet, and Gemini 2.0 Flash",
+      "Multi-provider support for GPT-4o, Claude 3.7 Sonnet, and Gemini 3.8 Flash",
       "Real-time token streaming with stop controls and syntax-highlighted code blocks",
       "Session history automatically encrypted at rest using InTab's AES-256-GCM vault",
     ],

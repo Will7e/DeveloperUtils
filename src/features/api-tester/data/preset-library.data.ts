@@ -1690,14 +1690,14 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     },
   },
   {
-    id: "google-gemini-2-flash",
-    name: "Google Gemini: Generate Content (Gemini 2.0 Flash)",
+    id: "google-gemini-3-6-flash",
+    name: "Google Gemini: Generate Content (Gemini 3.6 Flash)",
     platform: "ai",
     platformName: "AI & LLM Services",
     category: "Google Gemini",
     method: "POST",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={{gemini_api_key}}",
-    description: "Generate multimodal content using Google's next-generation, high-speed Gemini 2.0 Flash model.",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={{gemini_api_key}}",
+    description: "Generate multimodal content using Google's recommended high-speed Gemini 3.6 Flash model.",
     docsUrl: "https://ai.google.dev/gemini-api/docs/quickstart",
     headers: [
       { key: "Content-Type", value: "application/json" },
@@ -1724,7 +1724,7 @@ export const LIBRARY_PRESETS: LibraryPreset[] = [
     envVariables: [
       { key: "gemini_api_key", defaultValue: "", description: "Google AI Studio API Key" },
     ],
-    tags: ["gemini", "gemini-2.0", "google", "ai", "llm"],
+    tags: ["gemini", "gemini-3.6", "google", "ai", "llm"],
     sampleResponse: {
       status: 200,
       statusText: "OK",
