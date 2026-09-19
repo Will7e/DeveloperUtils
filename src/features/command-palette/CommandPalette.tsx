@@ -21,6 +21,7 @@ import {
   GitCompare,
   Network,
   Code2,
+  MessageSquare,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { compilerService } from "@/services/compiler.service";
@@ -318,6 +319,13 @@ export function CommandPalette() {
         category: "Navigation",
         icon: <LayoutDashboard style={{ width: 14, height: 14 }} />,
         action: () => navigate("/"),
+      },
+      {
+        id: "nav-chat",
+        label: "Go to AI Chat",
+        category: "Navigation",
+        icon: <MessageSquare style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/chat"),
       },
       {
         id: "nav-compiler",

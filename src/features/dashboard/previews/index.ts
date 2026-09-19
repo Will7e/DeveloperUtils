@@ -5,3 +5,4 @@ export { FormattersPreview } from "./FormattersPreview";
 export { DiffPreview } from "./DiffPreview";
 export { ComparatorsPreview } from "./ComparatorsPreview";
 export { LibraryPreview } from "./LibraryPreview";
+export { ChatPreview } from "./ChatPreview";

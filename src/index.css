@@ -2587,6 +2587,18 @@ html.light .settings-tab-item.active {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  animation: settings-tab-enter 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes settings-tab-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .settings-section {
@@ -2724,6 +2736,77 @@ html.light .settings-select {
 }
 
 html.light .settings-select:hover {
+  background: var(--bg-2);
+}
+
+.settings-input {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.settings-input:hover {
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  background: var(--bg-1);
+}
+
+html.light .settings-input {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+  color: var(--text-0);
+}
+
+html.light .settings-input:hover {
+  background: var(--bg-2);
+}
+
+.settings-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  outline: none;
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+  transition: all 0.15s ease;
+}
+
+.settings-textarea:hover {
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+
+.settings-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  background: var(--bg-1);
+}
+
+html.light .settings-textarea {
+  background: var(--bg-1);
+  border-color: var(--border-2);
+  color: var(--text-0);
+}
+
+html.light .settings-textarea:hover {
   background: var(--bg-2);
 }
 
