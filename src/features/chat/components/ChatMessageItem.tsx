@@ -1,182 +1,121 @@
 // ============================================================
-// ChatMessageItem — Renders user or assistant message with Markdown
+// ChatMessageItem — Enterprise Message Card with Rich Markdown,
+// Streaming Caret, Edit Prompt, Regenerate, and Model Switching
 // ============================================================
 
 import React, { useState, useEffect } from "react";
-import { User, Copy, Check, AlertCircle, Maximize2, Download, X } from "lucide-react";
+import {
+  User,
+  Copy,
+  Check,
+  AlertCircle,
+  Maximize2,
+  Download,
+  X,
+  RotateCw,
+  Edit3,
+  ThumbsUp,
+  ThumbsDown,
+  Sparkles,
+  ChevronDown,
+  FileText,
+} from "lucide-react";
 import type { ChatMessage, AIProvider, ChatImageAttachment } from "../types";
-import { CodeBlock } from "./CodeBlock";
+import { CURATED_MODELS } from "../types";
 import { ProviderIcon } from "./ProviderIcon";
 import { formatFileSize } from "../utils/image-utils";
+import { MarkdownRenderer } from "../utils/markdown-parser";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface ChatMessageItemProps {
   message: ChatMessage;
   provider?: AIProvider | string;
   modelId?: string;
+  isStreamingMessage?: boolean;
+  onRegenerate?: (messageId: string, modelOverride?: string) => void;
+  onEditAndResubmit?: (messageId: string, newContent: string) => void;
 }
 
-/**
- * Splits text into markdown blocks (code blocks vs regular markdown text)
- */
-function parseMessageBlocks(content: string) {
-  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
-  const blocks: Array<{ type: "code" | "text"; content: string; language?: string }> = [];
-
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = codeBlockRegex.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      blocks.push({
-        type: "text",
-        content: content.slice(lastIndex, match.index),
-      });
-    }
-
-    blocks.push({
-      type: "code",
-      language: match[1] || "typescript",
-      content: match[2] || "",
-    });
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < content.length) {
-    blocks.push({
-      type: "text",
-      content: content.slice(lastIndex),
-    });
-  }
-
-  return blocks;
-}
-
-/**
- * Lightweight inline markdown renderer for formatting text, bold, italics, inline code, and lists
- */
-function renderInlineMarkdown(text: string): React.ReactNode {
-  const lines = text.split("\n");
-
-  return lines.map((line, lineIdx) => {
-    // Heading 3
-    if (line.startsWith("### ")) {
-      return (
-        <h4 key={lineIdx} className="text-sm font-semibold text-text-0 mt-3 mb-1">
-          {formatInlineStyles(line.slice(4))}
-        </h4>
-      );
-    }
-    // Heading 2
-    if (line.startsWith("## ")) {
-      return (
-        <h3 key={lineIdx} className="text-base font-semibold text-text-0 mt-3 mb-1.5">
-          {formatInlineStyles(line.slice(3))}
-        </h3>
-      );
-    }
-    // Heading 1
-    if (line.startsWith("# ")) {
-      return (
-        <h2 key={lineIdx} className="text-lg font-bold text-text-0 mt-4 mb-2">
-          {formatInlineStyles(line.slice(2))}
-        </h2>
-      );
-    }
-    // Bullet list item
-    if (line.match(/^[-*]\s+/)) {
-      return (
-        <div key={lineIdx} className="flex items-start gap-2 ml-2 my-0.5">
-          <span className="text-accent mt-1.5 h-1.5 w-1.5 rounded-full bg-accent shrink-0" />
-          <span>{formatInlineStyles(line.replace(/^[-*]\s+/, ""))}</span>
-        </div>
-      );
-    }
-    // Numbered list item
-    const numMatch = line.match(/^(\d+)\.\s+(.*)/);
-    if (numMatch && numMatch[2] !== undefined) {
-      return (
-        <div key={lineIdx} className="flex items-start gap-2 ml-2 my-0.5">
-          <span className="text-text-3 font-mono text-xs mt-0.5 shrink-0">
-            {numMatch[1]}.
-          </span>
-          <span>{formatInlineStyles(numMatch[2])}</span>
-        </div>
-      );
-    }
-
-    if (!line.trim()) {
-      return <div key={lineIdx} className="h-2" />;
-    }
-
-    return (
-      <p key={lineIdx} className="my-1 leading-relaxed">
-        {formatInlineStyles(line)}
-      </p>
-    );
+function formatRelativeTime(timestamp?: number): string {
+  if (!timestamp) return "Just now";
+  const diff = Date.now() - timestamp;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 30) return "Just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
   });
 }
 
-/**
- * Replaces **bold**, *italic*, and `inline code`
- */
-function formatInlineStyles(str: string): React.ReactNode[] {
-  // Regex splitting by backticks and asterisks
-  const parts = str.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
-
-  return parts.map((part, idx) => {
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      return (
-        <code
-          key={idx}
-          className="px-1.5 py-0.5 rounded bg-bg-2 border border-border-1 text-accent font-mono text-[12px]"
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return (
-        <strong key={idx} className="font-semibold text-text-0">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    }
-    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
-      return (
-        <em key={idx} className="italic text-text-1">
-          {part.slice(1, -1)}
-        </em>
-      );
-    }
-    return <span key={idx}>{part}</span>;
-  });
-}
-
-export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemProps) {
+export function ChatMessageItem({
+  message,
+  provider,
+  modelId,
+  isStreamingMessage = false,
+  onRegenerate,
+  onEditAndResubmit,
+}: ChatMessageItemProps) {
   const [copied, setCopied] = useState(false);
+  const [copiedMd, setCopiedMd] = useState(false);
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
   const [lightboxImage, setLightboxImage] = useState<ChatImageAttachment | null>(null);
+
   const isUser = message.role === "user";
 
-  // Escape key closes lightbox
+  // Escape key closes lightbox or cancels edit
   useEffect(() => {
-    if (!lightboxImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setLightboxImage(null);
+        if (lightboxImage) setLightboxImage(null);
+        if (isEditing) {
+          setIsEditing(false);
+          setEditContent(message.content);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [lightboxImage]);
+  }, [lightboxImage, isEditing, message.content]);
 
-  const handleCopyMessage = async () => {
+  const handleCopyText = async () => {
     try {
+      // Strip backticks if just plain text wanted
       await navigator.clipboard.writeText(message.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // Ignore
+    }
+  };
+
+  const handleCopyMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopiedMd(true);
+      setTimeout(() => setCopiedMd(false), 2000);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleSaveEdit = () => {
+    const trimmed = editContent.trim();
+    if (!trimmed) return;
+    setIsEditing(false);
+    if (trimmed !== message.content && onEditAndResubmit) {
+      onEditAndResubmit(message.id, trimmed);
     }
   };
 
@@ -189,12 +128,14 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
     document.body.removeChild(a);
   };
 
-  const blocks = parseMessageBlocks(message.content);
   const hasImages = message.images && message.images.length > 0;
+  const currentModelInfo = CURATED_MODELS.find((m) => m.id === (message.model || modelId));
+  const displayModelName = currentModelInfo?.name || message.model || modelId || "AI Assistant";
 
   return (
     <>
       <div className={`chat-message-row ${isUser ? "user" : "assistant"} group`}>
+        {/* Assistant Avatar */}
         {!isUser && (
           <div className="chat-avatar assistant">
             <ProviderIcon provider={provider} modelId={modelId} className="w-4 h-4" />
@@ -202,31 +143,9 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
         )}
 
         {isUser ? (
+          /* User Message Bubble */
           <div className="chat-bubble-user">
-            {/* Attached images in user message */}
-            {hasImages && (
-              <div className="chat-message-images-grid">
-                {message.images!.map((img) => (
-                  <div
-                    key={img.id}
-                    className="chat-message-image-thumb group/img"
-                    onClick={() => setLightboxImage(img)}
-                    title={`${img.name} (Click to expand)`}
-                  >
-                    <img src={img.url} alt={img.name} className="chat-message-image" />
-                    <div className="chat-message-image-overlay">
-                      <Maximize2 className="w-4 h-4 text-white drop-shadow" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* User message text */}
-            {message.content && <div>{message.content}</div>}
-          </div>
-        ) : (
-          <div className="chat-bubble-assistant relative">
+            {/* Attached images preview grid */}
             {hasImages && (
               <div className="chat-message-images-grid mb-2">
                 {message.images!.map((img) => (
@@ -245,6 +164,108 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
               </div>
             )}
 
+            {isEditing ? (
+              <div className="chat-user-edit-wrap">
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="chat-user-edit-textarea"
+                  rows={Math.max(2, editContent.split("\n").length)}
+                  autoFocus
+                />
+                <div className="chat-user-edit-actions">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setEditContent(message.content);
+                    }}
+                    className="chat-user-edit-btn cancel"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEdit}
+                    className="chat-user-edit-btn save"
+                  >
+                    Save & Submit
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+
+                {/* User Message Action Toolbar */}
+                <div className="chat-msg-actions-toolbar justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="chat-msg-action-btn"
+                    title="Edit prompt and re-run"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyText}
+                    className="chat-msg-action-btn"
+                    title="Copy message"
+                  >
+                    {copied ? (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copied ? "Copied" : "Copy"}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Assistant Message Bubble */
+          <div className="chat-bubble-assistant">
+            {/* Metadata Header: Model Tag + Timestamp + Latency */}
+            <div className="chat-msg-meta">
+              <span className="chat-msg-meta-tag">
+                <Sparkles className="w-3 h-3 text-accent" />
+                <span>{displayModelName}</span>
+              </span>
+
+              {message.latencyMs && (
+                <span className="chat-msg-meta-latency">
+                  {(message.latencyMs / 1000).toFixed(1)}s
+                </span>
+              )}
+
+              <span className="chat-msg-meta-time">
+                {formatRelativeTime(message.timestamp)}
+              </span>
+            </div>
+
+            {/* Attached images in assistant response if any */}
+            {hasImages && (
+              <div className="chat-message-images-grid mb-2">
+                {message.images!.map((img) => (
+                  <div
+                    key={img.id}
+                    className="chat-message-image-thumb group/img"
+                    onClick={() => setLightboxImage(img)}
+                    title={`${img.name} (Click to expand)`}
+                  >
+                    <img src={img.url} alt={img.name} className="chat-message-image" />
+                    <div className="chat-message-image-overlay">
+                      <Maximize2 className="w-4 h-4 text-white drop-shadow" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Error Message Display */}
             {message.error && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs mb-3">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -252,41 +273,138 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
               </div>
             )}
 
-            {!message.error &&
-              blocks.map((block, i) =>
-                block.type === "code" ? (
-                  <CodeBlock
-                    key={i}
-                    language={block.language}
-                    code={block.content}
-                  />
-                ) : (
-                  <div key={i}>{renderInlineMarkdown(block.content)}</div>
-                )
-              )}
+            {/* Markdown Body */}
+            {!message.error && (
+              <div className="chat-msg-body">
+                <MarkdownRenderer
+                  content={message.content}
+                  isStreaming={isStreamingMessage}
+                />
+                {/* Real-time leading cursor */}
+                {isStreamingMessage && <span className="chat-streaming-cursor" />}
+              </div>
+            )}
 
-            {/* Quick Copy Message Action */}
-            <button
-              type="button"
-              onClick={handleCopyMessage}
-              className="chat-conv-action-btn opacity-0 group-hover:opacity-100 transition-opacity mt-2 p-1.5 rounded hover:bg-bg-2 text-text-3 hover:text-text-0 text-xs flex items-center gap-1.5"
-              title="Copy entire response"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-green-500" />
-                  <span className="text-green-500 text-[11px]">Copied</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span className="text-[11px]">Copy response</span>
-                </>
-              )}
-            </button>
+            {/* Assistant Action Toolbar */}
+            {!isStreamingMessage && !message.error && (
+              <div className="chat-msg-actions-toolbar">
+                {/* 1-Click Copy Text */}
+                <button
+                  type="button"
+                  onClick={handleCopyText}
+                  className="chat-msg-action-btn"
+                  title="Copy response text"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Copy Markdown */}
+                <button
+                  type="button"
+                  onClick={handleCopyMarkdown}
+                  className="chat-msg-action-btn"
+                  title="Copy as raw Markdown"
+                >
+                  {copiedMd ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" />
+                      <span className="text-emerald-400">Copied MD</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-3 h-3" />
+                      <span>Copy MD</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Regenerate Button */}
+                {onRegenerate && (
+                  <button
+                    type="button"
+                    onClick={() => onRegenerate(message.id)}
+                    className="chat-msg-action-btn"
+                    title="Regenerate this response"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                    <span>Regenerate</span>
+                  </button>
+                )}
+
+                {/* Try with another model Dropdown */}
+                {onRegenerate && (
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        className="chat-msg-action-btn"
+                        title="Compare with another AI model"
+                      >
+                        <Sparkles className="w-3 h-3 text-accent" />
+                        <span>Compare</span>
+                        <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56 p-1 bg-bg-1 border-border-1 text-xs">
+                      <div className="px-2 py-1 text-[10px] font-semibold text-text-3 uppercase tracking-wider">
+                        Regenerate with
+                      </div>
+                      {CURATED_MODELS.map((m) => (
+                        <DropdownMenuItem
+                          key={m.id}
+                          onClick={() => onRegenerate(message.id, m.id)}
+                          className="flex items-center justify-between p-2 rounded cursor-pointer hover:bg-bg-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <ProviderIcon provider={m.provider} className="w-3.5 h-3.5" />
+                            <span className="font-medium text-text-1">{m.name}</span>
+                          </div>
+                          <span className="text-[10px] text-text-3 font-mono">
+                            {m.contextWindow.replace(" context", "")}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                {/* Feedback Buttons (Thumbs Up / Down) */}
+                <div className="flex items-center gap-1 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setFeedback(feedback === "up" ? null : "up")}
+                    className={`chat-msg-action-btn p-1 ${feedback === "up" ? "active" : ""}`}
+                    title="Good response"
+                    aria-label="Thumbs up"
+                  >
+                    <ThumbsUp className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFeedback(feedback === "down" ? null : "down")}
+                    className={`chat-msg-action-btn p-1 ${feedback === "down" ? "active" : ""}`}
+                    title="Poor response"
+                    aria-label="Thumbs down"
+                  >
+                    <ThumbsDown className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
+        {/* User Avatar */}
         {isUser && (
           <div className="chat-avatar user">
             <User className="w-4 h-4 text-text-2" />
@@ -294,7 +412,7 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
         )}
       </div>
 
-      {/* Lightbox Modal for Full Image View */}
+      {/* Fullscreen Lightbox Modal for Image Attachments */}
       {lightboxImage && (
         <div
           className="chat-lightbox-backdrop"
@@ -310,7 +428,7 @@ export function ChatMessageItem({ message, provider, modelId }: ChatMessageItemP
                   {lightboxImage.name}
                 </span>
                 {lightboxImage.size && (
-                  <span className="text-xs text-text-3">
+                  <span className="text-xs text-text-3 font-mono">
                     ({formatFileSize(lightboxImage.size)})
                   </span>
                 )}

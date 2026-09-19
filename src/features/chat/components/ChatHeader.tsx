@@ -14,6 +14,7 @@ import {
   Sparkles,
   AlertTriangle,
   Info,
+  Download,
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -29,6 +30,7 @@ import {
   formatTokenCount,
 } from "../utils/token-counter";
 import { ProviderIcon } from "./ProviderIcon";
+import { exportConversationAsMarkdown } from "../utils/export-utils";
 
 interface ChatHeaderProps {
   sidebarOpen: boolean;
@@ -410,18 +412,31 @@ export function ChatHeader({ sidebarOpen: _sidebarOpen, onToggleSidebar: _onTogg
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Clear Conversation Action (only displayed when there are messages to clear) */}
-        {hasMessages && (
-          <SimpleTooltip content="Clear conversation messages" side="bottom">
-            <button
-              type="button"
-              onClick={clearActiveConversation}
-              className="chat-header-icon-btn hover:text-red-400 hover:bg-red-500/10"
-              aria-label="Clear conversation messages"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </SimpleTooltip>
+        {/* Export & Clear Actions (only displayed when there are messages) */}
+        {hasMessages && conversation && (
+          <div className="flex items-center gap-1">
+            <SimpleTooltip content="Export conversation as Markdown" side="bottom">
+              <button
+                type="button"
+                onClick={() => exportConversationAsMarkdown(conversation)}
+                className="chat-header-icon-btn hover:text-accent hover:bg-accent/10"
+                aria-label="Export conversation as Markdown"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+            </SimpleTooltip>
+
+            <SimpleTooltip content="Clear conversation messages" side="bottom">
+              <button
+                type="button"
+                onClick={clearActiveConversation}
+                className="chat-header-icon-btn hover:text-red-400 hover:bg-red-500/10"
+                aria-label="Clear conversation messages"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </SimpleTooltip>
+          </div>
         )}
       </div>
     </header>

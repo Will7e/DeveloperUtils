@@ -19,6 +19,8 @@ export interface ChatMessage {
   timestamp: number;
   error?: boolean;
   images?: ChatImageAttachment[];
+  model?: string;
+  latencyMs?: number;
 }
 
 export interface ChatConversation {
@@ -30,6 +32,7 @@ export interface ChatConversation {
   provider: AIProvider;
   model: string;
   systemPrompt?: string;
+  pinned?: boolean;
 }
 
 export interface ModelInfo {

@@ -60,7 +60,15 @@ export interface ChatStoreState {
   setBaseUrl: (provider: AIProvider, url: string) => void;
   setConversationSystemPrompt: (conversationId: string, prompt: string) => void;
   setSettingsModalOpen: (open: boolean) => void;
-  setSystemPromptModalOpen: (open: boolean) => void;
+  togglePinConversation: (id: string) => void;
+  duplicateConversation: (id: string) => string;
+  deleteMessage: (conversationId: string, messageId: string) => void;
+  truncateMessagesFrom: (conversationId: string, messageId: string) => void;
+  updateMessageMetadata: (
+    conversationId: string,
+    messageId: string,
+    meta: { model?: string; latencyMs?: number }
+  ) => void;
 
   toggleSkill: (id: string) => void;
   addSkill: (skill: Omit<ChatSkill, "id">) => void;
@@ -366,8 +374,79 @@ export const useChatStore = create<ChatStoreState>()(
         set({ settingsModalOpen: open });
       },
 
-      setSystemPromptModalOpen: (open) => {
-        set({ systemPromptModalOpen: open });
+      togglePinConversation: (id) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { ...c, pinned: !c.pinned, updatedAt: Date.now() } : c
+          ),
+        }));
+      },
+
+      duplicateConversation: (id) => {
+        const target = get().conversations.find((c) => c.id === id);
+        if (!target) return "";
+        const newId = generateId();
+        const cloned: ChatConversation = {
+          ...target,
+          id: newId,
+          title: `${target.title} (Copy)`,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          pinned: false,
+          messages: target.messages.map((m) => ({
+            ...m,
+            id: generateId(),
+            timestamp: Date.now(),
+          })),
+        };
+        set((state) => ({
+          conversations: [cloned, ...state.conversations],
+          activeConversationId: newId,
+        }));
+        return newId;
+      },
+
+      deleteMessage: (conversationId, messageId) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.filter((m) => m.id !== messageId),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      truncateMessagesFrom: (conversationId, messageId) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c;
+            const targetIdx = c.messages.findIndex((m) => m.id === messageId);
+            if (targetIdx === -1) return c;
+            return {
+              ...c,
+              messages: c.messages.slice(0, targetIdx),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
+      },
+
+      updateMessageMetadata: (conversationId, messageId, meta) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, ...meta } : m
+              ),
+              updatedAt: Date.now(),
+            };
+          }),
+        }));
       },
 
       toggleSkill: (id) => {

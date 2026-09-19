@@ -1,23 +1,46 @@
 // ============================================================
-// ChatInput — Input textarea with dynamic Send / Stop control & Image Support
+// ChatInput — Enterprise Composer with Slash Commands,
+// Active Skill Indicator, Draft Token Counter & Multimodal Vision
 // ============================================================
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp, Square, ImagePlus, X, FileImage, Loader2 } from "lucide-react";
+import {
+  ArrowUp,
+  Square,
+  ImagePlus,
+  X,
+  FileImage,
+  Loader2,
+  Sparkles,
+  Terminal,
+  ShieldAlert,
+  FlaskConical,
+  Trash2,
+  Layers,
+} from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { useAppStore } from "@/stores/app.store";
-import {
-  streamChatCompletion,
-  abortCurrentRequest,
-} from "../services/ai-client.service";
-import { PROVIDER_LABELS, buildEffectiveSystemPrompt, type ChatImageAttachment } from "../types";
+import { executeChatStream, stopChatStream } from "../services/chat-runner";
+import { PROVIDER_LABELS, type ChatImageAttachment } from "../types";
 import { processImageFile, formatFileSize } from "../utils/image-utils";
+import { estimateTokens } from "../utils/token-counter";
+
+interface SlashCommand {
+  id: string;
+  command: string;
+  title: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  action: () => void;
+}
 
 export function ChatInput() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatImageAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [selectedSlashIdx, setSelectedSlashIdx] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,9 +53,8 @@ export function ChatInput() {
 
   const createConversation = useChatStore((s) => s.createConversation);
   const addMessage = useChatStore((s) => s.addMessage);
-  const setStreaming = useChatStore((s) => s.setStreaming);
-  const setStreamingContent = useChatStore((s) => s.setStreamingContent);
-  const appendStreamingContent = useChatStore((s) => s.appendStreamingContent);
+  const toggleSkill = useChatStore((s) => s.toggleSkill);
+  const clearActiveConversation = useChatStore((s) => s.clearActiveConversation);
 
   const activeProvider = settings?.activeProvider || "openai";
   const activeModel = settings?.activeModel || "gpt-4o";
@@ -40,14 +62,117 @@ export function ChatInput() {
   const activeKey = apiKeys[activeProvider]?.trim();
   const hasKey = Boolean(activeKey);
 
+  // Active skill list
+  const activeSkills = (settings.skills || []).filter((s) => s.enabled);
+  const primarySkill = activeSkills[0];
+
+  // Slash commands registry
+  const slashCommands: SlashCommand[] = [
+    {
+      id: "architect",
+      command: "/architect",
+      title: "Full-Stack Architect",
+      description: "Clean architecture, modular TypeScript, production design",
+      icon: Layers,
+      action: () => {
+        toggleSkill("full-stack-architect");
+        setInput("");
+        useAppStore.getState().addToast({
+          message: "Skill toggled: Full-Stack Architect",
+          type: "info",
+          duration: 2500,
+        });
+      },
+    },
+    {
+      id: "review",
+      command: "/review",
+      title: "Strict Code Reviewer",
+      description: "Security audit, OWASP vulnerabilities, memory leaks",
+      icon: ShieldAlert,
+      action: () => {
+        toggleSkill("code-reviewer");
+        setInput("");
+        useAppStore.getState().addToast({
+          message: "Skill toggled: Strict Code Reviewer",
+          type: "info",
+          duration: 2500,
+        });
+      },
+    },
+    {
+      id: "test",
+      command: "/test",
+      title: "Test & QA Engineer",
+      description: "Vitest test suites, mock fixtures, edge cases",
+      icon: FlaskConical,
+      action: () => {
+        toggleSkill("test-qa-engineer");
+        setInput("");
+        useAppStore.getState().addToast({
+          message: "Skill toggled: Test & QA Engineer",
+          type: "info",
+          duration: 2500,
+        });
+      },
+    },
+    {
+      id: "servicenow",
+      command: "/servicenow",
+      title: "ServiceNow Specialist",
+      description: "Scoped Script Includes, GlideRecordSecure, ACLs",
+      icon: Terminal,
+      action: () => {
+        toggleSkill("servicenow-specialist");
+        setInput("");
+        useAppStore.getState().addToast({
+          message: "Skill toggled: ServiceNow Specialist",
+          type: "info",
+          duration: 2500,
+        });
+      },
+    },
+    {
+      id: "clear",
+      command: "/clear",
+      title: "Clear Active Chat",
+      description: "Reset conversation messages",
+      icon: Trash2,
+      action: () => {
+        clearActiveConversation();
+        setInput("");
+        useAppStore.getState().addToast({
+          message: "Conversation cleared",
+          type: "info",
+          duration: 2000,
+        });
+      },
+    },
+  ];
+
+  // Filter slash commands
+  const filteredSlashCommands = slashCommands.filter((cmd) =>
+    cmd.command.toLowerCase().includes(input.toLowerCase().trim())
+  );
+
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
       textareaRef.current.style.height = `${Math.min(
         textareaRef.current.scrollHeight,
-        200
+        220
       )}px`;
+    }
+  }, [input]);
+
+  // Open slash menu when input starts with /
+  useEffect(() => {
+    if (input.startsWith("/") && !input.includes(" ")) {
+      setSlashMenuOpen(true);
+      setSelectedSlashIdx(0);
+    } else {
+      setSlashMenuOpen(false);
     }
   }, [input]);
 
@@ -82,7 +207,6 @@ export function ChatInput() {
       });
     } finally {
       setIsProcessingImage(false);
-      // Focus textarea after adding images
       textareaRef.current?.focus();
     }
   }, []);
@@ -90,7 +214,7 @@ export function ChatInput() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       handleAddFiles(e.target.files);
-      e.target.value = ""; // Reset input so same file can be re-selected if deleted
+      e.target.value = "";
     }
   };
 
@@ -108,7 +232,6 @@ export function ChatInput() {
       const imageItems = items.filter((item) => item.type.startsWith("image/"));
 
       if (imageItems.length > 0) {
-        // Prevent default only if pure image paste to avoid pasting binary text
         const textData = clipboardData.getData("text");
         if (!textData) {
           e.preventDefault();
@@ -128,10 +251,9 @@ export function ChatInput() {
     [handleAddFiles]
   );
 
-  // Global window paste handler when chat view is mounted
+  // Global window paste handler
   useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
-      // If focused inside another input/textarea outside this container, don't hijack
       const activeEl = document.activeElement;
       if (
         activeEl &&
@@ -161,9 +283,7 @@ export function ChatInput() {
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isDragging) {
-      setIsDragging(true);
-    }
+    if (!isDragging) setIsDragging(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -216,86 +336,57 @@ export function ChatInput() {
 
     const currentAttachments = [...attachments];
 
-    // Clear input & attachments, and reset height
+    // Clear input & attachments
     setInput("");
     setAttachments([]);
+    setSlashMenuOpen(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
-    // Add user message with images
+    // Add user message
     addMessage(targetConvId, {
       role: "user",
       content: trimmed,
       images: currentAttachments.length > 0 ? currentAttachments : undefined,
     });
 
-    // Start streaming
-    setStreaming(true);
-    setStreamingContent("");
-
-    // Prepare message history
-    const conv = useChatStore
-      .getState()
-      .conversations.find((c) => c.id === targetConvId);
-    const messagesHistory = conv ? [...conv.messages] : [];
-
-    let accumulatedResponse = "";
-
-    try {
-      await streamChatCompletion({
-        provider: settings.activeProvider,
-        model: settings.activeModel,
-        apiKey: activeKey,
-        messages: messagesHistory,
-        systemPrompt: buildEffectiveSystemPrompt(
-          settings?.skills,
-          settings?.systemPrompt
-        ),
-        temperature: settings.temperature,
-        customBaseUrl: settings.baseUrls?.[settings.activeProvider],
-        useProxy: settings.useProxy,
-        onChunk: (chunk) => {
-          accumulatedResponse += chunk;
-          appendStreamingContent(chunk);
-        },
-      });
-
-      // Save completed assistant message
-      if (accumulatedResponse.trim()) {
-        addMessage(targetConvId, {
-          role: "assistant",
-          content: accumulatedResponse,
-        });
-      }
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : "An unexpected error occurred.";
-
-      // Only record as error message if not manually aborted
-      if (
-        errorMessage !== "The user aborted a request." &&
-        !errorMessage.includes("aborted")
-      ) {
-        addMessage(targetConvId, {
-          role: "assistant",
-          content: `Error: ${errorMessage}`,
-          error: true,
-        });
-      } else if (accumulatedResponse.trim()) {
-        // Save what was generated before abort
-        addMessage(targetConvId, {
-          role: "assistant",
-          content: accumulatedResponse,
-        });
-      }
-    } finally {
-      setStreaming(false);
-      setStreamingContent("");
-    }
+    // Execute streaming completion
+    executeChatStream(targetConvId);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash menu navigation
+    if (slashMenuOpen && filteredSlashCommands.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedSlashIdx((prev) => (prev + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedSlashIdx(
+          (prev) => (prev - 1 + filteredSlashCommands.length) % filteredSlashCommands.length
+        );
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const selected = filteredSlashCommands[selectedSlashIdx];
+        if (selected) {
+          selected.action();
+          setSlashMenuOpen(false);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuOpen(false);
+        return;
+      }
+    }
+
+    // Send message on Enter (without Shift)
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -303,17 +394,20 @@ export function ChatInput() {
   };
 
   const handleStop = () => {
-    abortCurrentRequest();
+    stopChatStream();
   };
 
+  const estimatedDraftTokens = estimateTokens(input);
+
   return (
-    <div className="chat-bottom-bar">
+    <div className="chat-bottom-bar relative">
+      {/* Composer Container */}
       <div
         ref={containerRef}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`chat-input-wrapper-container ${isDragging ? "chat-drag-active" : ""}`}
+        className={`chat-input-wrapper-container relative ${isDragging ? "chat-drag-active" : ""}`}
       >
         {/* Hidden File Input */}
         <input
@@ -336,11 +430,52 @@ export function ChatInput() {
           </div>
         )}
 
+        {/* Slash Command Palette Popup */}
+        {slashMenuOpen && filteredSlashCommands.length > 0 && (
+          <div className="chat-slash-palette">
+            <div className="chat-slash-header flex items-center justify-between">
+              <span>Commands</span>
+              <span>↑↓ to navigate</span>
+            </div>
+            <div className="chat-slash-list">
+              {filteredSlashCommands.map((cmd, idx) => {
+                const IconComponent = cmd.icon;
+                const isSelected = idx === selectedSlashIdx;
+                return (
+                  <div
+                    key={cmd.id}
+                    onClick={() => {
+                      cmd.action();
+                      setSlashMenuOpen(false);
+                    }}
+                    className={`chat-slash-item ${isSelected ? "selected" : ""}`}
+                  >
+                    <IconComponent className="w-4 h-4 text-accent shrink-0" />
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="chat-slash-command">{cmd.command}</span>
+                        <span className="text-[11px] font-medium text-text-1 truncate">
+                          {cmd.title}
+                        </span>
+                      </div>
+                      <span className="chat-slash-desc">{cmd.description}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Attached Images Preview Tray */}
         {attachments.length > 0 && (
           <div className="chat-attachments-tray">
             {attachments.map((att) => (
-              <div key={att.id} className="chat-attachment-chip" title={`${att.name} (${formatFileSize(att.size)})`}>
+              <div
+                key={att.id}
+                className="chat-attachment-chip"
+                title={`${att.name} (${formatFileSize(att.size)})`}
+              >
                 <img
                   src={att.url}
                   alt={att.name}
@@ -363,6 +498,27 @@ export function ChatInput() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Composer Meta Bar: Active Skill & Draft Token Estimator */}
+        {(primarySkill || input.length > 10) && (
+          <div className="chat-composer-status-bar">
+            {primarySkill ? (
+              <div
+                className="chat-composer-active-skill"
+                title={`Active Persona: ${primarySkill.description}`}
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>{primarySkill.name}</span>
+              </div>
+            ) : <div />}
+
+            {input.length > 10 && (
+              <div className="chat-composer-token-estimate">
+                ~{estimatedDraftTokens} tokens
+              </div>
+            )}
           </div>
         )}
 
@@ -393,12 +549,25 @@ export function ChatInput() {
             placeholder={
               attachments.length > 0
                 ? "Ask about attached image(s)..."
-                : `Message InTab AI (${activeModel})...`
+                : `Message InTab AI (${activeModel}) or type / for commands...`
             }
             rows={1}
             className="chat-textarea"
             disabled={isStreaming}
           />
+
+          {/* Clear Draft button when text entered */}
+          {input.length > 0 && !isStreaming && (
+            <button
+              type="button"
+              onClick={() => setInput("")}
+              className="p-1.5 text-text-3 hover:text-text-1 transition-colors rounded"
+              title="Clear draft"
+              aria-label="Clear draft"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <div className="chat-input-controls">
             {isStreaming ? (
@@ -433,4 +602,3 @@ export function ChatInput() {
     </div>
   );
 }
-

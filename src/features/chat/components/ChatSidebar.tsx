@@ -16,11 +16,16 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Pin,
+  PinOff,
+  Copy,
+  Download,
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { ChatConversation } from "../types";
 import { ProviderIcon } from "./ProviderIcon";
+import { exportConversationAsMarkdown } from "../utils/export-utils";
 
 interface ChatSidebarProps {
   collapsed: boolean;
@@ -28,7 +33,7 @@ interface ChatSidebarProps {
 }
 
 /**
- * Format timestamp into human-readable relative time (e.g. "Just now", "5m ago", "Yesterday")
+ * Format timestamp into human-readable relative time
  */
 function formatRelativeTime(timestamp?: number): string {
   if (!timestamp) return "";
@@ -49,7 +54,7 @@ function formatRelativeTime(timestamp?: number): string {
 }
 
 /**
- * Groups conversation list by chronological buckets
+ * Groups conversation list by chronological buckets and pinned status
  */
 function groupConversationsByDate(items: ChatConversation[]) {
   const now = new Date();
@@ -57,6 +62,7 @@ function groupConversationsByDate(items: ChatConversation[]) {
   const startOfYesterday = startOfToday - 86400000;
   const startOfLast7Days = startOfToday - 6 * 86400000;
 
+  const pinnedItems: ChatConversation[] = [];
   const todayItems: ChatConversation[] = [];
   const yesterdayItems: ChatConversation[] = [];
   const past7DaysItems: ChatConversation[] = [];
@@ -67,6 +73,10 @@ function groupConversationsByDate(items: ChatConversation[]) {
   );
 
   for (const conv of sorted) {
+    if (conv.pinned) {
+      pinnedItems.push(conv);
+      continue;
+    }
     const time = conv.updatedAt || conv.createdAt || Date.now();
     if (time >= startOfToday) {
       todayItems.push(conv);
@@ -80,6 +90,7 @@ function groupConversationsByDate(items: ChatConversation[]) {
   }
 
   const result: { label: string; items: ChatConversation[] }[] = [];
+  if (pinnedItems.length > 0) result.push({ label: "Pinned", items: pinnedItems });
   if (todayItems.length > 0) result.push({ label: "Today", items: todayItems });
   if (yesterdayItems.length > 0) result.push({ label: "Yesterday", items: yesterdayItems });
   if (past7DaysItems.length > 0) result.push({ label: "Previous 7 Days", items: past7DaysItems });
@@ -95,6 +106,8 @@ export function ChatSidebar({ collapsed, onToggleCollapse }: ChatSidebarProps) {
   const selectConversation = useChatStore((s) => s.selectConversation);
   const renameConversation = useChatStore((s) => s.renameConversation);
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const togglePinConversation = useChatStore((s) => s.togglePinConversation);
+  const duplicateConversation = useChatStore((s) => s.duplicateConversation);
   const setSettingsModalOpen = useChatStore((s) => s.setSettingsModalOpen);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -349,8 +362,11 @@ export function ChatSidebar({ collapsed, onToggleCollapse }: ChatSidebarProps) {
                               />
                             </div>
 
-                            <span className="chat-conv-title truncate">
-                              {conv.title}
+                            <span className="chat-conv-title truncate flex items-center gap-1">
+                              {conv.pinned && (
+                                <Pin className="w-2.5 h-2.5 text-accent shrink-0 fill-accent" />
+                              )}
+                              <span className="truncate">{conv.title}</span>
                             </span>
 
                             <span className="chat-conv-time shrink-0">
@@ -362,6 +378,46 @@ export function ChatSidebar({ collapsed, onToggleCollapse }: ChatSidebarProps) {
                             className="chat-card-actions"
                             onClick={(e) => e.stopPropagation()}
                           >
+                            <SimpleTooltip
+                              content={conv.pinned ? "Unpin" : "Pin to top"}
+                              side="top"
+                            >
+                              <button
+                                type="button"
+                                className={`chat-card-action-btn ${conv.pinned ? "text-accent" : ""}`}
+                                onClick={() => togglePinConversation(conv.id)}
+                                aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+                              >
+                                {conv.pinned ? (
+                                  <PinOff className="h-3 w-3" />
+                                ) : (
+                                  <Pin className="h-3 w-3" />
+                                )}
+                              </button>
+                            </SimpleTooltip>
+
+                            <SimpleTooltip content="Duplicate" side="top">
+                              <button
+                                type="button"
+                                className="chat-card-action-btn"
+                                onClick={() => duplicateConversation(conv.id)}
+                                aria-label="Duplicate conversation"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </SimpleTooltip>
+
+                            <SimpleTooltip content="Export Markdown" side="top">
+                              <button
+                                type="button"
+                                className="chat-card-action-btn"
+                                onClick={() => exportConversationAsMarkdown(conv)}
+                                aria-label="Export conversation"
+                              >
+                                <Download className="h-3 w-3" />
+                              </button>
+                            </SimpleTooltip>
+
                             <SimpleTooltip content="Rename" side="top">
                               <button
                                 type="button"
