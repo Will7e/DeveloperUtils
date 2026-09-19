@@ -898,51 +898,11 @@ description: Custom instructions and domain expertise for this skill
                   <div>
                     <div className="settings-security-card-title">Local Vault Security</div>
                     <div className="settings-security-card-desc">
-                      All API keys and custom skills are stored securely in your browser with AES-256-GCM encryption. Secrets never touch external analytics, tracking servers, or cloud infrastructure.
+                      API keys and skills are encrypted client-side and stored only in your browser. Nothing is sent to external servers or analytics.
                     </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="settings-divider" />
-
-              {/* Security Specifications */}
-              <div className="settings-section">
-                <div className="settings-section-title">Cryptographic Architecture</div>
-
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Encryption Standard</label>
-                    <span className="settings-sublabel">
-                      Client-side AES-GCM cipher with random initialization vectors
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="settings-value">AES-256-GCM</span>
-                  </div>
-                </div>
-
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Storage Target</label>
-                    <span className="settings-sublabel">
-                      Isolated browser local storage partition with authenticated session key
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="settings-value">Local Browser</span>
-                  </div>
-                </div>
-
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Data Collection</label>
-                    <span className="settings-sublabel">
-                      Zero tracking, zero analytics, zero proxy telemetry
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="settings-value">Zero Logs</span>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-mono">AES-256-GCM</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1020,7 +980,7 @@ description: Custom instructions and domain expertise for this skill
         {/* Footer */}
         <div className="settings-footer">
           <span className="settings-footer-hint">
-            Esc or click outside to close • Keys & skills stored locally with AES-256-GCM
+            Esc or click outside to close
           </span>
         </div>
       </div>
