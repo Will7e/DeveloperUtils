@@ -10,7 +10,9 @@ import React from "react";
 import {
   AlertTriangle,
   Blocks,
+  Check,
   CheckCircle2,
+  ClipboardPaste,
   Download,
   ExternalLink,
   Eye,
@@ -84,9 +86,11 @@ function SettingsModalInner({
   const [keyDraft, setKeyDraft] = React.useState(settings.apiKey);
   const [showKey, setShowKey] = React.useState(false);
   const [keyState, setKeyState] = React.useState<KeyState>({ status: "idle" });
+  const [pasted, setPasted] = React.useState(false);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [clearingState, setClearingState] = React.useState<"idle" | "clearing" | "done">("idle");
   const panelRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   // Focus the panel on open and restore focus to the trigger on close
   React.useEffect(() => {
@@ -134,6 +138,36 @@ function SettingsModalInner({
     const trimmed = keyDraft.trim();
     onUpdate({ apiKey: trimmed });
     if (!trimmed) setKeyState({ status: "idle" });
+  };
+
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text").trim();
+    if (text) {
+      e.preventDefault();
+      setKeyDraft(text);
+      onUpdate({ apiKey: text });
+      if (keyState.status !== "idle") setKeyState({ status: "idle" });
+      setPasted(true);
+      setTimeout(() => setPasted(false), 1600);
+    }
+  };
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const cleaned = text.trim();
+      if (cleaned) {
+        setKeyDraft(cleaned);
+        onUpdate({ apiKey: cleaned });
+        if (keyState.status !== "idle") setKeyState({ status: "idle" });
+        setPasted(true);
+        setTimeout(() => setPasted(false), 1600);
+      }
+    } catch {
+      // Fallback if browser blocks async clipboard API: focus input for Cmd/Ctrl+V
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
   };
 
   const validateKey = async () => {
@@ -265,26 +299,51 @@ function SettingsModalInner({
                   <div className="chat-key-controls">
                     <div className="chat-key-input-wrap">
                       <input
+                        ref={inputRef}
                         id="chat-api-key-input"
+                        name="openrouter_api_key"
                         type={showKey ? "text" : "password"}
                         value={keyDraft}
                         onChange={(e) => setKeyDraft(e.target.value)}
+                        onPaste={handleInputPaste}
                         onBlur={saveKey}
                         placeholder="sk-or-v1-…"
                         className="settings-input chat-key-input"
                         autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
                         spellCheck={false}
+                        data-1p-ignore="true"
+                        data-bwignore="true"
+                        data-lpignore="true"
+                        data-form-type="other"
                       />
-                      <SimpleTooltip content={showKey ? "Hide key" : "Show key"} side="top">
-                        <button
-                          type="button"
-                          className="chat-key-toggle"
-                          onClick={() => setShowKey((v) => !v)}
-                          aria-label={showKey ? "Hide key" : "Show key"}
-                        >
-                          {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      </SimpleTooltip>
+                      <div className="chat-key-actions">
+                        <SimpleTooltip content={pasted ? "Pasted!" : "Paste from clipboard"} side="top">
+                          <button
+                            type="button"
+                            className={`chat-key-action-btn ${pasted ? "active" : ""}`}
+                            onClick={handlePasteFromClipboard}
+                            aria-label="Paste from clipboard"
+                          >
+                            {pasted ? (
+                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            ) : (
+                              <ClipboardPaste className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </SimpleTooltip>
+                        <SimpleTooltip content={showKey ? "Hide key" : "Show key"} side="top">
+                          <button
+                            type="button"
+                            className="chat-key-action-btn"
+                            onClick={() => setShowKey((v) => !v)}
+                            aria-label={showKey ? "Hide key" : "Show key"}
+                          >
+                            {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </SimpleTooltip>
+                      </div>
                     </div>
                     {keyDirty && (
                       <button type="button" className="settings-action-btn" onClick={saveKey}>
