@@ -13,7 +13,6 @@ import {
   BookOpen,
   ShieldCheck,
   Check,
-  MessageSquare,
 } from "lucide-react";
 import { InTabLogo } from "@/components/ui/intab-logo";
 import {
@@ -24,7 +23,6 @@ import {
   DiffPreview,
   FormattersPreview,
   LibraryPreview,
-  ChatPreview,
 } from "@/features/dashboard/previews";interface ToolFeature {
   id: string;
   to: string;
@@ -162,24 +160,6 @@ const TOOLS: ToolFeature[] = [
     icon: <BookOpen className="h-3.5 w-3.5" />,
     windowTitle: "servicenow_reference.js",
     preview: <LibraryPreview />,
-  },
-
-  // Feature 8: AI Chat Assistant (Text Left, Feature Right)
-  {
-    id: "chat",
-    to: "/chat",
-    badge: "OpenAI, Claude & Gemini",
-    title: "AI Chat Assistant",
-    description:
-      "A ChatGPT-style workspace for debugging, architecture discussions, and writing code. Real-time streaming with 1-click code block copying, multi-session history, and local vault encryption.",
-    highlights: [
-      "Multi-provider support for GPT-4o, Claude 3.7 Sonnet, and Gemini 3.8 Flash",
-      "Real-time token streaming with stop controls and syntax-highlighted code blocks",
-      "Session history automatically encrypted at rest using InTab's AES-256-GCM vault",
-    ],
-    icon: <MessageSquare className="h-3.5 w-3.5" />,
-    windowTitle: "ai_assistant.tsx",
-    preview: <ChatPreview />,
   },
 ];
 

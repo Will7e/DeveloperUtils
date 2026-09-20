@@ -22,7 +22,6 @@ import {
   Globe,
   Sun,
   Moon,
-  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -146,14 +145,6 @@ export function MainLayout() {
             icon={<Home className="h-[18px] w-[18px]" />}
             label="Dashboard"
             active={location.pathname === "/"}
-            collapsed={sidebarCollapsed}
-          />
-
-          <NavItem
-            to="/chat"
-            icon={<MessageSquare className="h-[18px] w-[18px]" />}
-            label="AI Chat"
-            active={location.pathname === "/chat"}
             collapsed={sidebarCollapsed}
           />
 

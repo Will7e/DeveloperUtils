@@ -24,7 +24,6 @@ const DiffCheckerPage = lazy(() => import("@/pages/DiffCheckerPage").then(m => (
 const LibraryPage = lazy(() => import("@/pages/LibraryPage").then(m => ({ default: m.LibraryPage })));
 const DrawFlowPage = lazy(() => import("@/pages/DrawFlowPage").then(m => ({ default: m.DrawFlowPage })));
 const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ default: m.ApiTesterPage })));
-const ChatBotPage = lazy(() => import("@/pages/ChatBotPage").then(m => ({ default: m.ChatBotPage })));
 
 import { bootstrapApp } from "@/services/bootstrap.service";
 
@@ -41,7 +40,6 @@ if (typeof window !== "undefined") {
     import("@/pages/FormattersPage");
     import("@/pages/ComparatorsPage");
     import("@/pages/DiffCheckerPage");
-    import("@/pages/ChatBotPage");
   };
   if ("requestIdleCallback" in window) {
     window.requestIdleCallback(prewarm, { timeout: 3000 });
@@ -102,7 +100,6 @@ function AppContent() {
         <Routes>
           <Route element={<MainLayout />}>
             <Route path="/" element={<DashboardPage />} />
-            <Route path="/chat" element={<ChatBotPage />} />
             <Route path="/compiler" element={<CompilerPage />} />
             <Route path="/formatters" element={<FormattersPage />} />
             <Route path="/comparators" element={<ComparatorsPage />} />
