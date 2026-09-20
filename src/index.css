@@ -4324,6 +4324,7 @@ html.light .dash-hero-logo-wrap:hover .dash-hero-icon {
   color: var(--text-1);
   line-height: 1.22;
   margin: 0;
+  max-width: 720px;
 }
 
 .dash-hero-accent {

@@ -174,11 +174,10 @@ export function DashboardPage() {
             <InTabLogo size={46} className="dash-hero-icon" />
           </div>
           <h1 className="dash-hero-title">
-            Everyday developer tools, right in your{" "}
-            <span className="dash-hero-accent">browser</span>
+            Private developer utilities that run locally in your{" "}
+            <span className="dash-hero-accent">tab</span>
           </h1>
           <p className="dash-hero-subtitle">
-            Private developer utilities that run locally in your tab.
             No server calls, no tracking, and your data stays on your computer.
           </p>
         </div>
