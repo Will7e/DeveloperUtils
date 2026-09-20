@@ -300,6 +300,15 @@ export function useKeyboardShortcuts() {
           return;
         }
 
+        // 9. AI Chat
+        if (e.code === "Digit9" || e.code === "Numpad9" || keyLower === "9" || e.key === "ª") {
+          e.preventDefault();
+          closePaletteIfOpen();
+          navigate("/chat");
+          addToast({ message: "Navigated to AI Chat", type: "info", duration: 1500 });
+          return;
+        }
+
         // Quick creators: t, d, w (only with mod + altKey to prevent conflicts)
         if (mod && e.altKey) {
           if (e.code === "KeyT" || keyLower === "t" || e.key === "†") {

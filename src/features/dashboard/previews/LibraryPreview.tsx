@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Copy, Check, Search } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedTs } from "./syntaxHighlight";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 interface ApiDefinition {
   id: string;
@@ -32,7 +33,7 @@ const APIS: ApiDefinition[] = [
     name: "GlideSystem (gs)",
     scope: "Global Utilities",
     signature: "gs.info(message, [parm1])",
-    snippet: `gs.info('Execution completed: ' + id);\nvar user = gs.getUserName();`,
+    snippet: `gs.info('Execution completed: ' + id);\nvar user = gr.getValue('assigned_to');`,
   },
   {
     id: "glidedatetime",
@@ -50,20 +51,13 @@ const APIS: ApiDefinition[] = [
   },
 ];
 
+const FIRST_API = APIS[0]!;
+
 export function LibraryPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedApiId, setSelectedApiId] = useState("gliderecord");
+  const [selectedApiId, setSelectedApiId] = useState(FIRST_API.id);
   const [copied, setCopied] = useState(false);
-
-  // Virtual Cursor Autopilot State (Pixel-accurate coordinates)
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 35, y: 32, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [cursorDuration, setCursorDuration] = useState<number>(500);
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const filteredApis = APIS.filter(
     (a) =>
@@ -72,173 +66,80 @@ export function LibraryPreview() {
   );
 
   const selectedApi: ApiDefinition =
-    filteredApis.find((a) => a.id === selectedApiId) ?? (filteredApis[0] || APIS[0]!);
+    filteredApis.find((a) => a.id === selectedApiId) ?? (filteredApis[0] || FIRST_API);
 
-  const handleCopy = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    navigator.clipboard.writeText(selectedApi.snippet);
+  const copySnippet = () => {
+    void navigator.clipboard.writeText(selectedApi.snippet);
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
 
-  // Autonomous Lifelike Cursor Motion Loop for Library
-  useEffect(() => {
-    if (isUserActive) return;
-
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to RESTMessageV2 chip with pixel accuracy
-        setCursorDuration(480);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-chip="restmessage"]', { x: 38, y: 33 })
-        );
-        setCursorAction("RESTMessageV2");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("chip-restmessage");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setSelectedApiId("restmessage");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 1) {
-        // Glide to Copy button with pixel accuracy
-        setCursorDuration(520);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="copy"]', { x: 92, y: 78 })
-        );
-        setCursorAction("Copy Snippet");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("copy");
-          }, 320)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 520)
-        );
-      } else if (step === 2) {
-        // Glide to GlideDateTime chip with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-chip="glidedatetime"]', { x: 74, y: 33 })
-        );
-        setCursorAction("GlideDateTime");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("chip-glidedatetime");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setSelectedApiId("glidedatetime");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 3) {
-        // Drift over code snippet
-        setCursorDuration(600);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-lib-snippet-box", { x: 50, y: 68 })
-        );
-        setCursorAction("Reviewing Code");
-      } else if (step === 4) {
-        // Glide back to GlideRecord chip with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-chip="gliderecord"]', { x: 12, y: 33 })
-        );
-        setCursorAction("GlideRecord");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("chip-gliderecord");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setSelectedApiId("gliderecord");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      }
-
-      step = (step + 1) % 5;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1850);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
+  const handleCopy = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    copySnippet();
   };
 
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const steps: AutopilotStep[] = [
+    {
+      target: '[data-chip="restmessage"]',
+      fallback: { x: 38, y: 33 },
+      action: "RESTMessageV2",
+      transition: 480,
+      hover: "chip-restmessage",
+      run: () => setSelectedApiId("restmessage"),
+    },
+    {
+      target: '[data-action="copy"]',
+      fallback: { x: 92, y: 78 },
+      action: "Copy the snippet",
+      transition: 520,
+      hover: "copy",
+      run: copySnippet,
+    },
+    {
+      target: '[data-chip="glidedatetime"]',
+      fallback: { x: 74, y: 33 },
+      action: "GlideDateTime",
+      transition: 500,
+      hover: "chip-glidedatetime",
+      run: () => setSelectedApiId("glidedatetime"),
+    },
+    {
+      target: ".dash-lib-snippet-box",
+      fallback: { x: 50, y: 68 },
+      action: "Read the example",
+      transition: 600,
+    },
+    {
+      target: '[data-chip="gliderecord"]',
+      fallback: { x: 12, y: 33 },
+      action: "GlideRecord",
+      transition: 500,
+      hover: "chip-gliderecord",
+      run: () => setSelectedApiId("gliderecord"),
+    },
+  ];
+
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1850 });
 
   return (
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-library"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor with Pixel-Accurate Positioning */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in Library"
+        onOpen={() =>
+          requestHandoff({
+            target: "library",
+            label: selectedApi.name,
+            library: { tab: "servicenow", query: selectedApi.name },
+          })
+        }
       />
 
       {/* Search Input Bar */}
@@ -250,8 +151,8 @@ export function LibraryPreview() {
           placeholder="Search ServiceNow classes and methods..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
           spellCheck={false}
+          aria-label="Search the reference"
         />
         <span className="dash-lib-count">
           {filteredApis.length} {filteredApis.length === 1 ? "match" : "matches"}
@@ -265,7 +166,7 @@ export function LibraryPreview() {
             key={api.id}
             data-chip={api.id}
             type="button"
-            className={`dash-lib-chip ${selectedApi.id === api.id ? "active" : ""} ${virtualHover === `chip-${api.id}` ? "is-virtual-hover" : ""}`}
+            className={`dash-lib-chip ${selectedApi.id === api.id ? "active" : ""} ${autopilot.hoverClass(`chip-${api.id}`)}`}
             onClick={() => setSelectedApiId(api.id)}
           >
             {api.name}
@@ -286,19 +187,22 @@ export function LibraryPreview() {
         <pre className="dash-lib-snippet">
           <code>{renderHighlightedTs(selectedApi.snippet)}</code>
         </pre>
-        <button
-          data-action="copy"
-          type="button"
-          className={`dash-lib-copy-btn ${virtualHover === "copy" ? "is-virtual-hover" : ""}`}
-          onClick={handleCopy}
-          title="Copy snippet"
-        >
-          {copied ? (
-            <Check className="h-3 w-3 text-emerald-400" />
-          ) : (
-            <Copy className="h-3 w-3" />
-          )}
-        </button>
+
+        <div className="dash-lib-actions">
+          <button
+            data-action="copy"
+            type="button"
+            className={`dash-lib-copy-btn ${autopilot.hoverClass("copy")}`}
+            onClick={handleCopy}
+            title="Copy snippet"
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-emerald-400" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -3,8 +3,16 @@
 // ============================================================
 
 import React from "react";
-import { Download, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
+import {
+  Download,
+  Menu,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useAppStore } from "@/stores/app.store";
 import { ModelPicker } from "./ModelPicker";
 import { ContextMeter } from "./ContextMeter";
 import type { ContextBreakdown, ModelInfo } from "../types";
@@ -17,11 +25,16 @@ interface ChatHeaderProps {
   context: ContextBreakdown;
   onOpenSettings: () => void;
   onExport: () => void;
+  /** Whether the active conversation has anything to export */
+  hasMessages: boolean;
   /** Per-conversation system prompt indicator */
   hasConversationPrompt: boolean;
   /** Number of enabled skills (0 hides the chip) */
   activeSkillCount: number;
   onOpenSkills: () => void;
+  /** Toggle the off-canvas sidebar drawer (narrow widths) */
+  onToggleSidebar: () => void;
+  isSidebarOpen: boolean;
 }
 
 export function ChatHeader({
@@ -32,13 +45,46 @@ export function ChatHeader({
   context,
   onOpenSettings,
   onExport,
+  hasMessages,
   hasConversationPrompt,
   activeSkillCount,
   onOpenSkills,
+  onToggleSidebar,
+  isSidebarOpen,
 }: ChatHeaderProps) {
+  const handleExport = () => {
+    if (!hasMessages) {
+      useAppStore.getState().addToast({
+        message: "Nothing to export yet — send a message first.",
+        type: "info",
+      });
+      return;
+    }
+    onExport();
+  };
+
   return (
     <div className="chat-header">
       <div className="chat-header-left">
+        {/* Shown only when the sidebar is off-canvas (≤860px) */}
+        <SimpleTooltip
+          content={isSidebarOpen ? "Close menu" : "Open menu"}
+          side="bottom"
+        >
+          <button
+            type="button"
+            className="chat-header-btn chat-header-menu-btn"
+            onClick={onToggleSidebar}
+            aria-label={isSidebarOpen ? "Close menu" : "Open menu"}
+            aria-expanded={isSidebarOpen}
+          >
+            {isSidebarOpen ? (
+              <X className="h-3.5 w-3.5" />
+            ) : (
+              <Menu className="h-3.5 w-3.5" />
+            )}
+          </button>
+        </SimpleTooltip>
         <ModelPicker
           value={model}
           models={models}
@@ -80,7 +126,7 @@ export function ChatHeader({
           <button
             type="button"
             className="chat-header-btn"
-            onClick={onExport}
+            onClick={handleExport}
             aria-label="Export chat"
           >
             <Download className="h-3.5 w-3.5" />

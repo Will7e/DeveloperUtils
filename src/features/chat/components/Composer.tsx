@@ -2,8 +2,9 @@
 // Composer — Message Input with Send/Stop & Context Hint
 // ============================================================
 // Auto-growing textarea. Enter sends, Shift+Enter adds a newline.
-// While streaming, the send button becomes Stop (keeps partial
-// output). Shows a one-way conversation-system-prompt badge.
+// While this conversation streams, the send button becomes Stop
+// (keeps partial output). When a stream is running in another
+// conversation, the composer is disabled with a clear hint.
 
 import React from "react";
 import { ArrowUp, Square } from "lucide-react";
@@ -14,10 +15,14 @@ interface ComposerProps {
   onChange: (value: string) => void;
   onSend: () => void;
   onStop: () => void;
+  /** True while THIS conversation is streaming */
   isStreaming: boolean;
+  /** True when a stream is running in a different conversation */
   disabled?: boolean;
   /** Placeholder hint, e.g. active model */
   placeholder?: string;
+  /** Optional external handle so the page can focus the input */
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
 }
 
 export function Composer({
@@ -28,16 +33,35 @@ export function Composer({
   isStreaming,
   disabled = false,
   placeholder,
+  inputRef,
 }: ComposerProps) {
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const innerRef = React.useRef<HTMLTextAreaElement>(null);
 
-  // Auto-grow up to a max height
-  React.useEffect(() => {
-    const el = textareaRef.current;
+  const setRefs = React.useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      innerRef.current = el;
+      if (inputRef) inputRef.current = el;
+    },
+    [inputRef]
+  );
+
+  const grow = React.useCallback(() => {
+    const el = innerRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [value]);
+  }, []);
+
+  // Auto-grow as the value changes and when window resizing reflows
+  // the text into more/fewer lines.
+  React.useEffect(() => {
+    grow();
+  }, [value, grow]);
+
+  React.useEffect(() => {
+    window.addEventListener("resize", grow);
+    return () => window.removeEventListener("resize", grow);
+  }, [grow]);
 
   const canSend = value.trim().length > 0 && !isStreaming && !disabled;
 
@@ -48,19 +72,24 @@ export function Composer({
     }
   };
 
+  const placeholderText = disabled
+    ? "Generating a response in another chat…"
+    : placeholder ?? "Ask anything… (Enter to send, Shift+Enter for newline)";
+
   return (
     <div className="chat-composer-wrap">
       <div className={`chat-composer ${isStreaming ? "chat-composer-streaming" : ""}`}>
         <textarea
-          ref={textareaRef}
+          ref={setRefs}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? "Ask anything… (Enter to send, Shift+Enter for newline)"}
+          placeholder={placeholderText}
           className="chat-composer-input"
           rows={1}
-          disabled={disabled && !isStreaming}
+          disabled={disabled}
           aria-label="Chat message"
+          aria-busy={isStreaming}
         />
 
         {isStreaming ? (
@@ -91,9 +120,14 @@ export function Composer({
 
       <div className="chat-composer-footer">
         <span className="chat-composer-hint">
-          Responses may be inaccurate — verify important information.
+          {disabled
+            ? "You can keep browsing — sending resumes when the other chat finishes."
+            : "Responses may be inaccurate — verify important information."}
         </span>
       </div>
+      <span className="chat-sr-only" aria-live="polite">
+        {isStreaming ? "Assistant is responding" : ""}
+      </span>
     </div>
   );
 }

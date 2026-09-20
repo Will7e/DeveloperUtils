@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { Play, RotateCcw, Terminal, Code2 } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedTs, stripTsTypes } from "./syntaxHighlight";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 interface ScriptPreset {
   id: string;
@@ -28,9 +29,12 @@ const PRESETS: ScriptPreset[] = [
   },
 ];
 
+const FIBONACCI = PRESETS[0]!;
+const UUID = PRESETS[2]!;
+
 export function CompilerPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [selectedPresetId, setSelectedPresetId] = useState("fibonacci");
+  const [selectedPresetId, setSelectedPresetId] = useState(FIBONACCI.id);
   const [code, setCode] = useState(PRESETS[0]!.code);
   const [isRunning, setIsRunning] = useState(false);
   const [latencyMs, setLatencyMs] = useState<number>(0.08);
@@ -49,15 +53,6 @@ export function CompilerPreview() {
       syntaxRef.current.scrollLeft = textareaRef.current.scrollLeft;
     }
   };
-
-  // Virtual Cursor Autopilot State (Pixel-accurate coordinates)
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 88, y: 12, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [cursorDuration, setCursorDuration] = useState(550);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const executeCode = (sourceCode: string) => {
     setIsRunning(true);
@@ -97,7 +92,7 @@ export function CompilerPreview() {
     }
   };
 
-  const handleSelectPreset = (preset: ScriptPreset) => {
+  const selectPreset = (preset: ScriptPreset) => {
     setSelectedPresetId(preset.id);
     setCode(preset.code);
   };
@@ -114,181 +109,75 @@ export function CompilerPreview() {
     setReturnValue("");
   };
 
-  // Autonomous Lifelike Cursor Sequence Loop
-  useEffect(() => {
-    if (isUserActive) return;
+  const activePreset = PRESETS.find((preset) => preset.id === selectedPresetId) ?? FIBONACCI;
 
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
+  const steps: AutopilotStep[] = [
+    {
+      target: '[data-action="run"]',
+      fallback: { x: 88, y: 12 },
+      action: "Run script",
+      hover: "run",
+      run: () => executeCode(code),
+    },
+    {
+      target: ".dash-perf-badge",
+      fallback: { x: 62, y: 78 },
+      action: "Check the timing",
+      transition: 700,
+    },
+    {
+      target: '[data-tab="crypto"]',
+      fallback: { x: 44, y: 12 },
+      action: `Preset: ${UUID.name}`,
+      hover: "crypto",
+      run: () => selectPreset(UUID),
+    },
+    {
+      target: '[data-action="run"]',
+      fallback: { x: 88, y: 12 },
+      action: "Run the UUID script",
+      hover: "run",
+      run: () => executeCode(UUID.code),
+    },
+    {
+      target: ".dash-demo-console-logs",
+      fallback: { x: 50, y: 72 },
+      action: "Verify the output",
+      transition: 650,
+    },
+    {
+      target: '[data-tab="fibonacci"]',
+      fallback: { x: 14, y: 12 },
+      action: `Preset: ${FIBONACCI.name}`,
+      hover: "fibonacci",
+      run: () => selectPreset(FIBONACCI),
+    },
+  ];
 
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to "Run Script" button with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="run"]', { x: 88, y: 12 })
-        );
-        setCursorAction("Run");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("run");
-          }, 350)
-        );
-        // Click Run
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setCursorAction("Executing...");
-            executeCode(code);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 220)
-            );
-          }, 550)
-        );
-      } else if (step === 1) {
-        // Drift to Console Output to inspect result
-        setCursorDuration(700);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-perf-badge", { x: 62, y: 78 })
-        );
-        setCursorAction("Inspect Result");
-      } else if (step === 2) {
-        // Glide to UUID preset tab
-        setCursorDuration(550);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tab="crypto"]', { x: 44, y: 12 })
-        );
-        setCursorAction("Preset: UUID");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("crypto");
-          }, 350)
-        );
-        // Click tab
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            const p = PRESETS[2]!;
-            setSelectedPresetId(p.id);
-            setCode(p.code);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 200)
-            );
-          }, 550)
-        );
-      } else if (step === 3) {
-        // Glide to Run button again
-        setCursorDuration(450);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="run"]', { x: 88, y: 12 })
-        );
-        setCursorAction("Run UUID");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("run");
-          }, 300)
-        );
-        // Click Run
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setCursorAction("Generating...");
-            executeCode(PRESETS[2]!.code);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 220)
-            );
-          }, 500)
-        );
-      } else if (step === 4) {
-        // Drift across new output logs
-        setCursorDuration(650);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-demo-console-logs", { x: 50, y: 72 })
-        );
-        setCursorAction("Verified UUID");
-      } else if (step === 5) {
-        // Glide to Fibonacci preset tab
-        setCursorDuration(550);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tab="fibonacci"]', { x: 14, y: 12 })
-        );
-        setCursorAction("Preset: Fib");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("fibonacci");
-          }, 350)
-        );
-        // Click tab
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            const p = PRESETS[0]!;
-            setSelectedPresetId(p.id);
-            setCode(p.code);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 200)
-            );
-          }, 550)
-        );
-      }
-
-      step = (step + 1) % 6;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1750);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive, code]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
-  };
-
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1750 });
 
   return (
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-compiler"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor with Pixel-Accurate Positioning */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        color="var(--accent, #0070f3)"
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in Compiler"
+        onOpen={() =>
+          requestHandoff({
+            target: "compiler",
+            label: activePreset.name,
+            compiler: {
+              code,
+              language: "typescript",
+              fileName: activePreset.name,
+            },
+          })
+        }
       />
 
       {/* Tab bar & Run action */}
@@ -296,7 +185,7 @@ export function CompilerPreview() {
         <div className="dash-demo-tabs">
           <div className="dash-file-tab">
             <Code2 className="h-3 w-3 text-[var(--accent)]" />
-            <span>script.ts</span>
+            <span>{activePreset.name}</span>
           </div>
           <div className="dash-presets-divider" />
           <div className="dash-presets-group">
@@ -305,8 +194,8 @@ export function CompilerPreview() {
                 key={p.id}
                 data-tab={p.id}
                 type="button"
-                className={`dash-preset-chip ${selectedPresetId === p.id ? "active" : ""} ${virtualHover === p.id ? "is-virtual-hover" : ""}`}
-                onClick={() => handleSelectPreset(p)}
+                className={`dash-preset-chip ${selectedPresetId === p.id ? "active" : ""} ${autopilot.hoverClass(p.id)}`}
+                onClick={() => selectPreset(p)}
               >
                 {p.name}
               </button>
@@ -314,23 +203,25 @@ export function CompilerPreview() {
           </div>
         </div>
 
-        <button
-          data-action="run"
-          type="button"
-          className={`dash-run-btn ${isRunning ? "loading" : ""} ${virtualHover === "run" ? "is-virtual-hover" : ""}`}
-          onClick={handleRun}
-          disabled={isRunning}
-          title="Run script"
-        >
-          {isRunning ? (
-            <span className="dash-spinner-dots" />
-          ) : (
-            <>
-              <Play className="h-2.5 w-2.5 fill-current" />
-              <span>Run</span>
-            </>
-          )}
-        </button>
+        <div className="dash-demo-actions">
+          <button
+            data-action="run"
+            type="button"
+            className={`dash-run-btn ${isRunning ? "loading" : ""} ${autopilot.hoverClass("run")}`}
+            onClick={handleRun}
+            disabled={isRunning}
+            title="Run script"
+          >
+            {isRunning ? (
+              <span className="dash-spinner-dots" />
+            ) : (
+              <>
+                <Play className="h-2.5 w-2.5 fill-current" />
+                <span>Run</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Code Editor Area */}
@@ -350,8 +241,8 @@ export function CompilerPreview() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             onScroll={handleScroll}
-            onClick={(e) => e.stopPropagation()}
             spellCheck={false}
+            aria-label="Demo script"
             rows={code.split("\n").length}
           />
         </div>

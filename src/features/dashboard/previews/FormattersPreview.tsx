@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { AlignLeft, Minimize2, Copy, Check, AlertCircle } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedJson } from "./syntaxHighlight";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 const SAMPLE_JSON = `{\n  "service": "InTab Suite",\n  "version": "2.4.0",\n  "clientSide": true,\n  "features": ["compiler", "apitester", "drawflow", "formatters"]\n}`;
 
@@ -13,20 +14,10 @@ export function FormattersPreview() {
   const [copied, setCopied] = useState(false);
   const [byteSavings, setByteSavings] = useState<number>(0);
 
-  // Virtual Cursor Autopilot State (Pixel-accurate coordinates)
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 28, y: 12, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [cursorDuration, setCursorDuration] = useState<number>(500);
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   const formatJson = (source: string) => {
     try {
       const parsed = JSON.parse(source);
-      const formatted = JSON.stringify(parsed, null, 2);
-      setContent(formatted);
+      setContent(JSON.stringify(parsed, null, 2));
       setError(null);
       setByteSavings(0);
     } catch (err) {
@@ -60,152 +51,71 @@ export function FormattersPreview() {
 
   const handleCopy = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    navigator.clipboard.writeText(content);
+    void navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
 
-  // Autonomous Lifelike Cursor Motion Loop for Formatter
-  useEffect(() => {
-    if (isUserActive) return;
+  const steps: AutopilotStep[] = [
+    {
+      target: '[data-action="minify"]',
+      fallback: { x: 28, y: 12 },
+      action: "Minify",
+      hover: "minify",
+      run: () => minifyJson(content),
+    },
+    {
+      target: ".dash-code-editor-wrap",
+      fallback: { x: 55, y: 48 },
+      action: "One line now",
+      transition: 600,
+    },
+    {
+      target: '[data-action="prettify"]',
+      fallback: { x: 10, y: 12 },
+      action: "Prettify",
+      hover: "prettify",
+      run: () => formatJson(content),
+    },
+    {
+      target: '[data-action="copy"]',
+      fallback: { x: 94, y: 12 },
+      action: "Copy output",
+      hover: "copy",
+      run: () => {
+        void navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+    },
+    {
+      target: ".dash-fmt-footer",
+      fallback: { x: 35, y: 88 },
+      action: error ? "Invalid input" : "Valid JSON",
+      transition: 600,
+    },
+  ];
 
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to Minify button with pixel accuracy
-        setCursorDuration(460);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="minify"]', { x: 28, y: 12 })
-        );
-        setCursorAction("Minify");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("minify");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            minifyJson(content);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 480)
-        );
-      } else if (step === 1) {
-        // Drift over the minified output
-        setCursorDuration(600);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-code-editor-wrap", { x: 55, y: 48 })
-        );
-        setCursorAction("Compressed");
-      } else if (step === 2) {
-        // Glide to Prettify button with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="prettify"]', { x: 10, y: 12 })
-        );
-        setCursorAction("Prettify");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("prettify");
-          }, 320)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            formatJson(content);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 3) {
-        // Glide to Copy button with pixel accuracy
-        setCursorDuration(550);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="copy"]', { x: 94, y: 12 })
-        );
-        setCursorAction("Copy");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("copy");
-          }, 350)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 550)
-        );
-      } else if (step === 4) {
-        // Drift to metrics footer
-        setCursorDuration(600);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-fmt-footer", { x: 35, y: 88 })
-        );
-        setCursorAction("Valid JSON");
-      }
-
-      step = (step + 1) % 5;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1850);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive, content]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
-  };
-
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1850 });
 
   return (
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-formatters"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor with Pixel-Accurate Positioning */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in Formatters"
+        onOpen={() =>
+          requestHandoff({
+            target: "formatters",
+            label: "demo.json",
+            formatter: { type: "json", content, name: "demo.json" },
+          })
+        }
       />
 
       {/* Mini Controls Bar */}
@@ -215,7 +125,7 @@ export function FormattersPreview() {
             <button
               data-action="prettify"
               type="button"
-              className={`dash-fmt-pill-btn ${virtualHover === "prettify" ? "is-virtual-hover" : ""}`}
+              className={`dash-fmt-pill-btn ${autopilot.hoverClass("prettify")}`}
               onClick={handlePrettify}
               title="Parse and format JSON"
             >
@@ -225,7 +135,7 @@ export function FormattersPreview() {
             <button
               data-action="minify"
               type="button"
-              className={`dash-fmt-pill-btn ${virtualHover === "minify" ? "is-virtual-hover" : ""}`}
+              className={`dash-fmt-pill-btn ${autopilot.hoverClass("minify")}`}
               onClick={handleMinify}
               title="Minify JSON into single line"
             >
@@ -235,19 +145,21 @@ export function FormattersPreview() {
           </div>
         </div>
 
-        <button
-          data-action="copy"
-          type="button"
-          className={`dash-demo-icon-btn ${virtualHover === "copy" ? "is-virtual-hover" : ""}`}
-          onClick={handleCopy}
-          title="Copy formatted output"
-        >
-          {copied ? (
-            <Check className="h-3 w-3 text-emerald-400" />
-          ) : (
-            <Copy className="h-3 w-3" />
-          )}
-        </button>
+        <div className="dash-demo-actions">
+          <button
+            data-action="copy"
+            type="button"
+            className={`dash-demo-icon-btn ${autopilot.hoverClass("copy")}`}
+            onClick={handleCopy}
+            title="Copy formatted output"
+          >
+            {copied ? (
+              <Check className="h-3 w-3 text-emerald-400" />
+            ) : (
+              <Copy className="h-3 w-3" />
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Editable Code Display Area */}
@@ -263,8 +175,8 @@ export function FormattersPreview() {
               setContent(e.target.value);
               setError(null);
             }}
-            onClick={(e) => e.stopPropagation()}
             spellCheck={false}
+            aria-label="Demo JSON payload"
             rows={content.split("\n").length}
           />
         </div>
@@ -287,7 +199,7 @@ export function FormattersPreview() {
               {new Blob([content]).size} bytes
             </span>
             <span className="dash-fmt-divider">•</span>
-            <span className="dash-fmt-stat">Browser parser</span>
+            <span className="dash-fmt-stat">Parsed in your browser</span>
           </>
         )}
       </div>

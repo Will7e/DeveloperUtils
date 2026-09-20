@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
+import { useHandoffBridge } from "@/hooks/useHandoffBridge";
 import {
   Tooltip,
   TooltipContent,
@@ -103,6 +104,9 @@ export function MainLayout() {
   const settingsOpen = useAppStore((s) => s.settingsOpen);
   const currentTheme = useAppStore((s) => s.editorSettings.theme);
   const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
+
+  // Applies dashboard demo handoffs to the target tool, then navigates.
+  useHandoffBridge();
 
   const handleToggleTheme = () => {
     updateEditorSettings({ theme: currentTheme === "dark" ? "light" : "dark" });

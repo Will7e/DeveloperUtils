@@ -3,7 +3,8 @@
 // ============================================================
 // Renders the conversation transcript. Auto-scrolls to the bottom
 // while streaming unless the user has scrolled up (then a
-// "jump to latest" pill appears).
+// "jump to latest" pill appears). Streaming state is scoped to
+// the active conversation by the page before it reaches here.
 
 import React from "react";
 import { ArrowDown } from "lucide-react";
@@ -23,10 +24,15 @@ interface MessageListProps {
   messages: ChatMessage[];
   /** Streaming text appended after the last committed message */
   streamingContent: string;
+  /** True while THIS conversation is streaming */
   isStreaming: boolean;
+  /** Display name of the active model */
   defaultModel: string;
+  /** OpenRouter key present — controls the empty-state CTA */
+  hasApiKey: boolean;
   onSuggestion: (text: string) => void;
   onRegenerate: () => void;
+  onOpenSettings: () => void;
 }
 
 export function MessageList({
@@ -34,8 +40,10 @@ export function MessageList({
   streamingContent,
   isStreaming,
   defaultModel,
+  hasApiKey,
   onSuggestion,
   onRegenerate,
+  onOpenSettings,
 }: MessageListProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [isPinned, setIsPinned] = React.useState(true);
@@ -77,7 +85,14 @@ export function MessageList({
   })();
 
   if (visibleMessages.length === 0 && !isStreaming) {
-    return <ChatEmptyState onSuggestion={onSuggestion} defaultModel={defaultModel} />;
+    return (
+      <ChatEmptyState
+        onSuggestion={onSuggestion}
+        defaultModel={defaultModel}
+        hasApiKey={hasApiKey}
+        onOpenSettings={onOpenSettings}
+      />
+    );
   }
 
   return (
@@ -99,6 +114,18 @@ export function MessageList({
               streamingContentOverride={streamingContent}
               isStreaming
             />
+          )}
+
+          {isStreaming && streamingContent === "" && (
+            <div className="chat-msg chat-msg-assistant" aria-live="polite">
+              <div className="chat-msg-bubble chat-msg-bubble-assistant">
+                <span className="chat-thinking" role="status" aria-label="Assistant is thinking">
+                  <span className="chat-thinking-dot" />
+                  <span className="chat-thinking-dot" />
+                  <span className="chat-thinking-dot" />
+                </span>
+              </div>
+            </div>
           )}
         </div>
       </div>

@@ -2,7 +2,7 @@ import React from "react";
 
 export type CursorType = "pointer" | "pencil" | "grab" | "grabbing";
 
-interface VirtualCursorProps {
+export interface VirtualCursorProps {
   x: number; // percentage (0 - 100) or pixel
   y: number; // percentage (0 - 100) or pixel
   isPercent?: boolean;

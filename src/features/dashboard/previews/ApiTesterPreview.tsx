@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { Send, RefreshCw } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedJson } from "./syntaxHighlight";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 const DEMO_QUOTES: Array<{ quote: string; author: string }> = [
   { quote: "The only limit to our realization of tomorrow is our doubts of today.", author: "Franklin D. Roosevelt" },
@@ -11,6 +12,13 @@ const DEMO_QUOTES: Array<{ quote: string; author: string }> = [
   { quote: "Programs must be written for people to read.", author: "Harold Abelson" },
   { quote: "Talk is cheap. Show me the code.", author: "Linus Torvalds" },
 ];
+
+const HEADERS: Record<string, string> = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-cache, private",
+  "x-powered-by": "Express",
+  "access-control-allow-origin": "*",
+};
 
 export function ApiTesterPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -21,12 +29,6 @@ export function ApiTesterPreview() {
   const [latency, setLatency] = useState(142);
   const [statusCode, setStatusCode] = useState(200);
   const [statusText, setStatusText] = useState("OK");
-  const [headersMap] = useState<Record<string, string>>({
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-cache, private",
-    "x-powered-by": "Express",
-    "access-control-allow-origin": "*",
-  });
   const [responseJson, setResponseJson] = useState<string>(
     JSON.stringify(
       {
@@ -41,16 +43,7 @@ export function ApiTesterPreview() {
   );
   const demoIndexRef = useRef(0);
 
-  // Virtual Cursor Autopilot State
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 92, y: 14, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [cursorDuration, setCursorDuration] = useState<number>(500);
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Fully local simulation — the landing page must make zero network requests.
+  // Fully local simulation — the dashboard must make zero network requests.
   const dispatchFetch = async () => {
     setIsLoading(true);
     const t0 = performance.now();
@@ -86,154 +79,68 @@ export function ApiTesterPreview() {
     dispatchFetch();
   };
 
-  // Autonomous Lifelike Cursor Motion Loop for API Tester
-  useEffect(() => {
-    if (isUserActive) return;
+  const steps: AutopilotStep[] = [
+    {
+      target: '[data-action="send"]',
+      fallback: { x: 92, y: 14 },
+      action: `Send ${method}`,
+      hover: "send",
+      run: () => dispatchFetch(),
+    },
+    {
+      target: ".dash-api-pre",
+      fallback: { x: 60, y: 70 },
+      action: "Inspect the JSON",
+      transition: 650,
+    },
+    {
+      target: '[data-tab="headers"]',
+      fallback: { x: 35, y: 44 },
+      action: "Response headers",
+      hover: "tab-headers",
+      run: () => setActiveTab("headers"),
+    },
+    {
+      target: ".dash-headers-list",
+      fallback: { x: 50, y: 68 },
+      action: "Check caching",
+      transition: 600,
+    },
+    {
+      target: '[data-tab="body"]',
+      fallback: { x: 12, y: 44 },
+      action: "Back to the body",
+      hover: "tab-body",
+      run: () => setActiveTab("body"),
+    },
+    {
+      target: ".dash-api-pre",
+      fallback: { x: 55, y: 75 },
+      action: `${statusCode} ${statusText}`,
+      transition: 600,
+    },
+  ];
 
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to Send button with pixel accuracy
-        setCursorDuration(460);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-action="send"]', { x: 92, y: 14 })
-        );
-        setCursorAction("Send GET");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("send");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setCursorAction("Fetching...");
-            dispatchFetch();
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 200)
-            );
-          }, 500)
-        );
-      } else if (step === 1) {
-        // Drift down to response status & JSON
-        setCursorDuration(650);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-api-pre", { x: 60, y: 70 })
-        );
-        setCursorAction("Inspect JSON");
-      } else if (step === 2) {
-        // Glide to Headers tab with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tab="headers"]', { x: 35, y: 44 })
-        );
-        setCursorAction("View Headers");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("tab-headers");
-          }, 320)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActiveTab("headers");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 3) {
-        // Drift across headers
-        setCursorDuration(600);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-headers-list", { x: 50, y: 68 })
-        );
-        setCursorAction("Checking Headers");
-      } else if (step === 4) {
-        // Glide back to Response Body tab with pixel accuracy
-        setCursorDuration(480);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tab="body"]', { x: 12, y: 44 })
-        );
-        setCursorAction("View Body");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("tab-body");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActiveTab("body");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 480)
-        );
-      } else if (step === 5) {
-        // Drift over JSON body
-        setCursorDuration(600);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-api-pre", { x: 55, y: 75 })
-        );
-        setCursorAction("200 OK");
-      }
-
-      step = (step + 1) % 6;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1800);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive, url, method]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
-  };
-
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1800 });
 
   return (
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-apitester"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in API Tester"
+        onOpen={() =>
+          requestHandoff({
+            target: "api-tester",
+            label: url,
+            request: { url, method },
+          })
+        }
       />
 
       {/* URL / Request Bar */}
@@ -242,7 +149,7 @@ export function ApiTesterPreview() {
           className={`dash-api-method-select ${method.toLowerCase()}`}
           value={method}
           onChange={(e) => setMethod(e.target.value as "GET" | "POST")}
-          onClick={(e) => e.stopPropagation()}
+          aria-label="HTTP method"
         >
           <option value="GET">GET</option>
           <option value="POST">POST</option>
@@ -253,15 +160,15 @@ export function ApiTesterPreview() {
           className="dash-api-url-input"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
           spellCheck={false}
           placeholder="https://api..."
+          aria-label="Request URL"
         />
 
         <button
           type="button"
           data-action="send"
-          className={`dash-api-send-btn ${isLoading ? "loading" : ""} ${virtualHover === "send" ? "is-virtual-hover" : ""}`}
+          className={`dash-api-send-btn ${isLoading ? "loading" : ""} ${autopilot.hoverClass("send")}`}
           onClick={handleSend}
           disabled={isLoading}
           title="Send HTTP request"
@@ -289,6 +196,7 @@ export function ApiTesterPreview() {
             {(new Blob([responseJson]).size / 1024).toFixed(1)} KB
           </span>
         </div>
+        <span className="dash-api-meta-chip">Simulated locally</span>
       </div>
 
       {/* Response Body / Headers Tabs */}
@@ -297,7 +205,7 @@ export function ApiTesterPreview() {
           <button
             type="button"
             data-tab="body"
-            className={`dash-api-tab ${activeTab === "body" ? "active" : ""} ${virtualHover === "tab-body" ? "is-virtual-hover" : ""}`}
+            className={`dash-api-tab ${activeTab === "body" ? "active" : ""} ${autopilot.hoverClass("tab-body")}`}
             onClick={() => setActiveTab("body")}
           >
             Response Body
@@ -305,10 +213,10 @@ export function ApiTesterPreview() {
           <button
             type="button"
             data-tab="headers"
-            className={`dash-api-tab ${activeTab === "headers" ? "active" : ""} ${virtualHover === "tab-headers" ? "is-virtual-hover" : ""}`}
+            className={`dash-api-tab ${activeTab === "headers" ? "active" : ""} ${autopilot.hoverClass("tab-headers")}`}
             onClick={() => setActiveTab("headers")}
           >
-            Headers ({Object.keys(headersMap).length})
+            Headers ({Object.keys(HEADERS).length})
           </button>
         </div>
 
@@ -319,7 +227,7 @@ export function ApiTesterPreview() {
             </pre>
           ) : (
             <div className="dash-headers-list">
-              {Object.entries(headersMap).map(([key, val]) => (
+              {Object.entries(HEADERS).map(([key, val]) => (
                 <div key={key} className="dash-header-row">
                   <span className="header-key">{key}:</span>
                   <span className="header-val">{val}</span>

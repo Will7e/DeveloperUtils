@@ -80,7 +80,7 @@ export const MessageItem = React.memo(function MessageItem({
         {message.model && !isUser && (
           <span className="chat-msg-model">{message.model}</span>
         )}
-        <span className="chat-msg-time">{formatTime(message.timestamp)}</span>
+        <span className="chat-msg-meta-time">{formatTime(message.timestamp)}</span>
         {message.usage?.completionTokens != null && !isUser && (
           <span className="chat-msg-tokens">
             {formatTokens(message.usage.completionTokens)} tok

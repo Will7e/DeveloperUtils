@@ -114,18 +114,21 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
         nodes.push(token);
       }
     } else {
-      // Bare URL
+      // Bare URL — don't swallow trailing punctuation into the link
+      const trailing = token.match(/[.,;:!?)}\]]+$/)?.[0] ?? "";
+      const url = trailing ? token.slice(0, token.length - trailing.length) : token;
       nodes.push(
         <a
           key={key}
           className="chat-link"
-          href={token}
+          href={url}
           target="_blank"
           rel="noopener noreferrer"
         >
-          {token}
+          {url}
         </a>
       );
+      if (trailing) nodes.push(trailing);
     }
 
     lastIndex = match.index + token.length;

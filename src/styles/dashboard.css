@@ -28,11 +28,11 @@
   }
 }
 .dash-container {
-  max-width: 1240px;
+  max-width: 1120px;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 34px;
   align-items: center;
 }
 
@@ -129,65 +129,20 @@ html.light .dash-hero-accent {
 html.light .dash-hero-subtitle {
   color: var(--text-2);
 }
-.dash-hero-highlight {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-html.light .dash-hero-highlight {
-  color: var(--accent);
-}
-
-/* Bento Grid */
+/* Mobile */
 @media (max-width: 680px) {
-
-.dash-hero-title {
+  .dash-hero-title {
     font-size: 26px;
   }
 }
 
-/* Tool Cards */
-/* Subtle top edge sheen */
-/* Preview Sandbox Container inside Card */
 /* ============================================================
-   Alternating Zig-Zag Feature Showcase Layout
+   DEMO WINDOW — shared chrome for every live demo
    ============================================================ */
-
-.dash-zigzag-container {
-  display: flex;
-  flex-direction: column;
-  gap: 72px;
-  width: 100%;
-  margin-top: 18px;
-  margin-bottom: 24px;
-}
-.dash-zigzag-row {
-  display: grid;
-  grid-template-columns: 1.18fr 1fr;
-  gap: 48px;
-  align-items: center;
-  position: relative;
-  width: 100%;
-}
-
-/* Alternating Inverted Layout: Text on Left, Feature on Right */
-.dash-zigzag-row.is-reversed {
-  grid-template-columns: 1fr 1.18fr;
-}
-.dash-zigzag-row.is-reversed .dash-zigzag-preview {
-  order: 2;
-}
-.dash-zigzag-row.is-reversed .dash-zigzag-content {
-  order: 1;
-}
-
-/* Feature Preview Column (Mockup Window) */
-.dash-zigzag-preview {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-}
 .dash-window-mockup {
+  /* Demos adapt to their own width, not the viewport: see the
+     @container rules for the title bar below. */
+  container-type: inline-size;
   position: relative;
   border-radius: 12px;
   background: var(--bg-1);
@@ -237,6 +192,9 @@ html.light .dash-hero-highlight {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .dash-window-url {
   font-family: var(--font-mono, monospace);
@@ -250,104 +208,7 @@ html.light .dash-hero-highlight {
   background: var(--bg-0);
 }
 
-/* Feature Narrative Column */
-.dash-zigzag-content {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 6px 0;
-}
-.dash-feature-badge-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  margin-bottom: 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
-  color: var(--text-2);
-}
-.dash-feature-badge-icon {
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-}
-.dash-highlight-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
-  color: var(--accent);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.dash-feature-title {
-  font-size: 27px;
-  font-weight: 800;
-  color: var(--text-1);
-  letter-spacing: -0.5px;
-  line-height: 1.22;
-  margin: 0 0 10px 0;
-}
-.dash-feature-title-link {
-  color: inherit;
-  text-decoration: none;
-  transition: color 0.15s ease;
-}
-.dash-feature-title-link:hover {
-  color: var(--accent);
-}
-.dash-feature-desc {
-  font-size: 14.5px;
-  line-height: 1.6;
-  color: var(--text-2);
-  margin: 0 0 20px 0;
-  max-width: 520px;
-}
-.dash-feature-highlights {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.dash-feature-highlight-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13.5px;
-  color: var(--text-1);
-  font-weight: 500;
-  line-height: 1.4;
-}
-.dash-highlight-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-
-/* Subtle Row Divider */
-.dash-zigzag-divider {
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent 0%, var(--border-1) 25%, var(--border-1) 75%, transparent 100%);
-  opacity: 0.6;
-}
-
-/* Light Mode Overrides for Zig-Zag */
+/* Light mode */
 html.light .dash-window-mockup {
   background: #ffffff;
   box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.1);
@@ -366,38 +227,6 @@ html.light .dash-window-url {
   color: var(--ds-gray-700);
 }
 
-html.light .dash-window-badge {
-  background: var(--green-dim);
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 25%, transparent);
-}
-
-html.light .dash-feature-cta-btn {
-  color: #ffffff;
-}
-
-/* Mobile & Tablet Responsive Breakdown */
-@media (max-width: 980px) {
-  .dash-zigzag-container {
-    gap: 48px;
-  }
-.dash-zigzag-row,
-  .dash-zigzag-row.is-reversed {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-.dash-zigzag-row .dash-zigzag-preview,
-  .dash-zigzag-row.is-reversed .dash-zigzag-preview {
-    order: 2;
-  }
-.dash-zigzag-row .dash-zigzag-content,
-  .dash-zigzag-row.is-reversed .dash-zigzag-content {
-    order: 1;
-  }
-.dash-feature-title {
-    font-size: 23px;
-  }
-}
 .dash-demo-box {
   position: relative;
   display: flex;
@@ -752,14 +581,6 @@ html.light .token-del { color: var(--ds-gray-700); }
   background: var(--green-dim);
   color: var(--green);
   border: 1px solid color-mix(in srgb, var(--green) 22%, transparent);
-}
-.dash-perf-badge {
-  font-size: 9.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-2);
-  color: var(--text-2);
-  border: 1px solid var(--border-1);
 }
 .dash-return-badge {
   font-size: 9.5px;
@@ -1405,37 +1226,6 @@ html.light .dash-fmt-textarea {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* Minimal Footer Bar */
-.dash-footer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-2);
-  padding-top: 16px;
-}
-.dash-footer-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.dash-footer-divider {
-  color: var(--border-1);
-  opacity: 0.5;
-}
-
-@keyframes pulse-dot {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(0.85);
-  }
-}
 .dash-kbd {
   font-family: inherit;
   font-size: 10px;
@@ -1448,5 +1238,597 @@ html.light .dash-fmt-textarea {
 }
 
 /* ============================================================
-   DASHBOARD
+   HERO — the promise, one action, one line of proof
    ============================================================ */
+.dash-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.dash-cta-primary:hover {
+  background: var(--accent-dim);
+  transform: translateY(-1px);
+}
+/* Three plain facts instead of a stat card: no box, no numbers to decode. */
+.dash-hero-trust {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2px 0;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.dash-hero-trust-dot {
+  margin: 0 8px;
+  color: var(--border-2);
+}
+
+/* ============================================================
+   SHARED SECTION HEADING
+   ============================================================ */
+/* Sections carry no wrapper chrome and no per-section spacing hacks: the
+   heading owns the gap beneath it and the container owns the gap between. */
+.dash-section-title {
+  margin: 0 0 14px;
+  text-align: center;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-0);
+}
+
+/* ============================================================
+   DEMO STAGE — one window, one strip, one action
+   ============================================================ */
+.dash-demos {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+
+/* The switcher reads as the window's own tab row, not as a second toolbar:
+   transparent, hairline-separated, one row, scrolling sideways when cramped. */
+.dash-demo-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-1);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.dash-demo-switcher::-webkit-scrollbar {
+  display: none;
+}
+.dash-demo-switcher-btn {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.dash-demo-switcher-btn:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.dash-demo-switcher-btn.is-active {
+  color: var(--text-0);
+  background: var(--bg-2);
+  border-color: var(--border-1);
+}
+.dash-demo-switcher-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.dash-demos-caption {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* ============================================================
+   DEMO WINDOW CHROME + CONTROLS
+   ============================================================ */
+.dash-window-chip {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.dash-window-controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.dash-window-controls:empty {
+  display: none;
+}
+.dash-window-live {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.dash-demo-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+.dash-demo-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dash-demo-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border-1);
+  background: transparent;
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.dash-demo-control:hover {
+  color: var(--text-1);
+  border-color: var(--border-2);
+  background: var(--bg-hover);
+}
+.dash-demo-control-label {
+  white-space: nowrap;
+}
+
+/* The title bar sheds detail as the demo narrows: decorative chips first,
+   then control labels, then the live-demo caption. The dot always stays. */
+@container (max-width: 640px) {
+  .dash-window-chip {
+    display: none;
+  }
+}
+@container (max-width: 520px) {
+  .dash-demo-control-label,
+  .dash-window-live-text {
+    display: none;
+  }
+}
+@container (max-width: 400px) {
+  .dash-demo-control {
+    padding: 2px 5px;
+  }
+}
+
+/* ============================================================
+   COMPARATORS — real value columns + audit totals
+   ============================================================ */
+.dash-comp-head {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 1.2fr auto;
+  gap: 8px;
+  padding: 0 6px 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-1);
+  font-size: 9.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.dash-comp-row {
+  display: grid;
+  grid-template-columns: 1.1fr 1.2fr 1.2fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.dash-comp-col {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-comp-col code {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+}
+.dash-comp-col.key code {
+  color: var(--text-0);
+  font-weight: 600;
+}
+.dash-comp-col.prod code,
+.dash-comp-col.stg code {
+  color: var(--text-2);
+}
+.dash-comp-empty {
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--red);
+}
+.dash-comp-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border-1);
+  background: rgba(0, 0, 0, 0.2);
+}
+.dash-comp-summary-item {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.dash-comp-summary-item.diff {
+  background: var(--amber-dim);
+  color: var(--amber);
+}
+.dash-comp-summary-item.missing {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.dash-comp-summary-item.match {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.dash-comp-summary-item.muted {
+  background: var(--bg-2);
+  color: var(--text-3);
+}
+
+/* ============================================================
+   AI CHAT DEMO
+   ============================================================ */
+.dash-demo-chat {
+  min-height: 252px;
+}
+.dash-chat-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-1);
+  background: rgba(255, 255, 255, 0.02);
+}
+.dash-chat-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.dash-chat-or-via {
+  font-size: 9.5px;
+  color: var(--text-3);
+}
+.dash-chat-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--green) 22%, transparent);
+  background: var(--green-dim);
+  color: var(--green);
+  font-size: 9.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dash-chat-thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.dash-chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dash-chat-role {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.dash-chat-text {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+.dash-chat-turn.user .dash-chat-text {
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+}
+.dash-chat-turn.assistant .dash-chat-text {
+  padding-inline: 0;
+  background: transparent;
+}
+.dash-chat-caret {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-inline-start: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: dash-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes dash-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.dash-chat-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 10px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+.dash-chat-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.dash-chat-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.dash-chat-send:hover {
+  background: var(--accent-dim);
+}
+.dash-chat-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-1);
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 9.5px;
+  color: var(--text-3);
+}
+.dash-chat-usage-divider {
+  opacity: 0.5;
+}
+
+/* ============================================================
+   LIBRARY DEMO — controls share the snippet's corner
+   ============================================================ */
+.dash-lib-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dash-lib-actions .dash-lib-copy-btn {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+/* ============================================================
+   PRIVACY & SECURITY
+   ============================================================ */
+.dash-privacy {
+  width: 100%;
+}
+.dash-privacy-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dash-privacy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+.dash-privacy-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--green);
+}
+.dash-privacy-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-0);
+}
+.dash-privacy-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+@media (max-width: 980px) {
+  .dash-privacy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 560px) {
+  .dash-privacy-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   SHORTCUTS
+   ============================================================ */
+.dash-shortcuts {
+  width: 100%;
+}
+/* One wrapping row of key/label pairs — not a reference table. */
+.dash-shortcuts-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dash-shortcuts-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-shortcuts-label {
+  font-size: 12.5px;
+  color: var(--text-1);
+}
+.dash-shortcuts-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* ============================================================
+   FAQ / HOW IT WORKS
+   ============================================================ */
+.dash-faq {
+  width: 100%;
+}
+.dash-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.dash-faq-item {
+  border-radius: 10px;
+  border: 1px solid var(--border-1);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.dash-faq-item[open] {
+  border-color: var(--border-2);
+}
+.dash-faq-question {
+  padding: 12px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-0);
+  cursor: pointer;
+  list-style: none;
+}
+.dash-faq-question::-webkit-details-marker {
+  display: none;
+}
+.dash-faq-question::after {
+  content: "+";
+  float: inline-end;
+  color: var(--text-3);
+  font-weight: 700;
+}
+.dash-faq-item[open] .dash-faq-question::after {
+  content: "−";
+}
+.dash-faq-question:hover {
+  color: var(--accent);
+}
+.dash-faq-question:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+.dash-faq-answer {
+  margin: 0;
+  padding: 0 14px 14px;
+  max-width: 780px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+
+/* ============================================================
+   REDUCED MOTION — the autopilot is already gated in JS; this
+   stops decorative motion from CSS as well.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .dash-page,
+  .dash-hero-logo-glow,
+  .dash-virtual-cursor,
+  .dash-cursor-ripple,
+  .dash-chat-caret,
+  .dash-window-mockup,
+  .dash-cta-primary {
+    animation: none !important;
+    transition: none !important;
+  }
+}

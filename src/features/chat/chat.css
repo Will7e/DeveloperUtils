@@ -8,7 +8,21 @@
    except where alpha surfaces differ.
    ============================================================ */
 
+/* Screen-reader-only (live regions) */
+.chat-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .chat-page {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
@@ -240,6 +254,13 @@
   background: var(--red-dim);
 }
 
+/* Two-step delete: armed state */
+.chat-conv-action-confirm,
+.chat-conv-action-confirm:hover {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
 .chat-conv-pin-dot {
   position: absolute;
   left: 3px;
@@ -271,6 +292,11 @@
   border-radius: var(--radius-sm);
   outline: none;
   box-shadow: var(--ds-focus-ring);
+}
+
+/* Sidebar mobile-drawer scrim (rendered only under 860px) */
+.chat-sidebar-scrim {
+  display: none;
 }
 
 /* ============================================================
@@ -329,6 +355,17 @@
 .chat-header-btn:hover {
   background: var(--bg-hover);
   color: var(--text-1);
+}
+
+/* Sidebar drawer toggle — only shown when the sidebar is off-canvas */
+.chat-header-menu-btn {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .chat-header-menu-btn {
+    display: flex;
+  }
 }
 
 .chat-header-prompt-badge {
@@ -394,6 +431,7 @@
   z-index: 1000;
   display: flex;
   flex-direction: column;
+  max-width: calc(100vw - 16px);
   max-height: 420px;
   background: var(--bg-1);
   border: 1px solid var(--border-1);
@@ -463,7 +501,8 @@
   transition: background 0.12s ease;
 }
 
-.chat-model-item:hover {
+.chat-model-item:hover,
+.chat-model-item-highlighted {
   background: var(--bg-hover);
 }
 
@@ -551,6 +590,11 @@
   height: 100%;
   border-radius: 999px;
   transition: width 0.3s ease, background 0.3s ease;
+}
+
+.chat-ctx-meter-fill-zero {
+  background: transparent;
+  transition: none;
 }
 
 .chat-ctx-meter-fill-optimal {
@@ -658,6 +702,13 @@
   white-space: pre-wrap;
 }
 
+/* Plain user bubbles: no markdown paragraph margin, no extra
+   trailing whitespace artifacts inside the padded bubble */
+.chat-msg-bubble-user .chat-md-p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .chat-msg-bubble-assistant {
   width: 100%;
   color: var(--text-1);
@@ -665,7 +716,7 @@
 
 .chat-msg-error .chat-msg-bubble {
   background: var(--red-dim);
-  border: 1px solid rgba(229, 72, 77, 0.25);
+  border: 1px solid color-mix(in srgb, var(--red) 25%, transparent);
   border-radius: var(--radius-lg);
   padding: 9px 13px;
 }
@@ -678,6 +729,13 @@
   font-size: 13px;
 }
 
+.chat-msg-meta-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* Message actions: visible on hover OR keyboard focus; always
+   visible on coarse pointers where hover does not exist. */
 .chat-msg-actions {
   display: flex;
   align-items: center;
@@ -687,8 +745,15 @@
   transition: opacity 0.15s ease;
 }
 
-.chat-msg:hover .chat-msg-actions {
+.chat-msg:hover .chat-msg-actions,
+.chat-msg:focus-within .chat-msg-actions {
   opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .chat-msg-actions {
+    opacity: 1;
+  }
 }
 
 .chat-msg-user .chat-msg-actions {
@@ -752,6 +817,43 @@
 @keyframes chat-caret-blink {
   to {
     visibility: hidden;
+  }
+}
+
+/* Thinking indicator — waiting for the first streamed token */
+
+.chat-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.chat-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-3);
+  animation: chat-thinking-pulse 1.2s ease-in-out infinite;
+}
+
+.chat-thinking-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-thinking-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes chat-thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
   }
 }
 
@@ -853,6 +955,28 @@
   background: var(--bg-hover);
   border-color: var(--border-2);
   color: var(--text-1);
+}
+
+.chat-empty-key-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-empty-key-cta:hover {
+  border-color: var(--accent);
 }
 
 /* ============================================================
@@ -991,6 +1115,10 @@
 
 .chat-md-h:first-child {
   margin-top: 0;
+}
+
+.chat-md-h1 {
+  font-size: 18px;
 }
 
 .chat-md-h2 {
@@ -1211,6 +1339,13 @@
   background: var(--red-dim);
 }
 
+/* Two-step delete: armed state */
+.chat-danger-confirm,
+.chat-danger-confirm:hover:not(:disabled) {
+  color: var(--red);
+  background: var(--red-dim);
+}
+
 /* Tabs bar wrapper inside the settings panel */
 .chat-settings-tabsbar {
   padding: 12px 20px 0;
@@ -1219,6 +1354,121 @@
 
 .chat-settings-panel {
   width: 580px;
+}
+
+/* Wrapper for the tabs content inside the flex panel */
+.chat-settings-tabs-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tab content scrolls inside the fixed-height panel instead of
+   being clipped by the panel's overflow: hidden. */
+.chat-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 20px 20px;
+}
+
+/* ── Modal interior: card-based sections ──────────────────
+   Each settings group sits on its own surface with real padding,
+   so the panel reads as designed layers instead of loose text. */
+.chat-settings-body .settings-section {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  padding: 14px 16px;
+  gap: 12px;
+}
+
+/* Card headers: caps label, no underline (the card edge separates) */
+.chat-settings-body .settings-section-title {
+  border-bottom: none;
+  padding-bottom: 0;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+}
+
+/* Cards separate sections; the shared divider becomes noise */
+.chat-settings-body .settings-divider {
+  display: none;
+}
+
+.chat-settings-body .settings-row {
+  padding: 0;
+}
+
+.chat-settings-body .settings-sublabel {
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* API key block: label on top, full-width controls below */
+.chat-key-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.chat-key-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-key-controls .chat-key-input-wrap {
+  flex: 1;
+  width: auto;
+}
+
+.chat-key-controls .settings-input {
+  height: 32px;
+  font-size: 12.5px;
+}
+
+/* Temperature slider breathes inside the card */
+.chat-settings-body .settings-slider {
+  width: 160px;
+}
+
+/* The model picker button shouldn't fight the row width */
+.chat-settings-panel .chat-model-btn {
+  max-width: 240px;
+}
+
+/* Skills sections stay flat (each skill row is already a card) */
+.chat-settings-body .settings-section.chat-skills-section {
+  background: transparent;
+  border: none;
+  padding: 2px 0 0;
+}
+
+.chat-settings-body .settings-section.chat-skills-section
+  + .settings-section.chat-skills-section {
+  margin-top: -4px;
+}
+
+.chat-settings-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chat-settings-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-settings-body::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
+}
+
+.chat-settings-tabsbar button:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
 }
 
 .chat-model-input {
@@ -1380,17 +1630,6 @@
 
 /* Skill rows use the shared Toggle component — no local switch CSS */
 
-.chat-skill-save-btn {
-  background: var(--accent);
-  color: #ffffff;
-  border-color: transparent;
-}
-
-.chat-skill-save-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: #ffffff;
-}
-
 .chat-skill-editor {
   display: flex;
   flex-direction: column;
@@ -1436,20 +1675,37 @@
   gap: 6px;
 }
 
-.chat-skill-save-btn {
-  background: var(--accent);
-  color: #ffffff;
-  border-color: transparent;
-}
-
-.chat-skill-save-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-  color: #ffffff;
-}
-
 /* ============================================================
    RESPONSIVE
    ============================================================ */
+
+/* Keyboard focus rings for borderless icon buttons */
+.chat-sidebar-new-btn:focus-visible,
+.chat-sidebar-search-clear:focus-visible,
+.chat-conv-action:focus-visible,
+.chat-header-btn:focus-visible,
+.chat-header-skills-btn:focus-visible,
+.chat-jump-latest:focus-visible,
+.chat-composer-send:focus-visible,
+.chat-composer-stop:focus-visible,
+.chat-empty-suggestion:focus-visible,
+.chat-code-block-copy:focus-visible,
+.chat-key-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.chat-conv-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ds-focus-color);
+}
+
+/* Touch devices: conversation actions stay visible */
+@media (pointer: coarse) {
+  .chat-conv-item-actions {
+    display: flex;
+  }
+}
 
 @media (max-width: 860px) {
   .chat-sidebar {
@@ -1463,5 +1719,25 @@
 
   .chat-sidebar-open {
     transform: translateX(0);
+  }
+
+  .chat-sidebar-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    padding: 0;
+    cursor: default;
+    animation: overlay-in 0.15s ease-out;
+  }
+
+  html.light .chat-sidebar-scrim {
+    background: rgba(15, 23, 42, 0.4);
+  }
+
+  .chat-msg-bubble-user {
+    max-width: 95%;
   }
 }

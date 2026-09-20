@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   MousePointer,
   Square,
@@ -7,8 +7,10 @@ import {
   RotateCcw,
   Eraser,
 } from "lucide-react";
-import { VirtualCursor, type CursorType } from "../components/VirtualCursor";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { VirtualCursor } from "../components/VirtualCursor";
+import type { CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 interface CanvasNode {
   id: string;
@@ -72,6 +74,82 @@ const PALETTE = [
   { label: "Slate", value: "#a1a1a1" },
 ];
 
+const AMBER = "#fbbf24";
+
+/** Builds real diagram elements so the handoff opens a usable board. */
+function toDiagramElements(nodes: CanvasNode[]): unknown[] {
+  const elements: unknown[] = [];
+
+  nodes.forEach((node, index) => {
+    elements.push({
+      type: "rectangle",
+      version: 1,
+      versionNonce: 2000 + index,
+      isDeleted: false,
+      id: `demo-${node.id}`,
+      fillStyle: "solid",
+      strokeWidth: 2,
+      strokeStyle: "solid",
+      roughness: 1,
+      opacity: 100,
+      angle: 0,
+      x: node.x,
+      y: node.y,
+      strokeColor: node.color,
+      backgroundColor: "transparent",
+      width: node.w,
+      height: node.h,
+      seed: 20000 + index,
+      groupIds: [],
+      frameId: null,
+      roundness: { type: 3 },
+      boundElements: [],
+      updated: 1,
+      link: null,
+      locked: false,
+    });
+
+    elements.push({
+      type: "text",
+      version: 1,
+      versionNonce: 3000 + index,
+      isDeleted: false,
+      id: `demo-${node.id}-label`,
+      fillStyle: "hachure",
+      strokeWidth: 1,
+      strokeStyle: "solid",
+      roughness: 1,
+      opacity: 100,
+      angle: 0,
+      x: node.x + 8,
+      y: node.y + node.h / 2 - 10,
+      strokeColor: node.color,
+      backgroundColor: "transparent",
+      width: node.w - 16,
+      height: 20,
+      seed: 30000 + index,
+      groupIds: [],
+      frameId: null,
+      roundness: null,
+      boundElements: [],
+      updated: 1,
+      link: null,
+      locked: false,
+      text: node.label,
+      fontSize: 16,
+      fontFamily: 1,
+      textAlign: "center",
+      verticalAlign: "middle",
+      baseline: 14,
+      containerId: null,
+      originalText: node.label,
+      lineHeight: 1.25,
+    });
+  });
+
+  return elements;
+}
+
 export function DrawFlowPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [nodes, setNodes] = useState<CanvasNode[]>(INITIAL_NODES);
@@ -85,16 +163,7 @@ export function DrawFlowPreview() {
   const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement | null>(null);
   const newIdRef = useRef(0);
-
-  // Virtual Cursor Autopilot State
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 65, y: 35, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [cursorType, setCursorType] = useState<CursorType>("pointer");
-  const [cursorDuration, setCursorDuration] = useState<number>(550);
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const strokeIdRef = useRef<string>("");
 
   const getSvgCoordinates = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current) return { x: 0, y: 0 };
@@ -186,9 +255,7 @@ export function DrawFlowPreview() {
   const handleColorChange = (color: string) => {
     setActiveColor(color);
     if (selectedNodeId) {
-      setNodes((prev) =>
-        prev.map((n) => (n.id === selectedNodeId ? { ...n, color } : n))
-      );
+      setNodes((prev) => prev.map((n) => (n.id === selectedNodeId ? { ...n, color } : n)));
     }
   };
 
@@ -216,226 +283,108 @@ export function DrawFlowPreview() {
     return { x, y, isPercent: false };
   };
 
-  // Autonomous Lifelike Cursor Motion Loop for Excalidraw
-  useEffect(() => {
-    if (isUserActive) return;
+  const appendStrokePoint = (strokeId: string, point: { x: number; y: number }) => {
+    setStrokes((prev) =>
+      prev.map((s) => (s.id === strokeId ? { ...s, points: [...s.points, point] } : s))
+    );
+  };
 
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to Pencil tool with pixel accuracy
-        setCursorType("pointer");
-        setCursorDuration(450);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tool="pencil"]', { x: 5, y: 7.5 })
-        );
-        setCursorAction("Pencil Tool");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("tool-pencil");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActiveTool("pencil");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 480)
-        );
-      } else if (step === 1) {
-        // Switch to pencil cursor & glide to canvas start point with sub-pixel alignment
-        setCursorType("pencil");
-        setCursorDuration(550);
-        setCursorPos(getSvgPointInContainer(320, 48));
-        setCursorAction("Sketching...");
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            const strokeId = `stroke-new-${++newIdRef.current}`;
-            // Live stroke interpolation!
-            setStrokes((prev) => [
-              ...prev.slice(-3),
-              {
-                id: strokeId,
-                points: [{ x: 320, y: 48 }],
-                color: activeColor,
-              },
-            ]);
-
-            // Point 2
-            timeouts.push(
-              setTimeout(() => {
-                setCursorDuration(200);
-                setCursorPos(getSvgPointInContainer(345, 55));
-                setStrokes((prev) =>
-                  prev.map((s) =>
-                    s.id === strokeId
-                      ? { ...s, points: [...s.points, { x: 345, y: 55 }] }
-                      : s
-                  )
-                );
-              }, 170)
-            );
-
-            // Point 3
-            timeouts.push(
-              setTimeout(() => {
-                setCursorDuration(200);
-                setCursorPos(getSvgPointInContainer(370, 72));
-                setStrokes((prev) =>
-                  prev.map((s) =>
-                    s.id === strokeId
-                      ? { ...s, points: [...s.points, { x: 370, y: 72 }] }
-                      : s
-                  )
-                );
-              }, 340)
-            );
-
-            // Point 4 & release
-            timeouts.push(
-              setTimeout(() => {
-                setCursorDuration(200);
-                setCursorPos(getSvgPointInContainer(388, 96));
-                setStrokes((prev) =>
-                  prev.map((s) =>
-                    s.id === strokeId
-                      ? { ...s, points: [...s.points, { x: 388, y: 96 }] }
-                      : s
-                  )
-                );
-                timeouts.push(
-                  setTimeout(() => {
-                    setCursorClicking(false);
-                    setCursorAction("Done sketch");
-                  }, 120)
-                );
-              }, 510)
-            );
-          }, 600)
-        );
-      } else if (step === 2) {
-        // Glide to Amber swatch with pixel accuracy
-        setCursorType("pointer");
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-color="#fbbf24"]', { x: 32, y: 7.5 })
-        );
-        setCursorAction("Color: Amber");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("color-#fbbf24");
-          }, 320)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            handleColorChange("#fbbf24");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 3) {
-        // Glide to API Gateway diamond node with pixel accuracy
-        setCursorDuration(480);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-node-id="node-gateway"]', { x: 52, y: 28 })
-        );
-        setCursorAction("Select Node");
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setSelectedNodeId("node-gateway");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-              }, 180)
-            );
-          }, 490)
-        );
-      } else if (step === 4) {
-        // Drag Gateway node slightly
-        setCursorType("grabbing");
-        setCursorDuration(550);
-        setCursorPos(getSvgPointInContainer(215 + 55, 48 + 36));
-        setCursorAction("Dragging Node");
-        setCursorClicking(true);
+  const steps: AutopilotStep[] = [
+    {
+      target: '[data-tool="pencil"]',
+      fallback: { x: 5, y: 7.5 },
+      action: "Pencil tool",
+      cursor: "pointer",
+      transition: 450,
+      hover: "tool-pencil",
+      run: () => setActiveTool("pencil"),
+    },
+    // Four short steps trace the note one point at a time, like a real hand.
+    {
+      target: () => getSvgPointInContainer(320, 48),
+      action: "Sketching a note",
+      cursor: "pencil",
+      transition: 450,
+      click: true,
+      hold: 300,
+      run: () => {
+        const strokeId = `stroke-new-${++newIdRef.current}`;
+        strokeIdRef.current = strokeId;
+        setStrokes((prev) => [
+          ...prev.slice(-3),
+          { id: strokeId, points: [{ x: 320, y: 48 }], color: activeColor },
+        ]);
+      },
+    },
+    {
+      target: () => getSvgPointInContainer(345, 55),
+      transition: 200,
+      click: false,
+      hold: 210,
+      run: () => appendStrokePoint(strokeIdRef.current, { x: 345, y: 55 }),
+    },
+    {
+      target: () => getSvgPointInContainer(370, 72),
+      transition: 200,
+      click: false,
+      hold: 210,
+      run: () => appendStrokePoint(strokeIdRef.current, { x: 370, y: 72 }),
+    },
+    {
+      target: () => getSvgPointInContainer(388, 96),
+      action: "Note added",
+      transition: 200,
+      click: false,
+      hold: 620,
+      run: () => appendStrokePoint(strokeIdRef.current, { x: 388, y: 96 }),
+    },
+    {
+      target: `[data-color="${AMBER}"]`,
+      fallback: { x: 32, y: 7.5 },
+      action: "Color: amber",
+      transition: 500,
+      hover: `color-${AMBER}`,
+      run: () => handleColorChange(AMBER),
+    },
+    {
+      target: '[data-node-id="node-gateway"]',
+      fallback: { x: 52, y: 28 },
+      action: "Select the gateway",
+      transition: 480,
+      run: () => setSelectedNodeId("node-gateway"),
+    },
+    {
+      target: () => getSvgPointInContainer(215 + 55, 48 + 36),
+      action: "Dragging the node",
+      cursor: "grabbing",
+      transition: 550,
+      click: true,
+      releaseAt: 1150,
+      hold: 700,
+      run: () =>
         setNodes((prev) =>
-          prev.map((n) =>
-            n.id === "node-gateway" ? { ...n, x: 215, y: 48 } : n
-          )
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(false);
-            setCursorType("pointer");
-            setCursorAction("Released");
-          }, 600)
-        );
-      } else if (step === 5) {
-        // Switch tool back to Select with pixel accuracy and reset node position
-        setCursorDuration(480);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-tool="select"]', { x: 9, y: 7.5 })
-        );
-        setCursorAction("Pointer Tool");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("tool-select");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActiveTool("select");
-            setNodes(INITIAL_NODES);
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 490)
-        );
-      }
+          prev.map((n) => (n.id === "node-gateway" ? { ...n, x: 215, y: 48 } : n))
+        ),
+    },
+    {
+      action: "Released",
+      cursor: "pointer",
+      hold: 400,
+    },
+    {
+      target: '[data-tool="select"]',
+      fallback: { x: 9, y: 7.5 },
+      action: "Pointer tool",
+      transition: 480,
+      hover: "tool-select",
+      run: () => {
+        setActiveTool("select");
+        setNodes(INITIAL_NODES);
+      },
+    },
+  ];
 
-      step = (step + 1) % 6;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1850);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive, activeColor]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
-  };
-
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1850 });
 
   const pointsToSvgPath = (pts: { x: number; y: number }[]) => {
     if (pts.length < 2 || !pts[0]) return "";
@@ -452,20 +401,23 @@ export function DrawFlowPreview() {
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-excalidraw"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        cursorType={cursorType}
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in DrawFlows"
+        onOpen={() =>
+          requestHandoff({
+            target: "drawflows",
+            label: "Demo architecture",
+            workflow: {
+              name: "Demo architecture",
+              elements: toDiagramElements(INITIAL_NODES),
+            },
+          })
+        }
       />
 
       {/* Floating Excalidraw Toolbar */}
@@ -474,18 +426,18 @@ export function DrawFlowPreview() {
           <button
             type="button"
             data-tool="pencil"
-            className={`dash-tool-icon-btn ${activeTool === "pencil" ? "active" : ""} ${virtualHover === "tool-pencil" ? "is-virtual-hover" : ""}`}
+            className={`dash-tool-icon-btn ${activeTool === "pencil" ? "active" : ""} ${autopilot.hoverClass("tool-pencil")}`}
             onClick={() => setActiveTool("pencil")}
-            title="Freehand Pencil (Draw with mouse)"
+            title="Freehand pencil (draw with your mouse)"
           >
             <Pencil className="h-3 w-3" />
           </button>
           <button
             type="button"
             data-tool="select"
-            className={`dash-tool-icon-btn ${activeTool === "select" ? "active" : ""} ${virtualHover === "tool-select" ? "is-virtual-hover" : ""}`}
+            className={`dash-tool-icon-btn ${activeTool === "select" ? "active" : ""} ${autopilot.hoverClass("tool-select")}`}
             onClick={() => setActiveTool("select")}
-            title="Pointer / Drag nodes (V)"
+            title="Pointer / drag nodes (V)"
           >
             <MousePointer className="h-3 w-3" />
           </button>
@@ -494,7 +446,7 @@ export function DrawFlowPreview() {
             data-tool="rect"
             className={`dash-tool-icon-btn ${activeTool === "rect" ? "active" : ""}`}
             onClick={() => setActiveTool("rect")}
-            title="Click canvas to place Rectangle"
+            title="Click the canvas to place a rectangle"
           >
             <Square className="h-3 w-3" />
           </button>
@@ -503,7 +455,7 @@ export function DrawFlowPreview() {
             data-tool="diamond"
             className={`dash-tool-icon-btn ${activeTool === "diamond" ? "active" : ""}`}
             onClick={() => setActiveTool("diamond")}
-            title="Click canvas to place Diamond"
+            title="Click the canvas to place a diamond"
           >
             <Diamond className="h-3 w-3" />
           </button>
@@ -518,7 +470,7 @@ export function DrawFlowPreview() {
               key={c.value}
               type="button"
               data-color={c.value}
-              className={`dash-swatch-btn ${activeColor === c.value ? "active" : ""} ${virtualHover === `color-${c.value}` ? "is-virtual-hover" : ""}`}
+              className={`dash-swatch-btn ${activeColor === c.value ? "active" : ""} ${autopilot.hoverClass(`color-${c.value}`)}`}
               style={{ background: c.value }}
               onClick={() => handleColorChange(c.value)}
               title={`Color: ${c.label}`}
@@ -535,7 +487,7 @@ export function DrawFlowPreview() {
               type="button"
               className="dash-excali-action-btn"
               onClick={handleClearStrokes}
-              title="Clear freehand pencil strokes"
+              title="Clear freehand strokes"
             >
               <Eraser className="h-3 w-3" />
               <span>Erase</span>
@@ -545,12 +497,13 @@ export function DrawFlowPreview() {
             type="button"
             className="dash-excali-action-btn"
             onClick={handleReset}
-            title="Reset whiteboard"
+            title="Reset the whiteboard"
           >
             <RotateCcw className="h-3 w-3" />
             <span>Reset</span>
           </button>
         </div>
+
       </div>
 
       {/* Interactive SVG Whiteboard Canvas */}
@@ -627,7 +580,7 @@ export function DrawFlowPreview() {
             />
           )}
 
-          {/* Freehand Strokes Drawn by User or Autopilot */}
+          {/* Freehand Strokes Drawn by the Viewer or the Autopilot */}
           {strokes.map((stroke) => (
             <path
               key={stroke.id}

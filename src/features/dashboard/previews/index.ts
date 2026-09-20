@@ -1,5 +1,6 @@
 export { CompilerPreview } from "./CompilerPreview";
 export { ApiTesterPreview } from "./ApiTesterPreview";
+export { ChatPreview } from "./ChatPreview";
 export { DrawFlowPreview } from "./DrawFlowPreview";
 export { FormattersPreview } from "./FormattersPreview";
 export { DiffPreview } from "./DiffPreview";

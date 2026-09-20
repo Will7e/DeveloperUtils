@@ -1,12 +1,14 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { Columns2, AlignJustify } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedTs } from "./syntaxHighlight";
-import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
+import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
+import { requestHandoff } from "@/services/handoff.service";
 
 interface DiffPreset {
   id: string;
   name: string;
+  language: string;
   original: string[];
   modified: string[];
 }
@@ -15,199 +17,102 @@ const DIFF_PRESETS: DiffPreset[] = [
   {
     id: "network",
     name: "server.ts",
+    language: "typescript",
     original: ["const port = 8080;", 'const host = "127.0.0.1";'],
     modified: ["const port = 8080;", 'const host = "0.0.0.0";', "const tls = true;"],
   },
   {
     id: "auth",
     name: "auth.ts",
+    language: "typescript",
     original: ['export const ALGO = "HS256";', "export const TTL = 3600;"],
     modified: ['export const ALGO = "RS256";', "export const TTL = 7200;", "export const AUD = true;"],
   },
   {
     id: "sql",
     name: "query.sql",
+    language: "sql",
     original: ["SELECT id, name FROM users;", "WHERE active = true;"],
     modified: ["SELECT id, name, email FROM users;", "WHERE active = true;", "LIMIT 50;"],
   },
 ];
 
+const FIRST_PRESET = DIFF_PRESETS[0]!;
+const AUTH_PRESET = DIFF_PRESETS[1]!;
+
 export function DiffPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [viewMode, setViewMode] = useState<"unified" | "split">("split");
-  const [activePresetId, setActivePresetId] = useState("network");
+  const [activePresetId, setActivePresetId] = useState(FIRST_PRESET.id);
 
-  // Virtual Cursor Autopilot State (Pixel-accurate coordinates)
-  const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 28, y: 12, isPercent: true });
-  const [cursorClicking, setCursorClicking] = useState(false);
-  const [cursorAction, setCursorAction] = useState<string>("Ready");
-  const [cursorDuration, setCursorDuration] = useState<number>(500);
-  const [virtualHover, setVirtualHover] = useState<string | null>(null);
-  const [isUserActive, setIsUserActive] = useState(false);
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const preset: DiffPreset = DIFF_PRESETS.find((p) => p.id === activePresetId) ?? DIFF_PRESETS[0]!;
+  const preset: DiffPreset = DIFF_PRESETS.find((p) => p.id === activePresetId) ?? FIRST_PRESET;
 
   const addedLines = preset.modified.filter((line) => !preset.original.includes(line));
   const removedLines = preset.original.filter((line) => !preset.modified.includes(line));
 
-  // Autonomous Lifelike Cursor Motion Loop for Diff
-  useEffect(() => {
-    if (isUserActive) return;
+  const steps: AutopilotStep[] = [
+    {
+      target: `[data-preset="${AUTH_PRESET.id}"]`,
+      fallback: { x: 28, y: 12 },
+      action: AUTH_PRESET.name,
+      hover: `preset-${AUTH_PRESET.id}`,
+      run: () => setActivePresetId(AUTH_PRESET.id),
+    },
+    {
+      target: '[data-mode="unified"]',
+      fallback: { x: 90, y: 12 },
+      action: "Inline view",
+      hover: "mode-unified",
+      transition: 520,
+      run: () => setViewMode("unified"),
+    },
+    {
+      target: ".dash-diff-unified",
+      fallback: { x: 45, y: 55 },
+      action: "Review the changes",
+      transition: 650,
+    },
+    {
+      target: '[data-mode="split"]',
+      fallback: { x: 78, y: 12 },
+      action: "Split view",
+      hover: "mode-split",
+      run: () => setViewMode("split"),
+    },
+    {
+      target: `[data-preset="${FIRST_PRESET.id}"]`,
+      fallback: { x: 10, y: 12 },
+      action: FIRST_PRESET.name,
+      hover: `preset-${FIRST_PRESET.id}`,
+      run: () => setActivePresetId(FIRST_PRESET.id),
+    },
+  ];
 
-    let step = 0;
-    const timeouts: NodeJS.Timeout[] = [];
-
-    const cycle = () => {
-      if (isUserActive) return;
-
-      if (step === 0) {
-        // Glide to auth.ts preset button with pixel accuracy
-        setCursorDuration(480);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-preset="auth"]', { x: 28, y: 12 })
-        );
-        setCursorAction("auth.ts");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("preset-auth");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActivePresetId("auth");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 1) {
-        // Glide to Unified view toggle with pixel accuracy
-        setCursorDuration(520);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-mode="unified"]', { x: 90, y: 12 })
-        );
-        setCursorAction("Unified View");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("mode-unified");
-          }, 320)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setViewMode("unified");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 520)
-        );
-      } else if (step === 2) {
-        // Drift over unified additions / deletions
-        setCursorDuration(650);
-        setCursorPos(
-          getTargetCenter(containerRef.current, ".dash-diff-unified", { x: 45, y: 55 })
-        );
-        setCursorAction("Reviewing diff");
-      } else if (step === 3) {
-        // Glide to Split view toggle with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-mode="split"]', { x: 78, y: 12 })
-        );
-        setCursorAction("Split View");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("mode-split");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setViewMode("split");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      } else if (step === 4) {
-        // Glide back to server.ts preset with pixel accuracy
-        setCursorDuration(500);
-        setCursorPos(
-          getTargetCenter(containerRef.current, '[data-preset="network"]', { x: 10, y: 12 })
-        );
-        setCursorAction("server.ts");
-        timeouts.push(
-          setTimeout(() => {
-            setVirtualHover("preset-network");
-          }, 300)
-        );
-        timeouts.push(
-          setTimeout(() => {
-            setCursorClicking(true);
-            setActivePresetId("network");
-            timeouts.push(
-              setTimeout(() => {
-                setCursorClicking(false);
-                setVirtualHover(null);
-              }, 180)
-            );
-          }, 500)
-        );
-      }
-
-      step = (step + 1) % 5;
-    };
-
-    cycle();
-    const interval = setInterval(cycle, 1850);
-
-    return () => {
-      clearInterval(interval);
-      timeouts.forEach(clearTimeout);
-      setVirtualHover(null);
-    };
-  }, [isUserActive]);
-
-  const handleMouseEnter = () => {
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    setIsUserActive(true);
-    setVirtualHover(null);
-  };
-
-  const handleMouseLeave = () => {
-    idleTimerRef.current = setTimeout(() => {
-      setIsUserActive(false);
-    }, 2400);
-  };
+  const autopilot = useAutopilot(containerRef, steps, { stepMs: 1850 });
 
   return (
     <div
       ref={containerRef}
       className="dash-demo-box dash-demo-diff"
-      onClick={(e) => e.stopPropagation()}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      {...autopilot.containerProps}
     >
-      {/* Animated Virtual Cursor with Pixel-Accurate Positioning */}
-      <VirtualCursor
-        x={cursorPos.x}
-        y={cursorPos.y}
-        isPercent={cursorPos.isPercent}
-        isClicking={cursorClicking}
-        visible={!isUserActive}
-        actionText={cursorAction}
-        transitionDuration={cursorDuration}
+      <VirtualCursor {...autopilot.cursorProps} />
+
+      <DemoControls
+        autopilot={autopilot}
+        openLabel="Open in Diff Checker"
+        onOpen={() =>
+          requestHandoff({
+            target: "diff",
+            label: preset.name,
+            diff: {
+              original: preset.original.join("\n"),
+              modified: preset.modified.join("\n"),
+              name: preset.name,
+              language: preset.language,
+            },
+          })
+        }
       />
 
       {/* View Switcher & Presets Bar */}
@@ -218,7 +123,7 @@ export function DiffPreview() {
               key={p.id}
               data-preset={p.id}
               type="button"
-              className={`dash-diff-preset-btn ${activePresetId === p.id ? "active" : ""} ${virtualHover === `preset-${p.id}` ? "is-virtual-hover" : ""}`}
+              className={`dash-diff-preset-btn ${activePresetId === p.id ? "active" : ""} ${autopilot.hoverClass(`preset-${p.id}`)}`}
               onClick={() => setActivePresetId(p.id)}
             >
               {p.name}
@@ -232,7 +137,7 @@ export function DiffPreview() {
           <button
             data-mode="split"
             type="button"
-            className={`dash-diff-mode-btn ${viewMode === "split" ? "active" : ""} ${virtualHover === "mode-split" ? "is-virtual-hover" : ""}`}
+            className={`dash-diff-mode-btn ${viewMode === "split" ? "active" : ""} ${autopilot.hoverClass("mode-split")}`}
             onClick={() => setViewMode("split")}
             title="Side by side split comparison"
           >
@@ -242,7 +147,7 @@ export function DiffPreview() {
           <button
             data-mode="unified"
             type="button"
-            className={`dash-diff-mode-btn ${viewMode === "unified" ? "active" : ""} ${virtualHover === "mode-unified" ? "is-virtual-hover" : ""}`}
+            className={`dash-diff-mode-btn ${viewMode === "unified" ? "active" : ""} ${autopilot.hoverClass("mode-unified")}`}
             onClick={() => setViewMode("unified")}
             title="Unified line by line diff"
           >
@@ -250,6 +155,7 @@ export function DiffPreview() {
             <span>Unified</span>
           </button>
         </div>
+
       </div>
 
       {/* Diff Code Area */}
