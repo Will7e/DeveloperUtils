@@ -12,6 +12,8 @@ import {
   Download,
   Search,
   RotateCw,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { LoadingState } from "@/components/ui/loading-state";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
@@ -30,6 +32,8 @@ interface ResponsePaneProps {
   currentThemeSetting: string;
   handleEditorMount: OnMount;
   onSend: () => void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
 }
 
 export function ResponsePane({
@@ -37,6 +41,8 @@ export function ResponsePane({
   currentThemeSetting,
   handleEditorMount,
   onSend,
+  isExpanded = false,
+  onToggleExpand,
 }: ResponsePaneProps) {
   const store = useApiTesterStore();
   const addToast = useAppStore((s) => s.addToast);
@@ -368,36 +374,64 @@ export function ResponsePane({
 
                 <div style={{ flex: 1 }} />
 
-                {responseTab !== "headers" && (
-                  <div
-                    style={{ display: "flex", gap: "6px", alignItems: "center" }}
-                  >
+                <div
+                  style={{ display: "flex", gap: "6px", alignItems: "center" }}
+                >
+                  {responseTab !== "headers" && (
+                    <>
+                      <button
+                        type="button"
+                        className="api-copy-btn"
+                        onClick={handleDownloadResponse}
+                        title="Download raw response payload as a file"
+                      >
+                        <Download className="h-3 w-3 opacity-80" />
+                        <span>Download</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="api-copy-btn"
+                        onClick={handleCopyResponse}
+                        title="Copy response body to clipboard"
+                      >
+                        {copied ? (
+                          <>
+                            <Check className="h-3 w-3 text-green" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" /> Copy
+                          </>
+                        )}
+                      </button>
+                    </>
+                  )}
+
+                  {onToggleExpand && (
                     <button
                       type="button"
                       className="api-copy-btn"
-                      onClick={handleDownloadResponse}
-                      title="Download raw response payload as a file"
+                      onClick={onToggleExpand}
+                      title={
+                        isExpanded
+                          ? "Collapse response view (Esc)"
+                          : "Expand whole response view"
+                      }
                     >
-                      <Download className="h-3 w-3 opacity-80" />
-                      <span>Download</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="api-copy-btn"
-                      onClick={handleCopyResponse}
-                    >
-                      {copied ? (
+                      {isExpanded ? (
                         <>
-                          <Check className="h-3 w-3 text-green" /> Copied
+                          <Minimize2 className="h-3 w-3" />
+                          <span>Collapse</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="h-3 w-3" /> Copy
+                          <Maximize2 className="h-3 w-3" />
+                          <span>Expand</span>
                         </>
                       )}
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               <div
@@ -435,6 +469,7 @@ export function ResponsePane({
                           lineNumbers: "on",
                           scrollBeyondLastLine: false,
                           wordWrap: "on",
+                          automaticLayout: true,
                         }}
                       />
                     </EditorErrorBoundary>

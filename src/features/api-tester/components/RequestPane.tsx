@@ -41,6 +41,7 @@ interface RequestPaneProps {
   handleGraphqlEditorMount: OnMount;
   wsMessageText: string;
   setWsMessageText: (val: string) => void;
+  hidden?: boolean;
 }
 
 export function RequestPane({
@@ -54,6 +55,7 @@ export function RequestPane({
   handleGraphqlEditorMount,
   wsMessageText,
   setWsMessageText,
+  hidden = false,
 }: RequestPaneProps) {
   const store = useApiTesterStore();
   const [showPassword, setShowPassword] = useState(false);
@@ -63,7 +65,11 @@ export function RequestPane({
   return (
     <div
       className="api-pane api-pane-request"
-      style={{ height: `${requestPaneHeight}px`, flexShrink: 0 }}
+      style={{
+        height: `${requestPaneHeight}px`,
+        flexShrink: 0,
+        display: hidden ? "none" : "flex",
+      }}
     >
       <div className="api-tabs">
         <div className="api-tabs-list">

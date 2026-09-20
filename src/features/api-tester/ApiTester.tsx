@@ -177,6 +177,16 @@ export function ApiTester() {
     handleResizeStart,
   } = useResizablePane({ initialHeight: 280 });
 
+  // Response expanded state (maximize response to fill view)
+  const [isResponseExpanded, setIsResponseExpanded] = useState(false);
+
+  // Auto-reset response expansion if active tab has no response
+  useEffect(() => {
+    if (!activeTab?.response && isResponseExpanded) {
+      setIsResponseExpanded(false);
+    }
+  }, [activeTab?.id, activeTab?.response, isResponseExpanded]);
+
   // Relative time ticker
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -184,9 +194,14 @@ export function ApiTester() {
     return () => clearInterval(timer);
   }, []);
 
-  // Keyboard shortcut: Cmd+Enter (Send), Cmd+Shift+L (Presets Library)
+  // Keyboard shortcut: Cmd+Enter (Send), Cmd+Shift+L (Presets Library), Escape (Exit Response Expanded)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isResponseExpanded) {
+        e.preventDefault();
+        setIsResponseExpanded(false);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "L" || e.key === "l")) {
         e.preventDefault();
         setShowLibraryModal((prev) => !prev);
@@ -212,7 +227,7 @@ export function ApiTester() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [isResponseExpanded]);
 
   // Close env dropdown on outside click
   useEffect(() => {
@@ -548,7 +563,12 @@ export function ApiTester() {
           handleEditorMount={handleEditorMount}
         />
 
-        <div className="api-split-panes" ref={splitRef}>
+        <div
+          className={`api-split-panes ${
+            isResponseExpanded ? "api-split-panes-response-expanded" : ""
+          }`}
+          ref={splitRef}
+        >
           <RequestPane
             activeTab={activeTab}
             requestTab={requestTab}
@@ -560,22 +580,27 @@ export function ApiTester() {
             handleGraphqlEditorMount={handleGraphqlEditorMount}
             wsMessageText={wsMessageText}
             setWsMessageText={setWsMessageText}
+            hidden={isResponseExpanded}
           />
 
-          <div
-            className={`api-resize-handle ${
-              isDraggingActive ? "api-resize-handle-active" : ""
-            }`}
-            onMouseDown={handleResizeStart}
-          >
-            <div className="api-resize-handle-bar" />
-          </div>
+          {!isResponseExpanded && (
+            <div
+              className={`api-resize-handle ${
+                isDraggingActive ? "api-resize-handle-active" : ""
+              }`}
+              onMouseDown={handleResizeStart}
+            >
+              <div className="api-resize-handle-bar" />
+            </div>
+          )}
 
           <ResponsePane
             activeTab={activeTab}
             currentThemeSetting={currentThemeSetting}
             handleEditorMount={handleEditorMount}
             onSend={() => store.sendRequest()}
+            isExpanded={isResponseExpanded}
+            onToggleExpand={() => setIsResponseExpanded((prev) => !prev)}
           />
         </div>
 
