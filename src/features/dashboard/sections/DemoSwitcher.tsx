@@ -5,6 +5,10 @@
 // it stays a strip: no cards, no icons, no second "open" link per tool. It
 // implements the ARIA tabs pattern with roving focus, which means eight
 // demos cost one row and one tab stop instead of eight of each.
+//
+// The active tab shows a slim progress fill bar that counts down before
+// the carousel advances to the next demo. Hovering the demo area pauses
+// the timer and the bar holds its position.
 
 import { useRef, type KeyboardEvent } from "react";
 import { DASHBOARD_TOOLS } from "../tools";
@@ -12,9 +16,13 @@ import { DASHBOARD_TOOLS } from "../tools";
 export interface DemoSwitcherProps {
   activeId: string;
   onSelect: (id: string) => void;
+  /** 0 → 1 progress of the auto-rotation timer. Undefined = no auto-rotation. */
+  progress?: number;
+  /** True when the countdown is paused (hover / interaction). */
+  isPaused?: boolean;
 }
 
-export function DemoSwitcher({ activeId, onSelect }: DemoSwitcherProps) {
+export function DemoSwitcher({ activeId, onSelect, progress, isPaused }: DemoSwitcherProps) {
   const buttons = useRef<Array<HTMLButtonElement | null>>([]);
 
   const selectAt = (index: number) => {
@@ -75,10 +83,18 @@ export function DemoSwitcher({ activeId, onSelect }: DemoSwitcherProps) {
             className={`dash-demo-switcher-btn${isActive ? " is-active" : ""}`}
             onClick={() => onSelect(tool.id)}
           >
-            {tool.short}
+            <span className="dash-demo-switcher-label">{tool.short}</span>
+            {isActive && progress !== undefined && (
+              <span
+                className={`dash-demo-switcher-progress${isPaused ? " is-paused" : ""}`}
+                style={{ "--progress": progress } as React.CSSProperties}
+                aria-hidden="true"
+              />
+            )}
           </button>
         );
       })}
     </div>
   );
 }
+

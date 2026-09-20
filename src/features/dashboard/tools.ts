@@ -97,13 +97,11 @@ export const DASHBOARD_TOOLS: DashboardTool[] = [
 export const TOOL_COUNT = DASHBOARD_TOOLS.length;
 
 export const HERO = {
-  titleLead: "Everyday developer tools that run ",
-  titleAccent: "in your tab",
-  /** Deliberately not a second list of tool names — the demo strip is that
-      list. This line says what the tools are *for*, with no setup implied. */
+  titleLead: "Private, instant, and ",
+  titleAccent: "local-first",
   subtitle:
-    "Code, requests, diffs, data and diagrams — the small jobs between build steps, without the setup.",
-  primaryCta: { label: "Open the Compiler", to: "/compiler" },
+    "Everything runs directly in your browser, no accounts, no tracking, and your data is secure, encrypted, and never leaves your machine or your drive.",
+  primaryCta: { label: "Jump to a tool", shortcut: "⌘K" },
   /** One compact line of facts, instead of a stats panel. Encryption is left
       to the privacy card below, which actually explains it. */
   trust: [`${TOOL_COUNT} tools`, "no account", "nothing uploaded"],
@@ -125,7 +123,7 @@ export const PRIVACY_POINTS: PrivacyPoint[] = [
   },
   {
     title: "Our servers are not in the path",
-    body: "AI Chat calls OpenRouter with your key; Premium sync writes to your own drive.",
+    body: "AI Chat calls OpenRouter with your key; cloud sync writes to your own drive.",
   },
   {
     title: "A locked-down page",
@@ -142,22 +140,17 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Is my code or data uploaded anywhere?",
     answer:
-      "No. Every tool runs in your browser and this page makes no requests of its own. The only two exceptions are features you explicitly connect: AI Chat sends prompts to OpenRouter using your key, and Premium sync writes an encrypted file to your own cloud drive.",
+      "No. Every tool runs in your browser and this page makes no requests of its own. The only two exceptions are features you explicitly connect: AI Chat sends prompts to OpenRouter using your key, and cloud sync writes an encrypted file to your own cloud drive.",
   },
   {
     question: "Do I need an account?",
     answer:
-      "Never. There is no signup, no login and no email. Premium is unlocked with a license key, and that key is the whole credential.",
+      "Never. There is no signup, no login and no email. Every tool runs directly in your browser with zero setup.",
   },
   {
     question: "Does it work offline?",
     answer:
       "The tools and the bundled ServiceNow reference keep working once the page has loaded, because nothing calls a server. The page itself still needs to load from the web — there is no service worker yet.",
-  },
-  {
-    question: "What does Premium add?",
-    answer:
-      "Nothing you see here is locked away: every tool above is free. Premium is for people who want their workspace everywhere — encrypted background sync to your own cloud drive and no local storage cap.",
   },
   {
     question: "Where do my secrets live?",

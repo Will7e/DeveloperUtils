@@ -8,7 +8,7 @@
 // arrows move the highlight, Enter selects, Escape closes.
 
 import React from "react";
-import { Check, ChevronDown, Search, Sparkles } from "lucide-react";
+import { Bot, Check, ChevronDown, Search } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useClickOutside } from "@/features/api-tester/hooks/useClickOutside";
 import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
@@ -52,23 +52,31 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
     open
   );
 
-  // Position the dropdown below the trigger, clamped to the
-  // viewport so it can never overflow either edge.
+  // Position the dropdown below or above the trigger, clamped to the
+  // viewport so it never overflows either edge.
   const positionDropdown = React.useCallback(() => {
     const btn = btnRef.current;
     if (!btn) return;
     const rect = btn.getBoundingClientRect();
     const width = Math.max(DROPDOWN_WIDTH, rect.width);
-    const maxLeft = window.innerWidth - width - VIEWPORT_MARGIN;
-    const minTop = Math.max(
-      VIEWPORT_MARGIN,
-      window.innerHeight - 420 - VIEWPORT_MARGIN
-    );
-    setPos({
-      top: Math.max(minTop, Math.min(rect.bottom + 4, minTop)),
-      left: Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft)),
-      width,
-    });
+    const dropdownHeight = 380;
+
+    // Check vertical space: open above if not enough room below
+    const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
+    let top: number;
+    if (spaceBelow < 260 && rect.top > spaceBelow) {
+      top = Math.max(VIEWPORT_MARGIN, rect.top - dropdownHeight - 4);
+    } else {
+      const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - dropdownHeight - VIEWPORT_MARGIN);
+      top = Math.min(rect.bottom + 4, maxTop);
+    }
+
+    // Align to the right edge of button if possible, clamped to viewport
+    const rightAligned = rect.right - width;
+    let left = rightAligned >= VIEWPORT_MARGIN ? rightAligned : rect.left;
+    left = Math.max(VIEWPORT_MARGIN, Math.min(left, window.innerWidth - width - VIEWPORT_MARGIN));
+
+    setPos({ top, left, width });
   }, []);
 
   const handleOpen = React.useCallback(() => {
@@ -192,7 +200,7 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <Sparkles className="h-3.5 w-3.5 chat-model-btn-icon" />
+          <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />
           <span className="chat-model-btn-label">{selected?.name ?? value}</span>
           <ChevronDown className="h-3 w-3 chat-model-btn-chevron" />
         </button>
@@ -200,7 +208,7 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
 
       {open && (
         <>
-          <div className="dropdown-backdrop" onClick={() => setOpen(false)} />
+          <div className="chat-model-backdrop" onClick={() => setOpen(false)} />
           <div
             className="chat-model-dropdown"
             style={{ top: pos.top, left: pos.left, width: pos.width }}

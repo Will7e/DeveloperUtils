@@ -1,32 +1,33 @@
 // ============================================================
 // Chat Settings Modal — OpenRouter Key, Model, Prompt, Data, Skills
 // ============================================================
-// Built on the app's shared .settings-* layout vocabulary AND the
-// Geist component layer (Button, Toggle, Tabs secondary) per
-// vercel.com/geist. Tab content scrolls inside the fixed-height
-// panel; focus is trapped while the modal is open.
+// Built on the app's shared .settings-* layout vocabulary so it
+// visually matches the main SettingsPanel. Uses the same pill-style
+// tab bar, flat section layout, input/select/toggle tokens, and
+// footer pattern.
 
 import React from "react";
 import {
   AlertTriangle,
+  Blocks,
   CheckCircle2,
   Download,
   ExternalLink,
   Eye,
   EyeOff,
+  Key,
   Loader2,
+  MessageSquare,
   MessageSquareText,
   Pencil,
   Plus,
   RotateCcw,
-  Sparkles,
+  ShieldCheck,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/toggle";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { checkKey, type KeyCheckResult } from "../lib/openrouter-client";
 import { OPENROUTER_CONSOLE_URL } from "../constants";
@@ -171,11 +172,11 @@ function SettingsModalInner({
         aria-label="Chat settings"
         tabIndex={-1}
       >
-        {/* Header — SettingsPanel vocabulary */}
+        {/* Header — same as SettingsPanel */}
         <div className="settings-header">
           <div className="settings-header-info">
             <div className="settings-header-icon-box">
-              <MessageSquareText className="w-4 h-4" />
+              <MessageSquareText className="w-5 h-5" />
             </div>
             <div>
               <div className="settings-header-title-text">AI Chat Settings</div>
@@ -191,290 +192,302 @@ function SettingsModalInner({
           </SimpleTooltip>
         </div>
 
-        {/* Tabs — Geist secondary segmented control */}
-        <div className="chat-settings-tabsbar">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTab)}>
-            <TabsList variant="secondary" className="w-full">
-              <TabsTrigger value="connection" className="flex-1">Connection</TabsTrigger>
-              <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
-              <TabsTrigger value="skills" className="flex-1">Skills</TabsTrigger>
-            </TabsList>
-          </Tabs>
+        {/* Category Tabs — same pill bar as SettingsPanel */}
+        <div className="settings-tabs-bar">
+          <button
+            type="button"
+            className={`settings-tab-item ${activeTab === "connection" ? "active" : ""}`}
+            onClick={() => setActiveTab("connection")}
+          >
+            <Key size={14} />
+            <span>Connection</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-tab-item ${activeTab === "chat" ? "active" : ""}`}
+            onClick={() => setActiveTab("chat")}
+          >
+            <MessageSquare size={14} />
+            <span>Chat</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-tab-item ${activeTab === "skills" ? "active" : ""}`}
+            onClick={() => setActiveTab("skills")}
+          >
+            <Blocks size={14} />
+            <span>Skills</span>
+          </button>
         </div>
 
-        {/* Scrollable tab body — flex child that can shrink so long
-            tabs (Skills) scroll instead of being clipped */}
-        <div className="chat-settings-tabs-wrap">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTab)}>
-            <div className="chat-settings-body">
-              {/* ── Connection ── */}
-              <TabsContent value="connection">
-                <div className="settings-tab-content">
-                  <div className="settings-security-card">
-                    <div className="settings-security-badge-group">
-                      <div className="settings-security-card-icon-wrap">
-                        <CheckCircle2 size={18} />
-                      </div>
-                      <div>
-            <div className="settings-security-card-title">Bring your own key</div>
-            <div className="settings-security-card-desc">
-              Your key is encrypted at rest (AES-256-GCM) and sent only to OpenRouter over
-              TLS. With Cloud Sync enabled it syncs across devices — still end-to-end
-              encrypted.
-            </div>
-                      </div>
-                    </div>
+        {/* Body — same scroll container as SettingsPanel */}
+        <div className="settings-body">
+          {/* ── Connection ── */}
+          {activeTab === "connection" && (
+            <div className="settings-tab-content">
+              <div className="settings-security-card">
+                <div className="settings-security-badge-group">
+                  <div className="settings-security-card-icon-wrap">
+                    <ShieldCheck size={18} />
                   </div>
-
-                  <div className="settings-section">
-                    <div className="settings-section-title">OpenRouter API Key</div>
-
-                    <div className="settings-row chat-key-row">
-                      <div className="settings-row-info">
-                        <label className="settings-label" htmlFor="chat-api-key-input">
-                          API key
-                          <a
-                            href={OPENROUTER_CONSOLE_URL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="chat-settings-link"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Get a key <ExternalLink className="h-3 w-3" />
-                          </a>
-                        </label>
-                        <span className="settings-sublabel">
-                          Starts with sk-or-v1- · validated live against OpenRouter
-                        </span>
-                      </div>
-                      <div className="chat-key-controls">
-                          <div className="chat-key-input-wrap">
-                            <input
-                              id="chat-api-key-input"
-                              type={showKey ? "text" : "password"}
-                              value={keyDraft}
-                              onChange={(e) => setKeyDraft(e.target.value)}
-                              onBlur={saveKey}
-                              placeholder="sk-or-v1-…"
-                              className="settings-input chat-key-input"
-                              autoComplete="off"
-                              spellCheck={false}
-                            />
-                        <SimpleTooltip content={showKey ? "Hide key" : "Show key"} side="top">
-                              <button
-                                type="button"
-                                className="chat-key-toggle"
-                                onClick={() => setShowKey((v) => !v)}
-                                aria-label={showKey ? "Hide key" : "Show key"}
-                              >
-                                {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                              </button>
-                            </SimpleTooltip>
-                          </div>
-                          {keyDirty && (
-                            <Button size="sm" variant="default" onClick={saveKey}>
-                              Save
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={validateKey}
-                            disabled={!keyDraft.trim() || keyState.status === "checking"}
-                          >
-                            {keyState.status === "checking" ? (
-                              <Loader2 size={12} className="animate-spin" />
-                            ) : (
-                              "Test"
-                            )}
-                          </Button>
-                      </div>
+                  <div>
+                    <div className="settings-security-card-title">Bring your own key</div>
+                    <div className="settings-security-card-desc">
+                      Your key is encrypted at rest (AES-256-GCM) and sent only to OpenRouter over
+                      TLS. With Cloud Sync enabled it syncs across devices — still end-to-end
+                      encrypted.
                     </div>
-
-                    {keyState.status === "valid" && (
-                      <div className="chat-key-status chat-key-status-valid">
-                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                        <span>
-                          {keyState.result.message}
-                          {keyState.result.usageRemaining !== undefined &&
-                            ` Credits remaining: $${keyState.result.usageRemaining.toFixed(2)}.`}
-                        </span>
-                      </div>
-                    )}
-                    {keyState.status === "invalid" && (
-                      <div className="chat-key-status chat-key-status-invalid">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                        <span>{keyState.result.message}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
-              </TabsContent>
+              </div>
 
-              {/* ── Chat ── */}
-              <TabsContent value="chat">
-                <div className="settings-tab-content">
-                  <div className="settings-section">
-                    <div className="settings-section-title">Model</div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <label className="settings-label">
-                          Default model
-                        </label>
-                        <span className="settings-sublabel">
-                          Used for new chats — each chat remembers its own model once switched
-                        </span>
-                      </div>
-                      <div className="settings-control">
-                        <ModelPicker
-                          value={settings.defaultModel}
-                          models={models}
-                          isLoading={false}
-                          onChange={(id) => onUpdate({ defaultModel: id })}
-                        />
-                      </div>
-                    </div>
+              <div className="settings-section">
+                <div className="settings-section-title">OpenRouter API Key</div>
+
+                <div className="settings-row chat-key-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-api-key-input">
+                      API key
+                      <a
+                        href={OPENROUTER_CONSOLE_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="chat-settings-link"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Get a key <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </label>
+                    <span className="settings-sublabel">
+                      Starts with sk-or-v1- · validated live against OpenRouter
+                    </span>
                   </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-section">
-                    <div className="settings-section-title">Behavior</div>
-
-                    <div className="settings-row">
-                      <div className="settings-row-info" style={{ flex: 1 }}>
-                        <label className="settings-label">System prompt</label>
-                        <span className="settings-sublabel">
-                          Applied to all chats that don't define their own
-                        </span>
-                      </div>
-                      <span className="settings-value">{settings.systemPrompt.length} chars</span>
-                    </div>
-                    <textarea
-                      value={settings.systemPrompt}
-                      onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
-                      className="settings-textarea chat-prompt-textarea"
-                      rows={5}
-                      placeholder="You are a helpful assistant…"
-                    />
-
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <label className="settings-label" htmlFor="chat-temp-slider">
-                          Temperature
-                        </label>
-                        <span className="settings-sublabel">Lower is precise · higher is creative</span>
-                      </div>
-                      <div className="settings-control">
-                        <input
-                          id="chat-temp-slider"
-                          type="range"
-                          min={0}
-                          max={2}
-                          step={0.1}
-                          value={settings.temperature}
-                          onChange={(e) => onUpdate({ temperature: parseFloat(e.target.value) })}
-                          className="settings-slider"
-                        />
-                        <span className="settings-value">{settings.temperature.toFixed(1)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="settings-divider" />
-
-                  <div className="settings-section">
-                    <div className="settings-section-title">Data Management</div>
-                    <div className="settings-row">
-                      <div className="settings-row-info">
-                        <label className="settings-label">Stored conversations</label>
-                        <span className="settings-sublabel">
-                          {conversationCount} conversation{conversationCount === 1 ? "" : "s"} ·
-                          encrypted locally · synced when Cloud Sync is on
-                        </span>
-                      </div>
-                      {!confirmClear && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="chat-danger-ghost"
-                          onClick={() => setConfirmClear(true)}
-                          disabled={conversationCount === 0}
+                  <div className="chat-key-controls">
+                    <div className="chat-key-input-wrap">
+                      <input
+                        id="chat-api-key-input"
+                        type={showKey ? "text" : "password"}
+                        value={keyDraft}
+                        onChange={(e) => setKeyDraft(e.target.value)}
+                        onBlur={saveKey}
+                        placeholder="sk-or-v1-…"
+                        className="settings-input chat-key-input"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <SimpleTooltip content={showKey ? "Hide key" : "Show key"} side="top">
+                        <button
+                          type="button"
+                          className="chat-key-toggle"
+                          onClick={() => setShowKey((v) => !v)}
+                          aria-label={showKey ? "Hide key" : "Show key"}
                         >
-                          <Trash2 size={12} />
-                          Clear All
-                        </Button>
-                      )}
+                          {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </SimpleTooltip>
                     </div>
-
-                    {confirmClear && (
-                      <div className="settings-vault-subform danger-box">
-                        <div className="settings-subform-title danger">
-                          <AlertTriangle size={14} />
-                          Delete all conversations?
-                        </div>
-                        <p className="settings-subform-warning">
-                          This permanently removes {conversationCount} conversation
-                          {conversationCount === 1 ? "" : "s"} from this device
-                          {settings.apiKey ? " and queues deletion for the next cloud sync" : ""}.
-                          A fresh empty chat will be created.
-                        </p>
-                        <div className="settings-subform-btns">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={handleClearAll}
-                            disabled={clearingState !== "idle"}
-                            className="flex-1"
-                          >
-                            {clearingState === "clearing" ? (
-                              <>
-                                <Loader2 size={13} className="animate-spin" />
-                                Deleting…
-                              </>
-                            ) : clearingState === "done" ? (
-                              <>
-                                <CheckCircle2 size={13} />
-                                Deleted!
-                              </>
-                            ) : (
-                              "Yes, delete everything"
-                            )}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => setConfirmClear(false)}
-                            disabled={clearingState !== "idle"}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
+                    {keyDirty && (
+                      <button type="button" className="settings-action-btn" onClick={saveKey}>
+                        Save
+                      </button>
                     )}
+                    <button
+                      type="button"
+                      className="settings-action-btn"
+                      onClick={validateKey}
+                      disabled={!keyDraft.trim() || keyState.status === "checking"}
+                    >
+                      {keyState.status === "checking" ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>Testing…</span>
+                        </>
+                      ) : (
+                        "Test"
+                      )}
+                    </button>
                   </div>
                 </div>
-              </TabsContent>
 
-              {/* ── Skills ── */}
-              <TabsContent value="skills">
-                <SkillsTabContent
-                  settings={settings}
-                  onAddSkill={onAddSkill}
-                  onUpdateSkill={onUpdateSkill}
-                  onDeleteSkill={onDeleteSkill}
-                  onResetBuiltinSkills={onResetBuiltinSkills}
-                />
-              </TabsContent>
+                {keyState.status === "valid" && (
+                  <div className="chat-key-status chat-key-status-valid">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      {keyState.result.message}
+                      {keyState.result.usageRemaining !== undefined &&
+                        ` Credits remaining: $${keyState.result.usageRemaining.toFixed(2)}.`}
+                    </span>
+                  </div>
+                )}
+                {keyState.status === "invalid" && (
+                  <div className="chat-key-status chat-key-status-invalid">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{keyState.result.message}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          </Tabs>
+          )}
+
+          {/* ── Chat ── */}
+          {activeTab === "chat" && (
+            <div className="settings-tab-content">
+              <div className="settings-section">
+                <div className="settings-section-title">Model</div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label">
+                      Default model
+                    </label>
+                    <span className="settings-sublabel">
+                      Used for new chats — each chat remembers its own model once switched
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <ModelPicker
+                      value={settings.defaultModel}
+                      models={models}
+                      isLoading={false}
+                      onChange={(id) => onUpdate({ defaultModel: id })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-divider" />
+
+              <div className="settings-section">
+                <div className="settings-section-title">Behavior</div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info" style={{ flex: 1 }}>
+                    <label className="settings-label">System prompt</label>
+                    <span className="settings-sublabel">
+                      Applied to all chats that don't define their own
+                    </span>
+                  </div>
+                  <span className="settings-value">{settings.systemPrompt.length} chars</span>
+                </div>
+                <textarea
+                  value={settings.systemPrompt}
+                  onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
+                  className="settings-textarea chat-prompt-textarea"
+                  rows={5}
+                  placeholder="You are a helpful assistant…"
+                />
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-temp-slider">
+                      Temperature
+                    </label>
+                    <span className="settings-sublabel">Lower is precise · higher is creative</span>
+                  </div>
+                  <div className="settings-control">
+                    <input
+                      id="chat-temp-slider"
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={settings.temperature}
+                      onChange={(e) => onUpdate({ temperature: parseFloat(e.target.value) })}
+                      className="settings-slider"
+                    />
+                    <span className="settings-value">{settings.temperature.toFixed(1)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="settings-divider" />
+
+              <div className="settings-section">
+                <div className="settings-section-title">Data Management</div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label">Stored conversations</label>
+                    <span className="settings-sublabel">
+                      {conversationCount} conversation{conversationCount === 1 ? "" : "s"} ·
+                      encrypted locally · synced when Cloud Sync is on
+                    </span>
+                  </div>
+                  {!confirmClear && (
+                    <button
+                      type="button"
+                      className="settings-action-btn danger"
+                      onClick={() => setConfirmClear(true)}
+                      disabled={conversationCount === 0}
+                    >
+                      <Trash2 size={12} />
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                {confirmClear && (
+                  <div className="settings-vault-subform danger-box">
+                    <div className="settings-subform-title danger">
+                      <AlertTriangle size={14} />
+                      Delete all conversations?
+                    </div>
+                    <p className="settings-subform-warning">
+                      This permanently removes {conversationCount} conversation
+                      {conversationCount === 1 ? "" : "s"} from this device
+                      {settings.apiKey ? " and queues deletion for the next cloud sync" : ""}.
+                      A fresh empty chat will be created.
+                    </p>
+                    <div className="settings-subform-btns">
+                      <button
+                        type="button"
+                        className="settings-subform-danger-btn flex items-center justify-center gap-1.5 transition-all disabled:opacity-80"
+                        onClick={handleClearAll}
+                        disabled={clearingState !== "idle"}
+                      >
+                        {clearingState === "clearing" ? (
+                          <>
+                            <Loader2 size={13} className="animate-spin" />
+                            <span>Deleting…</span>
+                          </>
+                        ) : clearingState === "done" ? (
+                          <>
+                            <CheckCircle2 size={13} />
+                            <span>Deleted!</span>
+                          </>
+                        ) : (
+                          <span>Yes, delete everything</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-subform-cancel disabled:opacity-50"
+                        onClick={() => setConfirmClear(false)}
+                        disabled={clearingState !== "idle"}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Skills ── */}
+          {activeTab === "skills" && (
+            <SkillsTabContent
+              settings={settings}
+              onAddSkill={onAddSkill}
+              onUpdateSkill={onUpdateSkill}
+              onDeleteSkill={onDeleteSkill}
+              onResetBuiltinSkills={onResetBuiltinSkills}
+            />
+          )}
         </div>
 
-        {/* Footer */}
+        {/* Footer — same as SettingsPanel */}
         <div className="settings-footer">
-          <span className="settings-footer-hint">Esc to close</span>
-          <span className="settings-footer-hint chat-settings-footer-right">
-            Changes save automatically
+          <span className="settings-footer-hint">
+            Esc to close · Changes save automatically
           </span>
         </div>
       </div>
@@ -605,40 +618,39 @@ function SkillsTabContent({
           </div>
           <div className="chat-skill-actions">
             <SimpleTooltip content={isEditing ? "Close editor" : "Edit"} side="top">
-              <Button
-                size="icon-sm"
-                variant="ghost"
+              <button
+                type="button"
+                className="settings-icon-btn"
                 onClick={() => (isEditing ? closeEditor() : startEdit(skill))}
                 aria-label={isEditing ? "Close editor" : `Edit ${skill.name}`}
               >
-                {isEditing ? <X size={12} /> : <Pencil size={12} />}
-              </Button>
+                {isEditing ? <X size={13} /> : <Pencil size={13} />}
+              </button>
             </SimpleTooltip>
             <SimpleTooltip content="Export .md" side="top">
-              <Button
-                size="icon-sm"
-                variant="ghost"
+              <button
+                type="button"
+                className="settings-icon-btn"
                 onClick={() => downloadSkillFile(skill)}
                 aria-label={`Export ${skill.name}`}
               >
-                <Download size={12} />
-              </Button>
+                <Download size={13} />
+              </button>
             </SimpleTooltip>
             <SimpleTooltip
               content={isConfirmingDelete ? "Click again to delete" : "Delete"}
               side="top"
             >
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className={`chat-danger-ghost ${isConfirmingDelete ? "chat-danger-confirm" : ""}`}
+              <button
+                type="button"
+                className={`settings-icon-btn danger ${isConfirmingDelete ? "danger-confirm" : ""}`}
                 onClick={() => handleSkillDelete(skill.id)}
                 aria-label={
                   isConfirmingDelete ? "Click again to confirm delete" : `Delete ${skill.name}`
                 }
               >
-                <Trash2 size={12} />
-              </Button>
+                <Trash2 size={13} />
+              </button>
             </SimpleTooltip>
             <Toggle
               size="sm"
@@ -677,18 +689,22 @@ function SkillsTabContent({
             <div className="chat-skill-editor-footer">
               <span className="chat-skill-chars">{draft.content.length} chars</span>
               <div className="chat-skill-editor-btns">
-                <Button size="sm" variant="secondary" onClick={closeEditor}>
+                <button
+                  type="button"
+                  className="settings-subform-cancel"
+                  onClick={closeEditor}
+                >
                   Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
+                </button>
+                <button
+                  type="button"
+                  className="settings-subform-action-btn flex items-center justify-center gap-1.5"
                   onClick={commitEditor}
                   disabled={!draft.name.trim() || !draft.content.trim()}
                 >
                   <CheckCircle2 size={12} />
-                  {editingSkill ? "Save changes" : "Add skill"}
-                </Button>
+                  <span>{editingSkill ? "Save changes" : "Add skill"}</span>
+                </button>
               </div>
             </div>
           </div>
@@ -699,14 +715,14 @@ function SkillsTabContent({
 
   return (
     <div className="settings-tab-content">
-      <div className="settings-security-card">
-        <div className="settings-security-badge-group">
-          <div className="settings-security-card-icon-wrap">
-            <Sparkles size={18} />
+      <div className="settings-info-card">
+        <div className="settings-info-badge-group">
+          <div className="settings-info-card-icon-wrap">
+            <Blocks size={18} />
           </div>
           <div>
-            <div className="settings-security-card-title">Skills</div>
-            <div className="settings-security-card-desc">
+            <div className="settings-info-card-title">Prompt Skills</div>
+            <div className="settings-info-card-desc">
               Reusable prompt modules injected into every message when enabled. Enabled
               skills count toward the context window — the header meter shows the cost.
               {enabledCount > 0 && ` ${enabledCount} active now.`}
@@ -716,14 +732,22 @@ function SkillsTabContent({
       </div>
 
       <div className="chat-skills-toolbar">
-        <Button size="sm" variant="default" onClick={startCreate}>
+        <button
+          type="button"
+          className="settings-action-btn"
+          onClick={startCreate}
+        >
           <Plus size={12} />
-          New skill
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+          <span>New skill</span>
+        </button>
+        <button
+          type="button"
+          className="settings-action-btn"
+          onClick={() => fileInputRef.current?.click()}
+        >
           <Upload size={12} />
-          Import .md
-        </Button>
+          <span>Import .md</span>
+        </button>
         <input
           ref={fileInputRef}
           type="file"
@@ -731,9 +755,9 @@ function SkillsTabContent({
           onChange={handleFileChosen}
           style={{ display: "none" }}
         />
-        <Button
-          size="sm"
-          variant="ghost"
+        <button
+          type="button"
+          className="settings-action-btn"
           onClick={() => {
             onResetBuiltinSkills();
             closeEditor();
@@ -741,8 +765,8 @@ function SkillsTabContent({
           title="Restore all built-in skills to their original text"
         >
           <RotateCcw size={12} />
-          Reset built-ins
-        </Button>
+          <span>Reset built-ins</span>
+        </button>
       </div>
 
       {importError && (
@@ -780,18 +804,22 @@ function SkillsTabContent({
             <div className="chat-skill-editor-footer">
               <span className="chat-skill-chars">{draft.content.length} chars</span>
               <div className="chat-skill-editor-btns">
-                <Button size="sm" variant="secondary" onClick={closeEditor}>
+                <button
+                  type="button"
+                  className="settings-subform-cancel"
+                  onClick={closeEditor}
+                >
                   Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
+                </button>
+                <button
+                  type="button"
+                  className="settings-subform-action-btn flex items-center justify-center gap-1.5"
                   onClick={commitEditor}
                   disabled={!draft.name.trim() || !draft.content.trim()}
                 >
                   <CheckCircle2 size={12} />
-                  Add skill
-                </Button>
+                  <span>Add skill</span>
+                </button>
               </div>
             </div>
           </div>

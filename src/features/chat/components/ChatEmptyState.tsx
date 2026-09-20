@@ -4,7 +4,7 @@
 // When no OpenRouter key is configured, a prominent CTA opens the
 // connection settings instead of letting suggestions fail later.
 
-import { KeyRound, MessageSquareText, Sparkles } from "lucide-react";
+import { ArrowRight, KeyRound, MessageSquareText } from "lucide-react";
 
 const SUGGESTIONS = [
   "Explain the difference between debounce and throttle, with TypeScript examples.",
@@ -47,7 +47,7 @@ export function ChatEmptyState({
           >
             <KeyRound className="h-3.5 w-3.5" />
             Connect OpenRouter to start chatting
-            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         )}
         {SUGGESTIONS.map((s) => (

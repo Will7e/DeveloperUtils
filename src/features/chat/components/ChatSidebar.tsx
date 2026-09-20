@@ -14,6 +14,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Settings,
   Trash2,
   X,
 } from "lucide-react";
@@ -34,6 +35,7 @@ interface ChatSidebarProps {
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onOpenSettings?: () => void;
 }
 
 function formatRelative(ts: number): string {
@@ -59,6 +61,7 @@ export function ChatSidebar({
   onDelete,
   onDuplicate,
   onTogglePin,
+  onOpenSettings,
 }: ChatSidebarProps) {
   const [query, setQuery] = React.useState("");
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
@@ -320,6 +323,25 @@ export function ChatSidebar({
             );
           })}
         </div>
+
+        {/* Sidebar Footer */}
+        {onOpenSettings && (
+          <div className="chat-sidebar-footer">
+            <SimpleTooltip content="AI Chat Settings" side="top">
+              <button
+                type="button"
+                className="chat-sidebar-footer-btn"
+                onClick={onOpenSettings}
+                aria-label="AI Chat Settings"
+              >
+                <div className="chat-sidebar-footer-icon-wrap">
+                  <Settings className="h-4 w-4 chat-sidebar-settings-icon" />
+                </div>
+                <span className="chat-sidebar-footer-label">Settings</span>
+              </button>
+            </SimpleTooltip>
+          </div>
+        )}
       </aside>
     </>
   );

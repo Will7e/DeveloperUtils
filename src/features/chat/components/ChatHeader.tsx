@@ -4,11 +4,10 @@
 
 import React from "react";
 import {
+  Blocks,
   Download,
   Menu,
-  Settings,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -117,7 +116,7 @@ export function ChatHeader({
               className="chat-header-prompt-badge chat-header-skills-btn"
               onClick={onOpenSkills}
             >
-              <Sparkles className="h-3 w-3 chat-header-skills-icon" />
+              <Blocks className="h-3 w-3 chat-header-skills-icon" />
               {activeSkillCount}
             </button>
           </SimpleTooltip>
@@ -130,16 +129,6 @@ export function ChatHeader({
             aria-label="Export chat"
           >
             <Download className="h-3.5 w-3.5" />
-          </button>
-        </SimpleTooltip>
-        <SimpleTooltip content="Chat settings" side="bottom">
-          <button
-            type="button"
-            className="chat-header-btn"
-            onClick={onOpenSettings}
-            aria-label="Chat settings"
-          >
-            <Settings className="h-3.5 w-3.5" />
           </button>
         </SimpleTooltip>
       </div>

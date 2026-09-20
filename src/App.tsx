@@ -85,7 +85,7 @@ function AppContent() {
   useEffect(() => {
     const handleQuotaExceeded = () => {
       addToast({
-        message: "Storage Quota Full (~5MB): Browser local storage is full. Close unused tabs, or upgrade to Premium to sync to your own Drive — no local limit.",
+        message: "Storage Quota Full (~5MB): Browser local storage is full. Close unused tabs, or connect Cloud Sync in Settings to sync to your own Drive — no local limit.",
         type: "error",
         duration: 7000,
       });

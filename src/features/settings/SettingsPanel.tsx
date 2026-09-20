@@ -358,7 +358,7 @@ export function SettingsPanel() {
             onClick={() => setActiveTab("security")}
           >
             <ShieldCheck size={14} />
-            <span>Security & Vault</span>
+            <span>Security</span>
           </button>
           <button
             type="button"
@@ -712,13 +712,12 @@ export function SettingsPanel() {
                   {/* Progress bar */}
                   <div className="w-full h-2 rounded-full bg-bg-2 overflow-hidden border border-border-1">
                     <div
-                      className={`h-full transition-all duration-300 ${
-                        storageUsage.percentage >= 85
-                          ? "bg-red"
-                          : storageUsage.percentage >= 70
+                      className={`h-full transition-all duration-300 ${storageUsage.percentage >= 85
+                        ? "bg-red"
+                        : storageUsage.percentage >= 70
                           ? "bg-amber"
                           : "bg-accent"
-                      }`}
+                        }`}
                       style={{ width: `${Math.max(4, storageUsage.percentage)}%` }}
                     />
                   </div>

@@ -299,6 +299,69 @@
   display: none;
 }
 
+/* ── Sidebar Footer ───────────────────────────────────────── */
+.chat-sidebar-footer {
+  height: 46px;
+  min-height: 46px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border-1);
+  display: flex;
+  align-items: center;
+  background: var(--bg-1);
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.chat-sidebar-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.15s ease, color 0.15s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chat-sidebar-footer-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.chat-sidebar-footer-icon-wrap {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-sidebar-settings-icon {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-sidebar-footer-btn:hover .chat-sidebar-settings-icon {
+  transform: rotate(45deg);
+}
+
+.chat-sidebar-footer-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: color 0.15s ease;
+}
+
+.chat-sidebar-footer-btn:hover .chat-sidebar-footer-label {
+  color: var(--text-0);
+}
+
 /* ============================================================
    MAIN PANE
    ============================================================ */
@@ -426,18 +489,28 @@
   flex-shrink: 0;
 }
 
+.chat-model-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  background: transparent;
+}
+
 .chat-model-dropdown {
   position: fixed;
-  z-index: 1000;
+  z-index: 100002;
   display: flex;
   flex-direction: column;
   max-width: calc(100vw - 16px);
-  max-height: 420px;
+  max-height: 400px;
   background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--ds-shadow-menu);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 20px 48px -8px rgba(0, 0, 0, 0.65),
+    0 0 0 1px var(--border-1);
   overflow: hidden;
+  animation: modal-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chat-model-search {
@@ -1347,72 +1420,59 @@
 }
 
 /* Tabs bar wrapper inside the settings panel */
-.chat-settings-tabsbar {
-  padding: 12px 20px 0;
-  flex-shrink: 0;
-}
-
 .chat-settings-panel {
   width: 580px;
 }
 
-/* Wrapper for the tabs content inside the flex panel */
-.chat-settings-tabs-wrap {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Tab content scrolls inside the fixed-height panel instead of
-   being clipped by the panel's overflow: hidden. */
-.chat-settings-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 14px 20px 20px;
-}
-
-/* ── Modal interior: card-based sections ──────────────────
-   Each settings group sits on its own surface with real padding,
-   so the panel reads as designed layers instead of loose text. */
-.chat-settings-body .settings-section {
-  background: var(--bg-2);
-  border: 1px solid var(--border-1);
-  border-radius: 12px;
-  padding: 14px 16px;
-  gap: 12px;
-}
-
-/* Card headers: caps label, no underline (the card edge separates) */
-.chat-settings-body .settings-section-title {
-  border-bottom: none;
-  padding-bottom: 0;
-  font-size: 11px;
-  letter-spacing: 0.4px;
-  color: var(--text-3);
-}
-
-/* Cards separate sections; the shared divider becomes noise */
-.chat-settings-body .settings-divider {
-  display: none;
-}
-
-.chat-settings-body .settings-row {
+/* Skills sections stay flat (each skill row is already a card) */
+.chat-settings-panel .settings-section.chat-skills-section {
+  background: transparent;
+  border: none;
   padding: 0;
 }
 
-.chat-settings-body .settings-sublabel {
-  font-size: 11.5px;
-  line-height: 1.45;
+.chat-settings-panel .settings-section.chat-skills-section
+  + .settings-section.chat-skills-section {
+  margin-top: -4px;
+}
+
+/* The model picker button inside settings panel matches .settings-select */
+.chat-settings-panel .chat-model-btn {
+  height: 30px;
+  width: 200px;
+  max-width: 240px;
+  padding: 0 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  justify-content: space-between;
+}
+
+.chat-settings-panel .chat-model-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  color: var(--text-0);
+}
+
+.chat-settings-panel .chat-model-btn:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.chat-settings-tabsbar button:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
 }
 
 /* API key block: label on top, full-width controls below */
 .chat-key-row {
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
 }
 
 .chat-key-controls {
@@ -1423,52 +1483,30 @@
 
 .chat-key-controls .chat-key-input-wrap {
   flex: 1;
-  width: auto;
+  position: relative;
+  display: flex;
+  align-items: center;
 }
 
 .chat-key-controls .settings-input {
-  height: 32px;
-  font-size: 12.5px;
+  width: 100%;
+  height: 30px;
+  font-size: 12px;
+  padding-right: 32px;
 }
 
-/* Temperature slider breathes inside the card */
-.chat-settings-body .settings-slider {
-  width: 160px;
-}
-
-/* The model picker button shouldn't fight the row width */
-.chat-settings-panel .chat-model-btn {
-  max-width: 240px;
-}
-
-/* Skills sections stay flat (each skill row is already a card) */
-.chat-settings-body .settings-section.chat-skills-section {
-  background: transparent;
-  border: none;
-  padding: 2px 0 0;
-}
-
-.chat-settings-body .settings-section.chat-skills-section
-  + .settings-section.chat-skills-section {
-  margin-top: -4px;
-}
-
-.chat-settings-body::-webkit-scrollbar {
-  width: 5px;
-}
-
-.chat-settings-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-settings-body::-webkit-scrollbar-thumb {
-  background: var(--border-2);
-  border-radius: 4px;
-}
-
-.chat-settings-tabsbar button:focus-visible {
-  outline: none;
-  box-shadow: var(--ds-focus-ring);
+.chat-key-controls .settings-action-btn {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .chat-model-input {
@@ -1486,21 +1524,24 @@
 .chat-key-status {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 8px 12px;
   font-size: 12px;
   line-height: 1.45;
   border-radius: var(--radius-md);
+  border: 1px solid transparent;
 }
 
 .chat-key-status-valid {
   color: var(--green);
   background: var(--green-dim);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
 }
 
 .chat-key-status-invalid {
   color: var(--red);
   background: var(--red-dim);
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
 .chat-settings-link {
@@ -1517,15 +1558,8 @@
   text-decoration: underline;
 }
 
-.chat-settings-footer-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
 /* ============================================================
-   SKILLS — settings tab + header chip (Geist: Toggle component
-   for switches, Button for actions; rows = Label 14 / Copy 13)
+   SKILLS — settings tab + header chip
    ============================================================ */
 
 .chat-header-skills-btn {
@@ -1547,24 +1581,30 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  padding: 2px 0;
 }
 
 .chat-skills-empty {
-  padding: 18px 12px;
+  padding: 24px 16px;
   font-size: 12px;
   color: var(--text-3);
   text-align: center;
-  border: 1px dashed var(--border-1);
-  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
 }
 
 .chat-skill-item {
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--bg-2);
   overflow: hidden;
   animation: settings-tab-enter 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: border-color 0.15s ease;
+}
+
+.chat-skill-item:hover {
+  border-color: var(--border-2);
 }
 
 .chat-skill-row {
@@ -1572,7 +1612,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 12px;
+  padding: 10px 14px;
 }
 
 .chat-skill-info {
@@ -1583,7 +1623,7 @@
 .chat-skill-name-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1594,29 +1634,31 @@
 }
 
 .chat-skill-badge {
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  padding: 1.5px 6px;
+  letter-spacing: 0.2px;
+  padding: 2px 7px;
   border-radius: 999px;
-  background: var(--ds-gray-alpha-200);
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
   color: var(--text-3);
 }
 
 .chat-skill-badge-on {
   background: var(--green-dim);
+  border-color: color-mix(in srgb, var(--green) 30%, transparent);
   color: var(--green);
 }
 
 .chat-skill-badge-edited {
   background: var(--amber-dim);
+  border-color: color-mix(in srgb, var(--amber) 30%, transparent);
   color: var(--amber);
 }
 
 .chat-skill-desc {
-  margin-top: 2px;
-  font-size: 11px;
+  margin-top: 3px;
+  font-size: 11.5px;
   line-height: 1.4;
   color: var(--text-3);
 }
@@ -1624,17 +1666,15 @@
 .chat-skill-actions {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   flex-shrink: 0;
 }
-
-/* Skill rows use the shared Toggle component — no local switch CSS */
 
 .chat-skill-editor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px 12px;
+  gap: 10px;
+  padding: 12px 14px;
   border-top: 1px solid var(--border-1);
   background: var(--bg-1);
 }
@@ -1646,7 +1686,9 @@
 
 .chat-skill-input {
   width: 100%;
+  height: 30px;
   font-family: var(--font-sans);
+  font-size: 12px;
 }
 
 .chat-skill-textarea {
@@ -1661,10 +1703,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-top: 2px;
 }
 
 .chat-skill-chars {
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-3);
 }
@@ -1672,7 +1715,7 @@
 .chat-skill-editor-btns {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* ============================================================
@@ -1690,7 +1733,8 @@
 .chat-composer-stop:focus-visible,
 .chat-empty-suggestion:focus-visible,
 .chat-code-block-copy:focus-visible,
-.chat-key-toggle:focus-visible {
+.chat-key-toggle:focus-visible,
+.chat-sidebar-footer-btn:focus-visible {
   outline: none;
   box-shadow: var(--ds-focus-ring);
 }

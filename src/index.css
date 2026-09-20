@@ -860,12 +860,6 @@ html.light .lib-group-count {
 }
 
 /* ---- Light: Dashboard ---- */
-html.light .dash-hero-badge {
-  background: var(--ds-gray-alpha-200);
-  border-color: var(--ds-gray-alpha-400);
-  color: var(--ds-gray-1000);
-}
-
 html.light .dash-hero-accent {
   background: linear-gradient(180deg, var(--ds-gray-1000) 0%, var(--ds-gray-900) 100%);
   -webkit-background-clip: text;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Send, Sparkles } from "lucide-react";
+import { Bot, KeyRound, Send } from "lucide-react";
 import { VirtualCursor } from "../components/VirtualCursor";
 import { DemoControls, useAutopilot, type AutopilotStep } from "../autopilot";
 import { requestHandoff } from "@/services/handoff.service";
@@ -102,7 +102,7 @@ export function ChatPreview() {
           onClick={() => setModelIndex((index) => index + 1)}
           title="Pick any OpenRouter model"
         >
-          <Sparkles className="h-3 w-3" />
+          <Bot className="h-3 w-3" />
           <span>{model}</span>
         </button>
 

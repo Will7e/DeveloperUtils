@@ -2,12 +2,14 @@
 // Dashboard hero — what InTab is, in one screen
 // ============================================================
 
-import { Link } from "react-router-dom";
-import { ArrowRight } from "lucide-react";
+import { Command } from "lucide-react";
+import { useAppStore } from "@/stores/app.store";
 import { InTabLogo } from "@/components/ui/intab-logo";
 import { HERO } from "../tools";
 
 export function HeroSection() {
+  const openCommandPalette = useAppStore((s) => s.openCommandPalette);
+
   return (
     <header className="dash-hero">
       <div className="dash-hero-logo-wrap">
@@ -22,10 +24,15 @@ export function HeroSection() {
 
       <p className="dash-hero-subtitle">{HERO.subtitle}</p>
 
-      <Link to={HERO.primaryCta.to} className="dash-cta-primary">
+      <button
+        type="button"
+        className="dash-cta-primary"
+        onClick={openCommandPalette}
+      >
+        <Command className="h-3.5 w-3.5" />
         {HERO.primaryCta.label}
-        <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
+        <kbd className="dash-cta-kbd">{HERO.primaryCta.shortcut}</kbd>
+      </button>
 
       <p className="dash-hero-trust">
         {HERO.trust.map((fact, index) => (
@@ -38,3 +45,4 @@ export function HeroSection() {
     </header>
   );
 }
+

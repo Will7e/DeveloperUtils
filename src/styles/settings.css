@@ -419,8 +419,8 @@ html.light .settings-security-card {
 }
 .settings-security-badge-group {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
 }
 .settings-security-card-icon-wrap {
   width: 32px;
@@ -433,6 +433,7 @@ html.light .settings-security-card {
   justify-content: center;
   color: var(--green);
   flex-shrink: 0;
+  margin-top: 1px;
 }
 .settings-security-card-title {
   font-size: 13px;
@@ -447,10 +448,60 @@ html.light .settings-security-card-title {
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-2);
+  margin-top: 2px;
 }
 
 html.light .settings-security-card-desc {
   color: #065f46;
+}
+
+/* ── Generic Info Card (for Skills, Modules, Prompts) ── */
+.settings-info-card {
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+html.light .settings-info-card {
+  background: var(--bg-2);
+  border-color: var(--border-2);
+}
+
+.settings-info-badge-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.settings-info-card-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent-glow);
+  border: 1px solid var(--border-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.settings-info-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0);
+}
+
+.settings-info-card-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  margin-top: 2px;
 }
 
 html.light .settings-security-chip {
@@ -478,9 +529,9 @@ html.light .settings-vault-badge {
 .settings-action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   border-radius: var(--radius-xs);
   background: var(--bg-2);
@@ -488,18 +539,24 @@ html.light .settings-vault-badge {
   color: var(--text-1);
   cursor: pointer;
   transition: all 0.15s ease;
+  user-select: none;
 }
-.settings-action-btn:hover {
+.settings-action-btn:hover:not(:disabled) {
   background: var(--bg-3);
   border-color: var(--border-2);
   color: var(--text-0);
+}
+.settings-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .settings-action-btn.danger {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.25);
   background: rgba(239, 68, 68, 0.06);
 }
-.settings-action-btn.danger:hover {
+.settings-action-btn.danger:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.16);
   border-color: rgba(239, 68, 68, 0.4);
 }
@@ -510,8 +567,48 @@ html.light .settings-action-btn {
   color: var(--text-1);
 }
 
-html.light .settings-action-btn:hover {
+html.light .settings-action-btn:hover:not(:disabled) {
   background: var(--bg-2);
+}
+
+/* ── Icon Action Buttons ── */
+.settings-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+.settings-icon-btn:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+  color: var(--text-0);
+}
+.settings-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.settings-icon-btn.danger {
+  color: var(--text-3);
+}
+.settings-icon-btn.danger:hover:not(:disabled) {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+.settings-icon-btn.danger-confirm {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 .settings-vault-subform {
   padding: 12px 14px;

@@ -6,7 +6,6 @@
 // the meter reflects live usage.
 
 import React, { useEffect, useMemo, useState } from "react";
-import { TopLoadingBar } from "@/components/ui/top-loading-bar";
 import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
 import {
   regenerateLastResponse,
@@ -201,8 +200,6 @@ export function ChatPage() {
 
   return (
     <div className="chat-page">
-      <TopLoadingBar />
-
       <ChatSidebar
         conversations={conversations}
         activeId={activeConversationId}
@@ -214,6 +211,7 @@ export function ChatPage() {
         onDelete={handleDeleteConversation}
         onDuplicate={(id) => useChatStore.getState().duplicateConversation(id)}
         onTogglePin={(id) => useChatStore.getState().togglePinConversation(id)}
+        onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
       />
 
       <main className="chat-main">
