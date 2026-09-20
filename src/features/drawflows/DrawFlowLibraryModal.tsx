@@ -35,12 +35,18 @@ export function DrawFlowLibraryModal({ isOpen, onClose, canvasAPI }: Props) {
 
   useEffect(() => {
     if (isOpen) {
-      setAdded(new Set()); // Reset local session state; store is the source of truth
-      setLoading(true);
-      getDrawFlowLibraries().then((d) => { 
-        setLibs(d); 
-        setLoading(false); 
-      }).catch(() => setLoading(false));
+      // Reset local session state; store is the source of truth.
+      // Deferred so setState happens outside the effect body
+      // (avoids cascading renders on effect flush).
+      const timer = setTimeout(() => {
+        setAdded(new Set());
+        setLoading(true);
+        getDrawFlowLibraries().then((d) => {
+          setLibs(d);
+          setLoading(false);
+        }).catch(() => setLoading(false));
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 

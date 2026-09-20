@@ -15,8 +15,7 @@ const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       data-geist-tooltip=""
-      className={cn(
-        "intab-tooltip devutils-tooltip z-50 overflow-hidden px-2.5 py-1 text-xs font-medium",
+      className={cn(          "intab-tooltip z-50 overflow-hidden px-2.5 py-1 text-xs font-medium",
         "bg-[var(--ds-gray-1000)] text-[var(--ds-background-100)] border border-[var(--ds-gray-alpha-400)] rounded-md shadow-[var(--ds-shadow-tooltip)] select-none",
         className
       )}

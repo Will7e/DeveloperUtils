@@ -1,0 +1,175 @@
+/* ============================================================
+   DIFF CHECKER
+   ============================================================ */
+.diff-checker-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+/* ============================================================
+   DIFF CONSOLIDATED SUB-HEADER (Single Sleek 30px Strip)
+   ============================================================ */
+
+.diff-sub-header {
+  display: flex;
+  align-items: stretch;
+  height: 30px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+  user-select: none;
+  font-size: 11px;
+}
+.diff-sub-pane {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  min-width: 0;
+}
+.diff-sub-pane-original {
+  border-right: 1px solid var(--border-1);
+}
+.diff-sub-pane-inline {
+  width: 100%;
+}
+.diff-pane-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.diff-pane-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.diff-pane-tag {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2.5px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+.diff-pane-tag-orig {
+  background: var(--red-dim, rgba(244, 63, 94, 0.12));
+  color: var(--red, #f43f5e);
+  border: 1px solid rgba(244, 63, 94, 0.20);
+}
+.diff-pane-tag-mod {
+  background: var(--green-dim, rgba(16, 185, 129, 0.12));
+  color: var(--green, #10b981);
+  border: 1px solid rgba(16, 185, 129, 0.20);
+}
+.diff-pane-tag-inline {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.diff-pane-count {
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.diff-pane-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.diff-pane-action-btn:hover {
+  background: var(--bg-2);
+  color: var(--text-1);
+  border-color: var(--border-1);
+}
+
+/* ---- Refined Diff Stats Badges ---- */
+.diff-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1.5px 6px;
+  border-radius: 9999px;
+  line-height: 1.2;
+}
+.diff-stat-pill-add {
+  background: var(--green-dim, rgba(16, 185, 129, 0.12));
+  color: var(--green, #10b981);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+.diff-stat-pill-del {
+  background: var(--red-dim, rgba(244, 63, 94, 0.12));
+  color: var(--red, #f43f5e);
+  border: 1px solid rgba(244, 63, 94, 0.22);
+}
+.diff-stat-pill-eq {
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  padding: 0 4px;
+}
+
+/* ---- Diff Stepper Controls ---- */
+.diff-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.diff-nav-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+.diff-nav-counter {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-2);
+  padding: 0 4px;
+}
+
+/* ---- Diff Editor Container ---- */
+.diff-editor-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+.diff-lang-dropdown {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ============================================================
+   DIFF-CHECKER
+   ============================================================ */

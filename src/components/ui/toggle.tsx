@@ -11,6 +11,10 @@ export interface ToggleProps
   description?: React.ReactNode;
 }
 
+/**
+ * Geist Switch — track off = Gray 3, on = Gray 1000 (high contrast),
+ * never colored. Thumb = Background 100. Focus ring per spec.
+ */
 const sizeConfig = {
   sm: {
     track: "w-7 h-4",
@@ -58,6 +62,7 @@ export const Toggle = React.forwardRef<HTMLButtonElement, ToggleProps>(
       if (disabled) return;
       onClick?.(e);
       if (e.defaultPrevented) return;
+
       const nextChecked = !isChecked;
       if (!isControlled) {
         setUncontrolledChecked(nextChecked);
@@ -121,7 +126,7 @@ export const Toggle = React.forwardRef<HTMLButtonElement, ToggleProps>(
       >
         <div className="flex flex-col">
           {label && (
-            <span className="text-sm font-medium text-[var(--ds-gray-1000)]">
+            <span className="text-[13px] font-medium text-[var(--ds-gray-1000)]">
               {label}
             </span>
           )}
@@ -137,6 +142,3 @@ export const Toggle = React.forwardRef<HTMLButtonElement, ToggleProps>(
   }
 );
 Toggle.displayName = "Toggle";
-
-// Alias Switch to Toggle for standard UI library compatibility
-export { Toggle as Switch };

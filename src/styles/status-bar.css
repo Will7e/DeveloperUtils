@@ -1,0 +1,52 @@
+/* ============================================================
+   STATUS-BAR
+   ============================================================ */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 14px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-1);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.status-left,
+.status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.status-item {
+  color: var(--text-2);
+}
+.status-brand {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--ds-gray-900) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+html.light .status-brand {
+  background: linear-gradient(180deg, var(--ds-gray-1000) 0%, var(--ds-gray-900) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.status-dot {
+  color: var(--border-2);
+  font-size: 8px;
+}
+.status-shortcut {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-2);
+  opacity: 0.85;
+}
+
+/* ============================================================
+   STATUS-BAR
+   ============================================================ */

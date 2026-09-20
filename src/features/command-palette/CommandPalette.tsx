@@ -21,6 +21,7 @@ import {
   GitCompare,
   Network,
   Code2,
+  MessageSquareText,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { compilerService } from "@/services/compiler.service";
@@ -43,7 +44,6 @@ interface PaletteAction {
 
 export function CommandPalette() {
   const commandPaletteOpen = useAppStore((s) => s.commandPaletteOpen);
-  const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
   const closeCommandPalette = useAppStore((s) => s.closeCommandPalette);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
@@ -157,17 +157,14 @@ export function CommandPalette() {
 
           if (pathname.startsWith("/formatters")) {
             window.dispatchEvent(new CustomEvent("intab:format-formatter"));
-            window.dispatchEvent(new CustomEvent("devutils:format-formatter"));
             return;
           }
           if (pathname.startsWith("/diff")) {
             window.dispatchEvent(new CustomEvent("intab:format-diff"));
-            window.dispatchEvent(new CustomEvent("devutils:format-diff"));
             return;
           }
           if (pathname.startsWith("/api-tester")) {
             window.dispatchEvent(new CustomEvent("intab:format-api-tester"));
-            window.dispatchEvent(new CustomEvent("devutils:format-api-tester"));
             return;
           }
 
@@ -312,6 +309,13 @@ export function CommandPalette() {
         },
       },
       {
+        id: "new-chat",
+        label: "New AI Chat",
+        category: "File",
+        icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/chat"),
+      },
+      {
         id: "nav-dashboard",
         label: "Go to Dashboard",
         shortcut: "⌘⌥1",
@@ -374,6 +378,14 @@ export function CommandPalette() {
         category: "Navigation",
         icon: <Network style={{ width: 14, height: 14 }} />,
         action: () => navigate("/drawflows"),
+      },
+      {
+        id: "nav-chat",
+        label: "Go to AI Chat",
+        shortcut: "⌘⌥9",
+        category: "Navigation",
+        icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
+        action: () => navigate("/chat"),
       }
     );
 
@@ -430,15 +442,15 @@ export function CommandPalette() {
     return { grouped: groupedMap, flatOrdered: flat };
   }, [filtered]);
 
-  // Reset on open
+  // Reset on open. Deferred so setState happens outside the effect body
+  // (avoids cascading renders on effect flush).
   useEffect(() => {
     if (commandPaletteOpen) {
-      setQuery("");
-      setSelectedIndex(0);
-      inputRef.current?.focus();
       const timer = setTimeout(() => {
+        setQuery("");
+        setSelectedIndex(0);
         inputRef.current?.focus();
-      }, 20);
+      }, 0);
       return () => clearTimeout(timer);
     }
   }, [commandPaletteOpen]);

@@ -47,6 +47,60 @@ export function apiProxyPlugin(): Plugin {
     name: "vite-plugin-api-proxy",
     configureServer(server) {
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+        // ── Dev stub for the license edge function ──
+        // In production /api/license runs as a Vercel edge function. In dev
+        // there is no server route, so without this stub the SPA fallback
+        // would answer with index.html and license activation would fail
+        // with a confusing parse error. Behavior mirrors api/license.ts:
+        // any well-formed key is accepted; LEMON_SQUEEZY_TEST_KEY forces a
+        // rejection so the failure path can be tested too.
+        if (req.url?.startsWith("/api/license")) {
+          const origin = (req.headers["origin"] as string) || "";
+          const allowedOrigin = isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "";
+          res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+          res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "*");
+
+          if (req.method === "OPTIONS") {
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ valid: false, error: "Method not allowed" }));
+            return;
+          }
+
+          let bodyRaw = "";
+          req.on("data", (chunk) => (bodyRaw += chunk));
+          req.on("end", () => {
+            try {
+              const body = JSON.parse(bodyRaw || "{}") as { licenseKey?: string };
+              const key = (body.licenseKey || "").trim();
+              if (!key) {
+                res.statusCode = 400;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ valid: false, error: "Missing licenseKey" }));
+                return;
+              }
+              if (key === "LEMON_SQUEEZY_TEST_KEY") {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ valid: false, error: "License is not valid (test rejection key)" }));
+                return;
+              }
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ valid: true, expiresAt: null }));
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ valid: false, error: "Invalid JSON body" }));
+            }
+          });
+          return;
+        }
+
         if (!req.url?.startsWith("/api/proxy")) {
           return next();
         }

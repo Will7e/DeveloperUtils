@@ -31,7 +31,7 @@ type ExcalidrawInitialData = UnwrapInitialData<ExcalidrawProps["initialData"]>;
  * Ensures workflow elements have high-contrast, theme-compatible colors
  * across both light and dark modes in Excalidraw's inversion engine.
  */
-export function sanitizeWorkflowElements(elements: readonly unknown[] = []): unknown[] {
+function sanitizeWorkflowElements(elements: readonly unknown[] = []): unknown[] {
   return elements.map((rawEl) => {
     const el = rawEl as Record<string, unknown> | null;
     if (!el) return rawEl;

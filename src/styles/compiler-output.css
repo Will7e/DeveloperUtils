@@ -1,0 +1,122 @@
+/* ============================================================
+   TOOLBAR
+   ============================================================ */
+.toolbar {
+  position: relative;
+}
+
+@keyframes progress-slide {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ============================================================
+   OUTPUT FLASH
+   ============================================================ */
+.output-flash-success {
+  animation: flash-green 0.8s ease-out;
+}
+.output-flash-error {
+  animation: flash-red 0.8s ease-out;
+}
+
+@keyframes flash-green {
+  0% {
+    box-shadow: inset 0 0 20px rgba(52, 211, 153, 0.25);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 transparent;
+  }
+}
+
+@keyframes flash-red {
+  0% {
+    box-shadow: inset 0 0 20px rgba(248, 113, 113, 0.2);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 transparent;
+  }
+}
+
+/* Output count pulse */
+.output-count-pulse {
+  animation: count-pulse 0.4s ease-out;
+}
+
+@keyframes count-pulse {
+  0% {
+    transform: scale(1.3);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ============================================================
+   EXECUTION PROGRESS BAR
+   ============================================================ */
+.execution-history {
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-0);
+  max-height: 140px;
+  overflow-y: auto;
+}
+.execution-history-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+  color: var(--text-3);
+}
+.execution-history-list {
+  padding: 0 8px 6px;
+}
+.execution-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  transition: background 0.08s;
+}
+.execution-history-item:hover {
+  background: var(--bg-hover);
+}
+.execution-history-status {
+  font-weight: 600;
+  width: 14px;
+  text-align: center;
+}
+.execution-history-success .execution-history-status {
+  color: var(--green);
+}
+.execution-history-error .execution-history-status {
+  color: var(--red);
+}
+.execution-history-time {
+  color: var(--text-3);
+  font-size: 10px;
+}
+.execution-history-duration {
+  color: var(--text-2);
+  margin-left: auto;
+  font-size: 10px;
+}
+
+/* ============================================================
+   COMPILER-OUTPUT
+   ============================================================ */

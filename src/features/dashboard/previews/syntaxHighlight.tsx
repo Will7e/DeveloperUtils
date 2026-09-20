@@ -13,7 +13,7 @@ export function stripTsTypes(code: string): string {
 
   return code
     .replace(/\b(?:interface|type)\s+[A-Za-z0-9_]+[\s\S]*?(?:;|\})/g, "")
-    .replace(/\s+as\s+[A-Za-z0-9_<>\[\]]+/g, "")
+    .replace(/\s+as\s+[A-Za-z0-9_<>[]]+/g, "")
     .replace(typeRegex, "");
 }
 
@@ -135,7 +135,7 @@ export function renderHighlightedTs(code: string): React.ReactNode[] {
  * Tokenizer regex for JSON in live previews.
  */
 const JSON_TOKEN_REGEX =
-  /("(?:\\.|[^"\\])*")(\s*:)?|(\b(?:true|false|null)\b)|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([{}\[\],])|(\s+)|([^"{}\[\],\s]+)/g;
+  /("(?:\\.|[^"\\])*")(\s*:)?|(\b(?:true|false|null)\b)|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([{},])|(\s+)|([^"{},\s]+)/g;
 
 export function renderHighlightedJson(json: string): React.ReactNode[] {
   JSON_TOKEN_REGEX.lastIndex = 0;

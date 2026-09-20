@@ -24,6 +24,7 @@ const DiffCheckerPage = lazy(() => import("@/pages/DiffCheckerPage").then(m => (
 const LibraryPage = lazy(() => import("@/pages/LibraryPage").then(m => ({ default: m.LibraryPage })));
 const DrawFlowPage = lazy(() => import("@/pages/DrawFlowPage").then(m => ({ default: m.DrawFlowPage })));
 const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ default: m.ApiTesterPage })));
+const ChatBotPage = lazy(() => import("@/pages/ChatBotPage").then(m => ({ default: m.ChatBotPage })));
 const GeistShowcasePage = lazy(() => import("@/pages/GeistShowcasePage").then(m => ({ default: m.GeistShowcasePage })));
 
 import { bootstrapApp } from "@/services/bootstrap.service";
@@ -84,7 +85,7 @@ function AppContent() {
   useEffect(() => {
     const handleQuotaExceeded = () => {
       addToast({
-        message: "Storage Quota Full (~5MB): Browser local storage is full. Please close unused comparator/diff tabs or clear heavy inputs to continue saving changes.",
+        message: "Storage Quota Full (~5MB): Browser local storage is full. Close unused tabs, or upgrade to Premium to sync to your own Drive — no local limit.",
         type: "error",
         duration: 7000,
       });
@@ -109,6 +110,8 @@ function AppContent() {
             <Route path="/drawflows" element={<DrawFlowPage />} />
             <Route path="/workflows" element={<Navigate to="/drawflows" replace />} />
             <Route path="/api-tester" element={<ApiTesterPage />} />
+            <Route path="/chat" element={<ChatBotPage />} />
+            <Route path="/chatbot" element={<Navigate to="/chat" replace />} />
             <Route path="/geist" element={<GeistShowcasePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

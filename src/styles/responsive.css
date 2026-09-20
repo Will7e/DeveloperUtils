@@ -1,0 +1,60 @@
+/* ============================================================
+   RESPONSIVE — Tool pages below 1000px
+   The desktop shells (activity bar + tool sidebars + split panes)
+   assume ~1100px. Stack or shrink them below that instead of
+   crushing the editors to slivers.
+   ============================================================ */
+
+/* Nav rail: keep icons, drop labels and fixed width */
+@media (max-width: 1000px) {
+  .activity-bar {
+    width: 56px;
+  }
+  .activity-bar .activity-brand-text,
+  .activity-bar .nav-item-label {
+    display: none;
+  }
+  .activity-bar .nav-collapse-btn {
+    display: none;
+  }
+  .activity-bar .nav-item {
+    justify-content: center;
+    padding: 10px 0;
+  }
+  .activity-bar .activity-bar-brand {
+    justify-content: center;
+    padding: 16px 0;
+  }
+  .compiler-view > .sidebar {
+    width: 42px;
+  }
+}
+
+/* Narrow: hide the tool sidebars entirely, full width to the editor */
+@media (max-width: 760px) {
+  .compiler-view > .sidebar {
+    display: none;
+  }
+  .app-main {
+    grid-template-columns: 1fr !important;
+  }
+  .app-output-section {
+    display: none;
+  }
+  .status-bar .status-item.status-shortcut,
+  .status-bar .status-dot {
+    display: none;
+  }
+}
+
+/* Formatter, Diff & Comparator toolbars: let rows wrap instead of clipping */
+@media (max-width: 1000px) {
+  .json-formatter-toolbar,
+  .tabs-toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .json-formatter-content {
+    flex-direction: column;
+  }
+}

@@ -11,7 +11,6 @@ import {
   Settings,
   Search,
   Code2,
-  Zap,
   ChevronsLeft,
   ChevronsRight,
   FileCode,
@@ -20,8 +19,11 @@ import {
   Library,
   GitFork,
   Globe,
+  MessageSquareText,
   Sun,
   Moon,
+  Coffee,
+  Cloud,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
@@ -98,11 +100,23 @@ export function MainLayout() {
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
+  const settingsOpen = useAppStore((s) => s.settingsOpen);
   const currentTheme = useAppStore((s) => s.editorSettings.theme);
   const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
 
   const handleToggleTheme = () => {
     updateEditorSettings({ theme: currentTheme === "dark" ? "light" : "dark" });
+  };
+
+  const handleSupport = () => {
+    const handle = (import.meta.env.VITE_BMC_HANDLE as string | undefined) || "intab";
+    window.open(`https://buymeacoffee.com/${handle}`, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCloudSync = () => {
+    // Deep-link into Settings → Cloud Sync (event picked up by SettingsPanel)
+    window.dispatchEvent(new CustomEvent("intab:open-settings", { detail: { tab: "cloud" } }));
+    if (!settingsOpen) toggleSettings();
   };
 
   return (
@@ -189,6 +203,14 @@ export function MainLayout() {
           />
 
           <NavItem
+            to="/chat"
+            icon={<MessageSquareText className="h-[18px] w-[18px]" />}
+            label="AI Chat"
+            active={location.pathname === "/chat" || location.pathname === "/chatbot"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
             to="/library"
             icon={<Library className="h-[18px] w-[18px]" />}
             label="Library"
@@ -215,6 +237,20 @@ export function MainLayout() {
         {/* Bottom Actions */}
         <div className="activity-bar-bottom">
           <div className="activity-bar-divider" />
+
+          <NavItem
+            icon={<Cloud className="h-[18px] w-[18px]" />}
+            label="Cloud Sync"
+            collapsed={sidebarCollapsed}
+            onClick={handleCloudSync}
+          />
+
+          <NavItem
+            icon={<Coffee className="h-[18px] w-[18px]" />}
+            label="Support InTab"
+            collapsed={sidebarCollapsed}
+            onClick={handleSupport}
+          />
 
           <NavItem
             icon={currentTheme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}

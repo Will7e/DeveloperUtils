@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo, useEffect } from "react";
+import React, { useRef, useState, useMemo } from "react";
 import {
   Globe,
   Library,
@@ -84,20 +84,18 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
     return pills;
   }, [allSidebarPresets]);
 
-  // Reset sidebarPlatform to "all" if current platform is no longer present
-  useEffect(() => {
-    if (
-      sidebarPlatform !== "all" &&
-      !activePlatforms.some((p) => p.id === sidebarPlatform)
-    ) {
-      setSidebarPlatform("all");
-    }
-  }, [activePlatforms, sidebarPlatform]);
+  // Reset sidebarPlatform to "all" if current platform is no longer present.
+  // Derived during render instead of an effect to avoid cascading renders.
+  const effectivePlatform =
+    sidebarPlatform !== "all" &&
+    !activePlatforms.some((p) => p.id === sidebarPlatform)
+      ? ("all" as PlatformId)
+      : sidebarPlatform;
 
   const displayedPresets = useMemo(() => {
-    if (sidebarPlatform === "all") return allSidebarPresets;
-    return allSidebarPresets.filter((p) => p.platform === sidebarPlatform);
-  }, [allSidebarPresets, sidebarPlatform]);
+    if (effectivePlatform === "all") return allSidebarPresets;
+    return allSidebarPresets.filter((p) => p.platform === effectivePlatform);
+  }, [allSidebarPresets, effectivePlatform]);
 
   const handleSaveActiveTabToLibrary = () => {
     const activeTab = store.tabs.find((t) => t.id === store.activeTabId);
@@ -313,7 +311,7 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
                   <button
                     key={qp.id}
                     className={`api-sidebar-quick-pill ${
-                      sidebarPlatform === qp.id ? "api-sidebar-quick-pill-active" : ""
+                      effectivePlatform === qp.id ? "api-sidebar-quick-pill-active" : ""
                     }`}
                     onClick={() => setSidebarPlatform(qp.id)}
                   >

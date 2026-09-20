@@ -10,15 +10,13 @@ import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
+import { useLicenseStore } from "@/services/license.service";
+import { restoreOnBoot } from "@/services/cloud-sync/sync-engine";
 
 declare global {
   interface Window {
     __INTAB_DISMISS_LOADER__?: () => void;
-    __INTAB_LOADER_DISMISSED__?: boolean;
     __INTAB_BOOTSTRAP_PROMISE__?: Promise<void>;
-    __DEVUTILS_DISMISS_LOADER__?: () => void;
-    __DEVUTILS_LOADER_DISMISSED__?: boolean;
-    __DEVUTILS_BOOTSTRAP_PROMISE__?: Promise<void>;
   }
 }
 
@@ -60,6 +58,15 @@ export function bootstrapApp(): Promise<void> {
       console.warn("Vault initialization note:", err);
     });
 
+    // 1b. Premium license revalidation + silent cloud-sync restore
+    //     (non-blocking; failures never affect startup UX)
+    const cloudSyncPromise = Promise.resolve()
+      .then(() => useLicenseStore.getState().revalidate())
+      .then(() => restoreOnBoot())
+      .catch((err) => {
+        console.warn("Cloud sync restore note:", err);
+      });
+
     // 2. Monaco runtime initialization (critical for compiler, api-tester, formatters, diff)
     const monacoPromise = initMonacoRuntime();
 
@@ -83,6 +90,8 @@ export function bootstrapApp(): Promise<void> {
     }
 
     // 5. Critical tasks to wait for before opening the single loading gate
+    //     (cloud sync runs in the background and does not gate loading)
+    void cloudSyncPromise;
     const criticalTasks = [vaultPromise, monacoPromise, appStorePromise, pagePromise];
 
     // Cap the waiting time to 2.2 seconds maximum to prevent hanging on slow/offline networks
@@ -95,17 +104,12 @@ export function bootstrapApp(): Promise<void> {
 
     // 5. Trigger a smooth fade-out of the single splash screen
     if (typeof window !== "undefined") {
-      if (window.__INTAB_DISMISS_LOADER__) {
-        window.__INTAB_DISMISS_LOADER__();
-      } else if (window.__DEVUTILS_DISMISS_LOADER__) {
-        window.__DEVUTILS_DISMISS_LOADER__();
-      }
+      window.__INTAB_DISMISS_LOADER__?.();
     }
   })();
 
   if (typeof window !== "undefined") {
     window.__INTAB_BOOTSTRAP_PROMISE__ = bootstrapPromise;
-    window.__DEVUTILS_BOOTSTRAP_PROMISE__ = bootstrapPromise;
   }
 
   return bootstrapPromise;

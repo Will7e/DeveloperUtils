@@ -95,7 +95,10 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
   </Tooltip>
 );
 
-type SettingsTab = "editor" | "experience" | "security";
+import { CloudSyncSettings } from "./CloudSyncSettings";
+import { Cloud } from "lucide-react";
+
+type SettingsTab = "editor" | "experience" | "security" | "cloud";
 type CleanupTarget = "all" | "comparators" | "diff" | "formatters" | "files";
 
 export function SettingsPanel() {
@@ -112,6 +115,19 @@ export function SettingsPanel() {
   const [resettingState, setResettingState] = useState<"idle" | "resetting" | "done">("idle");
   const [storageUsage, setStorageUsage] = useState(() => getLocalStorageUsage());
   const [isRefreshingStorage, setIsRefreshingStorage] = useState(false);
+
+  // Deep-link support: other surfaces (e.g. sidebar "Cloud Sync") can open
+  // Settings directly on a specific tab via the intab:open-settings event.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab;
+      if (tab === "editor" || tab === "experience" || tab === "security" || tab === "cloud") {
+        setActiveTab(tab);
+      }
+    };
+    window.addEventListener("intab:open-settings", handler);
+    return () => window.removeEventListener("intab:open-settings", handler);
+  }, []);
 
   const handleRefreshStorage = () => {
     setIsRefreshingStorage(true);
@@ -183,10 +199,18 @@ export function SettingsPanel() {
     },
   };
 
-  // Refresh storage meter when settings opens or active tab is security
+  // Refresh storage meter when settings opens or active tab is security.
+  // Deferred to a microtask so the setState happens outside the effect body
+  // (avoids cascading renders on effect flush).
   useEffect(() => {
     if (settingsOpen && activeTab === "security") {
-      setStorageUsage(getLocalStorageUsage());
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) setStorageUsage(getLocalStorageUsage());
+      });
+      return () => {
+        cancelled = true;
+      };
     }
   }, [settingsOpen, activeTab]);
 
@@ -335,6 +359,14 @@ export function SettingsPanel() {
           >
             <ShieldCheck size={14} />
             <span>Security & Vault</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-tab-item ${activeTab === "cloud" ? "active" : ""}`}
+            onClick={() => setActiveTab("cloud")}
+          >
+            <Cloud size={14} />
+            <span>Cloud Sync</span>
           </button>
         </div>
 
@@ -638,6 +670,9 @@ export function SettingsPanel() {
               </div>
             </div>
           )}
+
+          {/* ── TAB: Cloud Sync ── */}
+          {activeTab === "cloud" && <CloudSyncSettings />}
 
           {/* ── TAB: Security & Vault ── */}
           {activeTab === "security" && (

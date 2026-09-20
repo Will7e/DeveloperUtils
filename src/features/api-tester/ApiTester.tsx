@@ -140,14 +140,9 @@ export function ApiTester() {
       }
     };
     window.addEventListener("intab:format-api-tester", handleExternalFormat);
-    window.addEventListener("devutils:format-api-tester", handleExternalFormat);
     return () => {
       window.removeEventListener(
         "intab:format-api-tester",
-        handleExternalFormat
-      );
-      window.removeEventListener(
-        "devutils:format-api-tester",
         handleExternalFormat
       );
     };

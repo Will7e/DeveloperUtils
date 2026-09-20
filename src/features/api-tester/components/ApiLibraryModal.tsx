@@ -16,7 +16,6 @@ import {
   Globe,
   Layers,
   Library,
-  Bot,
   Terminal,
   Code2,
   Trash2,

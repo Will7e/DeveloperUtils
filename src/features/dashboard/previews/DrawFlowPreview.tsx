@@ -84,6 +84,7 @@ export function DrawFlowPreview() {
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const newIdRef = useRef(0);
 
   // Virtual Cursor Autopilot State
   const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 65, y: 35, isPercent: true });
@@ -115,7 +116,7 @@ export function DrawFlowPreview() {
       setCurrentStroke([coords]);
     } else if (activeTool === "rect" || activeTool === "diamond") {
       const newNode: CanvasNode = {
-        id: `node-${Date.now()}`,
+        id: `node-new-${++newIdRef.current}`,
         type: activeTool,
         label: activeTool === "rect" ? "Service Node" : "Condition",
         sublabel: "Active Element",
@@ -158,7 +159,7 @@ export function DrawFlowPreview() {
       setStrokes((prev) => [
         ...prev,
         {
-          id: `stroke-${Date.now()}`,
+          id: `stroke-new-${++newIdRef.current}`,
           points: currentStroke,
           color: activeColor,
         },
@@ -259,7 +260,7 @@ export function DrawFlowPreview() {
         timeouts.push(
           setTimeout(() => {
             setCursorClicking(true);
-            const strokeId = `stroke-${Date.now()}`;
+            const strokeId = `stroke-new-${++newIdRef.current}`;
             // Live stroke interpolation!
             setStrokes((prev) => [
               ...prev.slice(-3),

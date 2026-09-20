@@ -164,7 +164,7 @@ export async function removeLibraryItemsFromList(
 ): Promise<{ remainingItems: unknown[]; removedCount: number }> {
   const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
   const safeTag = (libId || cleanPath).replace(/[^a-zA-Z0-9_-]/g, "_");
-  let rawItems: unknown[] = [];
+  let rawItems: unknown[];
   try {
     rawItems = await fetchRawLibraryItems(sourcePath);
   } catch {
@@ -255,7 +255,7 @@ export async function removeLibraryFromDrawFlow(
 ): Promise<number> {
   const cleanPath = sourcePath.startsWith("/") ? sourcePath.slice(1) : sourcePath;
   const safeTag = (libId || cleanPath).replace(/[^a-zA-Z0-9_-]/g, "_");
-  let rawItems: unknown[] = [];
+  let rawItems: unknown[];
   try {
     rawItems = await fetchRawLibraryItems(sourcePath);
   } catch {

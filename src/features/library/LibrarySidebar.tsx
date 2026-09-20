@@ -28,7 +28,6 @@ import {
   getDrawFlowLibraries, 
   type DrawFlowLibraryItem 
 } from "@/utils/drawflowLibrary";
-import { useNavigate } from "react-router-dom";
 
 const libraryData = libraryDataRaw as ServiceNowLibrary;
 
@@ -207,7 +206,6 @@ function highlightMatch(text: string, query: string): React.ReactNode {
 const CATEGORY_ORDER = ["Server-side", "Client-side", "Client/Server Interaction", "Utils"] as const;
 
 export function LibrarySidebar() {
-  const navigate = useNavigate();
   const selectedId = useAppStore((s) => s.librarySelectedItemId);
   const setSelectedId = useAppStore((s) => s.setLibrarySelectedItemId);
   const searchQuery = useAppStore((s) => s.librarySearchQuery);

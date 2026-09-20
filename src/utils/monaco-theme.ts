@@ -68,7 +68,6 @@ export function setupMonacoTheme(monaco: Monaco) {
     },
   };
   monaco.editor.defineTheme("intab-dark", darkThemeConfig);
-  monaco.editor.defineTheme("devutils-dark", darkThemeConfig);
 
   // Set custom light theme (InTab - Vercel Geist Light)
   const lightThemeConfig: editor.IStandaloneThemeData = {
@@ -120,7 +119,6 @@ export function setupMonacoTheme(monaco: Monaco) {
     },
   };
   monaco.editor.defineTheme("intab-light", lightThemeConfig);
-  monaco.editor.defineTheme("devutils-light", lightThemeConfig);
 
   // Register custom .env (dotenv) language if not already present
   const registeredLanguages = monaco.languages.getLanguages();
@@ -176,10 +174,9 @@ export function setupMonacoTheme(monaco: Monaco) {
   }
 
   // Automatically register Cmd+S / Ctrl+S and Shift+Alt+F formatting for every created editor
-  const monacoAny = monaco as unknown as { __intabFormatListenerAttached?: boolean; __devutilsFormatListenerAttached?: boolean };
+  const monacoAny = monaco as unknown as { __intabFormatListenerAttached?: boolean };
   if (!monacoAny.__intabFormatListenerAttached) {
     monacoAny.__intabFormatListenerAttached = true;
-    monacoAny.__devutilsFormatListenerAttached = true;
     monaco.editor.onDidCreateEditor((codeEditor: editor.ICodeEditor) => {
       registerMonacoFormatShortcut(codeEditor as editor.IStandaloneCodeEditor, monaco);
     });

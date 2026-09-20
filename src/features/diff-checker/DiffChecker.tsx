@@ -370,10 +370,8 @@ export function DiffChecker() {
       handleFormatBothRef.current?.();
     };
     window.addEventListener("intab:format-diff", handleExternalFormat);
-    window.addEventListener("devutils:format-diff", handleExternalFormat);
     return () => {
       window.removeEventListener("intab:format-diff", handleExternalFormat);
-      window.removeEventListener("devutils:format-diff", handleExternalFormat);
     };
   }, []);
 

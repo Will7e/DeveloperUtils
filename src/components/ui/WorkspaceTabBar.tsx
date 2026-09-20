@@ -332,17 +332,17 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
             onCloseTab ? () => onCloseTab(contextMenu.tab.id) : undefined
           }
           onCloseOthers={
-            Boolean(onCloseOthers || onCloseTab)
+            onCloseOthers || onCloseTab
               ? () => handleCloseOthers(contextMenu.tab.id)
               : undefined
           }
           onCloseToRight={
-            Boolean(onCloseToRight || onCloseTab)
+            onCloseToRight || onCloseTab
               ? () => handleCloseToRight(contextMenu.tab.id)
               : undefined
           }
           onCloseAll={
-            Boolean(onCloseAll || onCloseTab) ? handleCloseAll : undefined
+            onCloseAll || onCloseTab ? handleCloseAll : undefined
           }
         />
       )}

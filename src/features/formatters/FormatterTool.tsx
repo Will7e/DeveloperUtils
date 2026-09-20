@@ -24,7 +24,6 @@ import {
   Shrink,
   Plus,
   Minus,
-  X,
   Settings2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -254,10 +253,8 @@ export function FormatterTool() {
       handleFormatRef.current?.();
     };
     window.addEventListener("intab:format-formatter", handleExternalFormat);
-    window.addEventListener("devutils:format-formatter", handleExternalFormat);
     return () => {
       window.removeEventListener("intab:format-formatter", handleExternalFormat);
-      window.removeEventListener("devutils:format-formatter", handleExternalFormat);
     };
   }, []);
 

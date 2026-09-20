@@ -1,0 +1,112 @@
+/* ============================================================
+   TOOLBAR
+   ============================================================ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 46px;
+  padding: 0 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+  gap: 12px;
+}
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Brand */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+}
+.brand-text {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  background: linear-gradient(135deg, var(--text-0), var(--text-2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Language indicator */
+/* Run button */
+.run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+.run-btn:hover {
+  background: var(--accent-dim);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+.run-btn:active {
+  transform: scale(0.97);
+}
+.run-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  box-shadow: none;
+}
+.run-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Cancel/Stop button variant */
+/* Preview indicator (HTML mode) */
+/* Toolbar icon button */
+.toolbar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.toolbar-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.toolbar-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Separator */
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-1);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   TOOLBAR
+   ============================================================ */

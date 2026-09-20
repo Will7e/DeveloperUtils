@@ -1,964 +1,748 @@
 // ============================================================
-// AI Chat Settings Modal — Native Themed Settings Dialog
-// Uses identical .settings-* layout and styles from SettingsPanel
-// Supports modular SKILL.md skills management
+// Chat Settings Modal — OpenRouter Key, Model, Prompt, Data, Skills
 // ============================================================
+// Built on the app's shared .settings-* layout vocabulary AND the
+// Geist component layer (Button, Toggle, Tabs secondary) per
+// vercel.com/geist. Type ramp: Button 12 for small actions,
+// Label 12-CAPS for section titles, Label 14 row labels,
+// Copy 13 secondary text.
 
-import { useState, useEffect, useRef } from "react";
+import React from "react";
 import {
-  X,
-  Bot,
-  MessageSquare,
-  Sliders,
-  ShieldCheck,
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  ExternalLink,
   Eye,
   EyeOff,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
-  ExternalLink,
-  Trash2,
-  AlertTriangle,
-  ChevronDown,
-  Brain,
-  Upload,
-  Plus,
+  MessageSquareText,
   Pencil,
-  FileCode,
-  Check,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+  Upload,
+  X,
 } from "lucide-react";
-import { useChatStore } from "@/stores/chat.store";
-import { testProviderConnection } from "../services/ai-client.service";
+import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { checkKey, type KeyCheckResult } from "../lib/openrouter-client";
+import { OPENROUTER_CONSOLE_URL } from "../constants";
 import {
-  AIProvider,
-  CURATED_MODELS,
-  DEFAULT_SKILLS,
-  DEFAULT_SYSTEM_PROMPT,
-  PROVIDER_LABELS,
-  PROVIDER_CONSOLE_URLS,
-  ChatSkill,
-} from "../types";
-import { ProviderIcon } from "./ProviderIcon";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/components/ui/tooltip";
+  downloadSkillFile,
+  parseSkillFile,
+  skillFromParsed,
+} from "../lib/skills";
+import type { ChatSettings, ChatSkill } from "../types";
 
-interface SettingsDropdownProps<T extends string | number> {
-  value: T;
-  options: { label: string; value: T }[];
-  onChange: (value: T) => void;
-  className?: string;
+interface ChatSettingsModalProps {
+  open: boolean;
+  settings: ChatSettings;
+  conversationCount: number;
+  /** Tab to focus on open (from store deep-links) */
+  initialTab?: "connection" | "chat" | "skills" | null;
+  onClose: () => void;
+  onUpdate: (patch: Partial<ChatSettings>) => void;
+  onClearAllConversations: () => void;
+  onAddSkill: (skill: ChatSkill) => void;
+  onUpdateSkill: (id: string, patch: Partial<Omit<ChatSkill, "id" | "builtin">>) => void;
+  onDeleteSkill: (id: string) => void;
+  onResetBuiltinSkills: () => void;
 }
 
-function SettingsDropdown<T extends string | number>({
-  value,
-  options,
-  onChange,
-  className = "w-[150px]",
-}: SettingsDropdownProps<T>) {
-  const selectedOption = options.find((o) => o.value === value) || options[0];
+type KeyState =
+  | { status: "idle" }
+  | { status: "checking" }
+  | { status: "valid"; result: KeyCheckResult }
+  | { status: "invalid"; result: KeyCheckResult };
 
-  return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <button className={`settings-select flex items-center justify-between ${className}`}>
-          <span className="truncate">{selectedOption?.label ?? "Select..."}</span>
-          <ChevronDown className="h-3 w-3 opacity-50 ml-2 flex-shrink-0" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className={className}>
-        {options.map((opt) => (
-          <DropdownMenuItem
-            key={String(opt.value)}
-            onSelect={() => onChange(opt.value)}
-            onClick={() => onChange(opt.value)}
-            className="cursor-pointer text-xs"
-          >
-            {opt.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
+type SettingsTab = "connection" | "chat" | "skills";
 
-interface ActionTooltipProps {
-  children: React.ReactNode;
-  content: string;
-  side?: "top" | "bottom" | "left" | "right";
-}
+function SettingsModalInner({
+  settings,
+  conversationCount,
+  initialTab,
+  onClose,
+  onUpdate,
+  onClearAllConversations,
+  onAddSkill,
+  onUpdateSkill,
+  onDeleteSkill,
+  onResetBuiltinSkills,
+}: Omit<ChatSettingsModalProps, "open">) {
+  const [activeTab, setActiveTab] = React.useState<SettingsTab>(initialTab ?? "connection");
+  const [keyDraft, setKeyDraft] = React.useState(settings.apiKey);
+  const [showKey, setShowKey] = React.useState(false);
+  const [keyState, setKeyState] = React.useState<KeyState>({ status: "idle" });
+  const [confirmClear, setConfirmClear] = React.useState(false);
+  const [clearingState, setClearingState] = React.useState<"idle" | "clearing" | "done">("idle");
 
-function ActionTooltip({ children, content, side = "top" }: ActionTooltipProps) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side}>
-        <p>{content}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-type SettingsTab = "general" | "skills" | "security";
-
-export function ChatSettingsModal() {
-  const settingsModalOpen = useChatStore((s) => s.settingsModalOpen);
-  const setSettingsModalOpen = useChatStore((s) => s.setSettingsModalOpen);
-  const settings = useChatStore((s) => s.settings);
-  const updateSettings = useChatStore((s) => s.updateSettings);
-  const setApiKey = useChatStore((s) => s.setApiKey);
-  const setBaseUrl = useChatStore((s) => s.setBaseUrl);
-
-  const toggleSkill = useChatStore((s) => s.toggleSkill);
-  const addSkill = useChatStore((s) => s.addSkill);
-  const updateSkill = useChatStore((s) => s.updateSkill);
-  const deleteSkill = useChatStore((s) => s.deleteSkill);
-
-  const activeProvider: AIProvider = settings?.activeProvider || "openai";
-  const activeModel: string = settings?.activeModel || "gpt-4o";
-  const apiKeys = settings?.apiKeys || { openai: "", anthropic: "", gemini: "" };
-  const baseUrls = settings?.baseUrls || { openai: "", anthropic: "", gemini: "" };
-  const skills = settings?.skills || DEFAULT_SKILLS;
-  const temperature = typeof settings?.temperature === "number" ? settings.temperature : 0.7;
-  const useProxy = Boolean(settings?.useProxy);
-
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
-  const [showKeys, setShowKeys] = useState<{ [k in AIProvider]?: boolean }>({});
-  const [testing, setTesting] = useState<{ [k in AIProvider]?: boolean }>({});
-  const [testResults, setTestResults] = useState<{
-    [k in AIProvider]?: { success: boolean; message: string };
-  }>({});
-  const [showConfirmWipe, setShowConfirmWipe] = useState(false);
-  const [wipingState, setWipingState] = useState<"idle" | "wiping" | "done">("idle");
-
-  // Skill editing state
-  const [editingSkillId, setEditingSkillId] = useState<string | "new" | null>(null);
-  const [editingSkillName, setEditingSkillName] = useState("");
-  const [editingSkillDesc, setEditingSkillDesc] = useState("");
-  const [editingSkillContent, setEditingSkillContent] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && settingsModalOpen) {
-        if (editingSkillId !== null) {
-          setEditingSkillId(null);
-        } else {
-          setSettingsModalOpen(false);
-        }
-      }
+  // Escape to close
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsModalOpen, setSettingsModalOpen, editingSkillId]);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
 
-  if (!settingsModalOpen) return null;
-
-  const toggleShowKey = (provider: AIProvider) => {
-    setShowKeys((prev) => ({ ...prev, [provider]: !prev[provider] }));
+  const saveKey = () => {
+    const trimmed = keyDraft.trim();
+    onUpdate({ apiKey: trimmed });
+    if (!trimmed) setKeyState({ status: "idle" });
   };
 
-  const handleTestKey = async (provider: AIProvider) => {
-    const key = apiKeys[provider];
-    const baseUrl = baseUrls[provider];
-    if (!key) return;
-
-    setTesting((prev) => ({ ...prev, [provider]: true }));
-    setTestResults((prev) => ({ ...prev, [provider]: undefined }));
-
-    try {
-      const result = await testProviderConnection(
-        provider,
-        key,
-        baseUrl,
-        useProxy
-      );
-      setTestResults((prev) => ({ ...prev, [provider]: result }));
-    } catch (err) {
-      setTestResults((prev) => ({
-        ...prev,
-        [provider]: {
-          success: false,
-          message: err instanceof Error ? err.message : "Connection failed",
-        },
-      }));
-    } finally {
-      setTesting((prev) => ({ ...prev, [provider]: false }));
-    }
+  const validateKey = async () => {
+    const trimmed = keyDraft.trim();
+    if (!trimmed) return;
+    // Persist the draft first so the saved key is the tested key
+    onUpdate({ apiKey: trimmed });
+    setKeyState({ status: "checking" });
+    const result = await checkKey(trimmed);
+    setKeyState(result.valid ? { status: "valid", result } : { status: "invalid", result });
   };
 
-  const handleWipeKeys = () => {
-    setWipingState("wiping");
+  const handleClearAll = () => {
+    if (clearingState !== "idle") return;
+    setClearingState("clearing");
     setTimeout(() => {
-      setApiKey("openai", "");
-      setApiKey("anthropic", "");
-      setApiKey("gemini", "");
-      setTestResults({});
-      setWipingState("done");
+      onClearAllConversations();
+      setClearingState("done");
       setTimeout(() => {
-        setWipingState("idle");
-        setShowConfirmWipe(false);
-      }, 1000);
-    }, 400);
+        setConfirmClear(false);
+        setClearingState("idle");
+      }, 600);
+    }, 450);
   };
 
-  // Skill management handlers
-  const handleStartCreate = () => {
-    setEditingSkillId("new");
-    setEditingSkillName("");
-    setEditingSkillDesc("");
-    setEditingSkillContent(`---
-name: custom-expert-skill
-description: Custom instructions and domain expertise for this skill
----
-# Custom Skill Guidelines
-- Provide specific guidelines, rules, or system behavior here.
-- Write clean and concise markdown instructions.
-`);
-  };
-
-  const handleStartEdit = (skill: ChatSkill) => {
-    setEditingSkillId(skill.id);
-    setEditingSkillName(skill.name);
-    setEditingSkillDesc(skill.description);
-    setEditingSkillContent(skill.content);
-  };
-
-  const handleSaveSkill = () => {
-    if (!editingSkillName.trim() || !editingSkillContent.trim()) return;
-
-    if (editingSkillId === "new") {
-      addSkill({
-        name: editingSkillName.trim(),
-        description: editingSkillDesc.trim() || "Custom user skill",
-        content: editingSkillContent,
-        enabled: true,
-        isBuiltin: false,
-      });
-    } else if (editingSkillId) {
-      updateSkill(editingSkillId, {
-        name: editingSkillName.trim(),
-        description: editingSkillDesc.trim(),
-        content: editingSkillContent,
-      });
-    }
-    setEditingSkillId(null);
-  };
-
-  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const raw = (event.target?.result as string) || "";
-      let name = file.name.replace(/\.md$/i, "");
-      let description = "Imported SKILL.md document";
-
-      const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
-      if (frontmatterMatch && frontmatterMatch[1]) {
-        const fm = frontmatterMatch[1];
-        const nameMatch = fm.match(/^name:\s*(.+)$/m);
-        const descMatch = fm.match(/^description:\s*(.+)$/m);
-        if (nameMatch && nameMatch[1]) name = nameMatch[1].trim();
-        if (descMatch && descMatch[1]) description = descMatch[1].trim();
-      }
-
-      addSkill({
-        name,
-        description,
-        content: raw,
-        enabled: true,
-        isBuiltin: false,
-      });
-
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // Filter models for active provider
-  const availableModels = CURATED_MODELS.filter(
-    (m) => m.provider === activeProvider
-  );
-  const currentModelInfo = CURATED_MODELS.find(
-    (m) => m.id === activeModel
-  ) || availableModels[0];
-
-  const providerOptions: { label: string; value: AIProvider }[] = [
-    { label: "OpenAI", value: "openai" },
-    { label: "Anthropic Claude", value: "anthropic" },
-    { label: "Google Gemini", value: "gemini" },
-  ];
-
-  const modelOptions = availableModels.map((m) => ({
-    label: `${m.name} (${m.contextWindow})`,
-    value: m.id,
-  }));
+  const keyDirty = keyDraft.trim() !== settings.apiKey;
 
   return (
-    <div
-      className="settings-overlay"
-      onClick={() => setSettingsModalOpen(false)}
-    >
+    <div className="settings-overlay" onClick={onClose}>
       <div
-        className="settings-panel"
+        className="settings-panel chat-settings-panel"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Chat settings"
       >
-        {/* Header */}
+        {/* Header — SettingsPanel vocabulary */}
         <div className="settings-header">
           <div className="settings-header-info">
             <div className="settings-header-icon-box">
-              <MessageSquare className="w-4 h-4" />
+              <MessageSquareText className="w-4 h-4" />
             </div>
             <div>
               <div className="settings-header-title-text">AI Chat Settings</div>
               <div className="settings-header-desc">
-                Configure AI provider, model, SKILL.md instructions, and vault security
+                One OpenRouter key unlocks GPT, Claude, Gemini and hundreds more
               </div>
             </div>
           </div>
-          <ActionTooltip content="Close (Esc)" side="left">
-            <button
-              type="button"
-              className="settings-close-btn"
-              onClick={() => setSettingsModalOpen(false)}
-              aria-label="Close Settings"
-            >
+          <SimpleTooltip content="Close (Esc)" side="left">
+            <button type="button" className="settings-close-btn" onClick={onClose} aria-label="Close chat settings">
               <X className="w-4 h-4" />
             </button>
-          </ActionTooltip>
+          </SimpleTooltip>
         </div>
 
-        {/* Tabs Bar */}
-        <div className="settings-tabs-bar">
-          <button
-            type="button"
-            className={`settings-tab-item ${activeTab === "general" ? "active" : ""}`}
-            onClick={() => {
-              setEditingSkillId(null);
-              setActiveTab("general");
-            }}
-          >
-            <Bot size={14} />
-            <span>Model & Keys</span>
-          </button>
-          <button
-            type="button"
-            className={`settings-tab-item ${activeTab === "skills" ? "active" : ""}`}
-            onClick={() => setActiveTab("skills")}
-          >
-            <Brain size={14} />
-            <span>Skills</span>
-          </button>
-          <button
-            type="button"
-            className={`settings-tab-item ${activeTab === "security" ? "active" : ""}`}
-            onClick={() => {
-              setEditingSkillId(null);
-              setActiveTab("security");
-            }}
-          >
-            <ShieldCheck size={14} />
-            <span>Security & Vault</span>
-          </button>
+        {/* Tabs — Geist secondary segmented control */}
+        <div className="chat-settings-tabsbar">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTab)}>
+            <TabsList variant="secondary" className="w-full">
+              <TabsTrigger value="connection" className="flex-1">Connection</TabsTrigger>
+              <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
+              <TabsTrigger value="skills" className="flex-1">Skills</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
-        {/* Body */}
-        <div className="settings-body">
-          {/* ── TAB 1: Model & Keys ── */}
-          {activeTab === "general" && (
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTab)}>
+          {/* ── Connection ── */}
+          <TabsContent value="connection">
             <div className="settings-tab-content">
-              {/* Active Provider & Model Section */}
+              <div className="settings-security-card">
+                <div className="settings-security-badge-group">
+                  <div className="settings-security-card-icon-wrap">
+                    <CheckCircle2 size={18} />
+                  </div>
+                  <div>
+                    <div className="settings-security-card-title">Bring Your Own Key</div>
+                    <div className="settings-security-card-desc">
+                      Encrypted at rest (AES-256-GCM) and sent only to OpenRouter over TLS.
+                      With Cloud Sync enabled, settings sync across devices — still
+                      end-to-end encrypted.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="settings-section">
-                <div className="settings-section-title">Active AI Model & Provider</div>
+                <div className="settings-section-title">OpenRouter API Key</div>
 
-                {/* Active Provider Dropdown */}
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <label className="settings-label">AI Provider</label>
-                    <span className="settings-sublabel">
-                      Select primary provider for chat completions
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <SettingsDropdown<AIProvider>
-                      value={activeProvider}
-                      options={providerOptions}
-                      onChange={(provider) => {
-                        const defaultModelId = CURATED_MODELS.find(
-                          (m) => m.provider === provider && m.isDefault
-                        )?.id || CURATED_MODELS.find((m) => m.provider === provider)?.id || "";
-                        updateSettings({
-                          activeProvider: provider,
-                          activeModel: defaultModelId,
-                          defaultProvider: provider,
-                          defaultModel: defaultModelId,
-                        });
-                      }}
-                      className="w-[160px]"
-                    />
-                  </div>
-                </div>
-
-                {/* Model Dropdown */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Model</label>
-                    <span className="settings-sublabel truncate max-w-[280px]">
-                      {currentModelInfo?.description || "Select completion model"}
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <SettingsDropdown<string>
-                      value={activeModel}
-                      options={modelOptions}
-                      onChange={(model) => {
-                        const m = CURATED_MODELS.find((item) => item.id === model);
-                        updateSettings({
-                          activeModel: model,
-                          defaultModel: model,
-                          ...(m ? { activeProvider: m.provider, defaultProvider: m.provider } : {}),
-                        });
-                      }}
-                      className="w-[200px]"
-                    />
-                  </div>
-                </div>
-
-                {/* Active Key Row */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <div className="flex items-center gap-2">
-                      <ProviderIcon provider={activeProvider} className="w-4 h-4 shrink-0" />
-                      <label className="settings-label">
-                        {PROVIDER_LABELS[activeProvider]} API Key
-                      </label>
-                      <a
-                        href={PROVIDER_CONSOLE_URLS[activeProvider]}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] text-accent hover:underline inline-flex items-center gap-0.5"
-                      >
-                        <span>Get Key</span>
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
-                    </div>
-                    <span className="settings-sublabel">
-                      {apiKeys[activeProvider]?.trim()
-                        ? "Key saved securely in browser vault"
-                        : "Required to send queries to " + PROVIDER_LABELS[activeProvider]}
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <div className="relative flex items-center">
-                      <input
-                        type={showKeys[activeProvider] ? "text" : "password"}
-                        className="settings-input w-[180px] pr-7"
-                        placeholder="Paste API key..."
-                        value={apiKeys[activeProvider] || ""}
-                        onChange={(e) => setApiKey(activeProvider, e.target.value)}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-1 text-text-3 hover:text-text-0 p-1 cursor-pointer"
-                        onClick={() => toggleShowKey(activeProvider)}
-                        aria-label={showKeys[activeProvider] ? "Hide Key" : "Show Key"}
-                      >
-                        {showKeys[activeProvider] ? (
-                          <EyeOff className="w-3.5 h-3.5" />
-                        ) : (
-                          <Eye className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="settings-action-btn"
-                      disabled={!apiKeys[activeProvider]?.trim() || testing[activeProvider]}
-                      onClick={() => handleTestKey(activeProvider)}
-                    >
-                      {testing[activeProvider] ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <span>Test</span>
+                    <label className="settings-label">
+                      <span className="flex items-center gap-1.5">
+                        API Key
+                        <a
+                          href={OPENROUTER_CONSOLE_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="chat-settings-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Get a key <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </span>
+                      <span className="settings-sublabel">
+                        Starts with sk-or-v1- · validated live against OpenRouter
+                      </span>
+                    </label>
+                    <div className="settings-control chat-key-control">
+                      <div className="chat-key-input-wrap">
+                        <input
+                          type={showKey ? "text" : "password"}
+                          value={keyDraft}
+                          onChange={(e) => setKeyDraft(e.target.value)}
+                          onBlur={saveKey}
+                          placeholder="sk-or-v1-…"
+                          className="settings-input chat-key-input"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <SimpleTooltip content={showKey ? "Hide key" : "Show key"} side="top">
+                          <button
+                            type="button"
+                            className="chat-key-toggle"
+                            onClick={() => setShowKey((v) => !v)}
+                            aria-label={showKey ? "Hide key" : "Show key"}
+                          >
+                            {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </SimpleTooltip>
+                      </div>
+                      {keyDirty && (
+                        <Button size="sm" variant="default" onClick={saveKey}>
+                          Save
+                        </Button>
                       )}
-                    </button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={validateKey}
+                        disabled={!keyDraft.trim() || keyState.status === "checking"}
+                      >
+                        {keyState.status === "checking" ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          "Test"
+                        )}
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Test Feedback if present */}
-                {testResults[activeProvider] && (
-                  <div
-                    className={`flex items-center gap-2 p-2 rounded text-xs border ${
-                      testResults[activeProvider]?.success
-                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                        : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
-                    }`}
-                  >
-                    {testResults[activeProvider]?.success ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    ) : (
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    )}
-                    <span className="truncate">
-                      {testResults[activeProvider]?.message}
+                {keyState.status === "valid" && (
+                  <div className="chat-key-status chat-key-status-valid">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      {keyState.result.message}
+                      {keyState.result.usageRemaining !== undefined &&
+                        ` Credits remaining: $${keyState.result.usageRemaining.toFixed(2)}.`}
                     </span>
                   </div>
                 )}
+                {keyState.status === "invalid" && (
+                  <div className="chat-key-status chat-key-status-invalid">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{keyState.result.message}</span>
+                  </div>
+                )}
               </div>
+            </div>
+          </TabsContent>
 
-              <div className="settings-divider" />
-
-              {/* Inference Parameters */}
+          {/* ── Chat ── */}
+          <TabsContent value="chat">
+            <div className="settings-tab-content">
               <div className="settings-section">
-                <div className="settings-section-title">Inference Parameters</div>
-
-                {/* Temperature Slider */}
+                <div className="settings-section-title">Model</div>
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <label className="settings-label">Creativity & Temperature</label>
+                    <label className="settings-label">Default Model</label>
                     <span className="settings-sublabel">
-                      Lower values produce deterministic code; higher values increase variety
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={temperature}
-                      onChange={(e) =>
-                        updateSettings({ temperature: parseFloat(e.target.value) })
-                      }
-                      className="settings-slider"
-                    />
-                    <span className="settings-value">
-                      {temperature.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="settings-divider" />
-
-              {/* All Configured API Keys */}
-              <div className="settings-section">
-                <div className="settings-section-title">All Provider API Keys</div>
-
-                {(["openai", "anthropic", "gemini"] as AIProvider[]).map((prov) => {
-                  const isCurrent = prov === activeProvider;
-                  const keyVal = apiKeys[prov] || "";
-                  const isConfigured = Boolean(keyVal.trim());
-
-                  return (
-                    <div key={prov} className="settings-row">
-                      <div className="settings-row-info">
-                        <div className="flex items-center gap-2">
-                          <ProviderIcon provider={prov} className="w-4 h-4 shrink-0" />
-                          <label className="settings-label">
-                            {PROVIDER_LABELS[prov]}
-                          </label>
-                          {isCurrent && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent font-medium">
-                              Active
-                            </span>
-                          )}
-                          <a
-                            href={PROVIDER_CONSOLE_URLS[prov]}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-text-3 hover:text-accent inline-flex items-center gap-0.5 ml-1"
-                          >
-                            <span>Key ↗</span>
-                          </a>
-                        </div>
-                        <span className="settings-sublabel">
-                          {isConfigured ? "Configured in vault" : "Not configured"}
-                        </span>
-                      </div>
-                      <div className="settings-control">
-                        <div className="relative flex items-center">
-                          <input
-                            type={showKeys[prov] ? "text" : "password"}
-                            className="settings-input w-[180px] pr-7"
-                            placeholder="Enter API key..."
-                            value={keyVal}
-                            onChange={(e) => setApiKey(prov, e.target.value)}
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-1 text-text-3 hover:text-text-0 p-1 cursor-pointer"
-                            onClick={() => toggleShowKey(prov)}
-                            aria-label={showKeys[prov] ? "Hide Key" : "Show Key"}
-                          >
-                            {showKeys[prov] ? (
-                              <EyeOff className="w-3.5 h-3.5" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          className="settings-action-btn"
-                          disabled={!isConfigured || testing[prov]}
-                          onClick={() => handleTestKey(prov)}
-                        >
-                          {testing[prov] ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <span>Test</span>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="settings-divider" />
-
-              {/* Network & Base URL Section */}
-              <div className="settings-section">
-                <div className="settings-section-title">Network & Connectivity</div>
-
-                {/* Proxy Route Toggle */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Developer Proxy Route</label>
-                    <span className="settings-sublabel">
-                      Bypass browser CORS restrictions by routing via local /api/proxy
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${useProxy ? "active" : ""}`}
-                      onClick={() => updateSettings({ useProxy: !useProxy })}
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Custom Base URL */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Custom Base URL — {PROVIDER_LABELS[activeProvider]}</label>
-                    <span className="settings-sublabel">
-                      Optional endpoint override for local LLM gateways or self-hosted servers
+                      Used for new chats — each chat remembers its own model once switched
                     </span>
                   </div>
                   <div className="settings-control">
                     <input
                       type="text"
-                      className="settings-input w-[220px]"
-                      placeholder="Default official API URL"
-                      value={baseUrls[activeProvider] || ""}
-                      onChange={(e) => setBaseUrl(activeProvider, e.target.value)}
+                      value={settings.defaultModel}
+                      onChange={(e) => onUpdate({ defaultModel: e.target.value })}
+                      className="settings-input chat-model-input"
+                      placeholder="openai/gpt-4o-mini"
                       spellCheck={false}
                     />
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* ── TAB 2: Skills ── */}
-          {activeTab === "skills" && (
-            <div className="settings-tab-content">
-              {/* Skills List Section */}
-              <div className="settings-section">
-                <div className="settings-section-title">Agent Skills</div>
-                <span className="settings-sublabel">
-                  Active markdown skills are dynamically composed into the system instructions
-                </span>
-
-                {/* Subform: Skill Editor / Creator */}
-                {editingSkillId !== null && (
-                  <div className="settings-vault-subform mt-1">
-                    <div className="flex items-center justify-between">
-                      <span className="settings-subform-title">
-                        <FileCode className="w-3.5 h-3.5 text-accent" />
-                        <span>
-                          {editingSkillId === "new"
-                            ? "New Agent Skill"
-                            : `Edit Skill: ${editingSkillName || "Untitled"}`}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        className="text-text-3 hover:text-text-1 cursor-pointer"
-                        onClick={() => setEditingSkillId(null)}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="flex flex-col gap-2 mt-1">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          className="settings-input flex-1"
-                          placeholder="Skill Name (e.g. React 19 Expert)"
-                          value={editingSkillName}
-                          onChange={(e) => setEditingSkillName(e.target.value)}
-                        />
-                        <input
-                          type="text"
-                          className="settings-input flex-1"
-                          placeholder="Brief Description"
-                          value={editingSkillDesc}
-                          onChange={(e) => setEditingSkillDesc(e.target.value)}
-                        />
-                      </div>
-
-                      <textarea
-                        className="settings-textarea font-mono text-[11.5px]"
-                        rows={8}
-                        placeholder="Write markdown instructions or YAML frontmatter + markdown..."
-                        value={editingSkillContent}
-                        onChange={(e) => setEditingSkillContent(e.target.value)}
-                        spellCheck={false}
-                      />
-
-                      <div className="settings-subform-btns justify-end">
-                        <button
-                          type="button"
-                          className="settings-subform-cancel"
-                          onClick={() => setEditingSkillId(null)}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="settings-subform-action-btn max-w-[120px]"
-                          onClick={handleSaveSkill}
-                          disabled={!editingSkillName.trim() || !editingSkillContent.trim()}
-                        >
-                          Save Skill
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Clean Skills Rows */}
-                {skills.map((skill) => (
-                  <div key={skill.id} className="settings-row">
-                    <div className="settings-row-info">
-                      <div className="flex items-center gap-2">
-                        <label
-                          className="settings-label cursor-pointer hover:text-accent transition-colors flex items-center gap-1.5"
-                          onClick={() => handleStartEdit(skill)}
-                        >
-                          <span>{skill.name}</span>
-                          <Pencil className="w-3 h-3 text-text-3 opacity-60 hover:opacity-100 hover:text-accent" />
-                        </label>
-                        {!skill.isBuiltin && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-bg-3 text-text-3 font-mono">
-                            Custom
-                          </span>
-                        )}
-                      </div>
-                      <span className="settings-sublabel">{skill.description}</span>
-                    </div>
-
-                    <div className="settings-control">
-                      {!skill.isBuiltin && (
-                        <button
-                          type="button"
-                          className="text-text-3 hover:text-red-400 p-1 rounded transition-colors cursor-pointer"
-                          onClick={() => deleteSkill(skill.id)}
-                          title="Delete custom skill"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={`settings-toggle ${skill.enabled ? "active" : ""}`}
-                        onClick={() => toggleSkill(skill.id)}
-                        aria-label={`Toggle ${skill.name}`}
-                      >
-                        <span className="toggle-thumb" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
 
               <div className="settings-divider" />
 
-              {/* Skill Actions Section */}
               <div className="settings-section">
-                <div className="settings-section-title">Skill Actions</div>
+                <div className="settings-section-title">Behavior</div>
 
-                {/* Import File Row */}
+                <div className="settings-row">
+                  <div className="settings-row-info" style={{ flex: 1 }}>
+                    <label className="settings-label">System Prompt</label>
+                    <span className="settings-sublabel">
+                      Applied to all chats that don't define their own
+                    </span>
+                  </div>
+                  <span className="settings-value">{settings.systemPrompt.length} chars</span>
+                </div>
+                <textarea
+                  value={settings.systemPrompt}
+                  onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
+                  className="settings-textarea chat-prompt-textarea"
+                  rows={5}
+                  placeholder="You are a helpful assistant…"
+                />
+
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <label className="settings-label">Import SKILL.md</label>
-                    <span className="settings-sublabel">
-                      Load a markdown skill document from your computer
-                    </span>
+                    <label className="settings-label">Temperature</label>
+                    <span className="settings-sublabel">Lower is precise · higher is creative</span>
                   </div>
                   <div className="settings-control">
                     <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleImportFile}
-                      accept=".md,.markdown"
-                      className="hidden"
+                      type="range"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={settings.temperature}
+                      onChange={(e) => onUpdate({ temperature: parseFloat(e.target.value) })}
+                      className="settings-slider"
                     />
-                    <button
-                      type="button"
-                      className="settings-action-btn flex items-center gap-1.5"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Import File</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Create Custom Skill Row */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Create Custom Skill</label>
-                    <span className="settings-sublabel">
-                      Write markdown instructions and YAML frontmatter
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <button
-                      type="button"
-                      className="settings-action-btn flex items-center gap-1.5"
-                      onClick={handleStartCreate}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>New Skill</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB 3: Security & Vault ── */}
-          {activeTab === "security" && (
-            <div className="settings-tab-content">
-              {/* Security Reassurance Card */}
-              <div className="settings-security-card">
-                <div className="settings-security-badge-group">
-                  <div className="settings-security-card-icon-wrap">
-                    <ShieldCheck size={18} />
-                  </div>
-                  <div>
-                    <div className="settings-security-card-title">Local Vault Security</div>
-                    <div className="settings-security-card-desc">
-                      API keys and skills are encrypted client-side and stored only in your browser. Nothing is sent to external servers or analytics.
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-mono">AES-256-GCM</span>
-                    </div>
+                    <span className="settings-value">{settings.temperature.toFixed(1)}</span>
                   </div>
                 </div>
               </div>
 
               <div className="settings-divider" />
 
-              {/* Vault Actions */}
               <div className="settings-section">
                 <div className="settings-section-title">Data Management</div>
-
                 <div className="settings-row">
                   <div className="settings-row-info">
-                    <label className="settings-label">Clear Saved API Keys</label>
+                    <label className="settings-label">Stored Conversations</label>
                     <span className="settings-sublabel">
-                      Permanently wipe all stored OpenAI, Anthropic, and Gemini keys from this browser
+                      {conversationCount} conversation{conversationCount === 1 ? "" : "s"} ·
+                      encrypted locally · synced when Cloud Sync is on
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="settings-action-btn danger"
-                    onClick={() => setShowConfirmWipe(true)}
-                  >
-                    <Trash2 size={12} />
-                    <span>Clear Keys</span>
-                  </button>
+                  {!confirmClear && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="chat-danger-ghost"
+                      onClick={() => setConfirmClear(true)}
+                      disabled={conversationCount === 0}
+                    >
+                      <Trash2 size={12} />
+                      Clear All
+                    </Button>
+                  )}
                 </div>
 
-                {/* Reset Confirmation Subform */}
-                {showConfirmWipe && (
+                {confirmClear && (
                   <div className="settings-vault-subform danger-box">
                     <div className="settings-subform-title danger">
                       <AlertTriangle size={14} />
-                      <span>Confirm Key Removal</span>
+                      Delete all conversations?
                     </div>
                     <p className="settings-subform-warning">
-                      This will erase all saved API tokens from your browser's local encrypted vault. You will need to re-enter them to continue chatting.
+                      This permanently removes {conversationCount} conversation
+                      {conversationCount === 1 ? "" : "s"} from this device
+                      {settings.apiKey ? " and queues deletion for the next cloud sync" : ""}.
+                      A fresh empty chat will be created.
                     </p>
                     <div className="settings-subform-btns">
-                      <button
-                        type="button"
-                        disabled={wipingState !== "idle"}
-                        onClick={handleWipeKeys}
-                        className="settings-subform-danger-btn flex items-center justify-center gap-1.5"
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleClearAll}
+                        disabled={clearingState !== "idle"}
+                        className="flex-1"
                       >
-                        {wipingState === "wiping" ? (
+                        {clearingState === "clearing" ? (
                           <>
                             <Loader2 size={13} className="animate-spin" />
-                            <span>Clearing Keys...</span>
+                            Deleting…
                           </>
-                        ) : wipingState === "done" ? (
+                        ) : clearingState === "done" ? (
                           <>
                             <CheckCircle2 size={13} />
-                            <span>Keys Cleared!</span>
+                            Deleted!
                           </>
                         ) : (
-                          <span>Yes, Clear Stored Keys</span>
+                          "Yes, delete everything"
                         )}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={wipingState !== "idle"}
-                        onClick={() => setShowConfirmWipe(false)}
-                        className="settings-subform-cancel"
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setConfirmClear(false)}
+                        disabled={clearingState !== "idle"}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
               </div>
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          {/* ── Skills ── */}
+          <TabsContent value="skills">
+            <SkillsTabContent
+              settings={settings}
+              onAddSkill={onAddSkill}
+              onUpdateSkill={onUpdateSkill}
+              onDeleteSkill={onDeleteSkill}
+              onResetBuiltinSkills={onResetBuiltinSkills}
+            />
+          </TabsContent>
+        </Tabs>
 
         {/* Footer */}
         <div className="settings-footer">
-          <span className="settings-footer-hint">
-            Esc or click outside to close
+          <span className="settings-footer-hint">Esc to close</span>
+          <span className="settings-footer-hint chat-settings-footer-right">
+            Changes save automatically
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function ChatSettingsModal({ open, ...rest }: ChatSettingsModalProps) {
+  if (!open) return null;
+  // Keyed remount per open gives fresh draft state without
+  // setState-in-effect (the old draft is intentionally discarded).
+  return <SettingsModalInner key="chat-settings" {...rest} />;
+}
+
+// ============================================================
+// Skills Tab — Manage prompt modules
+// ============================================================
+
+function SkillsTabContent({
+  settings,
+  onAddSkill,
+  onUpdateSkill,
+  onDeleteSkill,
+  onResetBuiltinSkills,
+}: Pick<
+  ChatSettingsModalProps,
+  "settings" | "onAddSkill" | "onUpdateSkill" | "onDeleteSkill" | "onResetBuiltinSkills"
+>) {
+  const [editingSkill, setEditingSkill] = React.useState<ChatSkill | null>(null);
+  const [creating, setCreating] = React.useState(false);
+  const [draft, setDraft] = React.useState({ name: "", description: "", content: "" });
+  const [importError, setImportError] = React.useState<string | null>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const skills = settings.skills ?? [];
+  const builtins = skills.filter((s) => s.builtin);
+  const custom = skills.filter((s) => !s.builtin);
+  const enabledCount = skills.filter((s) => s.enabled).length;
+
+  const startCreate = () => {
+    setDraft({ name: "", description: "", content: "" });
+    setCreating(true);
+    setEditingSkill(null);
+  };
+
+  const startEdit = (skill: ChatSkill) => {
+    setDraft({ name: skill.name, description: skill.description, content: skill.content });
+    setEditingSkill(skill);
+    setCreating(false);
+  };
+
+  const closeEditor = () => {
+    setEditingSkill(null);
+    setCreating(false);
+  };
+
+  const commitEditor = () => {
+    const name = draft.name.trim();
+    const content = draft.content.trim();
+    if (!name || !content) return;
+
+    if (editingSkill) {
+      onUpdateSkill(editingSkill.id, {
+        name,
+        description: draft.description.trim(),
+        content,
+      });
+    } else {
+      onAddSkill({
+        id: `skill-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        name,
+        description: draft.description.trim(),
+        content,
+        enabled: false,
+      });
+    }
+    closeEditor();
+  };
+
+  const handleFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-importing the same file
+    if (!file) return;
+    setImportError(null);
+    try {
+      const text = await file.text();
+      const parsed = parseSkillFile(text);
+      onAddSkill(skillFromParsed(parsed));
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Could not read the skill file.");
+    }
+  };
+
+  const renderSkillRow = (skill: ChatSkill) => {
+    const isEditing = editingSkill?.id === skill.id;
+    return (
+      <div key={skill.id} className="chat-skill-item">
+        <div className="chat-skill-row">
+          <div className="chat-skill-info">
+            <div className="chat-skill-name-row">
+              <span className="chat-skill-name">{skill.name}</span>
+              {skill.builtin && <span className="chat-skill-badge">Built-in</span>}
+              {skill.updated && <span className="chat-skill-badge chat-skill-badge-edited">Edited</span>}
+              {skill.enabled && <span className="chat-skill-badge chat-skill-badge-on">Active</span>}
+            </div>
+            {skill.description && (
+              <div className="chat-skill-desc">{skill.description}</div>
+            )}
+          </div>
+          <div className="chat-skill-actions">
+            <SimpleTooltip content={isEditing ? "Close editor" : "Edit"} side="top">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => (isEditing ? closeEditor() : startEdit(skill))}
+                aria-label={isEditing ? "Close editor" : `Edit ${skill.name}`}
+              >
+                {isEditing ? <X size={12} /> : <Pencil size={12} />}
+              </Button>
+            </SimpleTooltip>
+            <SimpleTooltip content="Export .md" side="top">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={() => downloadSkillFile(skill)}
+                aria-label={`Export ${skill.name}`}
+              >
+                <Download size={12} />
+              </Button>
+            </SimpleTooltip>
+            <SimpleTooltip content="Delete" side="top">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="chat-danger-ghost"
+                onClick={() => onDeleteSkill(skill.id)}
+                aria-label={`Delete ${skill.name}`}
+              >
+                <Trash2 size={12} />
+              </Button>
+            </SimpleTooltip>
+            <Toggle
+              size="sm"
+              checked={skill.enabled}
+              onCheckedChange={(checked) => onUpdateSkill(skill.id, { enabled: checked })}
+              aria-label={`Toggle ${skill.name}`}
+            />
+          </div>
+        </div>
+
+        {isEditing && (
+          <div className="chat-skill-editor">
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+              placeholder="Skill name"
+              className="settings-input chat-skill-input"
+              maxLength={60}
+            />
+            <input
+              type="text"
+              value={draft.description}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              placeholder="Short description (optional)"
+              className="settings-input chat-skill-input"
+              maxLength={140}
+            />
+            <textarea
+              value={draft.content}
+              onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
+              placeholder="What should the model do when this skill is active?"
+              className="settings-textarea chat-skill-textarea"
+              rows={6}
+            />
+            <div className="chat-skill-editor-footer">
+              <span className="chat-skill-chars">{draft.content.length} chars</span>
+              <div className="chat-skill-editor-btns">
+                <Button size="sm" variant="secondary" onClick={closeEditor}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={commitEditor}
+                  disabled={!draft.name.trim() || !draft.content.trim()}
+                >
+                  <CheckCircle2 size={12} />
+                  {editingSkill ? "Save changes" : "Add skill"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="settings-tab-content">
+      <div className="settings-security-card">
+        <div className="settings-security-badge-group">
+          <div className="settings-security-card-icon-wrap">
+            <Sparkles size={18} />
+          </div>
+          <div>
+            <div className="settings-security-card-title">Skills</div>
+            <div className="settings-security-card-desc">
+              Reusable prompt modules injected into every message when enabled. Enabled
+              skills count toward the context window — the header meter shows the cost.
+              {enabledCount > 0 && ` ${enabledCount} active now.`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="chat-skills-toolbar">
+        <Button size="sm" variant="default" onClick={startCreate}>
+          <Plus size={12} />
+          New skill
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+          <Upload size={12} />
+          Import .md
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".md,.markdown,.txt"
+          onChange={handleFileChosen}
+          style={{ display: "none" }}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            onResetBuiltinSkills();
+            closeEditor();
+          }}
+          title="Restore all built-in skills to their original text"
+        >
+          <RotateCcw size={12} />
+          Reset built-ins
+        </Button>
+      </div>
+
+      {importError && (
+        <div className="chat-key-status chat-key-status-invalid">{importError}</div>
+      )}
+
+      {/* Create-new editor (top) */}
+      {creating && (
+        <div className="chat-skill-item">
+          <div className="chat-skill-editor">
+            <input
+              type="text"
+              value={draft.name}
+              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+              placeholder="Skill name"
+              className="settings-input chat-skill-input"
+              maxLength={60}
+              autoFocus
+            />
+            <input
+              type="text"
+              value={draft.description}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              placeholder="Short description (optional)"
+              className="settings-input chat-skill-input"
+              maxLength={140}
+            />
+            <textarea
+              value={draft.content}
+              onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
+              placeholder="What should the model do when this skill is active?"
+              className="settings-textarea chat-skill-textarea"
+              rows={6}
+            />
+            <div className="chat-skill-editor-footer">
+              <span className="chat-skill-chars">{draft.content.length} chars</span>
+              <div className="chat-skill-editor-btns">
+                <Button size="sm" variant="secondary" onClick={closeEditor}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={commitEditor}
+                  disabled={!draft.name.trim() || !draft.content.trim()}
+                >
+                  <CheckCircle2 size={12} />
+                  Add skill
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {builtins.length > 0 && (
+        <div className="settings-section">
+          <div className="settings-section-title">Built-in presets</div>
+          {builtins.map(renderSkillRow)}
+        </div>
+      )}
+
+      {custom.length > 0 && (
+        <div className="settings-section">
+          <div className="settings-section-title">Your skills</div>
+          {custom.map(renderSkillRow)}
+        </div>
+      )}
+
+      {skills.length === 0 && !creating && (
+        <div className="chat-skills-empty">
+          No skills yet. Start with a built-in preset or import a .md file.
+        </div>
+      )}
     </div>
   );
 }

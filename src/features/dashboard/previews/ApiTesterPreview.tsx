@@ -4,16 +4,24 @@ import { VirtualCursor } from "../components/VirtualCursor";
 import { renderHighlightedJson } from "./syntaxHighlight";
 import { getTargetCenter, type CursorPosition } from "../components/cursorUtils";
 
+const DEMO_QUOTES: Array<{ quote: string; author: string }> = [
+  { quote: "The only limit to our realization of tomorrow is our doubts of today.", author: "Franklin D. Roosevelt" },
+  { quote: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci" },
+  { quote: "Make it work, make it right, make it fast.", author: "Kent Beck" },
+  { quote: "Programs must be written for people to read.", author: "Harold Abelson" },
+  { quote: "Talk is cheap. Show me the code.", author: "Linus Torvalds" },
+];
+
 export function ApiTesterPreview() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [method, setMethod] = useState<"GET" | "POST">("GET");
-  const [url, setUrl] = useState("https://dummyjson.com/quotes/random");
+  const [url, setUrl] = useState("https://api.example.com/quotes/random");
   const [activeTab, setActiveTab] = useState<"body" | "headers">("body");
   const [isLoading, setIsLoading] = useState(false);
   const [latency, setLatency] = useState(142);
   const [statusCode, setStatusCode] = useState(200);
   const [statusText, setStatusText] = useState("OK");
-  const [headersMap, setHeadersMap] = useState<Record<string, string>>({
+  const [headersMap] = useState<Record<string, string>>({
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-cache, private",
     "x-powered-by": "Express",
@@ -23,14 +31,15 @@ export function ApiTesterPreview() {
     JSON.stringify(
       {
         id: 1,
-        quote: "The only limit to our realization of tomorrow is our doubts of today.",
-        author: "Franklin D. Roosevelt",
-        network: "direct",
+        quote: DEMO_QUOTES[0]!.quote,
+        author: DEMO_QUOTES[0]!.author,
+        network: "simulated locally — no request leaves your browser",
       },
       null,
       2
     )
   );
+  const demoIndexRef = useRef(0);
 
   // Virtual Cursor Autopilot State
   const [cursorPos, setCursorPos] = useState<CursorPosition>({ x: 92, y: 14, isPercent: true });
@@ -41,49 +50,34 @@ export function ApiTesterPreview() {
   const [isUserActive, setIsUserActive] = useState(false);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Fully local simulation — the landing page must make zero network requests.
   const dispatchFetch = async () => {
     setIsLoading(true);
     const t0 = performance.now();
+    const simulatedLatency = 90 + Math.round(Math.random() * 160);
 
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { Accept: "application/json" },
-      });
-      const t1 = performance.now();
-      setLatency(Math.max(12, Math.round(t1 - t0)));
-      setStatusCode(res.status);
-      setStatusText(res.statusText || "OK");
+    await new Promise((resolve) => setTimeout(resolve, simulatedLatency));
 
-      const capturedHeaders: Record<string, string> = {};
-      res.headers.forEach((val, key) => {
-        capturedHeaders[key] = val;
-      });
-      if (Object.keys(capturedHeaders).length > 0) {
-        setHeadersMap(capturedHeaders);
-      }
+    const t1 = performance.now();
+    const quote = DEMO_QUOTES[demoIndexRef.current % DEMO_QUOTES.length] ?? DEMO_QUOTES[0];
+    demoIndexRef.current += 1;
 
-      const json = await res.json();
-      setResponseJson(JSON.stringify(json, null, 2));
-      setIsLoading(false);
-    } catch {
-      const t1 = performance.now();
-      setLatency(Math.max(8, Math.round(t1 - t0)));
-      setStatusCode(200);
-      setStatusText("OK");
-      setResponseJson(
-        JSON.stringify(
-          {
-            id: 42,
-            quote: "Client execution directly in your browser tab.",
-            author: "InTab",
-          },
-          null,
-          2
-        )
-      );
-      setIsLoading(false);
-    }
+    setLatency(Math.max(12, Math.round(t1 - t0)));
+    setStatusCode(200);
+    setStatusText("OK");
+    setResponseJson(
+      JSON.stringify(
+        {
+          id: demoIndexRef.current,
+          quote: quote!.quote,
+          author: quote!.author,
+          network: "simulated locally — no request leaves your browser",
+        },
+        null,
+        2
+      )
+    );
+    setIsLoading(false);
   };
 
   const handleSend = (e?: React.MouseEvent) => {

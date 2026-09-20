@@ -1,0 +1,90 @@
+/* ============================================================
+   DROPDOWN-MENU
+   ============================================================ */
+.dropdown-content {
+  z-index: 100002;
+  min-width: 180px;
+  background: var(--ds-background-100);
+  border: 1px solid var(--ds-gray-alpha-400);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: var(--ds-shadow-menu);
+  animation: dropdownFade 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes dropdownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ds-gray-900);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  position: relative;
+}
+.dropdown-item:hover,
+.dropdown-item:focus,
+.dropdown-item[data-highlighted] {
+  background: var(--ds-gray-200);
+  color: var(--ds-gray-1000);
+}
+.dropdown-item[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.dropdown-item[data-state="checked"] {
+  color: var(--ds-gray-1000);
+  font-weight: 500;
+}
+.dropdown-checkbox-item {
+  padding-left: 32px !important;
+}
+.dropdown-indicator {
+  position: absolute;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--ds-gray-1000);
+}
+.dropdown-label {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ds-gray-700);
+}
+.dropdown-separator {
+  height: 1px;
+  background: var(--ds-gray-alpha-400);
+  margin: 4px 0;
+}
+.tab-context-menu {
+  z-index: 100002;
+  min-width: 195px;
+  box-shadow: var(--ds-shadow-menu);
+}
+
+/* ============================================================
+   DROPDOWN-MENU
+   ============================================================ */

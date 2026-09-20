@@ -1,0 +1,415 @@
+/* ============================================================
+   SETTINGS ENHANCEMENTS
+   ============================================================ */
+.settings-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-1);
+  margin-bottom: 4px;
+}
+.settings-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-1);
+  text-align: center;
+}
+.settings-footer-hint {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+.status-save {
+  transition: color 0.2s;
+}
+.status-unsaved {
+  color: var(--yellow) !important;
+}
+.status-saved {
+  color: var(--green) !important;
+  opacity: 0.6;
+}
+.status-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent) !important;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+.status-timer-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: blink 1s ease-in-out infinite;
+}
+.status-last-success {
+  color: var(--green) !important;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.status-last-error {
+  color: var(--red) !important;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* ============================================================
+   PREMIUM TOOLTIPS
+   ============================================================ */
+.intab-tooltip {
+  z-index: 100003;
+  overflow: hidden;
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ds-background-100);
+  letter-spacing: 0.1px;
+  background: var(--ds-gray-1000);
+  border: 1px solid var(--ds-gray-alpha-400);
+  border-radius: 6px;
+  box-shadow: var(--ds-shadow-tooltip);
+  pointer-events: none;
+  white-space: nowrap;
+
+  /* Animation defaults */
+  animation-duration: 0.15s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: forwards;
+}
+
+/* Keyboard shortcut styling inside tooltips */
+.intab-tooltip kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin-left: 6px;
+  background: var(--ds-gray-alpha-400);
+  border: 1px solid var(--ds-gray-alpha-500);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ds-background-100);
+  line-height: 1.5;
+}
+
+/* Per-side entrance animations */
+.intab-tooltip[data-side="top"] {
+  animation-name: tooltip-in-top;
+}
+.intab-tooltip[data-side="bottom"] {
+  animation-name: tooltip-in-bottom;
+}
+.intab-tooltip[data-side="left"] {
+  animation-name: tooltip-in-left;
+}
+.intab-tooltip[data-side="right"] {
+  animation-name: tooltip-in-right;
+}
+
+/* Exit animations */
+.intab-tooltip[data-state="closed"] {
+  animation-name: tooltip-out;
+  animation-duration: 0.1s;
+}
+
+@keyframes tooltip-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tooltip-in-bottom {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tooltip-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes tooltip-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes tooltip-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+/* ============================================================
+   SIDEBAR (File Explorer — Compiler Page)
+   ============================================================ */
+.sidebar {
+  width: 240px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-1);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.sidebar-collapsed {
+  width: 42px;
+}
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  height: 46px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.sidebar-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Collapsed expand button */
+.sidebar-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+  margin: 0 auto;
+}
+.sidebar-expand-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* Collapsed file icons */
+.sidebar-collapsed-files {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+}
+.sidebar-collapsed-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.12s;
+  position: relative;
+}
+.sidebar-collapsed-file:hover {
+  background: var(--bg-hover);
+}
+.sidebar-collapsed-file-active {
+  background: var(--bg-2);
+}
+.sidebar-collapsed-file-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px rgba(129, 140, 248, 0.4);
+}
+
+/* Expanded file list */
+.sidebar-files {
+  padding: 8px 0;
+}
+.sidebar-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  height: 32px;
+}
+.sidebar-file:hover {
+  background: var(--bg-hover);
+}
+.sidebar-file-active {
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+.sidebar-file-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px rgba(129, 140, 248, 0.3);
+}
+.sidebar-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.sidebar-file-name {
+  font-size: 13px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-file-active .sidebar-file-name {
+  color: var(--text-1);
+}
+.sidebar-file-rename-input {
+  background: var(--bg-4);
+  border: 1px solid var(--border-accent);
+  border-radius: 4px;
+  color: var(--text-1);
+  font-size: 12px;
+  padding: 2px 8px;
+  width: 100%;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.sidebar-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.sidebar-file:hover .sidebar-file-actions {
+  opacity: 1;
+}
+.sidebar-file-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.sidebar-file-action-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+.sidebar-file-delete:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.lang-icon {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.lang-js {
+  background: rgba(247, 223, 30, 0.1);
+  color: #f7df1e;
+}
+.lang-ts {
+  background: rgba(49, 120, 198, 0.1);
+  color: #3178c6;
+}
+.lang-py {
+  background: rgba(55, 118, 171, 0.1);
+  color: #ffd43b;
+}
+.lang-html {
+  background: rgba(227, 79, 38, 0.1);
+  color: #e34f26;
+}
+.new-file-menu {
+  padding: 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+.new-file-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
