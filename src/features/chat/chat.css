@@ -1557,6 +1557,12 @@
   border-color: rgba(239, 68, 68, 0.25);
 }
 
+.chat-key-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .chat-settings-link {
   display: inline-flex;
   align-items: center;

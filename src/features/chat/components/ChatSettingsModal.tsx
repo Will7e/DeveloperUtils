@@ -280,8 +280,10 @@ function SettingsModalInner({
 
                 <div className="settings-row chat-key-row">
                   <div className="settings-row-info">
-                    <label className="settings-label" htmlFor="chat-api-key-input">
-                      API key
+                    <div className="chat-key-label-row">
+                      <label className="settings-label" htmlFor="chat-api-key-input">
+                        API key
+                      </label>
                       <a
                         href={OPENROUTER_CONSOLE_URL}
                         target="_blank"
@@ -291,7 +293,7 @@ function SettingsModalInner({
                       >
                         Get a key <ExternalLink className="h-3 w-3" />
                       </a>
-                    </label>
+                    </div>
                     <span className="settings-sublabel">
                       Starts with sk-or-v1- · validated live against OpenRouter
                     </span>
