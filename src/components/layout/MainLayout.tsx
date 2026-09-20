@@ -167,6 +167,14 @@ export function MainLayout() {
           />
 
           <NavItem
+            to="/chat"
+            icon={<MessageSquareText className="h-[18px] w-[18px]" />}
+            label="AI Chat"
+            active={location.pathname === "/chat" || location.pathname === "/chatbot"}
+            collapsed={sidebarCollapsed}
+          />
+
+          <NavItem
             to="/compiler"
             icon={<Code2 className="h-[18px] w-[18px]" />}
             label="Compiler"
@@ -203,14 +211,6 @@ export function MainLayout() {
             icon={<Globe className="h-[18px] w-[18px]" />}
             label="API Tester"
             active={location.pathname === "/api-tester"}
-            collapsed={sidebarCollapsed}
-          />
-
-          <NavItem
-            to="/chat"
-            icon={<MessageSquareText className="h-[18px] w-[18px]" />}
-            label="AI Chat"
-            active={location.pathname === "/chat" || location.pathname === "/chatbot"}
             collapsed={sidebarCollapsed}
           />
 
