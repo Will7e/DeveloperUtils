@@ -21,7 +21,7 @@ const buttonVariants = cva(
         ghost:
           "bg-transparent text-[var(--ds-gray-1000)] border border-transparent hover:bg-[var(--ds-gray-alpha-200)] active:scale-[0.98]",
         link: "text-[var(--ds-blue-700)] underline-offset-4 hover:underline bg-transparent border-none p-0 h-auto",
-        glow: "bg-[var(--ds-blue-700)] text-white border border-transparent shadow-[0_0_20px_rgba(0,112,243,0.35)] hover:bg-[var(--ds-blue-800)] active:scale-[0.98]",
+        glow: "bg-[var(--ds-blue-700)] text-white border border-transparent hover:bg-[var(--ds-blue-800)] active:scale-[0.98]",
       },
       size: {
         default: "h-9 px-3.5 py-2",

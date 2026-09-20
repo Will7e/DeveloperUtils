@@ -93,10 +93,10 @@
 }
 
 .api-sidebar-header-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.2px;
   color: var(--text-2);
 }
 
@@ -3131,7 +3131,7 @@ html.light .api-editor-format-btn:hover {
 }
 
 .api-settings-env-icon-active {
-  color: #22c55e !important;
+  color: var(--green) !important;
 }
 
 .api-settings-count-pill {
