@@ -150,68 +150,7 @@ export const DEFAULT_MODELS = CURATED_MODELS;
 export const DEFAULT_SYSTEM_PROMPT =
   "You are InTab AI, an expert developer assistant built directly into the developer workstation. Provide clear, accurate, concise answers with production-ready code examples, thorough explanations, and best practices.";
 
-export const DEFAULT_SKILLS: ChatSkill[] = [
-  {
-    id: "full-stack-architect",
-    name: "Full-Stack Architect",
-    description: "Modular TypeScript, clean architecture, and production engineering",
-    enabled: true,
-    isBuiltin: true,
-    content: `---
-name: full-stack-architect
-description: Modular TypeScript, clean architecture, and production engineering
----
-# Full-Stack Architect Skill
-- Provide clean, modern, production-grade TypeScript code.
-- Adhere to clean architecture, separation of concerns, and defensive programming.
-- Prioritize type-safety, maintainability, and optimal runtime performance.`,
-  },
-  {
-    id: "code-reviewer",
-    name: "Strict Code Reviewer",
-    description: "Scrutinizes code for security, memory leaks, and performance edge cases",
-    enabled: false,
-    isBuiltin: true,
-    content: `---
-name: code-reviewer
-description: Scrutinizes code for security, memory leaks, and performance edge cases
----
-# Strict Code Reviewer Skill
-- Audit code for security vulnerabilities, OWASP threats, and unescaped inputs.
-- Identify memory leaks, unhandled edge cases, and performance bottlenecks.
-- Suggest concise, modern, and idiomatic refactorings.`,
-  },
-  {
-    id: "servicenow-specialist",
-    name: "ServiceNow Specialist",
-    description: "Scoped Script Includes, GlideRecordSecure, and ServiceNow best practices",
-    enabled: false,
-    isBuiltin: true,
-    content: `---
-name: servicenow-specialist
-description: Scoped Script Includes, GlideRecordSecure, and ServiceNow best practices
----
-# ServiceNow Specialist Skill
-- Always use GlideRecordSecure rather than GlideRecord when checking user ACLs.
-- Write scoped Script Includes with initialize functions and proper scope isolation.
-- Follow ServiceNow performance best practices (never query GlideRecord in loops).`,
-  },
-  {
-    id: "test-qa-engineer",
-    name: "Test & QA Engineer",
-    description: "Vitest, mock fixtures, edge cases, and high assertion coverage",
-    enabled: false,
-    isBuiltin: true,
-    content: `---
-name: test-qa-engineer
-description: Vitest, mock fixtures, edge cases, and high assertion coverage
----
-# Test & QA Engineer Skill
-- Write comprehensive unit and integration tests using Vitest or Jest.
-- Create realistic mock data fixtures and test boundary edge cases (null, empty, error states).
-- Keep assertions clean, deterministic, and self-documenting.`,
-  },
-];
+export const DEFAULT_SKILLS: ChatSkill[] = [];
 
 export function buildEffectiveSystemPrompt(
   skills: ChatSkill[] = [],

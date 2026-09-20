@@ -25,6 +25,7 @@ import { useChatStore } from "@/stores/chat.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { ChatConversation } from "../types";
 import { ProviderIcon } from "./ProviderIcon";
+import "../chat.css";
 
 function exportConversationAsMarkdown(conv: ChatConversation): void {
   const lines: string[] = [

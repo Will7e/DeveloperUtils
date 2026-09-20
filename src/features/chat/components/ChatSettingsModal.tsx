@@ -20,7 +20,6 @@ import {
   Trash2,
   AlertTriangle,
   ChevronDown,
-  RotateCcw,
   Brain,
   Upload,
   Plus,
@@ -287,10 +286,6 @@ description: Custom instructions and domain expertise for this skill
       }
     };
     reader.readAsText(file);
-  };
-
-  const handleResetDefaultSkills = () => {
-    updateSettings({ skills: DEFAULT_SKILLS });
   };
 
   // Filter models for active provider
@@ -859,26 +854,6 @@ description: Custom instructions and domain expertise for this skill
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>New Skill</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Reset Built-in Skills Row */}
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label">Reset Built-in Skills</label>
-                    <span className="settings-sublabel">
-                      Restore default architect, reviewer, and QA skills
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <button
-                      type="button"
-                      className="settings-action-btn flex items-center gap-1.5"
-                      onClick={handleResetDefaultSkills}
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Reset Defaults</span>
                     </button>
                   </div>
                 </div>

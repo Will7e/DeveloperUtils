@@ -538,8 +538,8 @@ export const useChatStore = create<ChatStoreState>()(
             anthropic: persistedSettings?.baseUrls?.anthropic || "",
             gemini: persistedSettings?.baseUrls?.gemini || "",
           },
-          skills: Array.isArray(persistedSettings?.skills) && persistedSettings.skills.length > 0
-            ? persistedSettings.skills
+          skills: Array.isArray(persistedSettings?.skills)
+            ? persistedSettings.skills.filter((s) => !s.isBuiltin)
             : DEFAULT_SKILLS,
           systemPrompt: persistedSettings?.systemPrompt || DEFAULT_SETTINGS.systemPrompt,
           temperature: typeof persistedSettings?.temperature === "number"
