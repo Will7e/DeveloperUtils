@@ -3,7 +3,22 @@
 // ============================================================
 
 import type { AIProvider, ChatMessage } from "../types";
-import { extractBase64Data } from "../utils/image-utils";
+function extractBase64Data(dataUrl: string): {
+  mimeType: string;
+  base64: string;
+} {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (match) {
+    return {
+      mimeType: match[1] || "image/jpeg",
+      base64: match[2] || "",
+    };
+  }
+  return {
+    mimeType: "image/jpeg",
+    base64: dataUrl,
+  };
+}
 
 let currentAbortController: AbortController | null = null;
 

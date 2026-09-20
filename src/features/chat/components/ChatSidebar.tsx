@@ -25,7 +25,33 @@ import { useChatStore } from "@/stores/chat.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { ChatConversation } from "../types";
 import { ProviderIcon } from "./ProviderIcon";
-import { exportConversationAsMarkdown } from "../utils/export-utils";
+
+function exportConversationAsMarkdown(conv: ChatConversation): void {
+  const lines: string[] = [
+    `# ${conv.title}`,
+    `Date: ${new Date(conv.createdAt).toLocaleString()}`,
+    `Model: ${conv.model} (${conv.provider})`,
+    "",
+    "---",
+    "",
+  ];
+
+  for (const msg of conv.messages) {
+    const roleLabel = msg.role === "user" ? "User" : `InTab AI (${conv.model})`;
+    const timeStr = new Date(msg.timestamp).toLocaleTimeString();
+    lines.push(`### ${roleLabel} • ${timeStr}`);
+    lines.push(msg.content);
+    lines.push("");
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${conv.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 interface ChatSidebarProps {
   collapsed: boolean;
