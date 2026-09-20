@@ -121,7 +121,7 @@ export function MainLayout() {
                 <InTabLogo size={28} />
               </div>
               <span className={cn("activity-brand-text", sidebarCollapsed && "activity-brand-text-hidden")}>
-                InTab
+                Tab
               </span>
             </Link>
           );

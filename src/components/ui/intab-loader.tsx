@@ -42,7 +42,7 @@ const SIZE_CONFIG: Record<
     textSizeClass: "text-[11px]",
     barWidth: 60,
     barHeight: 2,
-    gapClass: "gap-1.5",
+    gapClass: "gap-1",
     barMarginTop: "mt-1.5",
   },
   sm: {
@@ -50,7 +50,7 @@ const SIZE_CONFIG: Record<
     textSizeClass: "text-[13px]",
     barWidth: 110,
     barHeight: 2,
-    gapClass: "gap-2",
+    gapClass: "gap-1",
     barMarginTop: "mt-2.5",
   },
   md: {
@@ -58,7 +58,7 @@ const SIZE_CONFIG: Record<
     textSizeClass: "text-[16px]",
     barWidth: 160,
     barHeight: 2,
-    gapClass: "gap-2.5",
+    gapClass: "gap-1.5",
     barMarginTop: "mt-3.5",
   },
   lg: {
@@ -66,7 +66,7 @@ const SIZE_CONFIG: Record<
     textSizeClass: "text-[18px]",
     barWidth: 190,
     barHeight: 2.5,
-    gapClass: "gap-3",
+    gapClass: "gap-1.5",
     barMarginTop: "mt-4",
   },
   xl: {
@@ -74,7 +74,7 @@ const SIZE_CONFIG: Record<
     textSizeClass: "text-[22px]",
     barWidth: 230,
     barHeight: 3,
-    gapClass: "gap-3.5",
+    gapClass: "gap-2",
     barMarginTop: "mt-5",
   },
 };
@@ -86,7 +86,7 @@ export function InTabLoader({
   description,
   showText,
   showBar,
-  brandText = "InTab",
+  brandText = "Tab",
   inline = false,
   icon,
   iconClassName,
