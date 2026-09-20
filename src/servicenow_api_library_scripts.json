@@ -1,7 +1,7 @@
 {
-  "version": "2.2.0",
-  "last_updated": "2026-09-18",
-  "source": "ServiceNow Developer Documentation & Community Training",
+  "version": "2.3.0",
+  "last_updated": "2026-09-20",
+  "source": "ServiceNow Developer Documentation (Zurich) & Community Training — audited against official API reference",
   "apis": [
     {
       "name": "GlideRecord",
@@ -475,17 +475,18 @@
           "parameters": [
             "guid"
           ],
-          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.setNewGuidValue('custom_sys_id_value_32chars00');\ngr.short_description = 'Test';\ngr.insert();",
+          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.setNewGuidValue('a1b2c3d4e5f60718293a4b5c6d7e8f90'); // must be 32 chars\ngr.short_description = 'Inserted with a specific sys_id';\ngr.insert();",
           "scope": "both"
         },
         {
           "name": "applyTemplate",
-          "description": "Applies a record template to the current record.",
+          "description": "Applies a template record to the current record. Accepts the Template [sys_template] NAME as a string — not a template sys_id. Only fields defined in the template are copied onto the record.",
           "parameters": [
-            "templateSysId"
+            "templateName"
           ],
-          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.applyTemplate('template_sys_id');\ngr.insert();",
-          "scope": "both"
+          "example": "var gr = new GlideRecord('incident');\ngr.initialize();\ngr.applyTemplate('Reset Priority'); // template name, not sys_id\ngr.insert();",
+          "scope": "global",
+          "returnType": "void"
         },
         {
           "name": "getFields",
@@ -514,9 +515,22 @@
         },
         {
           "name": "getED",
-          "description": "Returns the GlideElementDescriptor for the specified field.",
+          "description": "Returns the GlideElementDescriptor for the current element. Commonly accessed on a GlideElement (gr.fieldName.getED()) to inspect a field's internal type, max length, and attributes.",
           "parameters": [],
-          "example": "var gr = new GlideRecord('incident');\ngr.get(sysId);\nvar ed = gr.getED();\ngs.info('Table label: ' + ed.getLabel());",
+          "example": "var gr = new GlideRecord('incident');\ngr.query();\ngr.next();\nvar ed = gr.getElement('priority').getED();\ngs.info('Internal type: ' + ed.getInternalType());",
+          "scope": "both",
+          "returnType": "GlideElementDescriptor",
+          "returnDescription": "Element descriptor for the field"
+        },
+        {
+          "name": "setNoCount",
+          "description": "Suppresses the automatic COUNT(*) query that chooseWindow() triggers, avoiding an extra full-table count on large tables. Call before query(); when set, getRowCount() is no longer reliable for windowed queries.",
+          "parameters": [
+            "noCount"
+          ],
+          "example": "var gr = new GlideRecord('incident');\ngr.addActiveQuery();\ngr.orderByDesc('sys_created_on');\ngr.chooseWindow(20, 40); // rows 21-40\ngr.setNoCount(true); // skip the COUNT(*) side query\ngr.query();\nwhile (gr.next()) {\n  gs.info(gr.number);\n}",
+          "returnType": "void",
+          "returnDescription": "Disables the row-count query used with chooseWindow",
           "scope": "both"
         }
       ]
@@ -768,12 +782,12 @@
         },
         {
           "name": "sleep",
-          "description": "Pauses the script for the specified number of milliseconds. Only use in background scripts or scheduled jobs — never in Business Rules.",
+          "description": "Pauses the executing script for the specified number of milliseconds. Global scope only — not available in scoped applications. Never use in Business Rules or request-time scripts; only in background scripts or scheduled jobs.",
           "parameters": [
             "milliseconds"
           ],
           "example": "// In a scheduled job or background script\ngs.sleep(2000); // Wait 2 seconds",
-          "scope": "both"
+          "scope": "global"
         },
         {
           "name": "generateGUID",
@@ -942,20 +956,6 @@
           "scope": "both"
         },
         {
-          "name": "getMaxSchemaNameLength",
-          "description": "Returns the maximum field name length for the database.",
-          "parameters": [],
-          "example": "gs.info('Max field name: ' + gs.getMaxSchemaNameLength());",
-          "scope": "both"
-        },
-        {
-          "name": "getNewAppScopeCompanyPrefix",
-          "description": "Returns the company prefix for scoped app naming.",
-          "parameters": [],
-          "example": "var prefix = gs.getNewAppScopeCompanyPrefix();\ngs.info('Prefix: ' + prefix);",
-          "scope": "both"
-        },
-        {
           "name": "yearsAgo",
           "description": "Returns a date/time for N years ago.",
           "parameters": [
@@ -1022,6 +1022,33 @@
           "description": "Returns midnight on January 1st of the previous year.",
           "parameters": [],
           "example": "gr.addQuery('opened_at', '>=', gs.beginningOfLastYear());",
+          "scope": "both"
+        },
+        {
+          "name": "now",
+          "description": "Returns the current date in the user's format and time zone as a string (yyyy-mm-dd). For date and time, use nowDateTime().",
+          "parameters": [],
+          "example": "gs.info('Today is: ' + gs.now());",
+          "returnType": "String",
+          "returnDescription": "Current date in user format",
+          "scope": "both"
+        },
+        {
+          "name": "beginningOfToday",
+          "description": "Returns the date and time for the beginning of today in the user's session time zone as a UTC timestamp string. Useful in encoded queries and date comparisons.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('incident');\ngr.addEncodedQuery('sys_created_on>=' + gs.beginningOfToday());\ngr.query();\ngs.info('Opened today: ' + gr.getRowCount());",
+          "returnType": "String",
+          "returnDescription": "UTC timestamp of today's start",
+          "scope": "both"
+        },
+        {
+          "name": "endOfToday",
+          "description": "Returns the date and time for the end of today in the user's session time zone as a UTC timestamp string. Commonly paired with beginningOfToday() to bracket a date range.",
+          "parameters": [],
+          "example": "var gr = new GlideRecord('sys_audit');\ngr.addEncodedQuery('sys_created_onBETWEEN' + gs.beginningOfToday() + '@' + gs.endOfToday());\ngr.query();\ngs.info('Audit rows today: ' + gr.getRowCount());",
+          "returnType": "String",
+          "returnDescription": "UTC timestamp of today's end",
           "scope": "both"
         }
       ]
@@ -1875,6 +1902,28 @@
           ],
           "example": "var ga = new GlideAggregate('incident');\nga.addQuery('active', true);\nga.addAggregate('AVG', 'reassignment_count');\nga.query();\nif (ga.next()) gs.info('Avg reassignments: ' + ga.getAggregate('AVG', 'reassignment_count'));",
           "scope": "both"
+        },
+        {
+          "name": "query",
+          "description": "Executes the aggregate query. Must be called after configuring aggregates and grouping; iterate results with next() and read them with getValue() and getAggregate().",
+          "parameters": [],
+          "example": "var ga = new GlideAggregate('incident');\nga.groupBy('priority');\nga.addAggregate('COUNT');\nga.query();\nwhile (ga.next()) {\n  gs.info('Priority ' + ga.getValue('priority') + ': ' + ga.getAggregate('COUNT'));\n}",
+          "returnType": "void",
+          "returnDescription": "Runs the query so results can be iterated",
+          "scope": "both"
+        },
+        {
+          "name": "addHaving",
+          "description": "Adds a HAVING condition that filters aggregated groups, e.g. to return only groups whose COUNT exceeds a threshold. Must correspond to an aggregate added with addAggregate().",
+          "parameters": [
+            "name",
+            "operator",
+            "value"
+          ],
+          "example": "// Find duplicate assigned_to values on active incidents\nvar ga = new GlideAggregate('incident');\nga.addQuery('active', true);\nga.groupBy('assigned_to');\nga.addAggregate('COUNT', 'assigned_to');\nga.addHaving('COUNT', 'assigned_to', '>', 1);\nga.query();\nwhile (ga.next()) {\n  gs.info(ga.getValue('assigned_to') + ' has ' + ga.getAggregate('COUNT', 'assigned_to') + ' incidents');\n}",
+          "returnType": "void",
+          "returnDescription": "Adds a group-level (HAVING) filter to the query",
+          "scope": "both"
         }
       ]
     },
@@ -2479,24 +2528,6 @@
           "scope": "both"
         },
         {
-          "name": "del",
-          "description": "Deletes a single record by sys_id.",
-          "parameters": [],
-          "example": "new GlideQuery('incident')\n  .where('sys_id', sysId)\n  .deleteMultiple();\n\n// Or to delete a specific record:\nvar gr = new GlideRecord('u_temp');\ngr.get(sysId);\ngr.deleteRecord();",
-          "scope": "both"
-        },
-        {
-          "name": "getGroupCountGQ",
-          "description": "Function defined in GlideQuery.js",
-          "parameters": [
-            "table",
-            "groupBy",
-            "min"
-          ],
-          "example": "// Internal grouping method used by GlideQuery\nvar results = new GlideQuery('incident')\n  .where('active', true)\n  .aggregate('COUNT')\n  .groupBy('priority')\n  .select()\n  .toArray(10);\nresults.forEach(function(r) {\n  gs.info('Priority ' + r.group.priority + ': ' + r.count);\n});",
-          "scope": "both"
-        },
-        {
           "name": "orWhere",
           "description": "Adds an OR condition to the query.",
           "parameters": [
@@ -2566,6 +2597,114 @@
             "field (optional)"
           ],
           "example": "var count = new GlideQuery('incident')\n  .where('active', true)\n  .aggregate('COUNT')\n  .select()\n  .next();\ngs.info('Active incidents: ' + count.count);",
+          "scope": "both"
+        },
+        {
+          "name": "groupBy",
+          "description": "Intermediate method that groups results by one or more fields for aggregate queries. Chain with aggregate() and a terminal method such as select().",
+          "parameters": [
+            "fields"
+          ],
+          "example": "new global.GlideQuery('task')\n  .where('active', true)\n  .groupBy('priority')\n  .aggregate('COUNT')\n  .select()\n  .forEach(function (row) {\n    gs.info('Priority ' + row.group.priority + ': ' + row.count);\n  });",
+          "returnType": "GlideQuery",
+          "returnDescription": "New GlideQuery with the group-by clause applied",
+          "scope": "both"
+        },
+        {
+          "name": "getBy",
+          "description": "Terminal method returning an Optional of the first record matching the supplied key/value object, selecting only the given fields.",
+          "parameters": [
+            "keyValues",
+            "selectedFields (optional)"
+          ],
+          "example": "var user = new global.GlideQuery('sys_user')\n  .getBy({ user_name: 'abel.tuter' }, ['sys_id', 'email'])\n  .orElse({ sys_id: 'NOT FOUND' });\ngs.info(user.sys_id);",
+          "returnType": "Optional",
+          "returnDescription": "Optional record matching all key values",
+          "scope": "both"
+        },
+        {
+          "name": "count",
+          "description": "Terminal method returning the number of records matching the query as a Number.",
+          "parameters": [],
+          "example": "var activeCount = new global.GlideQuery('incident')\n  .where('active', true)\n  .count();\ngs.info('Active incidents: ' + activeCount);",
+          "returnType": "Number",
+          "returnDescription": "Count of matching records",
+          "scope": "both"
+        },
+        {
+          "name": "sum",
+          "description": "Terminal method returning the sum of a numeric field across matching records, wrapped in an Optional (empty when no rows match).",
+          "parameters": [
+            "field"
+          ],
+          "example": "var total = new global.GlideQuery('incident')\n  .where('active', true)\n  .sum('reassignment_count')\n  .orElse(0);\ngs.info('Total reassignments: ' + total);",
+          "returnType": "Optional",
+          "returnDescription": "Optional sum of the field values",
+          "scope": "both"
+        },
+        {
+          "name": "having",
+          "description": "Intermediate method filtering aggregate groups, equivalent to SQL HAVING. Must follow groupBy() and aggregate(); evaluated against the aggregate result.",
+          "parameters": [
+            "aggregateType",
+            "field",
+            "operator",
+            "value"
+          ],
+          "example": "new global.GlideQuery('task')\n  .where('active', true)\n  .groupBy('priority')\n  .aggregate('SUM', 'reassignment_count')\n  .having('SUM', 'reassignment_count', '>', 4)\n  .select()\n  .forEach(function (row) {\n    gs.info('Priority ' + row.group.priority + ' reassignments: ' + row.sum.reassignment_count);\n  });",
+          "returnType": "GlideQuery",
+          "returnDescription": "New GlideQuery with the having clause applied",
+          "scope": "both"
+        },
+        {
+          "name": "toGlideRecord",
+          "description": "Terminal method returning the underlying GlideRecord for the query so legacy GlideRecord methods (setWorkflow, autoSysFields, etc.) can be used for interop.",
+          "parameters": [],
+          "example": "var gr = new global.GlideQuery('incident')\n  .where('priority', 1)\n  .toGlideRecord();\ngr.query();\nwhile (gr.next()) {\n  gs.info(gr.number);\n}",
+          "returnType": "GlideRecord",
+          "returnDescription": "GlideRecord configured with the query's filters",
+          "scope": "both"
+        },
+        {
+          "name": "insertOrUpdate",
+          "description": "Terminal method updating the first record that matches the query with the supplied changes, or inserting a new record when nothing matches.",
+          "parameters": [
+            "changes",
+            "selectedFields (optional)"
+          ],
+          "example": "var user = new global.GlideQuery('sys_user')\n  .where('user_name', 'abel.tuter')\n  .insertOrUpdate({ title: 'Senior Developer' });\ngs.info(user.title);",
+          "returnType": "Object",
+          "returnDescription": "The inserted or updated record as a plain object",
+          "scope": "both"
+        },
+        {
+          "name": "orderByDesc",
+          "description": "Intermediate method sorting results descending by a field, or by an aggregate when a second field argument is supplied.",
+          "parameters": [
+            "fieldOrAggregate",
+            "field (optional)"
+          ],
+          "example": "new global.GlideQuery('incident')\n  .where('active', true)\n  .orderByDesc('sys_created_on')\n  .select('number')\n  .forEach(function (inc) {\n    gs.info(inc.number);\n  });",
+          "returnType": "GlideQuery",
+          "returnDescription": "New GlideQuery with descending sort applied",
+          "scope": "both"
+        },
+        {
+          "name": "withAcls",
+          "description": "Intermediate method enabling ACL enforcement for the query. GlideQuery runs without ACL checks by default for performance; withAcls() makes results and updates respect the caller's permissions.",
+          "parameters": [],
+          "example": "var incidents = new global.GlideQuery('incident')\n  .withAcls()\n  .where('assigned_to', gs.getUserID())\n  .select('number', 'short_description')\n  .toArray(100);",
+          "returnType": "GlideQuery",
+          "returnDescription": "New GlideQuery that enforces ACLs",
+          "scope": "both"
+        },
+        {
+          "name": "disableAutoSysFields",
+          "description": "Intermediate method preventing sys fields (sys_updated_on, sys_updated_by, sys_mod_count) from being updated by subsequent update() calls on this query.",
+          "parameters": [],
+          "example": "new global.GlideQuery('incident')\n  .disableAutoSysFields()\n  .disableWorkflow()\n  .where('sys_id', sysId)\n  .update({ severity: 1 });",
+          "returnType": "GlideQuery",
+          "returnDescription": "New GlideQuery that skips auto-sys-field updates",
           "scope": "both"
         }
       ]
@@ -4243,7 +4382,7 @@
     {
       "name": "GlideEncrypter",
       "type": "Server-side",
-      "description": "Encrypts and decrypts strings using the platform encryption key. Useful for storing sensitive data that needs to be retrieved later.",
+      "description": "DEPRECATED global API that encrypts and decrypts strings with the platform encryption key. Retained for legacy code only. Mark methods deprecated and prefer the Key Management Framework (sn_kmf) for new development.",
       "methods": [
         {
           "name": "encrypt",
@@ -4252,7 +4391,9 @@
             "value"
           ],
           "example": "var enc = new GlideEncrypter();\nvar encrypted = enc.encrypt('sensitive_data');\ncurrent.setValue('u_encrypted_field', encrypted);",
-          "scope": "both"
+          "scope": "global",
+          "deprecated": true,
+          "deprecationNotice": "GlideEncrypter is deprecated. Use the Key Management Framework (sn_kmf) KMFContext/EncryptionContext APIs or a credential store for new development."
         },
         {
           "name": "decrypt",
@@ -4261,7 +4402,9 @@
             "encryptedValue"
           ],
           "example": "var enc = new GlideEncrypter();\nvar decrypted = enc.decrypt(current.getValue('u_encrypted_field'));\ngs.info('Decrypted: ' + decrypted);",
-          "scope": "both"
+          "scope": "global",
+          "deprecated": true,
+          "deprecationNotice": "GlideEncrypter is deprecated. Use the Key Management Framework (sn_kmf) KMFContext/EncryptionContext APIs or a credential store for new development."
         }
       ]
     },
@@ -6123,34 +6266,6 @@
             "message"
           ],
           "example": "var log = new GlideLog();\nlog.debug('ImportEngine', 'Payload: ' + JSON.stringify(payload));",
-          "scope": "both"
-        }
-      ]
-    },
-    {
-      "name": "GlideRegex",
-      "type": "Server-side",
-      "description": "Server-side regular expression utility. Provides pattern matching and extraction beyond native JavaScript regex.",
-      "methods": [
-        {
-          "name": "match",
-          "description": "Tests if a string matches a regex pattern. Returns true/false.",
-          "parameters": [
-            "pattern",
-            "value"
-          ],
-          "example": "var gr = new GlideRegex();\nif (gr.match('^INC[0-9]{7}$', current.getValue('number'))) {\n  gs.info('Valid incident number format');\n}",
-          "scope": "both"
-        },
-        {
-          "name": "extract",
-          "description": "Extracts matching groups from a string using a regex pattern.",
-          "parameters": [
-            "pattern",
-            "value",
-            "groupIndex"
-          ],
-          "example": "// Extract ticket number from email subject\nvar subject = 'RE: Issue with INC0012345 - Server down';\nvar regex = new GlideRegex('(INC[0-9]+)', subject);\nvar match = regex.match(subject);\nif (match) {\n  gs.info('Found ticket: ' + RegExp.$1);\n}",
           "scope": "both"
         }
       ]
