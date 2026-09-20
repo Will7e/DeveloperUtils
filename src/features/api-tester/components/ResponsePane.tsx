@@ -221,6 +221,19 @@ export function ResponsePane({
                 </div>
               </div>
             )}
+            {isExpanded && !activeTab.response && onToggleExpand && (
+              <div style={{ marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="api-copy-btn"
+                  onClick={onToggleExpand}
+                  title="Collapse response view (Esc)"
+                >
+                  <Minimize2 className="h-3 w-3" />
+                  <span>Collapse</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Loading */}

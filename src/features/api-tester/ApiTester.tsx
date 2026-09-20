@@ -180,13 +180,6 @@ export function ApiTester() {
   // Response expanded state (maximize response to fill view)
   const [isResponseExpanded, setIsResponseExpanded] = useState(false);
 
-  // Auto-reset response expansion if active tab has no response
-  useEffect(() => {
-    if (!activeTab?.response && isResponseExpanded) {
-      setIsResponseExpanded(false);
-    }
-  }, [activeTab?.id, activeTab?.response, isResponseExpanded]);
-
   // Relative time ticker
   const [, setTick] = useState(0);
   useEffect(() => {
