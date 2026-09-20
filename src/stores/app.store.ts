@@ -57,7 +57,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 280,
     y: 140,
-    strokeColor: "#0284c7",
+    strokeColor: "#0070f3",
     backgroundColor: "transparent",
     width: 320,
     height: 36,
@@ -129,8 +129,8 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 280,
     y: 250,
-    strokeColor: "#0284c7",
-    backgroundColor: "#e0f2fe",
+    strokeColor: "#0070f3",
+    backgroundColor: "#0070f314",
     width: 160,
     height: 60,
     seed: 20001,
@@ -192,7 +192,7 @@ const createDefaultWorkflowElements = (): unknown[] => [
     angle: 0,
     x: 440,
     y: 280,
-    strokeColor: "#0284c7",
+    strokeColor: "#0070f3",
     backgroundColor: "transparent",
     width: 80,
     height: 0,
@@ -990,7 +990,8 @@ export const useAppStore = create<AppState>()(
       createWorkflow: (name?: string, elements?: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
         const id = generateId();
         const state = get();
-        const { theme: _staleTheme, ...cleanAppState } = appState || {};
+        const cleanAppState = { ...(appState || {}) };
+        delete cleanAppState.theme;
         const newWorkflow: Workflow = {
           id,
           name: name || `DrawFlow ${state.workflows.length + 1}`,
@@ -1111,7 +1112,8 @@ export const useAppStore = create<AppState>()(
       },
 
       updateWorkflowDrawFlow: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
-        const { theme: _staleTheme, ...cleanAppState } = appState || {};
+        const cleanAppState = { ...(appState || {}) };
+        delete cleanAppState.theme;
         set((state) => ({
           workflows: state.workflows.map((w) =>
             w.id === workflowId ? { ...w, elements, appState: cleanAppState, files, updatedAt: Date.now() } : w
@@ -1119,7 +1121,8 @@ export const useAppStore = create<AppState>()(
         }));
       },
       updateWorkflowExcalidraw: (workflowId: string, elements: unknown[], appState?: Record<string, unknown>, files?: Record<string, unknown>) => {
-        const { theme: _staleTheme, ...cleanAppState } = appState || {};
+        const cleanAppState = { ...(appState || {}) };
+        delete cleanAppState.theme;
         set((state) => ({
           workflows: state.workflows.map((w) =>
             w.id === workflowId ? { ...w, elements, appState: cleanAppState, files, updatedAt: Date.now() } : w
@@ -1206,29 +1209,29 @@ export const useAppStore = create<AppState>()(
                 let modified = false;
                 const newEl = { ...el };
                 if (el.strokeColor === "#f8fafc") {
-                  newEl.strokeColor = "#1e1e1e";
+                  newEl.strokeColor = "#171717";
                   modified = true;
                 }
-                if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
-                  newEl.strokeColor = "#0284c7";
-                  newEl.backgroundColor = "#e0f2fe";
+                if (el.id === "node-start" && (el.backgroundColor === "#0369a122" || el.backgroundColor === "#e0f2fe")) {
+                  newEl.strokeColor = "#0070f3";
+                  newEl.backgroundColor = "#0070f314";
                   modified = true;
                 }
-                if (el.id === "node-action" && el.backgroundColor === "#04785722") {
-                  newEl.strokeColor = "#059669";
-                  newEl.backgroundColor = "#dcfce7";
+                if (el.id === "node-action" && (el.backgroundColor === "#04785722" || el.backgroundColor === "#dcfce7")) {
+                  newEl.strokeColor = "#00df8f";
+                  newEl.backgroundColor = "#00df8f14";
                   modified = true;
                 }
-                if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
-                  newEl.strokeColor = "#0284c7";
+                if (el.id === "welcome-title" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7")) {
+                  newEl.strokeColor = "#0070f3";
                   modified = true;
                 }
-                if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
-                  newEl.strokeColor = "#64748b";
+                if (el.id === "welcome-subtitle" && (el.strokeColor === "#94a3b8" || el.strokeColor === "#64748b")) {
+                  newEl.strokeColor = "#888888";
                   modified = true;
                 }
-                if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
-                  newEl.strokeColor = "#0284c7";
+                if (el.id === "arrow-1" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7")) {
+                  newEl.strokeColor = "#0070f3";
                   modified = true;
                 }
                 return modified ? newEl : rawEl;

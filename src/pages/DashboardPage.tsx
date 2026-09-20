@@ -15,6 +15,7 @@ import {
   Check,
 } from "lucide-react";
 import { InTabLogo } from "@/components/ui/intab-logo";
+import { StatusDot } from "@/components/ui/dots";
 import {
   CompilerPreview,
   ApiTesterPreview,
@@ -252,7 +253,7 @@ export function DashboardPage() {
         {/* Bottom Security and Tech Trust Bar */}
         <div className="dash-footer-bar">
           <div className="dash-footer-item">
-            <span className="dash-status-dot" />
+            <StatusDot status="success" size="sm" pulse />
             <span>Local browser execution</span>
           </div>
           <span className="dash-footer-divider">•</span>

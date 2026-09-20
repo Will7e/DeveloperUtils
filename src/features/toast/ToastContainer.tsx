@@ -1,15 +1,9 @@
 // ============================================================
-// Toast Notifications — Transient feedback messages
+// Toast Notifications — Geist Design System Transient Feedback
 // ============================================================
 
-import { CheckCircle, Info, XCircle } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
-
-const icons = {
-  info: <Info style={{ width: 14, height: 14 }} />,
-  success: <CheckCircle style={{ width: 14, height: 14 }} />,
-  error: <XCircle style={{ width: 14, height: 14 }} />,
-};
+import { Toast, type ToastVariant } from "@/components/ui/toast";
 
 export function ToastContainer() {
   const toasts = useAppStore((s) => s.toasts);
@@ -18,16 +12,18 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="toast-container">
+    <div
+      role="region"
+      aria-label="Notifications"
+      className="fixed bottom-6 right-6 z-[999999] flex flex-col gap-2.5 pointer-events-none max-w-[420px] w-full items-end"
+    >
       {toasts.map((toast) => (
-        <div
+        <Toast
           key={toast.id}
-          className={`toast toast-${toast.type}`}
-          onClick={() => removeToast(toast.id)}
-        >
-          <span className="toast-icon">{icons[toast.type]}</span>
-          <span className="toast-message">{toast.message}</span>
-        </div>
+          variant={(toast.type as ToastVariant) || "info"}
+          message={toast.message}
+          onClose={() => removeToast(toast.id)}
+        />
       ))}
     </div>
   );

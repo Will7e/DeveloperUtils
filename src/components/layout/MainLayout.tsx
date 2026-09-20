@@ -64,7 +64,7 @@ function NavItem({ to, icon, label, active, collapsed, onClick }: NavItemProps) 
     return collapsed ? (
       <Tooltip>
         <TooltipTrigger asChild>{btn}</TooltipTrigger>
-        <TooltipContent side="right" className="bg-popover border-border shadow-xl">
+        <TooltipContent side="right">
           {label}
         </TooltipContent>
       </Tooltip>
@@ -83,7 +83,7 @@ function NavItem({ to, icon, label, active, collapsed, onClick }: NavItemProps) 
   return collapsed ? (
     <Tooltip>
       <TooltipTrigger asChild>{link}</TooltipTrigger>
-      <TooltipContent side="right" className="bg-popover border-border shadow-xl">
+      <TooltipContent side="right">
         {label}
       </TooltipContent>
     </Tooltip>
@@ -129,7 +129,7 @@ export function MainLayout() {
           return sidebarCollapsed ? (
             <Tooltip>
               <TooltipTrigger asChild>{brandLink}</TooltipTrigger>
-              <TooltipContent side="right" className="bg-popover border-border shadow-xl">
+              <TooltipContent side="right">
                 InTab Home
               </TooltipContent>
             </Tooltip>

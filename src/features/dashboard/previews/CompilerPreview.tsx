@@ -287,7 +287,7 @@ export function CompilerPreview() {
         isClicking={cursorClicking}
         visible={!isUserActive}
         actionText={cursorAction}
-        color="var(--accent, #38bdf8)"
+        color="var(--accent, #0070f3)"
         transitionDuration={cursorDuration}
       />
 
@@ -295,7 +295,7 @@ export function CompilerPreview() {
       <div className="dash-demo-bar">
         <div className="dash-demo-tabs">
           <div className="dash-file-tab">
-            <Code2 className="h-3 w-3 text-sky-400" />
+            <Code2 className="h-3 w-3 text-[var(--accent)]" />
             <span>script.ts</span>
           </div>
           <div className="dash-presets-divider" />
@@ -361,7 +361,7 @@ export function CompilerPreview() {
       <div className="dash-demo-console">
         <div className="dash-demo-console-header">
           <div className="dash-demo-console-title">
-            <Terminal className="h-3 w-3 text-slate-400" />
+            <Terminal className="h-3 w-3 text-[var(--ds-gray-700)]" />
             <span>Console Output</span>
             <span className="dash-perf-badge">{latencyMs}ms</span>
             {returnValue && (

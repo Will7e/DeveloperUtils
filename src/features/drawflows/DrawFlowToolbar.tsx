@@ -313,7 +313,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                 </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={handleExportJSON} className="cursor-pointer gap-2.5 px-2 py-2 rounded-md">
-                  <div className="w-7 h-7 rounded-md bg-sky-500/15 text-sky-400 flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded-md bg-[var(--blue-dim)] text-[var(--ds-blue-700)] flex items-center justify-center shrink-0">
                     <Download className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col min-w-0">
@@ -331,7 +331,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  className="toolbar-btn hover:!text-red-400 hover:!border-red-500/30"
+                  className="toolbar-btn hover:!text-[var(--ds-red-800)] hover:!border-[var(--ds-red-800)]/30"
                   onClick={handleClearCanvas}
                 >
                   <Trash2 className="w-3.5 h-3.5" />

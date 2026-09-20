@@ -67,7 +67,7 @@ export function OutputPanel() {
                   style={{
                     width: 24,
                     height: 24,
-                    color: showHistory ? "#0ea5e9" : undefined,
+                    color: showHistory ? "var(--accent)" : undefined,
                   }}
                 >
                   <Clock style={{ width: 12, height: 12 }} />

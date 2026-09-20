@@ -31,6 +31,15 @@ import {
   AlertTriangle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Breadcrumbs,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumbs";
+import { SearchInput } from "@/components/ui/search-input";
 import { useAppStore } from "@/stores/app.store";
 import libraryDataRaw from "../../servicenow_api_library_scripts.json";
 import { ServiceNowLibrary, ServiceNowMethod, Toast } from "@/types";
@@ -195,20 +204,28 @@ function ApiDocumentationView({
         <div className="lib-view-header-inner">
           {/* Top Row: Navigation Breadcrumbs */}
           <div className="flex items-center justify-between gap-4 mb-2">
-            <div className="lib-breadcrumbs mb-0">
-              <button
-                className="lib-breadcrumb-link flex items-center gap-1 font-medium hover:text-accent"
-                onClick={onBackToHub}
-                title="Return to Developer Library Hub"
-              >
-                <ArrowLeft className="w-3 h-3" />
-                <span>Developer Library</span>
-              </button>
-              <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
-              <span className="text-text-3">{badge.label}</span>
-              <ChevronRight className="w-3 h-3 lib-breadcrumb-sep" />
-              <span className="text-text-1 font-semibold">{selectedApi.name}</span>
-            </div>
+            <Breadcrumbs className="mb-0">
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink
+                    onClick={onBackToHub}
+                    className="flex items-center gap-1 font-medium cursor-pointer"
+                    title="Return to Developer Library Hub"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Developer Library</span>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <span className="text-[var(--ds-gray-900)]">{badge.label}</span>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{selectedApi.name}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumbs>
           </div>
 
           {/* Middle Row: Title, Badges, and Method Controls Toolbar */}
@@ -600,7 +617,7 @@ function MethodCard({
             </span>
           </h3>
           {method.returnType && (
-            <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 shrink-0">
+            <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-[var(--blue-dim)] text-[var(--ds-blue-700)] border border-[var(--border-accent)] shrink-0">
               returns: {method.returnType}
             </span>
           )}
@@ -610,7 +627,7 @@ function MethodCard({
             </span>
           )}
           {method.deprecated && (
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[var(--amber-dim)] text-[var(--ds-amber-800)] border border-[var(--ds-amber-800)]/30 shrink-0">
               Deprecated
             </span>
           )}
@@ -894,13 +911,13 @@ function onChange(control, oldValue, newValue, isLoading) {
             Test any script immediately in the local JavaScript compiler or copy straight into your workspace.
           </p>
 
-          <form onSubmit={handleHeroSearch} className="lib-hub-hero-search">
-            <Search className="w-4 h-4 lib-hub-hero-search-icon" />
-            <input
-              type="text"
+          <form onSubmit={handleHeroSearch} className="w-full max-w-[640px] mx-auto mt-4">
+            <SearchInput
+              size="lg"
               placeholder="Search APIs, methods (e.g. GlideRecord, addQuery, GlideAjax)..."
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
+              onClear={() => setLocalSearch("")}
             />
           </form>
         </div>
@@ -1129,7 +1146,6 @@ function DrawFlowLibraryGallery({
   const [libraries, setLibraries] = useState<DrawFlowLibraryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const activeCategory = useAppStore((s) => s.libraryDrawFlowCategory || s.libraryExcalidrawCategory || "all");
-  const addToast = useAppStore((s) => s.addToast);
   const navigate = useNavigate();
 
   useEffect(() => {

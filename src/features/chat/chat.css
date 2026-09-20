@@ -151,7 +151,7 @@
   background: var(--bg-hover);
   border-color: var(--accent);
   color: var(--text-0);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .chat-sidebar-browse-btn:active {
@@ -216,7 +216,7 @@
 .chat-sidebar-search-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .chat-sidebar-search-icon {
@@ -408,8 +408,8 @@
 }
 
 .chat-card-action-btn.delete:hover {
-  color: var(--red, #ef4444);
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
 }
 
 /* Inline Rename input wrap */
@@ -423,7 +423,7 @@
   background: var(--bg-2);
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
   box-sizing: border-box;
 }
 
@@ -459,8 +459,8 @@
 }
 
 .chat-conv-rename-btn.success:hover {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.15);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
 }
 
 /* Empty State inside sidebar */
@@ -574,45 +574,45 @@
 
 /* ── Light Mode Parity Overrides ──────────────────────────── */
 html.light .chat-sidebar {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: var(--bg-1);
+  border-color: var(--border-1);
 }
 
 html.light .chat-sidebar-header {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: var(--bg-1);
+  border-color: var(--border-1);
 }
 
 html.light .chat-sidebar-footer {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: var(--bg-1);
+  border-color: var(--border-1);
 }
 
 html.light .chat-sidebar-footer-btn:hover {
-  background: #f1f5f9;
-  color: #0f172a;
+  background: var(--bg-hover);
+  color: var(--text-1);
 }
 
 html.light .chat-sidebar-browse-btn {
-  background: #ffffff;
-  border-color: #e2e8f0;
-  color: #334155;
+  background: var(--bg-0);
+  border-color: var(--border-1);
+  color: var(--text-2);
 }
 
 html.light .chat-sidebar-browse-btn:hover {
-  background: #f8fafc;
-  border-color: #0284c7;
-  color: #0f172a;
+  background: var(--bg-1);
+  border-color: var(--accent);
+  color: var(--text-1);
 }
 
 html.light .chat-conv-card:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: var(--bg-hover);
+  border-color: var(--border-2);
 }
 
 html.light .chat-conv-card.active {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+  background: var(--bg-2);
+  border-color: var(--border-2);
 }
 
 /* ── Accessibility & Reduced Motion Overrides ─────────────── */

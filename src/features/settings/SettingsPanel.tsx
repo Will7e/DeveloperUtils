@@ -21,8 +21,6 @@ import {
   FileCode2,
   Layers,
   CheckCircle2,
-  Check,
-  Sparkles,
   Loader2,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
@@ -41,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { Toggle } from "@/components/ui/toggle";
 
 interface SettingsDropdownProps<T extends string | number> {
   value: T;
@@ -426,17 +425,15 @@ export function SettingsPanel() {
                     <span className="settings-sublabel">Soft-wrap lines exceeding editor width</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.wordWrap === "on" ? "active" : ""}`}
-                      onClick={() =>
+                    <Toggle
+                      checked={editorSettings.wordWrap === "on"}
+                      onCheckedChange={(checked) =>
                         updateEditorSettings({
-                          wordWrap: editorSettings.wordWrap === "on" ? "off" : "on",
+                          wordWrap: checked ? "on" : "off",
                         })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Word Wrap"
+                    />
                   </div>
                 </div>
 
@@ -447,15 +444,13 @@ export function SettingsPanel() {
                     <span className="settings-sublabel">Display bird's-eye code overview scrollbar</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.minimap ? "active" : ""}`}
-                      onClick={() =>
-                        updateEditorSettings({ minimap: !editorSettings.minimap })
+                    <Toggle
+                      checked={editorSettings.minimap}
+                      onCheckedChange={(checked) =>
+                        updateEditorSettings({ minimap: checked })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Minimap"
+                    />
                   </div>
                 </div>
 
@@ -488,17 +483,15 @@ export function SettingsPanel() {
                     <span className="settings-sublabel">Colorize matching pairs of brackets and braces</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.bracketPairColorization ? "active" : ""}`}
-                      onClick={() =>
+                    <Toggle
+                      checked={editorSettings.bracketPairColorization}
+                      onCheckedChange={(checked) =>
                         updateEditorSettings({
-                          bracketPairColorization: !editorSettings.bracketPairColorization,
+                          bracketPairColorization: checked,
                         })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Bracket Colors"
+                    />
                   </div>
                 </div>
               </div>
@@ -525,20 +518,18 @@ export function SettingsPanel() {
                         Application Theme
                       </span>
                     </label>
-                    <span className="settings-sublabel">Toggle between Obsidian Dark and Soft Neutral Light</span>
+                    <span className="settings-sublabel">Toggle between Geist Dark and Geist Light</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.theme === "light" ? "active" : ""}`}
-                      onClick={() =>
+                    <Toggle
+                      checked={editorSettings.theme === "light"}
+                      onCheckedChange={(checked) =>
                         updateEditorSettings({
-                          theme: editorSettings.theme === "dark" ? "light" : "dark",
+                          theme: checked ? "light" : "dark",
                         })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Application Theme"
+                    />
                     <span className="settings-value capitalize">
                       {editorSettings.theme}
                     </span>
@@ -583,17 +574,15 @@ export function SettingsPanel() {
                     <span className="settings-sublabel">Automatically format clipboard text upon paste</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.formatOnPaste ? "active" : ""}`}
-                      onClick={() =>
+                    <Toggle
+                      checked={editorSettings.formatOnPaste}
+                      onCheckedChange={(checked) =>
                         updateEditorSettings({
-                          formatOnPaste: !editorSettings.formatOnPaste,
+                          formatOnPaste: checked,
                         })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Format on Paste"
+                    />
                   </div>
                 </div>
 
@@ -604,17 +593,15 @@ export function SettingsPanel() {
                     <span className="settings-sublabel">Auto-format line following trigger characters</span>
                   </div>
                   <div className="settings-control">
-                    <button
-                      type="button"
-                      className={`settings-toggle ${editorSettings.formatOnType ? "active" : ""}`}
-                      onClick={() =>
+                    <Toggle
+                      checked={editorSettings.formatOnType}
+                      onCheckedChange={(checked) =>
                         updateEditorSettings({
-                          formatOnType: !editorSettings.formatOnType,
+                          formatOnType: checked,
                         })
                       }
-                    >
-                      <span className="toggle-thumb" />
-                    </button>
+                      aria-label="Toggle Format on Type"
+                    />
                   </div>
                 </div>
               </div>

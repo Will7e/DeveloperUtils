@@ -23,7 +23,7 @@ export function VirtualCursor({
   visible,
   label,
   actionText,
-  color = "var(--accent, #38bdf8)",
+  color = "var(--accent, #0070f3)",
   cursorType = "pointer",
   transitionDuration = 550,
 }: VirtualCursorProps) {

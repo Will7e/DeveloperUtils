@@ -24,6 +24,7 @@ const DiffCheckerPage = lazy(() => import("@/pages/DiffCheckerPage").then(m => (
 const LibraryPage = lazy(() => import("@/pages/LibraryPage").then(m => ({ default: m.LibraryPage })));
 const DrawFlowPage = lazy(() => import("@/pages/DrawFlowPage").then(m => ({ default: m.DrawFlowPage })));
 const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ default: m.ApiTesterPage })));
+const GeistShowcasePage = lazy(() => import("@/pages/GeistShowcasePage").then(m => ({ default: m.GeistShowcasePage })));
 
 import { bootstrapApp } from "@/services/bootstrap.service";
 
@@ -108,6 +109,7 @@ function AppContent() {
             <Route path="/drawflows" element={<DrawFlowPage />} />
             <Route path="/workflows" element={<Navigate to="/drawflows" replace />} />
             <Route path="/api-tester" element={<ApiTesterPage />} />
+            <Route path="/geist" element={<GeistShowcasePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

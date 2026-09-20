@@ -166,7 +166,7 @@ print(f"\\nCharacter count in '{word}': {char_count}")
     }
     h1 {
       font-size: 2rem;
-      background: linear-gradient(135deg, #0ea5e9, #2dd4bf, #38bdf8);
+      background: linear-gradient(135deg, #0070f3, #50e3c2, #00df8f);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       margin-bottom: 0.5rem;

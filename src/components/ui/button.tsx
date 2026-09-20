@@ -4,29 +4,32 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:shadow-[var(--ds-focus-ring)] disabled:pointer-events-none disabled:opacity-50 disabled:bg-[var(--ds-gray-100)] disabled:text-[var(--ds-gray-700)] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 cursor-pointer select-none",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-md hover:bg-primary/90 hover:shadow-lg active:scale-[0.98]",
+          "bg-[var(--ds-gray-1000)] text-[var(--ds-background-100)] border border-transparent shadow-xs hover:opacity-90 active:scale-[0.98]",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-md hover:bg-destructive/90",
+          "bg-[var(--ds-red-800)] text-white border border-transparent shadow-xs hover:bg-[var(--ds-red-900)] active:scale-[0.98]",
+        warning:
+          "bg-[var(--ds-amber-800)] text-[#0a0a0a] border border-transparent shadow-xs hover:bg-[var(--ds-amber-900)] active:scale-[0.98]",
         outline:
-          "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
+          "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)] border border-[var(--ds-gray-400)] shadow-xs hover:bg-[var(--ds-gray-200)] active:scale-[0.98]",
         secondary:
-          "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
-        glow: "bg-primary text-primary-foreground shadow-[0_0_20px_rgba(99,102,241,0.4)] hover:shadow-[0_0_30px_rgba(99,102,241,0.6)] active:scale-[0.98]",
+          "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)] border border-[var(--ds-gray-400)] shadow-xs hover:bg-[var(--ds-gray-200)] active:scale-[0.98]",
+        ghost:
+          "bg-transparent text-[var(--ds-gray-1000)] border border-transparent hover:bg-[var(--ds-gray-alpha-200)] active:scale-[0.98]",
+        link: "text-[var(--ds-blue-700)] underline-offset-4 hover:underline bg-transparent border-none p-0 h-auto",
+        glow: "bg-[var(--ds-blue-700)] text-white border border-transparent shadow-[0_0_20px_rgba(0,112,243,0.35)] hover:bg-[var(--ds-blue-800)] active:scale-[0.98]",
       },
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-lg px-8",
-        xl: "h-12 rounded-xl px-10 text-base",
-        icon: "h-9 w-9",
-        "icon-sm": "h-7 w-7",
+        default: "h-9 px-3.5 py-2",
+        sm: "h-8 px-2.5 text-xs",
+        lg: "h-10 px-6 text-sm rounded-lg",
+        xl: "h-12 px-8 text-base rounded-lg",
+        icon: "h-9 w-9 p-0",
+        "icon-sm": "h-7 w-7 p-0",
       },
     },
     defaultVariants: {

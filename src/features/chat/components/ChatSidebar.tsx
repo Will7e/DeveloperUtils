@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { SearchInput } from "@/components/ui/search-input";
 import type { ChatConversation } from "../types";
 import { ProviderIcon } from "./ProviderIcon";
 import "../chat.css";
@@ -245,25 +246,14 @@ export function ChatSidebar({ collapsed, onToggleCollapse }: ChatSidebarProps) {
             </button>
 
             {conversations.length > 0 && (
-              <div className="chat-sidebar-search-wrap">
-                <Search className="h-3.5 w-3.5 text-text-3 chat-sidebar-search-icon" />
-                <input
-                  type="text"
+              <div className="w-full">
+                <SearchInput
                   placeholder="Search conversations..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="chat-sidebar-search-input"
+                  onClear={() => setSearchQuery("")}
+                  size="sm"
                 />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery("")}
-                    className="chat-sidebar-search-clear"
-                    aria-label="Clear search"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
               </div>
             )}
           </>

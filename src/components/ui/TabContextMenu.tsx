@@ -300,7 +300,7 @@ export function TabContextMenu({
             role="menuitem"
             disabled={!canCloseAll}
             className={cn(
-              "dropdown-item w-full text-left flex items-center justify-between text-red-400 hover:text-red-300 hover:bg-red-500/10",
+              "dropdown-item w-full text-left flex items-center justify-between text-[var(--ds-red-800)] hover:text-[var(--ds-red-900)] hover:bg-[var(--red-dim)]",
               !canCloseAll && "opacity-40 cursor-not-allowed pointer-events-none"
             )}
             onClick={() => handleAction(onCloseAll)}

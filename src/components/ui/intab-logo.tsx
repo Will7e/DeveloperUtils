@@ -71,28 +71,28 @@ export function InTabLogo({
       <defs>
         {/* Dark Mode Tab Background Gradient */}
         <linearGradient id={tabBgDarkId} x1="24" y1="5.5" x2="24" y2="43" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#1e293b" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#0f172a" stopOpacity="0.98" />
+          <stop offset="0%" stopColor="#121212" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#000000" stopOpacity="0.98" />
         </linearGradient>
 
         {/* Light Mode Tab Background Gradient */}
         <linearGradient id={tabBgLightId} x1="24" y1="5.5" x2="24" y2="43" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#f8fafc" />
+          <stop offset="100%" stopColor="#fafafa" />
         </linearGradient>
 
         {/* Dark Mode Subtle Rim Gradient */}
         <linearGradient id={borderDarkId} x1="12" y1="5.5" x2="36" y2="43" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.5" />
-          <stop offset="45%" stopColor="#94a3b8" stopOpacity="0.25" />
-          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.1" />
+          <stop offset="0%" stopColor="#0070f3" stopOpacity="0.4" />
+          <stop offset="45%" stopColor="#333333" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="#0070f3" stopOpacity="0.1" />
         </linearGradient>
 
         {/* Light Mode Subtle Rim Gradient */}
         <linearGradient id={borderLightId} x1="12" y1="5.5" x2="36" y2="43" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#0284c7" stopOpacity="0.4" />
-          <stop offset="50%" stopColor="#cbd5e1" stopOpacity="0.8" />
-          <stop offset="100%" stopColor="#0284c7" stopOpacity="0.2" />
+          <stop offset="0%" stopColor="#0070f3" stopOpacity="0.3" />
+          <stop offset="50%" stopColor="#eaeaea" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#0070f3" stopOpacity="0.15" />
         </linearGradient>
 
         {/* Dot Ambient Glow (Dark Mode) */}
@@ -108,11 +108,11 @@ export function InTabLogo({
       {/* Outer Browser Tab Container (Rendered when variant is "tab") */}
       {variant === "tab" && (
         <g className="intab-logo-tab-group">
-          {/* Tab Body Fill & Crisp White Border */}
+          {/* Tab Body Fill & Crisp Border */}
           <path
             d="M 13 5.5 L 23 5.5 C 26 5.5 27 13.5 30 13.5 L 35 13.5 C 39.4183 13.5 43 17.0817 43 21.5 L 43 35 C 43 39.4183 39.4183 43 35 43 L 13 43 C 8.58172 43 5 39.4183 5 35 L 5 13.5 C 5 9.08172 8.58172 5.5 13 5.5 Z"
             className="intab-logo-tab-bg"
-            stroke="#ffffff"
+            stroke="var(--logo-tab-stroke, #ffffff)"
             strokeWidth="1.75"
           />
         </g>

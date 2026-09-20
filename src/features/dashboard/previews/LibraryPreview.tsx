@@ -243,7 +243,7 @@ export function LibraryPreview() {
 
       {/* Search Input Bar */}
       <div className="dash-lib-search-bar">
-        <Search className="h-3 w-3 text-slate-400" />
+        <Search className="h-3 w-3 text-[var(--ds-gray-700)]" />
         <input
           type="text"
           className="dash-lib-search-input"

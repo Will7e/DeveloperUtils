@@ -38,7 +38,7 @@ const INITIAL_NODES: CanvasNode[] = [
     y: 45,
     w: 110,
     h: 52,
-    color: "#38bdf8",
+    color: "#0070f3",
   },
   {
     id: "node-gateway",
@@ -49,7 +49,7 @@ const INITIAL_NODES: CanvasNode[] = [
     y: 35,
     w: 110,
     h: 72,
-    color: "#60a5fa",
+    color: "#3291ff",
   },
   {
     id: "node-db",
@@ -60,16 +60,16 @@ const INITIAL_NODES: CanvasNode[] = [
     y: 45,
     w: 110,
     h: 52,
-    color: "#34d399",
+    color: "#00df8f",
   },
 ];
 
 const PALETTE = [
-  { label: "Blue", value: "#38bdf8" },
-  { label: "Emerald", value: "#34d399" },
-  { label: "Violet", value: "#a78bfa" },
-  { label: "Amber", value: "#fbbf24" },
-  { label: "Slate", value: "#94a3b8" },
+  { label: "Blue", value: "#0070f3" },
+  { label: "Emerald", value: "#00df8f" },
+  { label: "Violet", value: "#8e4ec6" },
+  { label: "Amber", value: "#f5a623" },
+  { label: "Slate", value: "#a1a1a1" },
 ];
 
 export function DrawFlowPreview() {
@@ -77,7 +77,7 @@ export function DrawFlowPreview() {
   const [nodes, setNodes] = useState<CanvasNode[]>(INITIAL_NODES);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>("node-gateway");
   const [activeTool, setActiveTool] = useState<"pencil" | "select" | "rect" | "diamond">("pencil");
-  const [activeColor, setActiveColor] = useState<string>("#38bdf8");
+  const [activeColor, setActiveColor] = useState<string>("#0070f3");
   const [strokes, setStrokes] = useState<FreehandStroke[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<{ x: number; y: number }[]>([]);

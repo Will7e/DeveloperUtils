@@ -39,29 +39,29 @@ export function sanitizeWorkflowElements(elements: readonly unknown[] = []): unk
     const newEl = { ...el };
 
     if (el.strokeColor === "#f8fafc") {
-      newEl.strokeColor = "#1e1e1e";
+      newEl.strokeColor = "#171717";
       modified = true;
     }
-    if (el.id === "node-start" && el.backgroundColor === "#0369a122") {
-      newEl.strokeColor = "#0284c7";
-      newEl.backgroundColor = "#e0f2fe";
+    if (el.id === "node-start" && (el.backgroundColor === "#0369a122" || el.backgroundColor === "#e0f2fe")) {
+      newEl.strokeColor = "#0070f3";
+      newEl.backgroundColor = "#0070f314";
       modified = true;
     }
-    if (el.id === "node-action" && el.backgroundColor === "#04785722") {
-      newEl.strokeColor = "#059669";
-      newEl.backgroundColor = "#dcfce7";
+    if (el.id === "node-action" && (el.backgroundColor === "#04785722" || el.backgroundColor === "#dcfce7")) {
+      newEl.strokeColor = "#00df8f";
+      newEl.backgroundColor = "#00df8f14";
       modified = true;
     }
-    if (el.id === "welcome-title" && el.strokeColor === "#38bdf8") {
-      newEl.strokeColor = "#0284c7";
+    if (el.id === "welcome-title" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7")) {
+      newEl.strokeColor = "#0070f3";
       modified = true;
     }
-    if (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") {
-      newEl.strokeColor = "#64748b";
+    if (el.id === "welcome-subtitle" && (el.strokeColor === "#94a3b8" || el.strokeColor === "#64748b")) {
+      newEl.strokeColor = "#888888";
       modified = true;
     }
-    if (el.id === "arrow-1" && el.strokeColor === "#38bdf8") {
-      newEl.strokeColor = "#0284c7";
+    if (el.id === "arrow-1" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7")) {
+      newEl.strokeColor = "#0070f3";
       modified = true;
     }
 
@@ -124,7 +124,8 @@ export function DrawFlowDesigner() {
       const targetWorkflow = workflows.find((w) => w.id === activeWorkflowId);
       if (targetWorkflow) {
         isUpdatingSceneRef.current = true;
-        const { theme: _staleTheme, ...cleanAppState } = targetWorkflow.appState || {};
+        const cleanAppState = { ...(targetWorkflow.appState || {}) };
+        delete cleanAppState.theme;
         const sanitizedElements = sanitizeWorkflowElements(targetWorkflow.elements || []);
         excalidrawAPI.updateScene({
           elements: sanitizedElements as Parameters<typeof excalidrawAPI.updateScene>[0]["elements"],
@@ -153,11 +154,11 @@ export function DrawFlowDesigner() {
     const needsHealing = sceneElements.some(
       (el) =>
         el.strokeColor === "#f8fafc" ||
-        (el.id === "node-start" && el.backgroundColor === "#0369a122") ||
-        (el.id === "node-action" && el.backgroundColor === "#04785722") ||
-        (el.id === "welcome-title" && el.strokeColor === "#38bdf8") ||
-        (el.id === "welcome-subtitle" && el.strokeColor === "#94a3b8") ||
-        (el.id === "arrow-1" && el.strokeColor === "#38bdf8")
+        (el.id === "node-start" && (el.backgroundColor === "#0369a122" || el.strokeColor === "#0284c7")) ||
+        (el.id === "node-action" && (el.backgroundColor === "#04785722" || el.strokeColor === "#059669")) ||
+        (el.id === "welcome-title" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7")) ||
+        (el.id === "welcome-subtitle" && (el.strokeColor === "#94a3b8" || el.strokeColor === "#64748b")) ||
+        (el.id === "arrow-1" && (el.strokeColor === "#38bdf8" || el.strokeColor === "#0284c7"))
     );
     if (needsHealing) {
       const healed = sanitizeWorkflowElements(sceneElements);

@@ -78,7 +78,7 @@ export function HtmlPreview() {
                 style={{
                   width: 24,
                   height: 24,
-                  color: viewMode === "mobile" ? "#0ea5e9" : undefined,
+                  color: viewMode === "mobile" ? "var(--accent)" : undefined,
                 }}
               >
                 {viewMode === "desktop" ? (

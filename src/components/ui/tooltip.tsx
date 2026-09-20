@@ -14,7 +14,12 @@ const TooltipContent = React.forwardRef<
     <TooltipPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
-      className={cn("intab-tooltip devutils-tooltip", className)}
+      data-geist-tooltip=""
+      className={cn(
+        "intab-tooltip devutils-tooltip z-50 overflow-hidden px-2.5 py-1 text-xs font-medium",
+        "bg-[var(--ds-gray-1000)] text-[var(--ds-background-100)] border border-[var(--ds-gray-alpha-400)] rounded-md shadow-[var(--ds-shadow-tooltip)] select-none",
+        className
+      )}
       {...props}
     />
   </TooltipPrimitive.Portal>
@@ -25,18 +30,32 @@ export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
 
 export function SimpleTooltip({
   content,
+  shortcut,
   children,
   side = "top",
+  delayDuration = 150,
 }: {
   content: React.ReactNode;
+  shortcut?: string;
   children: React.ReactNode;
   side?: "top" | "right" | "bottom" | "left";
+  delayDuration?: number;
 }) {
-  if (!content) return <>{children}</>;
+  if (!content && !shortcut) return <>{children}</>;
+
   return (
-    <Tooltip>
+    <Tooltip delayDuration={delayDuration}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side}>{content}</TooltipContent>
+      <TooltipContent side={side}>
+        <span className="flex items-center gap-1.5">
+          {content && <span>{content}</span>}
+          {shortcut && (
+            <kbd className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)] border border-[var(--ds-gray-alpha-400)] text-[10px] font-mono font-medium leading-none">
+              {shortcut}
+            </kbd>
+          )}
+        </span>
+      </TooltipContent>
     </Tooltip>
   );
 }
