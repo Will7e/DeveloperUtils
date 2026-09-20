@@ -178,7 +178,8 @@ export function DashboardPage() {
             <span className="dash-hero-accent">tab</span>
           </h1>
           <p className="dash-hero-subtitle">
-            No server calls, no tracking, and your data stays on your computer.
+            No server calls, no tracking. Your data stays{" "}
+            <span className="dash-hero-highlight">secure and encrypted</span> on your device.
           </p>
         </div>
 
@@ -257,7 +258,7 @@ export function DashboardPage() {
           <span className="dash-footer-divider">•</span>
           <div className="dash-footer-item">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Stored locally on your device</span>
+            <span>Encrypted locally on your device</span>
           </div>
           <span className="dash-footer-divider">•</span>
           <div className="dash-footer-item">
