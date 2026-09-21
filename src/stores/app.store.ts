@@ -7,7 +7,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { createEncryptedStorage } from "@/services/encrypted-storage.service";
 import { compilerService } from "@/services/compiler.service";
 import { formatDuration } from "@/lib/utils";
-import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession, TabExecutionState, OutputEntry, ExecutionResult } from "@/types";
+import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession, TabExecutionState, OutputEntry, ExecutionResult, RunHistoryEntry } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
 
@@ -21,6 +21,9 @@ const RUNTIME_LABELS: Partial<Record<Language, string>> = {
   lua: "Loading Lua runtime (WASM)...",
 };
 
+/** Max stored runs per tab */
+const RUN_HISTORY_LIMIT = 20;
+
 /** Create an empty per-tab execution state */
 function createTabExec(): TabExecutionState {
   return {
@@ -28,12 +31,31 @@ function createTabExec(): TabExecutionState {
     outputEntries: [],
     executionResults: [],
     executionStartTime: null,
+    runHistory: [],
+    stdin: "",
+    restoredHistoryId: null,
   };
 }
 
 /** Ensure a tab has execution state, creating it lazily */
 function ensureTabExec(state: AppState, fileId: string): TabExecutionState {
   return state.tabExec[fileId] ?? createTabExec();
+}
+
+/** Build the module sources map (all tabs except the runner) for cross-tab imports */
+function buildModuleSources(state: AppState, runnerFileId: string): Record<string, string> {
+  const runner = state.files.find((f) => f.id === runnerFileId);
+  const runnerLang = runner?.language;
+  const sources: Record<string, string> = {};
+  for (const f of state.files) {
+    if (f.id === runnerFileId) continue;
+    // Only JS/TS siblings can be imported into a JS/TS program
+    if (runnerLang === "javascript" || runnerLang === "typescript") {
+      if (f.language !== "javascript" && f.language !== "typescript") continue;
+    }
+    sources[f.name] = f.content;
+  }
+  return sources;
 }
 
 /** Append an output entry to a specific tab's console */
@@ -354,6 +376,8 @@ export const useAppStore = create<AppState>()(
       sidebarOpen: false,
       sidebarCollapsed: false,
       outputPanelOpen: true,
+      splitConsoleOpen: false,
+      splitConsoleFileId: null,
       settingsOpen: false,
       commandPaletteOpen: false,
       editorSettings: DEFAULT_EDITOR_SETTINGS,
@@ -434,7 +458,8 @@ export const useAppStore = create<AppState>()(
       deleteFile: (id: string) => {
         const state = get();
         const remaining = state.files.filter((f) => f.id !== id);
-        const { [id]: _removedExec, ...remainingTabExec } = state.tabExec;
+        const { [id]: _ignored, ...remainingTabExec } = state.tabExec;
+        void _ignored;
         if (remaining.length === 0) {
           // Always keep at least one file
           const fallback = createDefaultFile("javascript");
@@ -530,6 +555,7 @@ export const useAppStore = create<AppState>()(
           get().toggleOutputPanel();
         }
 
+        const startedAt = Date.now();
         set((state) => ({
           isRunning: true,
           tabExec: {
@@ -538,7 +564,8 @@ export const useAppStore = create<AppState>()(
               ...ensureTabExec(state, fileId),
               isRunning: true,
               outputEntries: [],
-              executionStartTime: Date.now(),
+              restoredHistoryId: null,
+              executionStartTime: startedAt,
             },
           },
         }));
@@ -546,6 +573,9 @@ export const useAppStore = create<AppState>()(
         set((state) => ({ ...pushTabOutput(state, fileId, { type: "info", content: `Running ${file.name}...` }) }));
 
         get().addToast({ message: `Running ${file.name}...`, type: "info", duration: 2000 });
+
+        // Snapshot the exact code being run (kept on the result for history diffs)
+        const sourceCode = file.content;
 
         try {
           // Initialize the WASM / compiler runtime on first use
@@ -564,24 +594,41 @@ export const useAppStore = create<AppState>()(
 
           const result = await compilerService.execute(file.content, file.language, {
             timeout: get().editorSettings.executionTimeout,
+            stdin: ensureTabExec(get() as AppState, fileId).stdin,
+            moduleSources: buildModuleSources(get() as AppState, fileId),
+            onStdout: (chunk) => get().appendStreamOutput(fileId, "stdout", chunk),
+            onStderr: (chunk) => get().appendStreamOutput(fileId, "stderr", chunk),
           });
+
+          const finalResult: ExecutionResult = { ...result, sourceCode };
 
           set((state) => {
             const exec = ensureTabExec(state, fileId);
-            const isSuccess = result.exitCode === 0;
+            const isSuccess = finalResult.exitCode === 0;
             const entries: OutputEntry[] = [];
             const mk = (type: OutputEntry["type"], content: string): OutputEntry =>
               ({ id: generateId(), timestamp: Date.now(), type, content });
-            if (result.stdout) entries.push(mk("stdout", result.stdout));
-            if (result.stderr) entries.push(mk("stderr", result.stderr));
+            // Only append full-run output when nothing was streamed live
+            const streamed = exec.outputEntries.some((e) => e.type === "stdout" || e.type === "stderr");
+            if (!streamed) {
+              if (finalResult.stdout) entries.push(mk("stdout", finalResult.stdout));
+              if (finalResult.stderr) entries.push(mk("stderr", finalResult.stderr));
+            } else if (finalResult.stderr && !exec.outputEntries.some((e) => e.type === "stderr")) {
+              entries.push(mk("stderr", finalResult.stderr));
+            }
             entries.push(
               mk(
                 isSuccess ? "success" : "error",
                 isSuccess
-                  ? `Completed in ${formatDuration(result.duration)}`
-                  : `Exit code ${result.exitCode} (${formatDuration(result.duration)})`
+                  ? `Completed in ${formatDuration(finalResult.duration)}`
+                  : `Exit code ${finalResult.exitCode} (${formatDuration(finalResult.duration)})`
               )
             );
+            const historyEntry: RunHistoryEntry = {
+              id: generateId(),
+              result: finalResult,
+              ranAt: startedAt,
+            };
             return {
               isRunning: false,
               tabExec: {
@@ -590,22 +637,42 @@ export const useAppStore = create<AppState>()(
                   ...exec,
                   isRunning: false,
                   executionStartTime: null,
-                  executionResults: [...exec.executionResults, result],
+                  // Capped like runHistory — executionResults (incl.
+                  // full sourceCode snapshots) are persisted, so an
+                  // unbounded array would bloat storage over time.
+                  executionResults: [...exec.executionResults, finalResult].slice(-RUN_HISTORY_LIMIT),
+                  runHistory: [...exec.runHistory, historyEntry].slice(-RUN_HISTORY_LIMIT),
                   outputEntries: [...exec.outputEntries, ...entries],
                 },
               },
             };
           });
 
-          get().setOutputFlash(result.exitCode === 0 ? "success" : "error");
+          get().setOutputFlash(finalResult.exitCode === 0 ? "success" : "error");
         } catch (error) {
-          set((state) => ({
-            ...pushTabOutput(state, fileId, {
-              type: "error",
-              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-            }),
-            isRunning: false,
-          }));
+          const message = error instanceof Error ? error.message : String(error);
+          set((state) => {
+            const exec = ensureTabExec(state, fileId);
+            return {
+              // Reset the per-tab exec state so the tab doesn't stay
+              // stuck in "Running" forever after a failed run (e.g. a
+              // runtime init failure). Without this, runFile would
+              // early-return on every future click until page reload.
+              isRunning: false,
+              tabExec: {
+                ...state.tabExec,
+                [fileId]: {
+                  ...exec,
+                  isRunning: false,
+                  executionStartTime: null,
+                  outputEntries: [
+                    ...exec.outputEntries,
+                    { id: generateId(), timestamp: Date.now(), type: "error" as const, content: `Error: ${message}` },
+                  ],
+                },
+              },
+            };
+          });
           get().setOutputFlash("error");
         }
       },
@@ -646,8 +713,103 @@ export const useAppStore = create<AppState>()(
           const exec = state.tabExec[fileId];
           if (!exec) return state;
           return {
-            tabExec: { ...state.tabExec, [fileId]: { ...exec, outputEntries: [] } },
+            tabExec: { ...state.tabExec, [fileId]: { ...exec, outputEntries: [], restoredHistoryId: null } },
           };
+        });
+      },
+
+      appendStreamOutput: (fileId, type, chunk) => {
+        set((state) => {
+          const exec = ensureTabExec(state, fileId);
+          const last = exec.outputEntries[exec.outputEntries.length - 1];
+          // Coalesce consecutive chunks of the same kind into one growing entry
+          if (last && last.type === type && Date.now() - last.timestamp < 500) {
+            return {
+              tabExec: {
+                ...state.tabExec,
+                [fileId]: {
+                  ...exec,
+                  restoredHistoryId: null,
+                  outputEntries: [
+                    ...exec.outputEntries.slice(0, -1),
+                    { ...last, content: last.content + "\n" + chunk },
+                  ],
+                },
+              },
+            };
+          }
+          return {
+            tabExec: {
+              ...state.tabExec,
+              [fileId]: {
+                ...exec,
+                restoredHistoryId: null,
+                outputEntries: [
+                  ...exec.outputEntries,
+                  { id: generateId(), timestamp: Date.now(), type, content: chunk },
+                ],
+              },
+            },
+          };
+        });
+      },
+
+      setTabStdin: (fileId, stdin) => {
+        set((state) => {
+          const exec = ensureTabExec(state, fileId);
+          if (exec.stdin === stdin) return state;
+          return {
+            tabExec: { ...state.tabExec, [fileId]: { ...exec, stdin } },
+          };
+        });
+      },
+
+      restoreRunHistory: (fileId, historyId) => {
+        set((state) => {
+          const exec = ensureTabExec(state, fileId);
+          if (historyId === null) {
+            return {
+              tabExec: { ...state.tabExec, [fileId]: { ...exec, restoredHistoryId: null } },
+            };
+          }
+          const entry = exec.runHistory.find((h) => h.id === historyId);
+          if (!entry) return state;
+          const entries: OutputEntry[] = [];
+          if (entry.result.stdout) {
+            entries.push({ id: generateId(), timestamp: entry.ranAt, type: "stdout", content: entry.result.stdout });
+          }
+          if (entry.result.stderr) {
+            entries.push({ id: generateId(), timestamp: entry.ranAt, type: "stderr", content: entry.result.stderr });
+          }
+          entries.push({
+            id: generateId(),
+            timestamp: entry.ranAt,
+            type: entry.result.exitCode === 0 ? "success" : "error",
+            content:
+              entry.result.exitCode === 0
+                ? `History · ${formatDuration(entry.result.duration)}`
+                : `History · Exit code ${entry.result.exitCode} (${formatDuration(entry.result.duration)})`,
+          });
+          return {
+            tabExec: {
+              ...state.tabExec,
+              [fileId]: { ...exec, restoredHistoryId: historyId, outputEntries: entries },
+            },
+          };
+        });
+      },
+
+      toggleSplitConsole: () => {
+        set((state) => ({
+          splitConsoleOpen: !state.splitConsoleOpen,
+          splitConsoleFileId: state.splitConsoleOpen ? null : state.splitConsoleFileId,
+        }));
+      },
+
+      setSplitConsoleFile: (fileId) => {
+        set({
+          splitConsoleFileId: fileId,
+          splitConsoleOpen: fileId !== null,
         });
       },
 
@@ -1356,25 +1518,39 @@ export const useAppStore = create<AppState>()(
             const tabExec: Record<string, TabExecutionState> = {};
             if (state.activeFileId) {
               tabExec[state.activeFileId] = {
-                isRunning: false,
+                ...createTabExec(),
                 outputEntries: legacy,
                 executionResults: legacyResults,
-                executionStartTime: null,
               };
             }
             useAppStore.setState({ tabExec });
           }
         }
-        // Safety: never restore a "running" flag across reloads
+        // Safety: normalize every persisted tabExec entry — backfill new
+        // fields added in later versions and never restore a "running"
+        // flag across reloads.
         if (state && state.tabExec && Object.keys(state.tabExec).length > 0) {
-          const hadRunning = Object.values(state.tabExec).some((e) => e.isRunning || e.executionStartTime);
-          if (hadRunning) {
-            const fixed: Record<string, TabExecutionState> = {};
-            for (const [id, e] of Object.entries(state.tabExec)) {
-              fixed[id] = { ...e, isRunning: false, executionStartTime: null };
+          const fixed: Record<string, TabExecutionState> = {};
+          let changed = false;
+          for (const [id, e] of Object.entries(state.tabExec)) {
+            const needsBackfill = !e.runHistory || !("stdin" in e) || !("restoredHistoryId" in e);
+            const wasRunning = e.isRunning || e.executionStartTime;
+            if (needsBackfill || wasRunning) {
+              fixed[id] = {
+                ...createTabExec(),
+                ...e,
+                isRunning: false,
+                executionStartTime: null,
+                runHistory: e.runHistory ?? [],
+                stdin: e.stdin ?? "",
+                restoredHistoryId: null,
+              };
+              changed = true;
+            } else {
+              fixed[id] = e;
             }
-            useAppStore.setState({ tabExec: fixed });
           }
+          if (changed) useAppStore.setState({ tabExec: fixed });
         }
         if (state && state.workflows && Array.isArray(state.workflows)) {
           state.workflows = state.workflows.map((w) => ({

@@ -15,9 +15,13 @@ import type {
   ChatMessage,
   ChatSettings,
   ChatSkill,
+  ConversationSummary,
+  RepoContext,
+  ToolCallRequest,
+  ToolCallResult,
   UsageInfo,
 } from "@/features/chat/types";
-import { DEFAULT_CHAT_SETTINGS, BUILTIN_SKILLS } from "@/features/chat/constants";
+import { DEFAULT_CHAT_SETTINGS, BUILTIN_SKILLS, INTAB_MODEL_ID } from "@/features/chat/constants";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
 
 export interface ChatStoreState {
@@ -36,7 +40,7 @@ export interface ChatStoreState {
   wasAborted: boolean;
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
-  settingsTab: "connection" | "chat" | "skills" | null;
+  settingsTab: "connection" | "chat" | "skills" | "github" | null;
 
   // ── Conversation actions ──
   createConversation: (model?: string) => string;
@@ -47,6 +51,10 @@ export interface ChatStoreState {
   togglePinConversation: (id: string) => void;
   setConversationModel: (id: string, model: string | undefined) => void;
   setConversationSystemPrompt: (id: string, prompt: string | undefined) => void;
+  /** Attaches/detaches the GitHub repo this conversation works against */
+  setConversationRepo: (id: string, repo: RepoContext | undefined) => void;
+  /** Replaces the oldest `summary.coversCount` messages with the rolling summary */
+  applyCompaction: (conversationId: string, summary: ConversationSummary) => void;
 
   // ── Message actions ──
   addMessage: (conversationId: string, message: Omit<ChatMessage, "id" | "timestamp">) => string;
@@ -71,16 +79,33 @@ export interface ChatStoreState {
     usage?: UsageInfo;
     reasoning?: string;
     reasoningMs?: number;
+    /** Message routed through the InTab LLM virtual model (UI mask) */
+    viaInTab?: boolean;
   }) => string | null;
+  /** Commits an in-flight assistant tool-calls message (agent mode) */
+  commitToolCallsMessage: (
+    conversationId: string,
+    calls: ToolCallRequest[],
+    meta?: { content?: string; reasoning?: string; model?: string }
+  ) => string;
+  /** Commits one tool result (paired to its request via callId) */
+  commitToolResult: (
+    conversationId: string,
+    result: ToolCallResult,
+    content: string
+  ) => void;
   /** Discards in-flight content (used when stream produced nothing) */
   discardStreaming: () => void;
   endStreaming: (aborted: boolean) => void;
 
   // ── Settings ──
   updateSettings: (patch: Partial<ChatSettings>) => void;
-  setSettingsOpen: (open: boolean, tab?: "connection" | "chat" | "skills") => void;
-  setSettingsTab: (tab: "connection" | "chat" | "skills") => void;
-  setSettingsModalState: (state: { settingsOpen: boolean; settingsTab: "connection" | "chat" | "skills" | null }) => void;
+  setSettingsOpen: (open: boolean, tab?: "connection" | "chat" | "skills" | "github") => void;
+  setSettingsTab: (tab: "connection" | "chat" | "skills" | "github") => void;
+  setSettingsModalState: (state: {
+    settingsOpen: boolean;
+    settingsTab: "connection" | "chat" | "skills" | "github" | null;
+  }) => void;
 
   // ── Skills ──
   addSkill: (skill: ChatSkill) => void;
@@ -202,6 +227,31 @@ export const useChatStore = create<ChatStoreState>()(
           ),
         })),
 
+      setConversationRepo: (id, repo) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, id, (c) =>
+            // Stamp attachedAt here (impure Date.now stays out of render)
+            touchConversation({
+              ...c,
+              repoContext: repo ? { ...repo, attachedAt: Date.now() } : undefined,
+            })
+          ),
+        })),
+
+      applyCompaction: (conversationId, summary) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({
+              ...c,
+              // Drop the folded messages — the summary carries their
+              // memory. coversCount was snapped to a user boundary,
+              // so the kept tail still starts with a user turn.
+              messages: c.messages.slice(summary.coversCount),
+              summary,
+            })
+          ),
+        })),
+
       // ── Messages ──
       addMessage: (conversationId, message) => {
         const id = generateId();
@@ -294,6 +344,58 @@ export const useChatStore = create<ChatStoreState>()(
 
       discardStreaming: () => set({ streamingContent: "", streamingReasoning: "" }),
 
+      commitToolCallsMessage: (conversationId, calls, meta) => {
+        const id = generateId();
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({
+              ...c,
+              messages: [
+                ...c.messages,
+                {
+                  id,
+                  role: "assistant",
+                  content: meta?.content ?? "",
+                  timestamp: Date.now(),
+                  reasoning: meta?.reasoning || undefined,
+                  model: meta?.model,
+                  toolCalls: { kind: "tool_calls", calls },
+                },
+              ],
+            })
+          ),
+        }));
+        return id;
+      },
+
+      commitToolResult: (conversationId, result, content) => {
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({
+              ...c,
+              messages: [
+                ...c.messages,
+                {
+                  id: generateId(),
+                  role: "user",
+                  content: "",
+                  timestamp: Date.now(),
+                  toolResult: {
+                    kind: "tool_result",
+                    callId: result.callId,
+                    name: result.name,
+                    ok: result.ok,
+                    content,
+                    durationMs: result.durationMs,
+                    summary: result.summary,
+                  },
+                },
+              ],
+            })
+          ),
+        }));
+      },
+
       endStreaming: (aborted) =>
         set({
           isStreaming: false,
@@ -382,6 +484,18 @@ export const useChatStore = create<ChatStoreState>()(
           settings: {
             ...DEFAULT_CHAT_SETTINGS,
             ...settings,
+            // Versioned default: existing installs move to InTab LLM
+            // when it shipped. Conversations with an explicit model
+            // choice are untouched; legacy unset chats resolve to it
+            // via the `?? settings.defaultModel` fallback at send time.
+            defaultModel:
+              settings?.defaultModel === "openai/gpt-4o-mini"
+                ? INTAB_MODEL_ID
+                : (settings?.defaultModel ?? DEFAULT_CHAT_SETTINGS.defaultModel),
+            github: {
+              ...DEFAULT_CHAT_SETTINGS.github,
+              ...settings?.github,
+            },
             skills: reconciled ?? skills,
           },
           isStreaming: false,

@@ -35,12 +35,21 @@ export function ContextMeter({ context }: { context: ContextBreakdown }) {
             ? "chat-ctx-meter-fill-moderate"
             : "chat-ctx-meter-fill-optimal";
 
+  const compacted = context.compactedTokens > 0;
+
   return (
     <SimpleTooltip
       content={
         <>
           {formatTokens(context.totalTokens)} of {formatTokens(context.maxTokens)} tokens ·{" "}
           {HEALTH_LABEL[context.health]}
+          {compacted && (
+            <>
+              <br />
+              {formatTokens(context.compactedTokens)} tokens summarized into compacted
+              memory
+            </>
+          )}
         </>
       }
       side="bottom"
@@ -57,6 +66,7 @@ export function ContextMeter({ context }: { context: ContextBreakdown }) {
           />
         </div>
         <span className="chat-ctx-meter-label">{pct.toFixed(0)}%</span>
+        {compacted && <span className="chat-ctx-compact-badge">compact</span>}
       </div>
     </SimpleTooltip>
   );

@@ -4,6 +4,76 @@
 
 import type { ChatSettings, ChatSkill, ModelInfo } from "./types";
 
+// ── GitHub Agent Mode ─────────────────────────────────────
+
+export const GITHUB_API_BASE_URL = "https://api.github.com";
+export const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
+/** Edge function that exchanges the OAuth code for a token (server-side secret) */
+export const GITHUB_EXCHANGE_PATH = "/api/github";
+/** OAuth scopes: full repo read access (private + public) */
+export const GITHUB_OAUTH_SCOPES = "repo read:org";
+/** OAuth popup dimensions (matches the cloud-sync popup conventions) */
+export const GITHUB_POPUP_WIDTH = 640;
+export const GITHUB_POPUP_HEIGHT = 720;
+
+/** Files above this size are refused/tail-truncated by read_file */
+export const GITHUB_MAX_FILE_BYTES = 64_000;
+/** Repo trees larger than this are summarized rather than returned whole */
+export const GITHUB_MAX_TREE_ENTRIES = 2_500;
+/** Hard cap on agent iterations (model turns) per user message */
+export const AGENT_MAX_ITERATIONS = 8;
+/** Tool definitions are only sent when a repo is attached AND the model is known-capable */
+export const TOOL_RESULT_MAX_CHARS = 12_000;
+
+// ── InTab LLM (virtual model) ────────────────────────────
+// "intab/intab-llm" is not a real OpenRouter model — the runner
+// resolves it to a pool of free OpenRouter models (see
+// lib/intab-llm.ts) with per-conversation sticky routing and
+// silent failover. The UI presents it as an ordinary model.
+export const INTAB_MODEL_ID = "intab/intab-llm";
+export const INTAB_MODEL_NAME = "InTab LLM";
+/** Synthetic catalog entry so the picker/header resolve the id */
+export const INTAB_VIRTUAL_MODEL: ModelInfo = {
+  id: INTAB_MODEL_ID,
+  name: INTAB_MODEL_NAME,
+  contextLength: 128000,
+};
+
+/**
+ * Static InTab pool used before/without the live catalog. Kept in
+ * preference order — strong general models first, fast ones after.
+ * The live catalog replaces this wholesale when it loads (see
+ * buildInTabPool), so stale entries here degrade gracefully: the
+ * runner failover skips ids OpenRouter rejects with 404.
+ */
+export const INTAB_FALLBACK_POOL: ModelInfo[] = [
+  {
+    id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+    name: "Nemotron 3 Ultra (free)",
+    contextLength: 1000000,
+  },
+  {
+    id: "openai/gpt-oss-120b:free",
+    name: "GPT-OSS 120B (free)",
+    contextLength: 131072,
+  },
+  {
+    id: "google/gemma-4-31b:free",
+    name: "Gemma 4 31B (free)",
+    contextLength: 262144,
+  },
+  {
+    id: "openai/gpt-oss-20b:free",
+    name: "GPT-OSS 20B (free)",
+    contextLength: 131072,
+  },
+  {
+    id: "google/gemma-4-26b:free",
+    name: "Gemma 4 26B (free)",
+    contextLength: 262144,
+  },
+];
+
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_CONSOLE_URL = "https://openrouter.ai/settings/keys";
 export const OPENROUTER_MODELS_URL = "https://openrouter.ai/models";
@@ -12,14 +82,31 @@ export const OUTPUT_RESERVE_TOKENS = 4096;
 export const COMPACTION_THRESHOLD = 0.85;
 /** Compact down to this fraction of the budget when triggered */
 export const COMPACTION_TARGET = 0.5;
+/** Cap for the non-streaming summary completion */
+export const SUMMARY_MAX_TOKENS = 1024;
+/** Never fold the most recent N messages into the summary */
+export const COMPACTION_KEEP_RECENT = 2;
+/** Auto-compaction retries before falling back to plain truncation */
+export const COMPACTION_MAX_RETRIES = 2;
+/** Streaming watchdogs: no-headers budget / mid-stream silence budget */
+export const STREAM_FIRST_BYTE_TIMEOUT_MS = 30_000;
+export const STREAM_STALL_TIMEOUT_MS = 60_000;
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
-  defaultModel: "openai/gpt-4o-mini",
+  defaultModel: INTAB_MODEL_ID,
   apiKey: "",
   temperature: 0.7,
   systemPrompt:
     "You are InTab AI, an expert developer assistant built into the developer workstation. Provide clear, accurate, concise answers with production-ready code examples.",
   skills: [],
+  syncImageAttachments: true,
+  github: {
+    token: "",
+    mode: null,
+    login: null,
+    avatarUrl: null,
+    connectedAt: null,
+  },
 };
 
 /**
@@ -146,6 +233,7 @@ export const CURATED_FALLBACK_MODELS: ModelInfo[] = [
 ];
 
 export const PINNED_MODEL_IDS = [
+  INTAB_MODEL_ID,
   "openai/gpt-4o-mini",
   "openai/gpt-4o",
   "anthropic/claude-3.5-sonnet",

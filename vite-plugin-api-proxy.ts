@@ -47,6 +47,52 @@ export function apiProxyPlugin(): Plugin {
     name: "vite-plugin-api-proxy",
     configureServer(server) {
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+        // ── Dev stub for the GitHub OAuth exchange edge function ──
+        // Mirrors api/github.ts: in dev there is no server route, so
+        // the popup flow cannot exchange the code for a token.
+        // Without a GITHUB_CLIENT_SECRET configured the stub reports a
+        // clear configuration error (the PAT path still works fully).
+        if (req.url?.startsWith("/api/github")) {
+          const origin = (req.headers["origin"] as string) || "";
+          res.setHeader("Access-Control-Allow-Origin", isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "");
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.setHeader("Cache-Control", "no-store");
+
+          if (req.method === "OPTIONS") {
+            res.statusCode = 204;
+            res.end();
+            return;
+          }
+
+          const parsedGithubUrl = new URL(req.url, "http://localhost");
+          const ghError = parsedGithubUrl.searchParams.get("error");
+          const ghPayload = ghError
+            ? { ok: false, error: parsedGithubUrl.searchParams.get("error_description") || ghError }
+            : { ok: false, error: "GitHub OAuth exchange is not configured in local dev — use a Personal Access Token in Chat Settings → GitHub, or set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET." };
+
+          res.end(
+            `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>Connecting GitHub…</title></head>
+  <body>
+    <script>
+      (function () {
+        if (window.opener) {
+          window.opener.postMessage(
+            { source: "intab-github-oauth", payload: ${JSON.stringify(ghPayload)} },
+            ${JSON.stringify(origin || "http://localhost:5173")}
+          );
+        }
+        setTimeout(function () { window.close(); }, 150);
+      })();
+    </script>
+    <p style="font-family: system-ui; color: #555;">Completing GitHub sign-in…</p>
+  </body>
+</html>`
+          );
+          return;
+        }
+
         // ── Dev stub for the license edge function ──
         // In production /api/license runs as a Vercel edge function. In dev
         // there is no server route, so without this stub the SPA fallback

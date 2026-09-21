@@ -17,6 +17,8 @@ interface DeleteConfirmPopoverProps {
   anchor: { top: number; left: number } | null;
   onCancel: () => void;
   onConfirm: () => void;
+  /** Action verb shown in the message & confirm button (default "Delete") */
+  verb?: string;
 }
 
 const POPOVER_WIDTH = 236;
@@ -28,6 +30,7 @@ export function DeleteConfirmPopover({
   anchor,
   onCancel,
   onConfirm,
+  verb = "Delete",
 }: DeleteConfirmPopoverProps) {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -75,7 +78,7 @@ export function DeleteConfirmPopover({
         <div className="delete-confirm-body">
           <AlertTriangle className="h-4 w-4 delete-confirm-icon" />
           <span className="delete-confirm-text">
-            Delete <strong className="delete-confirm-name">{file.name}</strong>?
+            {verb} <strong className="delete-confirm-name">{file.name}</strong>?
             {file.isDirty && (
               <span className="delete-confirm-dirty">Unsaved changes will be lost.</span>
             )}
@@ -95,7 +98,7 @@ export function DeleteConfirmPopover({
             className={cn("delete-confirm-delete")}
             onClick={onConfirm}
           >
-            Delete
+            {verb}
           </button>
         </div>
       </div>

@@ -4,19 +4,23 @@
 // engines with seamless tabs and synchronized workspace settings.
 // ============================================================
 
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useRef } from "react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import {
   Columns,
   Braces,
   KeyRound,
   ArrowLeftRight,
+  FilePlus2,
   FlaskConical,
   Settings2,
   Trash2,
   ChevronDown,
   Check,
 } from "lucide-react";
+import { useFileDrop } from "@/hooks/useFileDrop";
+import { DropOverlay } from "@/hooks/DropOverlay";
+import { importTextFiles, comparatorKindFromFilename } from "@/lib/file-import";
 import {
   Tooltip,
   TooltipTrigger,
@@ -145,6 +149,56 @@ export function ComparatorsSuite() {
     addToast({ message: "Cleared inputs", type: "info" });
   }, [activeSession.id, updateSessionInput, addToast]);
 
+  // ── File import (drop / button) ─────────────────────────
+  // .env → Env mode, .json → JSON mode, else List; two files fill A & B.
+
+  const handleImportFiles = useCallback(
+    async (incoming: File[], target?: "a" | "b") => {
+      const { imported, rejected } = await importTextFiles(incoming);
+      rejected.forEach(({ name, reason }) =>
+        addToast({ message: `${name}: ${reason}`, type: "error", duration: 3500 })
+      );
+      if (imported.length === 0) return;
+
+      const first = imported[0]!;
+      const second = imported[1];
+
+      // Route mode by the first file's kind
+      const kind = comparatorKindFromFilename(first.name);
+      const nextMode = kind === "xml" ? "json" : kind;
+      if (nextMode !== currentMode) {
+        updateSessionMode(activeSession.id, nextMode);
+      }
+
+      if (second) {
+        updateSessionInput(activeSession.id, "a", first.text);
+        updateSessionInput(activeSession.id, "b", second.text);
+        addToast({ message: `Loaded ${first.name} ↦ A, ${second.name} ↦ B`, type: "success", duration: 2500 });
+      } else {
+        const side = target ?? "a";
+        updateSessionInput(activeSession.id, side, first.text);
+        addToast({ message: `Loaded ${first.name} ↦ ${side === "a" ? "A" : "B"}`, type: "success", duration: 2000 });
+      }
+    },
+    [activeSession.id, currentMode, updateSessionInput, updateSessionMode, addToast]
+  );
+
+  const { isOver, dropHandlers } = useFileDrop(handleImportFiles);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Split-side detection: left half → A, right half → B
+  const onContainerDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault(); // keep the browser from opening the dropped file
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const target: "a" | "b" =
+        e.clientX - rect.left < rect.width / 2 ? "a" : "b";
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length > 0) void handleImportFiles(files, target);
+    },
+    [handleImportFiles]
+  );
+
   // Swap Left and Right inputs
   const handleSwap = useCallback(() => {
     swapInputs(activeSession.id);
@@ -154,7 +208,30 @@ export function ComparatorsSuite() {
   const { caseSensitive, trimWhitespace, sortAlpha } = comparatorSettings;
 
   return (
-    <div className="list-comparator-container flex-1 flex flex-col h-full overflow-hidden bg-bg-0">
+    <div
+      className="list-comparator-container flex-1 flex flex-col h-full overflow-hidden bg-bg-0"
+      {...dropHandlers}
+      onDrop={onContainerDrop}
+    >
+      <DropOverlay
+        show={isOver}
+        leftLabel="Drop ↦ Input A"
+        rightLabel="Drop ↦ Input B"
+      />
+
+      {/* Hidden file picker for the Import button */}
+      <input
+        ref={importInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) void handleImportFiles(files);
+          e.target.value = "";
+        }}
+      />
+
       {/* Top Workspace Tab Bar */}
       <WorkspaceTabBar
         tabs={tabs}
@@ -249,6 +326,13 @@ export function ComparatorsSuite() {
               <button className="toolbar-btn" onClick={handleLoadSample}>
                 <FlaskConical className="h-3.5 w-3.5 text-accent" />
                 <span>Sample</span>
+              </button>
+            </ActionTooltip>
+
+            <ActionTooltip content="Import files (or drop them anywhere)">
+              <button className="toolbar-btn" onClick={() => importInputRef.current?.click()}>
+                <FilePlus2 className="h-3.5 w-3.5" />
+                <span>Import</span>
               </button>
             </ActionTooltip>
 

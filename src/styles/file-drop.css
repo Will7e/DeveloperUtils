@@ -1,0 +1,83 @@
+/* ============================================================
+   FILE DROP OVERLAY — shared drag & drop affordance
+   ============================================================ */
+
+.intab-drop-overlay-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--ds-background-0, #0a0a0a) 72%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.intab-drop-overlay-full {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg, 10px);
+  margin: 12px;
+}
+
+.intab-drop-overlay-half {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-right: none;
+  border-radius: var(--radius-lg, 10px) 0 0 var(--radius-lg, 10px);
+  margin: 12px 0 12px 12px;
+}
+
+.intab-drop-overlay-half-right {
+  border: 2px dashed var(--accent);
+  border-left: none;
+  border-radius: 0 var(--radius-lg, 10px) var(--radius-lg, 10px) 0;
+  margin: 12px 12px 12px 0;
+}
+
+.intab-drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 34px;
+  background: var(--ds-background-100);
+  border: 1px solid var(--ds-gray-400);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  color: var(--ds-gray-1000);
+  font-family: var(--font-sans);
+}
+
+.intab-drop-overlay-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+
+.intab-drop-overlay-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .intab-drop-overlay-wrap {
+    animation: drop-overlay-in 0.15s ease-out;
+  }
+
+  @keyframes drop-overlay-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+}

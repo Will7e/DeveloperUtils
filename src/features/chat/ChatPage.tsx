@@ -8,6 +8,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
 import {
+  displayNameFor,
   regenerateLastResponse,
   resolveModelInfo,
   sendUserMessage,
@@ -15,24 +16,21 @@ import {
   downloadConversation,
   ensureModelCatalog,
 } from "./services/chat-runner";
-import { getConversationContext } from "./context/engine";
+import { getConversationContext, composeSystemPrompt } from "./context/engine";
 import { buildEffectiveSystemPrompt } from "./lib/skills";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatHeader } from "./components/ChatHeader";
 import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
-import { CURATED_FALLBACK_MODELS } from "./constants";
-import type { ModelInfo } from "./types";
+import { modelSupportsImages } from "./services/chat-runner";
+import type { ChatAttachment, ModelInfo, RepoContext } from "./types";
+import type { ChatCommand } from "./lib/commands";
 import "./chat.css";
 
-/** Display name for a model id (falls back to the id itself) */
+/** Display name for a model id (masks InTab routing; falls back to the id) */
 function modelDisplayName(modelId: string, models: ModelInfo[]): string {
-  return (
-    models.find((m) => m.id === modelId)?.name ??
-    CURATED_FALLBACK_MODELS.find((m) => m.id === modelId)?.name ??
-    modelId
-  );
+  return displayNameFor(modelId, models);
 }
 
 export function ChatPage() {
@@ -50,6 +48,7 @@ export function ChatPage() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingImages, setPendingImages] = useState<ChatAttachment[]>([]);
 
   // Fetch the live model catalog whenever an API key becomes
   // available. Keying on the hydrated key value (not just mount)
@@ -129,13 +128,15 @@ export function ChatPage() {
     [modelId, models]
   );
 
-  // Compose the same effective prompt the runner will send so the
-  // context meter reflects skills overhead.
+  // Compose the same effective prompt the runner will send — skills
+  // plus the rolling summary — so the context meter reflects exactly
+  // what the next request costs.
   const effectiveSystemPrompt = useMemo(() => {
     const base =
       activeConversation?.systemPrompt?.trim() || settings.systemPrompt.trim() || "";
-    return buildEffectiveSystemPrompt(base, settings.skills ?? []);
-  }, [activeConversation?.systemPrompt, settings.systemPrompt, settings.skills]);
+    const withSkills = buildEffectiveSystemPrompt(base, settings.skills ?? []);
+    return composeSystemPrompt(withSkills, activeConversation?.summary);
+  }, [activeConversation?.systemPrompt, activeConversation?.summary, settings.systemPrompt, settings.skills]);
 
   const context = useMemo(
     () =>
@@ -148,10 +149,17 @@ export function ChatPage() {
   );
 
   const handleSend = () => {
-    if (!activeConversationId || !draft.trim()) return;
+    if (!activeConversationId) return;
+    if (!draft.trim() && pendingImages.length === 0) return;
     const text = draft;
+    const images = pendingImages;
     setDraft("");
-    sendUserMessage(activeConversationId, text);
+    setPendingImages([]);
+    sendUserMessage(
+      activeConversationId,
+      text,
+      images.length > 0 ? images : undefined
+    );
   };
 
   const handleSuggestion = (text: string) => {
@@ -193,6 +201,23 @@ export function ChatPage() {
     useChatStore.getState().updateSettings({ defaultModel: modelId });
   };
 
+  // Slash command entry point from the composer's command menu.
+  // Clears the composer when the page (not the command) owns the
+  // draft; submenu commands keep it open for their argument.
+  const handleRunCommand = (command: ChatCommand, arg: string) => {
+    if (!activeConversationId) return;
+    if (command.hasSubmenu) {
+      // /model without an arg enters the submenu in the composer —
+      // the draft is still showing "/model", so leave it alone.
+      if (!arg.trim()) return;
+      command.run({ conversationId: activeConversationId, arg, models });
+      setDraft("");
+      return;
+    }
+    command.run({ conversationId: activeConversationId, arg, models });
+    setDraft("");
+  };
+
   // Streaming is scoped to one conversation: other chats stay fully
   // usable while a stream runs elsewhere.
   const isStreamingHere = isStreaming && streamingConversationId === activeConversationId;
@@ -226,6 +251,16 @@ export function ChatPage() {
           hasConversationPrompt={Boolean(activeConversation?.systemPrompt)}
           activeSkillCount={(settings.skills ?? []).filter((s) => s.enabled).length}
           onOpenSkills={() => useChatStore.getState().setSettingsOpen(true, "skills")}
+          repoContext={activeConversation?.repoContext}
+          githubToken={settings.github?.token ?? ""}
+          onRepoChange={(repo) => {
+            if (!activeConversationId) return;
+            // Store action accepts the selection and stamps attachedAt
+            useChatStore.getState().setConversationRepo(
+              activeConversationId,
+              repo as RepoContext | undefined
+            );
+          }}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
           isSidebarOpen={sidebarOpen}
         />
@@ -235,6 +270,7 @@ export function ChatPage() {
           messages={activeConversation?.messages ?? []}
           defaultModel={modelName}
           hasApiKey={Boolean(settings.apiKey)}
+          summary={activeConversation?.summary}
           onSuggestion={handleSuggestion}
           onRegenerate={() =>
             activeConversationId && regenerateLastResponse(activeConversationId)
@@ -249,7 +285,20 @@ export function ChatPage() {
           onStop={handleStop}
           isStreaming={isStreamingHere}
           disabled={isStreaming && !isStreamingHere}
-          placeholder={`Message ${modelName}…`}
+          placeholder={
+            activeConversation?.repoContext
+              ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`
+              : `Message ${modelName}…`
+          }
+          attachments={pendingImages}
+          onAttachmentsChange={setPendingImages}
+          onTextFilesImported={(md) => setDraft((d) => d + md)}
+          modelSupportsImages={modelSupportsImages(modelId)}
+          models={models}
+          modelsLoading={modelsLoading}
+          activeModelId={modelId}
+          onRunCommand={handleRunCommand}
+          onModelChange={handleModelChange}
         />
       </main>
 

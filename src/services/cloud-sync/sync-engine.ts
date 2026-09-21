@@ -10,6 +10,8 @@
 //  - Concurrency: manifest `rev` + tombstones; conflicts archived
 //  - Multi-tab: BroadcastChannel leader election (only leader syncs)
 //  - Offline: navigator.onLine listeners + retry with backoff
+//  - Selective: per-domain toggles decide what syncs (store.syncDomains);
+//    disabled domains are omitted from pushes and never applied from pulls
 
 import { getSyncCryptoKey, encryptSnapshotTagged, decryptSnapshot, decryptSnapshotTagged, clearSyncCryptoKey, licenseFingerprint, getDefaultSyncKey } from "./sync-crypto";
 import { useLicenseStore } from "../license.service";
@@ -17,10 +19,12 @@ import { persistPresence } from "./cloud-sync.store";
 import { saveTokens, loadTokens, clearTokens, saveEtag, loadEtag } from "./token-storage";
 import { getProvider } from "./providers";
 import { isOAuthError } from "./oauth-error";import { useCloudSyncStore } from "./cloud-sync.store";
+import { readValue } from "../idb-storage.service";
 import type {
   CloudProviderId,
   CloudSnapshot,
   OAuthTokens,
+  SyncDomain,
   SyncManifest,
 } from "./types";
 import { SYNC_FILE_NAME } from "./types";
@@ -126,11 +130,16 @@ function claimLeadership(): void {
   }, 250);
 }
 
-// ── Snapshot collection & application ───────────────────────/** Captures the current local state of all persistence stacks. */
+// ── Snapshot collection & application ───────────────────────
+
+/**
+ * Captures the current local state of the persistence stacks selected for
+ * sync. Domains not selected for sync are omitted from the snapshot.
+ */
 async function collectLocalSnapshot(): Promise<{
-  appState: unknown;
-  apiTester: unknown;
-  chat: unknown;
+  appState?: unknown;
+  apiTester?: unknown;
+  chat?: unknown;
 }> {
   // Dynamic imports keep the cloud-sync module out of the critical path
   const [{ useAppStore }, { selectSyncableAppState }, { getApiTesterSnapshot }, { getChatSnapshot }] = await Promise.all([
@@ -140,14 +149,24 @@ async function collectLocalSnapshot(): Promise<{
     import("@/stores/chat.snapshot"),
   ]);
 
-  const appState = selectSyncableAppState(useAppStore.getState() as unknown as Record<string, unknown>);
-  const apiTester = await getApiTesterSnapshot();
-  const chat = await getChatSnapshot();
+  const { syncDomains } = useCloudSyncStore.getState();
+
+  const [appState, apiTester, chat] = await Promise.all([
+    syncDomains.appState
+      ? Promise.resolve(selectSyncableAppState(useAppStore.getState() as unknown as Record<string, unknown>))
+      : Promise.resolve(undefined),
+    syncDomains.apiTester ? getApiTesterSnapshot() : Promise.resolve(undefined),
+    syncDomains.chat ? getChatSnapshot() : Promise.resolve(undefined),
+  ]);
 
   return { appState, apiTester, chat };
 }
 
-/** Applies a remote snapshot onto the local stores. */
+/**
+ * Applies a remote snapshot onto the local stores, skipping domains that
+ * are not selected for sync on this device (their local data stays intact).
+ * A missing/null remote domain is also a no-op — never wipe local data.
+ */
 async function applyRemoteSnapshot(snapshot: CloudSnapshot): Promise<void> {
   const [{ useAppStore }, { applySyncableAppState }, { applyApiTesterSnapshot }, { applyChatSnapshot }] = await Promise.all([
     import("@/stores/app.store"),
@@ -156,13 +175,15 @@ async function applyRemoteSnapshot(snapshot: CloudSnapshot): Promise<void> {
     import("@/stores/chat.snapshot"),
   ]);
 
-  if (snapshot.appState !== undefined && snapshot.appState !== null) {
+  const { syncDomains } = useCloudSyncStore.getState();
+
+  if (syncDomains.appState && snapshot.appState != null) {
     applySyncableAppState(useAppStore, snapshot.appState);
   }
-  if (snapshot.apiTester !== undefined && snapshot.apiTester !== null) {
+  if (syncDomains.apiTester && snapshot.apiTester != null) {
     await applyApiTesterSnapshot(snapshot.apiTester);
   }
-  if (snapshot.chat !== undefined && snapshot.chat !== null) {
+  if (syncDomains.chat && snapshot.chat != null) {
     await applyChatSnapshot(snapshot.chat);
   }
 }
@@ -171,49 +192,75 @@ async function applyRemoteSnapshot(snapshot: CloudSnapshot): Promise<void> {
 
 let lastLocalSignature: string | null = null;
 
-function computeLocalSignature(): string {
-  const keys = [
-    "intab-app-state",
-    "intab_chat_state",
-    "intab_api_tabs",
-    "intab_api_history",
-    "intab_api_collections",
-    "intab_api_env_vars",
-    "intab_api_environments",
-    "intab_api_active_env",
-    "intab_api_custom_presets",
-    "intab_api_added_preset_ids",
-    "intab_api_custom_proxy",
-  ];
+/**
+ * Hash of the storage keys belonging to the domains currently selected for
+ * sync. Keys of disabled domains are excluded so background push polling
+ * never schedules uploads for data this device doesn't sync. Toggling a
+ * domain therefore changes the signature, which is intentional: the next
+ * push uploads the newly enabled domain promptly.
+ */
+async function computeLocalSignature(): Promise<string> {
+  const { syncDomains } = useCloudSyncStore.getState();
+  const keys: Array<[key: string, domain: SyncDomain]> = [];
+  if (syncDomains.appState) keys.push(["intab-app-state", "appState"]);
+  if (syncDomains.chat) keys.push(["intab_chat_state", "chat"]);
+  if (syncDomains.apiTester) {
+    for (const k of [
+      "intab_api_tabs",
+      "intab_api_history",
+      "intab_api_collections",
+      "intab_api_env_vars",
+      "intab_api_environments",
+      "intab_api_active_env",
+      "intab_api_custom_presets",
+      "intab_api_added_preset_ids",
+      "intab_api_custom_proxy",
+    ]) {
+      keys.push([k, "apiTester"]);
+    }
+  }
   let hash = 0;
-  for (const key of keys) {
-    const value = localStorage.getItem(key) || "";
+  for (const [key, domain] of keys) {
+    // Heavy keys live in IndexedDB now; readValue spans both stores.
+    const value = (await readValue(key)) || "";
     for (let i = 0; i < value.length; i++) {
       hash = (hash * 31 + value.charCodeAt(i)) | 0;
     }
     hash = (hash * 31 + key.length) | 0;
+    hash = (hash * 31 + domain.length) | 0;
   }
   return String(hash);
 }
 
 // ── Push ────────────────────────────────────────────────────
 
+function schedulePushTimer(delay: number): void {
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    void pushSnapshot();
+  }, delay);
+}
+
 export function schedulePush(immediate = false): void {
   if (!useCloudSyncStore.getState().isConnected) return;
   if (!isLeader) return;
 
-  // Background polling calls pass immediate=false; skip when nothing changed.
-  if (!immediate) {
-    const signature = computeLocalSignature();
-    if (signature === lastLocalSignature) return;
-    lastLocalSignature = signature;
+  if (immediate) {
+    schedulePushTimer(0);
+    return;
   }
 
-  if (pushTimer) clearTimeout(pushTimer);
-  const delay = immediate ? 0 : PUSH_DEBOUNCE_MS;
-  pushTimer = setTimeout(() => {
-    void pushSnapshot();
-  }, delay);
+  // Background polling calls pass immediate=false; skip when nothing changed.
+  // The signature reads IndexedDB (async), so the check continues off the
+  // calling stack without blocking store subscribers.
+  void computeLocalSignature().then((signature) => {
+    if (signature === lastLocalSignature) return;
+    lastLocalSignature = signature;
+    // Respect an already-pending push (e.g. an immediate one) instead of
+    // clearing and re-delaying it.
+    if (pushTimer !== null) return;
+    schedulePushTimer(PUSH_DEBOUNCE_MS);
+  });
 }
 
 async function pushSnapshot(): Promise<void> {
@@ -240,12 +287,12 @@ async function pushSnapshot(): Promise<void> {
       v: 1,
     };
 
-    const payload: CloudSnapshot = {
-      manifest,
-      appState: snapshotData.appState,
-      apiTester: snapshotData.apiTester,
-      chat: snapshotData.chat,
-    };
+    // Only include domains selected for sync; disabled ones stay untouched
+    // on other devices too (a missing domain is a no-op on apply).
+    const payload: CloudSnapshot = { manifest };
+    if (snapshotData.appState !== undefined) payload.appState = snapshotData.appState;
+    if (snapshotData.apiTester !== undefined) payload.apiTester = snapshotData.apiTester;
+    if (snapshotData.chat) payload.chat = snapshotData.chat;
 
     // Always encrypt at rest: license key → true E2E; otherwise pepper+account key.
     const syncKey = resolveSyncKey(store);
@@ -489,7 +536,12 @@ export async function restoreOnBoot(): Promise<void> {
       isConnected: true,
       status: "syncing",
     });
-    persistPresence({ provider, isConnected: true, syncSchedule: store.syncSchedule });
+    persistPresence({
+      provider,
+      isConnected: true,
+      syncSchedule: store.syncSchedule,
+      syncDomains: store.syncDomains,
+    });
 
     claimLeadership();
     startLoops();
@@ -525,7 +577,12 @@ export async function connectProvider(providerId: CloudProviderId, tokens: OAuth
     error: null,
     lastError: null,
   });
-  persistPresence({ provider: providerId, isConnected: true, syncSchedule: useCloudSyncStore.getState().syncSchedule });
+  persistPresence({
+    provider: providerId,
+    isConnected: true,
+    syncSchedule: useCloudSyncStore.getState().syncSchedule,
+    syncDomains: useCloudSyncStore.getState().syncDomains,
+  });
 
   claimLeadership();
   startLoops();
@@ -567,7 +624,12 @@ export async function disconnectProvider(removeCloudCopy: boolean): Promise<void
     lastSyncedAt: null,
     lastError: null,
   });
-  persistPresence({ provider: null, isConnected: false, syncSchedule: useCloudSyncStore.getState().syncSchedule });
+  persistPresence({
+    provider: null,
+    isConnected: false,
+    syncSchedule: useCloudSyncStore.getState().syncSchedule,
+    syncDomains: useCloudSyncStore.getState().syncDomains,
+  });
 }
 
 // ── Store subscriptions & timers ────────────────────────────

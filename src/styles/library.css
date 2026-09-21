@@ -206,8 +206,8 @@
 }
 .lib-search-input:focus {
   background: var(--bg-1);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 .lib-search-clear {
   position: absolute;
@@ -996,8 +996,8 @@ html.light .lib-recipe-ln {
 }
 .lib-method-filter-input:focus {
   background: var(--bg-1);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 .lib-method-filter-icon {
   position: absolute;

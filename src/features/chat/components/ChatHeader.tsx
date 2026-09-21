@@ -15,7 +15,8 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
 import { ModelPicker } from "./ModelPicker";
 import { ContextMeter } from "./ContextMeter";
-import type { ContextBreakdown, ModelInfo } from "../types";
+import { RepoPicker, type RepoSelection } from "./RepoPicker";
+import type { ContextBreakdown, ModelInfo, RepoContext } from "../types";
 
 interface ChatHeaderProps {
   model: string;
@@ -32,6 +33,11 @@ interface ChatHeaderProps {
   /** Number of enabled skills (0 hides the chip) */
   activeSkillCount: number;
   onOpenSkills: () => void;
+  /** Attached GitHub repo (agent mode); undefined = none */
+  repoContext?: RepoContext;
+  /** GitHub token — enables the repo picker */
+  githubToken: string;
+  onRepoChange: (repo: RepoSelection | undefined) => void;
   /** Toggle the off-canvas sidebar drawer (narrow widths) */
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
@@ -49,6 +55,9 @@ export function ChatHeader({
   hasConversationPrompt,
   activeSkillCount,
   onOpenSkills,
+  repoContext,
+  githubToken,
+  onRepoChange,
   onToggleSidebar,
   isSidebarOpen,
 }: ChatHeaderProps) {
@@ -92,6 +101,11 @@ export function ChatHeader({
           onChange={onModelChange}
         />
         <ContextMeter context={context} />
+        <RepoPicker
+          repoContext={repoContext}
+          token={githubToken}
+          onChange={onRepoChange}
+        />
       </div>
 
       <div className="chat-header-right">

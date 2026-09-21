@@ -19,7 +19,8 @@ import { useAppStore } from "@/stores/app.store";
 import { useCloudSyncStore } from "@/services/cloud-sync/cloud-sync.store";
 import { connectProvider, disconnectProvider, syncNow } from "@/services/cloud-sync/sync-engine";
 import { getProvider } from "@/services/cloud-sync/providers";
-import type { CloudProviderId } from "@/services/cloud-sync/types";
+import type { CloudProviderId, SyncDomain } from "@/services/cloud-sync/types";
+import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import { GoogleDriveIcon, OneDriveIcon } from "@/components/ui/provider-icons";
 
@@ -33,6 +34,22 @@ const PROVIDER_META: Record<ConnectTarget, { label: string; description: string 
   googledrive: {
     label: "Google Drive",
     description: "Syncs to a hidden app folder in your Google account.",
+  },
+};
+
+/** What each syncable domain contains — shown under its toggle. */
+const DOMAIN_META: Record<SyncDomain, { label: string; description: string }> = {
+  appState: {
+    label: "Workspace & Files",
+    description: "Notes and files, editor settings, workflows, tool sessions",
+  },
+  apiTester: {
+    label: "API Tester",
+    description: "Tabs, request history, collections, environments",
+  },
+  chat: {
+    label: "Agents",
+    description: "Conversations and chat settings, including your encrypted OpenRouter key",
   },
 };
 
@@ -60,6 +77,18 @@ export function CloudSyncSettings() {
 
   const [connectTarget, setConnectTarget] = useState<ConnectTarget | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState<null | { removeCloudCopy: boolean }>(null);
+
+  const syncDomains = useCloudSyncStore((s) => s.syncDomains);
+  const setSyncDomain = useCloudSyncStore((s) => s.setSyncDomain);
+
+  const handleToggleDomain = (domain: SyncDomain, enabled: boolean) => {
+    setSyncDomain(domain, enabled);
+    if (isConnected) {
+      // Land the change on the drive immediately: disabling stops uploading
+      // that domain, enabling uploads it on the next snapshot.
+      syncNow();
+    }
+  };
 
   const handleConnect = async (target: CloudProviderId) => {
     setConnectTarget(target);
@@ -95,6 +124,33 @@ export function CloudSyncSettings() {
 
   return (
     <div className="settings-tab-content">
+      {/* What syncs — selectable data domains (persisted even when disconnected) */}
+      <div className="settings-section">
+        <div className="settings-section-title">What Syncs to Your Drive</div>
+        <div className="settings-sync-domains">
+          {(Object.keys(DOMAIN_META) as SyncDomain[]).map((domain) => (
+            <div key={domain} className="settings-row settings-sync-domain-row">
+              <div className="settings-row-info">
+                <label className="settings-label">{DOMAIN_META[domain].label}</label>
+                <span className="settings-sublabel">{DOMAIN_META[domain].description}</span>
+              </div>
+              <div className="settings-control">
+                <Toggle
+                  size="sm"
+                  checked={syncDomains[domain]}
+                  onCheckedChange={(checked) => handleToggleDomain(domain, checked)}
+                  aria-label={`Sync ${DOMAIN_META[domain].label}`}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <span className="settings-sync-domain-note">
+          Turned-off categories stay on this device only — they are neither uploaded nor
+          overwritten from your drive. Changes apply from the next sync.
+        </span>
+      </div>
+
       {/* Connection status banner */}
       {isConnected && (
         <div className="settings-section">

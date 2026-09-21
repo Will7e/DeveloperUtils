@@ -8,9 +8,11 @@
 // Streaming content is rendered inline with a blinking caret.
 
 import React from "react";
-import { Brain, Check, ChevronDown, Copy, RefreshCw, TriangleAlert } from "lucide-react";
+import { Brain, Check, ChevronDown, Copy, Image as ImageIcon, RefreshCw, TriangleAlert } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
+import { ToolCallBlock } from "./ToolCallBlock";
+import { ProviderLogo } from "./ProviderLogo";
 import type { ChatMessage } from "../types";
 
 function formatTime(ts: number): string {
@@ -45,6 +47,8 @@ interface MessageItemProps {
   streamingReasoningOverride?: string;
   canRegenerate?: boolean;
   onRegenerate?: () => void;
+  /** Full transcript — lets tool blocks find their paired results */
+  allMessages?: ChatMessage[];
 }
 
 export const MessageItem = React.memo(function MessageItem({
@@ -54,6 +58,7 @@ export const MessageItem = React.memo(function MessageItem({
   streamingReasoningOverride,
   canRegenerate = false,
   onRegenerate,
+  allMessages = [],
 }: MessageItemProps) {
   const [copied, setCopied] = React.useState(false);
   const [reasoningOpen, setReasoningOpen] = React.useState(false);
@@ -74,6 +79,16 @@ export const MessageItem = React.memo(function MessageItem({
       }
     );
   }, [message.content, streamingContentOverride]);
+
+  // ── Agent-activity messages render as tool blocks, not bubbles ──
+  // Standalone results (whose calls message was compacted away) render
+  // as a subtle divider so the transcript never shows raw JSON bubbles.
+  if (message.toolCalls && allMessages.length > 0) {
+    return <ToolCallBlock message={message} allMessages={allMessages} />;
+  }
+  if (message.toolResult) {
+    return null;
+  }
 
   // Compaction marker — renders as a subtle divider chip
   if (message.compactedFrom !== undefined) {
@@ -98,7 +113,18 @@ export const MessageItem = React.memo(function MessageItem({
       <div className="chat-msg-meta">
         <span className="chat-msg-role">{isUser ? "You" : "Assistant"}</span>
         {message.model && !isUser && (
-          <span className="chat-msg-model">{message.model}</span>
+          <span className="chat-msg-model">
+            {message.viaInTab ? (
+              // InTab-routed message — display only the product model,
+              // never the underlying free-model id.
+              "InTab LLM"
+            ) : (
+              <>
+                <ProviderLogo modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />
+                {message.model}
+              </>
+            )}
+          </span>
         )}
         <span className="chat-msg-meta-time">{formatTime(message.timestamp)}</span>
         {message.usage?.completionTokens != null && !isUser && (
@@ -140,17 +166,52 @@ export const MessageItem = React.memo(function MessageItem({
       )}
 
       <div className={`chat-msg-bubble ${isUser ? "chat-msg-bubble-user" : "chat-msg-bubble-assistant"}`}>
+        {/* Attached images — thumbnails above the text content; images
+            excluded from Cloud Sync render as metadata-only chips */}
+        {isUser && (message.attachments ?? []).length > 0 && (
+          <div className="chat-msg-attachments">
+            {(message.attachments ?? []).map((att) =>
+              att.dataUrl ? (
+                <a
+                  key={att.id}
+                  className="chat-msg-attachment"
+                  href={att.dataUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={`${att.name} — open full size`}
+                >
+                  <img
+                    src={att.dataUrl}
+                    alt={att.name}
+                    className="chat-msg-attachment-img"
+                    loading="lazy"
+                  />
+                </a>
+              ) : (
+                <span
+                  key={att.id}
+                  className="chat-msg-attachment-stub"
+                  title={`${att.name} — image not synced (excluded in Chat Settings)`}
+                >
+                  <ImageIcon className="h-3 w-3 shrink-0" />
+                  <span className="chat-msg-attachment-stub-name">{att.name}</span>
+                  <span className="chat-msg-attachment-stub-note">not synced</span>
+                </span>
+              )
+            )}
+          </div>
+        )}
         {message.error ? (
           <div className="chat-msg-error-content">
             <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
             <span>{message.content}</span>
           </div>
-        ) : (
+        ) : content ? (
           <MarkdownContent
             content={content}
             className="chat-md chat-md-assistant"
           />
-        )}
+        ) : null}
         {isStreaming && <span className="chat-streaming-caret" aria-hidden="true" />}
       </div>
 

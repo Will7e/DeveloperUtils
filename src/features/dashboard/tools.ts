@@ -47,7 +47,7 @@ export const DASHBOARD_TOOLS: DashboardTool[] = [
   {
     id: "chat",
     to: "/chat",
-    short: "AI Chat",
+    short: "Agents",
     tagline: "Streams answers from hundreds of models with your own OpenRouter key.",
     demoTitle: "chat.md",
     demoMeta: ["OpenRouter", "your key"],
@@ -123,7 +123,7 @@ export const PRIVACY_POINTS: PrivacyPoint[] = [
   },
   {
     title: "Our servers are not in the path",
-    body: "AI Chat calls OpenRouter with your key; cloud sync writes to your own drive.",
+    body: "Agents calls OpenRouter with your key; cloud sync writes to your own drive.",
   },
   {
     title: "A locked-down page",
@@ -140,7 +140,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "Is my code or data uploaded anywhere?",
     answer:
-      "No. Every tool runs in your browser and this page makes no requests of its own. The only two exceptions are features you explicitly connect: AI Chat sends prompts to OpenRouter using your key, and cloud sync writes an encrypted file to your own cloud drive.",
+      "No. Every tool runs in your browser and this page makes no requests of its own. The only two exceptions are features you explicitly connect: Agents sends prompts to OpenRouter using your key, and cloud sync writes an encrypted file to your own cloud drive.",
   },
   {
     question: "Do I need an account?",

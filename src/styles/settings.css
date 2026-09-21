@@ -317,8 +317,8 @@ html.light .settings-slider {
   background: var(--bg-3);
 }
 .settings-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 
 html.light .settings-select {
@@ -347,8 +347,8 @@ html.light .settings-select:hover {
   background: var(--bg-3);
 }
 .settings-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
   background: var(--bg-1);
 }
 
@@ -383,8 +383,8 @@ html.light .settings-input:hover {
   background: var(--bg-3);
 }
 .settings-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
   background: var(--bg-1);
 }
 .settings-textarea::placeholder {

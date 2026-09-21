@@ -19,8 +19,11 @@
 import type { Language, ExecutionResult, ExecutionOptions, ICompilerService } from "@/types";
 
 // ============================================================
-// TypeScript Compiler (loaded from CDN on demand)
+// TypeScript Compiler (vendored — bundled at build time)
 // ============================================================
+// The compiler is imported from the installed `typescript` package
+// so transpilation works fully OFFLINE. Vite code-splits it into a
+// lazy chunk that downloads on first TS run instead of a CDN fetch.
 type TSModule = typeof import("typescript");
 let tsModule: TSModule | null = null;
 let tsLoadPromise: Promise<TSModule> | null = null;
@@ -29,35 +32,17 @@ async function loadTypeScriptCompiler(): Promise<TSModule> {
   if (tsModule) return tsModule;
   if (tsLoadPromise) return tsLoadPromise;
 
-  tsLoadPromise = new Promise((resolve, reject) => {
-    try {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/typescript@5.5.4/lib/typescript.min.js";
-      script.integrity = "sha384-ZpynyeRTntpnyPnOEFURvjfBRu26zrASCWaWwuvHYAxPh8s3xAuhKVVDj7TUoGRQ";
-      script.crossOrigin = "anonymous";
-      script.async = true;
-
-      script.onload = () => {
-        // TypeScript attaches itself to the global `ts` variable
-        tsModule = (window as unknown as { ts?: TSModule }).ts || null;
-        if (tsModule) {
-          resolve(tsModule);
-        } else {
-          reject(new Error("TypeScript loaded but `ts` global not found"));
-        }
-      };
-
-      script.onerror = () => {
-        tsLoadPromise = null;
-        reject(new Error("Failed to load TypeScript compiler from CDN. Please check your network connection."));
-      };
-
-      document.head.appendChild(script);
-    } catch (err) {
+  tsLoadPromise = import("typescript")
+    .then((mod) => {
+      tsModule = (mod.default ?? mod) as TSModule;
+      return tsModule;
+    })
+    .catch((err) => {
       tsLoadPromise = null;
-      reject(err);
-    }
-  });
+      throw new Error(
+        `Failed to load the bundled TypeScript compiler: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
 
   return tsLoadPromise;
 }
@@ -100,9 +85,19 @@ let activeWorker: Worker | null = null;
  * - Configurable timeout with automatic termination
  * - Cancellable via cancelWorkerExecution()
  */
+/**
+ * Execute JavaScript code inside a Web Worker sandbox.
+ * - No access to DOM, window, document, localStorage
+ * - Configurable timeout with automatic termination
+ * - Cancellable via cancelWorkerExecution()
+ * - Streams console output line-by-line via onStdout/onStderr
+ */
 function executeInWorker(
   code: string,
-  timeout: number = 10000
+  timeout: number = 10000,
+  onStdout?: (chunk: string) => void,
+  onStderr?: (chunk: string) => void,
+  stdin?: string
 ): Promise<ExecutionResult> {
   return new Promise((resolve) => {
     // Build the worker script
@@ -112,6 +107,19 @@ function executeInWorker(
       // ── Console capture ──────────────────────────────
       const __stdout = [];
       const __stderr = [];
+
+      // Stream a completed line to the main thread as soon as it's
+      // produced, so long-running programs show output live.
+      function __stream(kind, text) {
+        if (!text) return;
+        __safePostMessage({ type: 'stream', kind, text });
+      }
+
+      function __emitLine(kind, line) {
+        if (kind === 'stdout') __stdout.push(line);
+        else __stderr.push(line);
+        __stream(kind, line);
+      }
 
       function __formatArg(arg) {
         if (arg === null) return 'null';
@@ -125,56 +133,55 @@ function executeInWorker(
         return String(arg);
       }
 
+      // Shared timer map so console.timeEnd can see timers registered
+      // by console.time (declared outside the object literal).
+      const __timers = {};
+
       const console = {
         log: (...args) => {
-          __stdout.push(args.map(__formatArg).join(' '));
+          __emitLine('stdout', args.map(__formatArg).join(' '));
         },
         info: (...args) => {
-          __stdout.push(args.map(__formatArg).join(' '));
+          __emitLine('stdout', args.map(__formatArg).join(' '));
         },
         warn: (...args) => {
-          __stderr.push('[warn] ' + args.map(__formatArg).join(' '));
+          __emitLine('stderr', '[warn] ' + args.map(__formatArg).join(' '));
         },
         error: (...args) => {
-          __stderr.push(args.map(__formatArg).join(' '));
+          __emitLine('stderr', args.map(__formatArg).join(' '));
         },
         debug: (...args) => {
-          __stdout.push('[debug] ' + args.map(__formatArg).join(' '));
+          __emitLine('stdout', '[debug] ' + args.map(__formatArg).join(' '));
         },
         table: (data) => {
-          __stdout.push(JSON.stringify(data, null, 2));
+          __emitLine('stdout', JSON.stringify(data, null, 2));
         },
         clear: () => {
           __stdout.length = 0;
           __stderr.length = 0;
         },
         dir: (obj) => {
-          __stdout.push(JSON.stringify(obj, null, 2));
+          __emitLine('stdout', JSON.stringify(obj, null, 2));
         },
-        time: (() => {
-          const timers = {};
-          return (label = 'default') => { timers[label] = performance.now(); };
-        })(),
-        timeEnd: (() => {
-          const timers = {};
-          return (label = 'default') => {
-            const start = timers[label];
-            if (start !== undefined) {
-              __stdout.push(label + ': ' + (performance.now() - start).toFixed(3) + 'ms');
-              delete timers[label];
-            }
-          };
-        })(),
+        // time/timeEnd share the __timers map declared above.
+        time: (label = 'default') => { __timers[label] = performance.now(); },
+        timeEnd: (label = 'default') => {
+          const start = __timers[label];
+          if (start !== undefined) {
+            __emitLine('stdout', label + ': ' + (performance.now() - start).toFixed(3) + 'ms');
+            delete __timers[label];
+          }
+        },
         assert: (condition, ...args) => {
           if (!condition) {
-            __stderr.push('Assertion failed: ' + args.map(__formatArg).join(' '));
+            __emitLine('stderr', 'Assertion failed: ' + args.map(__formatArg).join(' '));
           }
         },
         count: (() => {
           const counts = {};
           return (label = 'default') => {
             counts[label] = (counts[label] || 0) + 1;
-            __stdout.push(label + ': ' + counts[label]);
+            __emitLine('stdout', label + ': ' + counts[label]);
           };
         })(),
         group: () => {},
@@ -205,20 +212,39 @@ function executeInWorker(
         Object.defineProperty(globalThis, 'postMessage', { value: undefined, configurable: false, writable: false });
       } catch {}
 
+      // ── Stdin ────────────────────────────────────────
+      const __stdinLines = ${JSON.stringify(stdin ?? "")}.length
+        ? ${JSON.stringify(stdin ?? "")}.split('\\n')
+        : [];
+      let __stdinPos = 0;
+      function __nextLine() {
+        return __stdinPos < __stdinLines.length ? __stdinLines[__stdinPos++] : null;
+      }
+      // Simple sync readline: returns the next stdin line (null at EOF).
+      // prompt('Your name: ') echoes the prompt and reads a line.
+      function readline() { return __nextLine(); }
+      function prompt(msg) {
+        if (msg !== undefined && msg !== null && msg !== '') __stream('stdout', String(msg));
+        return __nextLine();
+      }
+
       // ── Execute ──────────────────────────────────────
       const __startTime = performance.now();
 
       try {
         // Wrap in an async IIFE so top-level await works
         const __asyncFn = new Function(
-          'console', 'fetch',
+          'console', 'fetch', 'readline', 'prompt',
           '"use strict"; return (async () => {\\n' + ${JSON.stringify(code)} + '\\n})();'
         );
-        __asyncFn(console, fetch).then(() => {
+        __asyncFn(console, fetch, readline, prompt).then(() => {
           const __duration = performance.now() - __startTime;
           __safePostMessage({
+            type: 'result',
             stdout: __stdout.join('\\n'),
-            stderr: __stderr.join('\\n'),
+            stderr: __stderr.length > 0
+              ? __stderr.join('\\n')
+              : '',
             exitCode: 0,
             duration: __duration,
           });
@@ -228,6 +254,7 @@ function executeInWorker(
             ? err.name + ': ' + err.message
             : String(err);
           __safePostMessage({
+            type: 'result',
             stdout: __stdout.join('\\n'),
             stderr: __stderr.length > 0
               ? __stderr.join('\\n') + '\\n' + errorMsg
@@ -242,6 +269,7 @@ function executeInWorker(
           ? err.name + ': ' + err.message
           : String(err);
         __safePostMessage({
+          type: 'result',
           stdout: __stdout.join('\\n'),
           stderr: __stderr.length > 0
             ? __stderr.join('\\n') + '\\n' + errorMsg
@@ -277,8 +305,14 @@ function executeInWorker(
       });
     }, timeout);
 
-    // Result handler
+    // Streaming + result handler
     worker.onmessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (data?.type === "stream") {
+        if (data.kind === "stderr") onStderr?.(data.text);
+        else onStdout?.(data.text);
+        return;
+      }
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
@@ -286,7 +320,6 @@ function executeInWorker(
       activeWorker = null;
       URL.revokeObjectURL(blobUrl);
 
-      const data = e.data;
       resolve({
         stdout: (data.stdout || "").trimEnd(),
         stderr: (data.stderr || "").trimEnd(),
@@ -336,7 +369,18 @@ async function executeJavaScript(
   options?: ExecutionOptions
 ): Promise<ExecutionResult> {
   const timeout = options?.timeout ?? 10000;
-  return executeInWorker(code, timeout);
+  try {
+    const bundled = await bundleTabModules(code, options?.moduleSources ?? {});
+    return await executeInWorker(bundled, timeout, options?.onStdout, options?.onStderr, options?.stdin);
+  } catch (error) {
+    return {
+      stdout: "",
+      stderr: `Module bundling failed: ${error instanceof Error ? error.message : String(error)}`,
+      exitCode: 1,
+      duration: 0,
+      timestamp: Date.now(),
+    };
+  }
 }
 
 /** Execute TypeScript: real compilation → Web Worker */
@@ -347,7 +391,9 @@ async function executeTypeScript(
   const timeout = options?.timeout ?? 10000;
 
   try {
-    // Transpile TS → JS using the real TypeScript compiler
+    // Transpile TS → JS using the real TypeScript compiler.
+    // Sibling tab sources are passed through the entry as ESM specifiers
+    // so the bundler resolves them after transpilation.
     const { js, diagnostics } = await transpileTypeScript(code);
 
     // Report any compilation warnings/errors but still execute
@@ -356,7 +402,8 @@ async function executeTypeScript(
       warnings = diagnostics.map((d) => `[TS] ${d}`).join("\n");
     }
 
-    const result = await executeInWorker(js, timeout);
+    const bundled = await bundleTabModules(js, options?.moduleSources ?? {});
+    const result = await executeInWorker(bundled, timeout, options?.onStdout, options?.onStderr, options?.stdin);
 
     // Prepend TS diagnostics as warnings in stderr
     if (warnings && result.stderr) {
@@ -376,6 +423,259 @@ async function executeTypeScript(
       timestamp: Date.now(),
     };
   }
+}
+
+// ============================================================
+// Multi-file tab programs — CJS-style bundling of sibling tabs
+// ============================================================
+// `import x from "./utils.ts"` inside a JS/TS tab is resolved from
+// the other open tabs (moduleSources) and bundled into one sandbox-
+// safe script. Circular imports are detected and reported.
+
+function normalizeTabSpecifier(spec: string): string {
+  return spec.replace(/^\.\//, "").replace(/^\.\./, "");
+}
+
+function resolveTabModule(
+  spec: string,
+  moduleSources: Record<string, string>
+): string | null {
+  const clean = normalizeTabSpecifier(spec);
+  const names = Object.keys(moduleSources);
+  return (
+    names.find((n) => n === clean) ??
+    names.find((n) => n.toLowerCase() === clean.toLowerCase()) ??
+    names.find((n) => n.replace(/\.[^.]+$/, "") === clean.replace(/\.[^.]+$/, "")) ??
+    null
+  );
+}
+
+/** Strip comments (respecting strings) so import scanning is accurate */
+function stripCodeComments(src: string): string {
+  let out = "";
+  let i = 0;
+  let inStr: string | null = null;
+  while (i < src.length) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (inStr) {
+      out += ch;
+      if (ch === "\\") {
+        out += next ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === inStr) inStr = null;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inStr = ch;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+/** Extract ESM import specifiers + default/namespace hints from a transpiled module */
+function scanEsmImports(js: string): string[] {
+  const clean = stripCodeComments(js);
+  const specs: string[] = [];
+  const re = /import\s*[\s\S]*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']|export\s*\*\s*from\s*["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(clean)) !== null) {
+    const spec = m[1] ?? m[2] ?? m[3];
+    if (spec) specs.push(spec);
+  }
+  return specs;
+}
+
+/**
+ * Bundle an entry script with sibling tab modules into a single CJS-style
+ * script. Unresolvable specifiers are left untouched (real ESM/fail at runtime).
+ */
+async function bundleTabModules(
+  entryJs: string,
+  moduleSources: Record<string, string>
+): Promise<string> {
+  if (Object.keys(moduleSources).length === 0) return entryJs;
+
+  const modules = new Map<string, string>(); // tabName → CJS factory body
+  const visiting = new Set<string>();
+
+  async function compileToCjs(spec: string, rawSource: string): Promise<void> {
+    if (modules.has(spec)) return;
+    if (visiting.has(spec)) {
+      throw new Error(`Circular import detected: "${[...visiting, spec].join(" → ")}"`);
+    }
+    visiting.add(spec);
+    if (visiting.size > 64) {
+      throw new Error(`Module graph too deep while bundling "${spec}"`);
+    }
+
+    let js: string;
+    if (/\.(ts|tsx)$/i.test(spec)) {
+      const t = tsModule ?? (await loadTypeScriptCompiler());
+      js = t.transpileModule(rawSource, {
+        compilerOptions: {
+          target: t.ScriptTarget.ES2022,
+          module: t.ModuleKind.CommonJS,
+          strict: true,
+          esModuleInterop: true,
+          allowJs: true,
+          sourceMap: false,
+        },
+      }).outputText;
+    } else {
+      // JS tabs keep ESM syntax until imported — transpile to CJS via TS
+      // (allowJs) so `export` becomes exports assignments too.
+      const t = tsModule ?? (await loadTypeScriptCompiler());
+      js = t.transpileModule(rawSource, {
+        compilerOptions: {
+          target: t.ScriptTarget.ES2022,
+          module: t.ModuleKind.CommonJS,
+          esModuleInterop: true,
+          allowJs: true,
+          sourceMap: false,
+        },
+      }).outputText;
+    }
+
+    // Recurse into that module's own tab imports first
+    for (const inner of scanEsmImports(js)) {
+      const resolved = resolveTabModule(inner, moduleSources);
+      if (resolved) await compileToCjs(resolved, moduleSources[resolved]!);
+    }
+
+    // Rewrite resolved tab imports to runtime __require calls
+    const body = js.replace(
+      /(\bimport\s[\s\S]*?from\s*|\bimport\s*|\bexport\s\*\s*from\s*)(["'])([^"']+)(\2)/g,
+      (full, head: string, q: string, spec2: string) => {
+        const resolved = resolveTabModule(spec2, moduleSources);
+        return resolved ? `__require(${JSON.stringify(resolved)})` : full;
+      }
+    );
+
+    modules.set(spec, body);
+    visiting.delete(spec);
+  }
+
+  // Entry is already-transpiled JS from the caller (TS path) or raw JS.
+  // Compile dependencies first, then rewrite the entry's own imports to
+  // destructure the module's exports so bindings keep working:
+  //   import greet, { PI } from "./utils.ts"  →
+  //   var __m0 = __require("utils.ts"); var greet = __m0.default ?? __m0; var PI = __m0.PI;
+  const entryImports = scanEsmImports(entryJs)
+    .map((s) => resolveTabModule(s, moduleSources))
+    .filter((s): s is string => Boolean(s));
+
+  for (const spec of new Set(entryImports)) {
+    await compileToCjs(spec, moduleSources[spec]!);
+  }
+  if (modules.size === 0) return entryJs;
+
+  let entry = entryJs;
+  let modIdx = 0;
+  entry = entry.replace(
+    /\bimport\s+([\w$]+)\s*,?\s*(?:\{([^}]*)\})?\s*from\s*(["'])([^"']+)(\3)/g,
+    (full, defaultBind: string | undefined, named: string | undefined, _q: string, spec: string) => {
+      const resolved = resolveTabModule(spec, moduleSources);
+      if (!resolved) return full;
+      const v = `__m${modIdx++}`;
+      let out = `var ${v} = __require(${JSON.stringify(resolved)});`;
+      if (defaultBind) out += ` var ${defaultBind} = ${v}.default !== undefined ? ${v}.default : ${v};`;
+      if (named) {
+        for (const part of named.split(",")) {
+          const clause = part.trim();
+          if (!clause) continue;
+          const alias = clause.split(/\s+as\s+/);
+          const imported = alias[0]!.trim();
+          const local = (alias[1] ?? imported).trim();
+          out += ` var ${local} = ${v}[${JSON.stringify(imported)}];`;
+        }
+      }
+      return out;
+    }
+  );
+  // Named-only imports: import { a, b as c } from "..."
+  entry = entry.replace(
+    /\bimport\s*\{([^}]*)\}\s*from\s*(["'])([^"']+)(\2)/g,
+    (full, named: string, _q: string, spec: string) => {
+      const resolved = resolveTabModule(spec, moduleSources);
+      if (!resolved) return full;
+      const v = `__m${modIdx++}`;
+      let out = `var ${v} = __require(${JSON.stringify(resolved)});`;
+      for (const part of named.split(",")) {
+        const clause = part.trim();
+        if (!clause) continue;
+        const alias = clause.split(/\s+as\s+/);
+        const imported = alias[0]!.trim();
+        const local = (alias[1] ?? imported).trim();
+        out += ` var ${local} = ${v}[${JSON.stringify(imported)}];`;
+      }
+      return out;
+    }
+  );
+  // Namespace imports: import * as ns from "..."
+  entry = entry.replace(
+    /\bimport\s*\*\s*as\s+([\w$]+)\s*from\s*(["'])([^"']+)(\2)/g,
+    (full, ns: string, _q: string, spec: string) => {
+      const resolved = resolveTabModule(spec, moduleSources);
+      return resolved ? `var ${ns} = __require(${JSON.stringify(resolved)});` : full;
+    }
+  );
+  // Side-effect imports: import "./thing.ts"
+  entry = entry.replace(
+    /\bimport\s*(["'])([^"']+)(\1)/g,
+    (full, _q: string, spec: string) => {
+      const resolved = resolveTabModule(spec, moduleSources);
+      return resolved ? `__require(${JSON.stringify(resolved)});` : full;
+    }
+  );
+
+  const moduleEntries = [...modules.entries()]
+    .map(([name, body]) => `${JSON.stringify(name)}: function(exports, require, module) {\n${body}\n},`)
+    .join("\n");
+
+  // NOTE: executeInWorker wraps this code in `return (async () => { … })()`
+  // — so the final `return (async function(){…})()` hands the program's
+  // promise back to the wrapper, giving proper completion + error capture.
+  return `
+var __modules = {
+${moduleEntries}
+};
+var __cache = {};
+function __require(name) {
+  if (__cache[name]) return __cache[name].exports;
+  if (!__modules[name]) throw new Error("Cannot find module '" + name + "'");
+  var module = { exports: {} };
+  __cache[name] = module;
+  try {
+    __modules[name].call(module.exports, module.exports, __require, module);
+  } catch (err) {
+    delete __cache[name];
+    throw err;
+  }
+  return module.exports;
+}
+return (async function() {
+${entry}
+})();
+`;
 }
 
 // ============================================================
@@ -434,38 +734,68 @@ const PYODIDE_WORKER_CODE = `
     }
 
     if (data.type === 'execute') {
-      const { id, code } = data;
+      const { id, code, stdin } = data;
       const startTime = performance.now();
       try {
         const engine = await getOrInitPyodide();
 
-        // Capture Python stdout/stderr via StringIO
-        engine.runPython(\`
-import sys
-from io import StringIO
-sys.stdout = StringIO()
-sys.stderr = StringIO()
-\`);
+        // Stream stdout to the UI as it is printed (line-buffered),
+        // while still accumulating the full text for the final result.
+        let __streamBuf = '';
+        engine.setStdout({
+          batched: (text) => {
+            __streamBuf += text;
+            self.postMessage({ type: 'stream', id, kind: 'stdout', text });
+          }
+        });
+        engine.setStderr({
+          batched: (text) => {
+            self.postMessage({ type: 'stream', id, kind: 'stderr', text });
+          }
+        });
+
+        // Provide stdin: input() / sys.stdin read from the provided text.
+        // Each input() consumes one line; EOF raises EOFError like a real
+        // terminal when the stdin box runs dry.
+        const stdinText = stdin || '';
+        const __NL = String.fromCharCode(10);
+        // Build a safe Python single-quoted string literal.
+        // NOTE: this code lives inside a template literal, so backslash
+        // escapes here would be consumed by the outer template — use
+        // String.fromCharCode to stay escape-free.
+        const __BS = String.fromCharCode(92);
+        const pyStdinLiteral = "'" + stdinText
+          .split(__BS).join(__BS + __BS)
+          .split("'").join(__BS + "'")
+          .split(__NL).join(__BS + 'n')
+          .split(String.fromCharCode(13)).join(__BS + 'r') + "'";
+        const setupCode = [
+          'import sys, io',
+          'class _TabStdin(io.StringIO):',
+          '    def readline(self, size=-1):',
+          '        line = super().readline(size)',
+          "        if line == '' and size != 0:",
+          "            raise EOFError('EOF when reading a line (no more stdin provided)')",
+          '        return line',
+          'sys.stdin = _TabStdin(' + pyStdinLiteral + ')'
+        ].join(__NL);
+        engine.runPython(setupCode);
 
         try {
           await engine.runPythonAsync(code);
         } catch (runErr) {
-          const stdout = String(engine.runPython("sys.stdout.getvalue()") || "");
           const stderr = runErr instanceof Error ? runErr.message : String(runErr);
           const duration = performance.now() - startTime;
-          self.postMessage({ type: 'result', id, stdout, stderr, exitCode: 1, duration });
+          self.postMessage({ type: 'result', id, stdout: __streamBuf.trimEnd(), stderr, exitCode: 1, duration });
           return;
         }
 
-        const stdout = String(engine.runPython("sys.stdout.getvalue()") || "");
-        const stderr = String(engine.runPython("sys.stderr.getvalue()") || "");
         const duration = performance.now() - startTime;
-
         self.postMessage({
           type: 'result',
           id,
-          stdout: stdout.trimEnd(),
-          stderr: stderr.trimEnd(),
+          stdout: __streamBuf.trimEnd(),
+          stderr: '',
           exitCode: 0,
           duration
         });
@@ -501,6 +831,15 @@ async function initPython(): Promise<void> {
         resolve();
       } else if (e.data.type === "init_error") {
         worker.removeEventListener("message", handleInit);
+        // The runtime failed to load — terminate the broken worker so the
+        // next attempt builds a fresh one instead of reusing the cached
+        // rejected ready-promise inside it.
+        worker.terminate();
+        if (activePythonWorker === worker) {
+          activePythonWorker = null;
+          pythonWorkerBlobUrl = null;
+          isPythonReady = false;
+        }
         reject(new Error(e.data.error));
       }
     };
@@ -547,15 +886,21 @@ async function executePython(
     }, timeout);
 
     const handleMessage = (e: MessageEvent) => {
+      const data = e.data;
+      if (data?.type === "stream" && data.id === execId) {
+        if (data.kind === "stderr") options?.onStderr?.(data.text);
+        else options?.onStdout?.(data.text);
+        return;
+      }
       if (resolved) return;
-      if (e.data.type === "result" && e.data.id === execId) {
+      if (data?.type === "result" && data.id === execId) {
         resolved = true;
         cleanup();
         resolve({
-          stdout: e.data.stdout || "",
-          stderr: e.data.stderr || "",
-          exitCode: e.data.exitCode ?? 0,
-          duration: e.data.duration ?? 0,
+          stdout: data.stdout || "",
+          stderr: data.stderr || "",
+          exitCode: data.exitCode ?? 0,
+          duration: data.duration ?? 0,
           timestamp: Date.now(),
         });
       }
@@ -576,7 +921,7 @@ async function executePython(
 
     worker.addEventListener("message", handleMessage);
     worker.addEventListener("error", handleError);
-    worker.postMessage({ type: "execute", id: execId, code });
+    worker.postMessage({ type: "execute", id: execId, code, stdin: options?.stdin ?? "" });
   });
 }
 
@@ -824,6 +1169,14 @@ async function initSql(): Promise<void> {
         resolve();
       } else if (e.data.type === "init_error") {
         worker.removeEventListener("message", handleInit);
+        // Runtime failed to load — drop the broken worker so the next
+        // attempt builds a fresh one (the worker caches its rejected
+        // ready-promise, so retrying inside it would never succeed).
+        worker.terminate();
+        if (activeSqlWorker === worker) {
+          activeSqlWorker = null;
+          sqlWorkerBlobUrl = null;
+        }
         reject(new Error(e.data.error));
       }
     };
@@ -1050,6 +1403,14 @@ async function initLua(): Promise<void> {
         resolve();
       } else if (e.data.type === "init_error") {
         worker.removeEventListener("message", handleInit);
+        // Runtime failed to load — drop the broken worker so the next
+        // attempt builds a fresh one (the worker caches its rejected
+        // ready-promise, so retrying inside it would never succeed).
+        worker.terminate();
+        if (activeLuaWorker === worker) {
+          activeLuaWorker = null;
+          luaWorkerBlobUrl = null;
+        }
         reject(new Error(e.data.error));
       }
     };

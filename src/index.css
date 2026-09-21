@@ -188,7 +188,7 @@
   --ds-pink-1000: hsla(333, 90%, 96%, 1);
 
   /* ---- Official Geist Focus & Shadows (Dark) ---- */
-  --ds-focus-color: var(--ds-blue-900);
+  --ds-focus-color: var(--ds-gray-600);
   --ds-focus-ring: 0 0 0 2px var(--ds-background-100), 0 0 0 4px var(--ds-focus-color);
   --ds-shadow-background-border: 0 0 0 1px var(--ds-background-200);
   --ds-shadow-border-base: 0 0 0 1px #ffffff25;
@@ -370,7 +370,7 @@ html.light {
   --ds-pink-1000: hsla(333, 74%, 15%, 1);
 
   /* ---- Official Geist Focus & Shadows (Light) ---- */
-  --ds-focus-color: var(--ds-blue-700);
+  --ds-focus-color: var(--ds-gray-600);
   --ds-focus-ring: 0 0 0 2px var(--ds-background-100), 0 0 0 4px var(--ds-focus-color);
   --ds-shadow-background-border: 0 0 0 1px var(--ds-background-200);
   --ds-shadow-border-base: 0 0 0 1px #00000014;
@@ -1183,7 +1183,10 @@ body {
 
 .main-layout {
   display: flex;
+  /* 100vh first (fallback), 100dvh where supported — avoids the iOS
+     URL-bar jump on mobile. Desktop resolves both identically. */
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: var(--bg-0);
   overflow: hidden;
@@ -1597,5 +1600,6 @@ html.light .intab-logo-glow {
 @import "./styles/excalidraw.css";
 @import "./styles/vault.css";
 @import "./styles/cloud-sync.css";
+@import "./styles/file-drop.css";
 @import "./features/chat/chat.css";
 @import "./styles/responsive.css";

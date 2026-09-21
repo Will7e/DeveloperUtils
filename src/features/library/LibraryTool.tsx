@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Menu } from "lucide-react";
 import { LibrarySidebar } from "./LibrarySidebar";
 import { LibraryView } from "./LibraryView";
 import { useResizable } from "@/hooks/useResizable";
@@ -21,6 +22,19 @@ export function LibraryTool() {
     maxSize: 420,
     unit: "px"
   });
+
+  // ── Mobile drawer (≤760px) ───────────────────────────────
+  // The sidebar slides over the content behind a scrim; the hamburger
+  // only renders on phones via CSS. Mirrors the chat drawer pattern.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 760px)");
+    const onChange = () => {
+      if (!mql.matches) setDrawerOpen(false);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
 
   // Sync initial URL params to store
   useEffect(() => {
@@ -65,8 +79,17 @@ export function LibraryTool() {
   return (
     <div 
       ref={containerRef}
-      className={cn("lib-layout", isDragging && "lib-layout-dragging")}
+      className={cn("lib-layout", isDragging && "lib-layout-dragging", drawerOpen && "lib-sidebar-open")}
     >
+      {/* Mobile drawer scrim — display controlled in styles/responsive.css */}
+      <button
+        type="button"
+        className="lib-scrim"
+        aria-label="Close navigation"
+        onClick={() => setDrawerOpen(false)}
+        tabIndex={-1}
+      />
+
       {/* Sidebar */}
       <div className="lib-layout-sidebar" style={{ width: `${sidebarWidth}px` }}>
         <LibrarySidebar />
@@ -85,6 +108,15 @@ export function LibraryTool() {
 
       {/* Content */}
       <div className="lib-layout-content">
+        {/* Hamburger — CSS shows it only ≤760px, floating over the header */}
+        <button
+          type="button"
+          className="lib-mobile-menu-btn"
+          aria-label="Open library navigation"
+          onClick={() => setDrawerOpen(true)}
+        >
+          <Menu className="h-4 w-4" />
+        </button>
         <LibraryView />
       </div>
     </div>

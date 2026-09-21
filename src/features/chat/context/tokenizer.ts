@@ -10,6 +10,9 @@ import type { ChatMessage } from "../types";
 /** Framing overhead per message (role tags, separators) */
 export const MESSAGE_OVERHEAD_TOKENS = 4;
 
+/** Fixed estimate per attached image (vision tokens vary by model) */
+export const IMAGE_TOKEN_ESTIMATE = 800;
+
 /**
  * Fast token estimation for text. Code-heavy content has a denser
  * token distribution, so it uses a slightly lower chars/token ratio.
@@ -29,7 +32,18 @@ export function estimateTokens(text?: string | null): number {
 export function estimateMessageTokens(message: ChatMessage): number {
   // Compaction markers carry no payload — just the marker overhead
   if (message.compactedFrom !== undefined) return MESSAGE_OVERHEAD_TOKENS;
-  return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS;
+  // Tool protocol messages: estimate the serialized payload they carry
+  if (message.toolCalls) {
+    const callsJson = message.toolCalls.calls
+      .map((c) => c.arguments + c.name)
+      .join("");
+    return estimateTokens(callsJson) + estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS * 2;
+  }
+  if (message.toolResult) {
+    return estimateTokens(message.toolResult.content) + MESSAGE_OVERHEAD_TOKENS * 2;
+  }
+  const imageTokens = (message.attachments?.length ?? 0) * IMAGE_TOKEN_ESTIMATE;
+  return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS + imageTokens;
 }
 
 /** Total tokens for a message list */

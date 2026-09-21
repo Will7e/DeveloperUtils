@@ -8,14 +8,33 @@
 // rotation lifecycle.
 
 import { create } from "zustand";
-import type { CloudProviderId, OAuthTokens, SyncStatus } from "./types";
+import type { CloudProviderId, OAuthTokens, SyncDomain, SyncStatus } from "./types";
+import { SYNC_DOMAINS } from "./types";
 
 const PRESENCE_KEY = "intab_cloudsync_presence";
+
+/** All domains enabled — the default for fresh profiles and legacy presence. */
+function allDomainsEnabled(): Record<SyncDomain, boolean> {
+  return { appState: true, apiTester: true, chat: true };
+}
+
+/** Normalizes a stored presence payload's domain flags (missing → enabled). */
+function normalizeDomains(raw: unknown): Record<SyncDomain, boolean> {
+  const defaults = allDomainsEnabled();
+  if (!raw || typeof raw !== "object") return defaults;
+  const record = raw as Partial<Record<SyncDomain, unknown>>;
+  const out = defaults;
+  for (const domain of SYNC_DOMAINS) {
+    if (typeof record[domain] === "boolean") out[domain] = record[domain] as boolean;
+  }
+  return out;
+}
 
 interface PersistedPresence {
   provider: CloudProviderId | null;
   isConnected: boolean;
   syncSchedule: SyncSchedule;
+  syncDomains: Record<SyncDomain, boolean>;
 }
 
 export type SyncSchedule = "realtime" | "manual";
@@ -43,12 +62,16 @@ export interface CloudSyncStoreState {
   // Schedule preference
   syncSchedule: SyncSchedule;
 
+  // Per-domain sync selection (which data categories sync to the drive)
+  syncDomains: Record<SyncDomain, boolean>;
+
   // Actions
   setLicense: (key: string | null, fp: string | null) => void;
   setConnecting: (connecting: boolean) => void;
   setStatus: (status: SyncStatus, lastError?: string | null) => void;
   setMultiTabRole: (role: "leader" | "follower" | null) => void;
   setSyncSchedule: (schedule: SyncSchedule) => void;
+  setSyncDomain: (domain: SyncDomain, enabled: boolean) => void;
   hydratePresence: () => void;
 }
 
@@ -61,12 +84,13 @@ function loadPresence(): PersistedPresence {
         provider: parsed.provider ?? null,
         isConnected: Boolean(parsed.isConnected),
         syncSchedule: parsed.syncSchedule === "manual" ? "manual" : "realtime",
+        syncDomains: normalizeDomains(parsed.syncDomains),
       };
     }
   } catch {
     /* fallthrough */
   }
-  return { provider: null, isConnected: false, syncSchedule: "realtime" };
+  return { provider: null, isConnected: false, syncSchedule: "realtime", syncDomains: allDomainsEnabled() };
 }
 
 function savePresence(presence: PersistedPresence): void {
@@ -96,6 +120,7 @@ export const useCloudSyncStore = create<CloudSyncStoreState>((set, get) => ({
   multiTabRole: null,
 
   syncSchedule: initialPresence.syncSchedule,
+  syncDomains: initialPresence.syncDomains,
 
   setLicense: (key, fp) => {
     set({ licenseKey: key, licenseFp: fp });
@@ -119,6 +144,17 @@ export const useCloudSyncStore = create<CloudSyncStoreState>((set, get) => ({
       provider: get().provider,
       isConnected: get().isConnected,
       syncSchedule: schedule,
+      syncDomains: get().syncDomains,
+    });
+  },
+
+  setSyncDomain: (domain, enabled) => {
+    set({ syncDomains: { ...get().syncDomains, [domain]: enabled } });
+    savePresence({
+      provider: get().provider,
+      isConnected: get().isConnected,
+      syncSchedule: get().syncSchedule,
+      syncDomains: get().syncDomains,
     });
   },
 
@@ -127,15 +163,19 @@ export const useCloudSyncStore = create<CloudSyncStoreState>((set, get) => ({
     set({
       provider: presence.provider,
       syncSchedule: presence.syncSchedule,
+      syncDomains: presence.syncDomains,
     });
   },
 }));
 
 /** Persists connection presence so the UI can show "reconnecting…" states. */
-export function persistPresence(state: Pick<CloudSyncStoreState, "provider" | "isConnected" | "syncSchedule">): void {
+export function persistPresence(
+  state: Pick<CloudSyncStoreState, "provider" | "isConnected" | "syncSchedule" | "syncDomains">
+): void {
   savePresence({
     provider: state.provider,
     isConnected: state.isConnected,
     syncSchedule: state.syncSchedule,
+    syncDomains: state.syncDomains,
   });
 }

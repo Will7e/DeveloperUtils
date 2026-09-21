@@ -11,16 +11,17 @@ import React from "react";
 import { Bot, Check, ChevronDown, Search } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useClickOutside } from "@/features/api-tester/hooks/useClickOutside";
-import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
+import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID, INTAB_VIRTUAL_MODEL, PINNED_MODEL_IDS } from "../constants";
+import { ProviderLogo } from "./ProviderLogo";
 import type { ModelInfo } from "../types";
 
-function formatPrice(price?: number): string {
+export function formatPrice(price?: number): string {
   if (price === undefined) return "";
   if (price === 0) return "Free";
   return `$${price.toFixed(2)}`;
 }
 
-function formatContext(n?: number): string {
+export function formatContext(n?: number): string {
   if (!n) return "";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M ctx`;
   return `${Math.round(n / 1000)}k ctx`;
@@ -104,7 +105,14 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
     }
   }, [open]);
 
-  const catalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
+  const baseCatalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
+  // InTab LLM leads the list. It never appears in the OpenRouter
+  // catalog, so it's injected here — no FREE badge, no sparkles, no
+  // hint that it routes to free models. The id line renders as the
+  // slug (or via tagline) exactly like any other entry.
+  const catalog = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
+    ? baseCatalog
+    : [INTAB_VIRTUAL_MODEL, ...baseCatalog];
   const effectiveQuery = open ? query : "";
 
   const filtered = React.useMemo(() => {
@@ -200,8 +208,9 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />
-          <span className="chat-model-btn-label">{selected?.name ?? value}</span>
+          <ProviderLogo modelId={selected?.id ?? ""} className="h-3.5 w-3.5 chat-model-btn-logo" />
+          {!selected && <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />}
+          <span className="chat-model-btn-label">{selected?.name ?? "Model"}</span>
           <ChevronDown className="h-3 w-3 chat-model-btn-chevron" />
         </button>
       </SimpleTooltip>
@@ -258,11 +267,20 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
                     title={m.id}
                   >
                     <div className="chat-model-item-main">
-                      <span className="chat-model-item-name">{m.name}</span>
-                      <span className="chat-model-item-id">{m.id}</span>
+                      <div className="chat-model-item-head">
+                        <ProviderLogo modelId={m.id} className="h-3.5 w-3.5 chat-model-item-logo" />
+                        <span className="chat-model-item-name">{m.name}</span>
+                      </div>
+                      {m.id === INTAB_MODEL_ID ? (
+                        <span className="chat-model-item-id">
+                          Smart routing across top open models · 128k ctx
+                        </span>
+                      ) : (
+                        <span className="chat-model-item-id">{m.id}</span>
+                      )}
                     </div>
                     <div className="chat-model-item-meta">
-                      {m.isFree && (
+                      {m.isFree && m.id !== INTAB_MODEL_ID && (
                         <span className="chat-model-badge chat-model-badge-free">FREE</span>
                       )}
                       {m.contextLength !== undefined && (

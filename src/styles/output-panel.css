@@ -98,6 +98,244 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ── Split console ───────────────────────────────────────── */
+.console-split-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.console-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.console-split-divider {
+  width: 1px;
+  background: var(--border-1);
+  margin: 8px 2px;
+}
+.console-split-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2, rgba(148, 163, 184, 0.05));
+}
+.console-split-label {
+  font-size: 10.5px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.console-split-options {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.console-split-option {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+.console-split-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+.console-split-option-active {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: var(--accent);
+}
+.console-split-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.console-split-close:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+
+/* Individual pane header (split mode) */
+.console-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-1);
+}
+.console-pane-name {
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+.console-pane-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ── Restored-run banner ─────────────────────────────────── */
+.console-restored-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(251, 191, 36, 0.08);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+  font-size: 10.5px;
+  color: var(--yellow, #fbbf24);
+}
+.console-restored-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.console-restored-btn + .console-restored-btn {
+  margin-left: 0;
+}
+.console-restored-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* ── Source diff (history vs current code) ───────────────── */
+.console-source-diff {
+  border-bottom: 1px solid var(--border-1);
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+}
+.console-source-diff-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.console-source-diff-body {
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  padding-bottom: 4px;
+}
+.console-source-diff-line {
+  display: flex;
+  padding: 0 10px;
+  white-space: pre;
+}
+.console-source-diff-sign {
+  width: 14px;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.console-source-diff-add {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--green, #4ade80);
+}
+.console-source-diff-del {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--red, #f87171);
+}
+
+/* ── Stdin box ───────────────────────────────────────────── */
+.console-stdin {
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2, rgba(148, 163, 184, 0.05));
+}
+.console-stdin-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.console-stdin-hint {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-3);
+}
+.console-stdin-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 44px;
+  max-height: 120px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--bg-0, rgba(0, 0, 0, 0.25));
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  outline: none;
+}
+.console-stdin-input:focus {
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* Clickable history rows */
+.execution-history-clickable {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 5px;
+  padding: 3px 8px;
+  transition: background 0.1s ease;
+}
+.execution-history-clickable:hover {
+  background: var(--bg-hover);
+}
+.execution-history-selected {
+  background: rgba(14, 165, 233, 0.12);
+  outline: 1px solid rgba(14, 165, 233, 0.3);
+}
 .output-content {
   flex: 1;
   overflow-y: auto;

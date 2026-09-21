@@ -74,7 +74,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
           "group/search relative flex items-center w-full transition-all duration-150 overflow-hidden font-normal rounded-md",
           "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)]",
           "shadow-[0_0_0_1px_var(--ds-gray-alpha-400)] hover:shadow-[0_0_0_1px_var(--ds-gray-alpha-500)]",
-          "has-[:focus]:!shadow-[0_0_0_1px_var(--ds-gray-1000),0_0_0_3px_var(--ds-focus-ring)]",
+          "has-[:focus]:!shadow-[0_0_0_1px_var(--ds-gray-1000),0_0_0_3px_var(--ds-focus-color)]",
           disabled && "opacity-50 cursor-not-allowed bg-[var(--ds-gray-100)] hover:shadow-[0_0_0_1px_var(--ds-gray-alpha-400)]",
           size === "sm" && "h-8 text-xs",
           size === "md" && "h-9 text-sm",

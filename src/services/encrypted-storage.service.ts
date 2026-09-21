@@ -15,6 +15,7 @@ import {
   type CipherEnvelope,
 } from "./crypto.service";
 import { getAutomaticKey, getOrCreateDeviceId } from "./vault.service";
+import { readValue, writeValue } from "./idb-storage.service";
 
 const ALGORITHM = "AES-GCM";
 const IV_LENGTH = 12; // 96-bit IV recommended for AES-GCM
@@ -29,7 +30,7 @@ let cachedMasterKeyPromise: Promise<CryptoKey> | null = null;
  */
 export async function getMasterCryptoKey(): Promise<CryptoKey> {
   if (!cachedMasterKeyPromise) {
-    cachedMasterKeyPromise = deriveEnvelopeKey(getAutomaticKey()).catch((err) => {
+    cachedMasterKeyPromise = deriveEnvelopeKey(await getAutomaticKey()).catch((err) => {
       cachedMasterKeyPromise = null;
       throw err;
     });
@@ -43,8 +44,8 @@ export async function getMasterCryptoKey(): Promise<CryptoKey> {
  * still be decrypted and transparently migrated; new writes never use it.
  */
 async function getLegacyMasterCryptoKey(): Promise<CryptoKey> {
-  const passphrase = getAutomaticKey();
-  const deviceId = getOrCreateDeviceId();
+  const passphrase = await getAutomaticKey();
+  const deviceId = await getOrCreateDeviceId();
   const encoder = new TextEncoder();
   const saltBytes = encoder.encode(deviceId.padEnd(16, "0")).slice(0, 16);
 
@@ -91,7 +92,7 @@ export async function encryptState(plaintext: string): Promise<string> {
     const envelope: CipherEnvelope = {
       ct: bufferToBase64(ciphertext),
       iv: bufferToBase64(iv.buffer as ArrayBuffer),
-      salt: getOrCreateDeviceId(),
+      salt: await getOrCreateDeviceId(),
       v: 1,
     };
 
@@ -172,14 +173,16 @@ export interface StorageUsageStats {
 }
 
 /**
- * Calculates current localStorage utilization and approximate quota percentage.
+ * Calculates current localStorage utilization (legacy fallback path for
+ * browsers without the Storage Manager API).
  */
 export function getLocalStorageUsage(): StorageUsageStats {
+  const quotaBytes = 5 * 1024 * 1024; // 5 MB typical browser quota
   if (typeof window === "undefined" || !window.localStorage) {
     return {
       usedBytes: 0,
       usedFormatted: "0 KB",
-      quotaBytes: 5 * 1024 * 1024,
+      quotaBytes,
       quotaFormatted: "5.0 MB",
       percentage: 0,
       isNearLimit: false,
@@ -196,22 +199,50 @@ export function getLocalStorageUsage(): StorageUsageStats {
 
   // UTF-16 strings consume 2 bytes per char
   const usedBytes = totalChars * 2;
-  const quotaBytes = 5 * 1024 * 1024; // 5 MB typical browser quota
   const percentage = Math.min(100, Math.round((usedBytes / quotaBytes) * 100));
-
-  let usedFormatted = `${(usedBytes / 1024).toFixed(1)} KB`;
-  if (usedBytes >= 1024 * 1024) {
-    usedFormatted = `${(usedBytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
 
   return {
     usedBytes,
-    usedFormatted,
+    usedFormatted: formatBytes(usedBytes),
     quotaBytes,
     quotaFormatted: "5.0 MB",
     percentage,
     isNearLimit: percentage >= 80,
   };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+/**
+ * Returns real storage utilization via the Storage Manager API. Heavy data
+ * now lives in IndexedDB, so usage is origin-wide (IndexedDB + localStorage
+ * + caches) against the browser's disk-based quota — no fixed 5MB ceiling.
+ * Falls back to a localStorage-only estimate when the API is unavailable.
+ */
+export async function getStorageUsage(): Promise<StorageUsageStats> {
+  if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
+    try {
+      const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+      if (quota > 0) {
+        const percentage = Math.min(100, Math.round((usage / quota) * 100));
+        return {
+          usedBytes: usage,
+          usedFormatted: formatBytes(usage),
+          quotaBytes: quota,
+          quotaFormatted: formatBytes(quota),
+          percentage,
+          isNearLimit: percentage >= 80,
+        };
+      }
+    } catch {
+      /* fall through to the localStorage estimate */
+    }
+  }
+  return getLocalStorageUsage();
 }
 
 /**
@@ -235,13 +266,13 @@ export function createEncryptedStorage(): StateStorage {
   let latestPayload: { name: string; value: string } | null = null;
 
   const executeWrite = async () => {
-    if (!latestPayload || typeof window === "undefined" || !window.localStorage) return;
+    if (!latestPayload || typeof window === "undefined") return;
     const { name, value } = latestPayload;
     latestPayload = null;
 
     try {
       const encrypted = await encryptState(value);
-      window.localStorage.setItem(name, encrypted);
+      await writeValue(name, encrypted);
     } catch (err) {
       if (isQuotaExceededError(err)) {
         const now = Date.now();
@@ -262,18 +293,22 @@ export function createEncryptedStorage(): StateStorage {
   };
 
   if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", () => {
-      if (latestPayload) {
-        // Attempt flush before page closes
-        executeWrite();
-      }
+    // IndexedDB writes need the page alive: flush when the tab hides or
+    // starts unloading instead of waiting for beforeunload. Best-effort —
+    // an instant close can lose the last ~60ms of coalesced writes.
+    const flush = () => {
+      if (latestPayload) void executeWrite();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flush();
     });
   }
 
   return {
     getItem: async (name: string): Promise<string | null> => {
-      if (typeof window === "undefined" || !window.localStorage) return null;
-      const raw = window.localStorage.getItem(name);
+      if (typeof window === "undefined") return null;
+      const raw = await readValue(name);
       if (!raw) return null;
       return decryptState(raw);
     },
@@ -296,8 +331,8 @@ export function createEncryptedStorage(): StateStorage {
         pendingTimeout = null;
       }
       latestPayload = null;
-      if (typeof window !== "undefined" && window.localStorage) {
-        window.localStorage.removeItem(name);
+      if (typeof window !== "undefined") {
+        await writeValue(name, null);
       }
     },
   };

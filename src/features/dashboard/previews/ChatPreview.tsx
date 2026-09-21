@@ -83,7 +83,7 @@ export function ChatPreview() {
 
       <DemoControls
         autopilot={autopilot}
-        openLabel="Open in AI Chat"
+        openLabel="Open in Agents"
         onOpen={() =>
           requestHandoff({
             target: "chat",

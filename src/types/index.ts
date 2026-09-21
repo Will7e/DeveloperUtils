@@ -24,6 +24,27 @@ export interface ExecutionResult {
   timestamp: number;
   language?: Language;
   fileName?: string;
+  /** Source code that produced this result (kept for history diffs) */
+  sourceCode?: string;
+}
+
+/** A stored past run in a tab's run history */
+export interface RunHistoryEntry {
+  id: string;
+  result: ExecutionResult;
+  ranAt: number;
+}
+
+/** Options for code execution */
+export interface ExecutionOptions {
+  timeout?: number; // ms, default 10000
+  /** Streaming stdout/stderr callbacks — fired line-by-line while running */
+  onStdout?: (chunk: string) => void;
+  onStderr?: (chunk: string) => void;
+  /** Stdin content piped to the program (Python scripts etc.) */
+  stdin?: string;
+  /** Sources of sibling tabs so JS/TS can import across tabs */
+  moduleSources?: Record<string, string>;
 }
 
 /** A single file/tab in the editor */
@@ -102,6 +123,12 @@ export interface TabExecutionState {
   outputEntries: OutputEntry[];
   executionResults: ExecutionResult[];
   executionStartTime: number | null;
+  /** Last N completed runs, restorable to the console */
+  runHistory: RunHistoryEntry[];
+  /** Stdin fed to the next run of this tab */
+  stdin: string;
+  /** Console currently showing a restored historical run instead of live output */
+  restoredHistoryId: string | null;
 }
 
 /** Toast notification */
@@ -135,6 +162,9 @@ export interface AppState {
   sidebarOpen: boolean;
   sidebarCollapsed: boolean;
   outputPanelOpen: boolean;
+  /** Split-console mode: show another tab's console side-by-side */
+  splitConsoleFileId: string | null;
+  splitConsoleOpen: boolean;
   settingsOpen: boolean;
   commandPaletteOpen: boolean;
   editorSettings: EditorSettings;
@@ -174,6 +204,15 @@ export interface AppState {
   cancelRun: (fileId?: string) => Promise<void>;
   /** Clear a single tab's console */
   clearTabOutput: (fileId: string) => void;
+  /** Append a streaming output chunk to a tab's live console */
+  appendStreamOutput: (fileId: string, type: "stdout" | "stderr", chunk: string) => void;
+  /** Set a tab's stdin for its next run */
+  setTabStdin: (fileId: string, stdin: string) => void;
+  /** Restore a historical run's output into a tab's console view */
+  restoreRunHistory: (fileId: string, historyId: string | null) => void;
+  /** Toggle / set the split-console comparison pane */
+  toggleSplitConsole: () => void;
+  setSplitConsoleFile: (fileId: string | null) => void;
 
   toggleSidebar: () => void;
   toggleSidebarCollapse: () => void;

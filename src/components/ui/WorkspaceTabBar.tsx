@@ -13,7 +13,7 @@
 // - Right-side toolbar slot for contextual actions
 // ============================================================
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   DndContext,
   closestCenter,
@@ -30,6 +30,7 @@ import { X, Plus } from "lucide-react";
 import { SortableTab } from "@/components/ui/SortableTab";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { TabContextMenu } from "@/components/ui/TabContextMenu";
+import { DeleteConfirmPopover } from "@/components/ui/DeleteConfirmPopover";
 import { cn } from "@/lib/utils";
 
 export interface TabItem {
@@ -65,6 +66,8 @@ export interface WorkspaceTabBarProps<T extends TabItem = TabItem> {
   newTabTooltip?: string;
   closeTabTooltip?: string;
   renderNewTabButton?: () => React.ReactNode;
+  /** Slot rendered before the tab list (e.g. mobile drawer hamburger) */
+  leftContent?: React.ReactNode;
   rightContent?: React.ReactNode;
   className?: string;
 }
@@ -86,6 +89,7 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
   newTabTooltip = "New Tab",
   closeTabTooltip = "Close Tab",
   renderNewTabButton,
+  leftContent,
   rightContent,
   className,
 }: WorkspaceTabBarProps<T>) {
@@ -95,6 +99,10 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
     tab: T;
     position: { x: number; y: number };
   } | null>(null);
+  // Dirty-close confirmation: closing a tab with unsaved edits asks first
+  const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
+  const [closeAnchor, setCloseAnchor] = useState<{ top: number; left: number } | null>(null);
+  const tabRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
@@ -130,6 +138,37 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
     setRenamingId(null);
   };
 
+  /**
+   * Request closing a tab. Dirty tabs get a confirm popover instead of
+   * silently discarding unsaved edits.
+   */
+  const requestCloseTab = useCallback(
+    (id: string) => {
+      const tab = tabs.find((t) => t.id === id);
+      if (tab?.isDirty) {
+        const btn = tabRefs.current.get(id);
+        const closeBtn = btn?.querySelector(".tab-close") as HTMLElement | null;
+        const rect = (closeBtn ?? btn)?.getBoundingClientRect();
+        setCloseAnchor(rect ? { top: rect.bottom + 6, left: rect.left + rect.width / 2 - 118 } : null);
+        setConfirmCloseId(id);
+        return;
+      }
+      onCloseTab?.(id);
+    },
+    [tabs, onCloseTab]
+  );
+
+  const confirmCloseTab = useCallback(() => {
+    if (confirmCloseId) onCloseTab?.(confirmCloseId);
+    setConfirmCloseId(null);
+    setCloseAnchor(null);
+  }, [confirmCloseId, onCloseTab]);
+
+  const cancelCloseTab = useCallback(() => {
+    setConfirmCloseId(null);
+    setCloseAnchor(null);
+  }, []);
+
   const handleCloseOthers = useCallback(
     (targetTabId: string) => {
       if (onCloseOthers) {
@@ -157,11 +196,11 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
       if (targetIndex === -1) return;
       tabs.slice(targetIndex + 1).forEach((t) => {
         if (t.closable !== false) {
-          onCloseTab(t.id);
+          requestCloseTab(t.id);
         }
       });
     },
-    [onCloseToRight, onCloseTab, tabs]
+    [onCloseToRight, onCloseTab, tabs, requestCloseTab]
   );
 
   const handleCloseAll = useCallback(() => {
@@ -190,6 +229,7 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
 
   return (
     <div className={cn("tabs-bar", className)}>
+      {leftContent && <div className="tabs-left-slot">{leftContent}</div>}
       <div className="tabs-list">
         <DndContext
           sensors={dndSensors}
@@ -224,6 +264,10 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
                       });
                     }}
                     title={tab.tooltip}
+                    ref={(el) => {
+                      if (el) tabRefs.current.set(tab.id, el);
+                      else tabRefs.current.delete(tab.id);
+                    }}
                   >
                     {tab.icon && (
                       <span className="tab-icon-wrapper flex items-center justify-center shrink-0">
@@ -263,7 +307,7 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
                           className="tab-close"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onCloseTab(tab.id);
+                            requestCloseTab(tab.id);
                           }}
                         >
                           <X className="h-3 w-3" />
@@ -293,6 +337,16 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
       </div>
 
       {rightContent && <div className="tabs-toolbar">{rightContent}</div>}
+
+      {/* Dirty-close confirmation popover */}
+      <DeleteConfirmPopover
+        open={Boolean(confirmCloseId)}
+        file={tabs.find((t) => t.id === confirmCloseId) ?? null}
+        anchor={closeAnchor}
+        onCancel={cancelCloseTab}
+        onConfirm={confirmCloseTab}
+        verb="Close"
+      />
 
       {/* Tab Context Menu */}
       {contextMenu && (
@@ -333,7 +387,7 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
               : undefined
           }
           onCloseTab={
-            onCloseTab ? () => onCloseTab(contextMenu.tab.id) : undefined
+            onCloseTab ? () => requestCloseTab(contextMenu.tab.id) : undefined
           }
           onCloseOthers={
             onCloseOthers || onCloseTab

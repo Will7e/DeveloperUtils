@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { LanguageIcon } from "@/features/editor/language-icon";
 import { NewFileMenu } from "@/features/editor/NewFileMenu";
-import { DeleteConfirmPopover } from "./DeleteConfirmPopover";
+import { DeleteConfirmPopover } from "@/components/ui/DeleteConfirmPopover";
 
 /** Files matching the search query (name only — contents can be huge) */
 function filterFiles(

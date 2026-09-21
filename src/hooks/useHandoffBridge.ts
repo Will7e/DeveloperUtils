@@ -55,7 +55,7 @@ export function applyHandoff(payload: HandoffPayload): boolean {
       if (!payload.chat) return false;
       useChatStore.getState().createConversation();
       stageChatDraft(payload.chat.prompt);
-      toast("Dropped the demo prompt into AI Chat");
+      toast("Dropped the demo prompt into Agents");
       return true;
     }
 

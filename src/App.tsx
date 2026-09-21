@@ -85,7 +85,7 @@ function AppContent() {
   useEffect(() => {
     const handleQuotaExceeded = () => {
       addToast({
-        message: "Storage Quota Full (~5MB): Browser local storage is full. Close unused tabs, or connect Cloud Sync in Settings to sync to your own Drive — no local limit.",
+        message: "Browser storage is full. Close unused tabs, or connect Cloud Sync in Settings to sync to your own Drive — no local limit.",
         type: "error",
         duration: 7000,
       });
@@ -95,6 +95,13 @@ function AppContent() {
       window.removeEventListener("intab:storage-quota-exceeded", handleQuotaExceeded);
     };
   }, [addToast]);
+
+  // Request durable storage once at boot: opts this origin out of
+  // eviction under disk pressure (best-effort; the browser may still
+  // deny it, in which case behavior is unchanged).
+  useEffect(() => {
+    void navigator.storage?.persist?.().catch(() => undefined);
+  }, []);
 
   return (
     <TooltipProvider delayDuration={300}>

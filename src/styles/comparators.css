@@ -174,8 +174,8 @@
   transition: all 0.15s;
 }
 .results-search:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 .results-table-header {
   display: flex;
@@ -502,8 +502,8 @@ html.light .results-search {
 }
 
 html.light .results-search:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 
 html.light .results-table-header {

@@ -15,11 +15,49 @@
 // prefers-reduced-motion by disabling smooth scrolling.
 
 import React from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Brain } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
-import type { ChatMessage } from "../types";
+import type { ChatMessage, ConversationSummary } from "../types";
+
+/**
+ * Collapsible "Compacted memory" chip rendered above the kept
+ * transcript. The summary rides in the system prompt on every
+ * request — this is its visible representation.
+ */
+const SummaryBlock = React.memo(function SummaryBlock({
+  summary,
+}: {
+  summary: ConversationSummary;
+}) {
+  const [open, setOpen] = React.useState(false);
+  if (!summary.text.trim()) return null;
+
+  return (
+    <div className="chat-summary-block">
+      <button
+        type="button"
+        className="chat-summary-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Brain className="chat-summary-icon h-3 w-3" aria-hidden="true" />
+        <span className="chat-summary-label">
+          Compacted memory — summary of the first {summary.coversCount} messages
+        </span>
+        {summary.freedTokens > 0 && (
+          <span className="chat-summary-freed">
+            {(summary.freedTokens / 1000).toFixed(1)}k tokens held
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="chat-summary-body">{summary.text}</div>
+      )}
+    </div>
+  );
+});
 
 /** Stable placeholder object used for the in-flight streaming bubble */
 const STREAMING_PLACEHOLDER_MESSAGE: ChatMessage = {
@@ -35,6 +73,8 @@ interface MessageListProps {
   defaultModel: string;
   /** OpenRouter key present — controls the empty-state CTA */
   hasApiKey: boolean;
+  /** Rolling LLM summary of the folded prefix (compact mode) */
+  summary?: ConversationSummary;
   onSuggestion: (text: string) => void;
   onRegenerate: () => void;
   onOpenSettings: () => void;
@@ -44,6 +84,7 @@ export function MessageList({
   messages,
   defaultModel,
   hasApiKey,
+  summary,
   onSuggestion,
   onRegenerate,
   onOpenSettings,
@@ -172,10 +213,12 @@ export function MessageList({
     <div className="chat-message-list-wrap">
       <div ref={scrollRef} className="chat-message-list">
         <div ref={innerRef} className="chat-message-list-inner">
+          {summary && <SummaryBlock summary={summary} />}
           {messages.map((message, idx) => (
             <MessageItem
               key={message.id}
               message={message}
+              allMessages={messages}
               canRegenerate={!isStreamingHere && idx === lastAssistantIdx}
               onRegenerate={onRegenerate}
             />

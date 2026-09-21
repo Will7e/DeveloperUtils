@@ -2,6 +2,7 @@ import { TabState, HistoryItem, ImportedCollection, Environment, KeyValueField, 
 import type { LibraryPreset } from "@/features/api-tester/data/preset-library.data";
 import { encrypt, decrypt, isCipherEnvelope, type CipherEnvelope } from "@/services/crypto.service";
 import { getPassphrase } from "@/services/vault.service";
+import { readValue, writeValue } from "@/services/idb-storage.service";
 
 export interface StorageAdapter {
   getTabs(): Promise<{ tabs: TabState[]; activeTabId: string } | null>;
@@ -149,6 +150,13 @@ function getStoredItem(key: string, legacyKey: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** readValue-based twin of getStoredItem for keys that moved to IDB. */
+async function getStoredItemAsync(key: string, legacyKey: string): Promise<string | null> {
+  const val = await readValue(key);
+  if (val !== null) return val;
+  return readValue(legacyKey);
 }
 
 // ── LocalStorageAdapter (original, kept as fallback) ────────
@@ -326,7 +334,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 export class EncryptedStorageAdapter implements StorageAdapter {
   private fallback = new LocalStorageAdapter();
 
-  private getKey(): string | null {
+  private async getKey(): Promise<string | null> {
     return getPassphrase();
   }
 
@@ -334,11 +342,11 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // Encrypts: authConfig fields on each tab
 
   async getTabs(): Promise<{ tabs: TabState[]; activeTabId: string } | null> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.getTabs();
 
     try {
-      const saved = getStoredItem(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS);
+      const saved = await getStoredItemAsync(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS);
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       if (!parsed.tabs || parsed.tabs.length === 0) return null;
@@ -364,7 +372,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveTabs(tabs: TabState[], activeTabId: string): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.saveTabs(tabs, activeTabId);
 
     try {
@@ -381,7 +389,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify({ tabs: encrypted, activeTabId }));
+      await writeValue(STORAGE_KEYS.TABS, JSON.stringify({ tabs: encrypted, activeTabId }));
     } catch (e) {
       console.error("Failed to save encrypted tabs", e);
     }
@@ -394,8 +402,14 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // so they are encrypted at rest and decrypted transparently on read.
 
   async getHistory(): Promise<HistoryItem[]> {
-    const items = await this.fallback.getHistory();
-    const passphrase = this.getKey();
+    let items: HistoryItem[];
+    try {
+      const saved = await getStoredItemAsync(STORAGE_KEYS.HISTORY, LEGACY_STORAGE_KEYS.HISTORY);
+      items = saved ? (JSON.parse(saved) as HistoryItem[]) : [];
+    } catch {
+      items = [];
+    }
+    const passphrase = await this.getKey();
     if (!passphrase) return items;
 
     try {
@@ -432,7 +446,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveHistory(history: HistoryItem[]): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     const sensitiveParamRegex = /^(.*_)?(key|token|secret|password|passwd|auth|sig|signature|cred|credential|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|jwt)(_.*)?$/i;
     const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|x-session-token|cookie|set-cookie|cf-access-client-secret|x-amz-security-token|x-csrf-token|x-xsrf-token)$/i;
 
@@ -492,20 +506,20 @@ export class EncryptedStorageAdapter implements StorageAdapter {
         }),
       };
     }));
-    // Encrypted fields are CipherEnvelopes at rest; the fallback only
+    // Encrypted fields are CipherEnvelopes at rest; writeValue only
     // serializes, so the envelope-vs-string variance is erased on write.
-    return this.fallback.saveHistory(sanitized as unknown as HistoryItem[]);
+    await writeValue(STORAGE_KEYS.HISTORY, JSON.stringify(sanitized as unknown as HistoryItem[]));
   }
 
   // ── Collections ─────────────────────────────────────────
   // Encrypts: authConfig on each request in each collection
 
   async getCollections(): Promise<ImportedCollection[]> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.getCollections();
 
     try {
-      const saved = getStoredItem(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS);
+      const saved = await getStoredItemAsync(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS);
       if (!saved) return [];
       const collections = JSON.parse(saved) as ImportedCollection[];
 
@@ -530,7 +544,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveCollections(collections: ImportedCollection[]): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.saveCollections(collections);
 
     try {
@@ -545,7 +559,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encrypted));
+      await writeValue(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted collections", e);
     }
@@ -555,11 +569,11 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // Encrypts: value field of each key-value pair (keys remain plaintext)
 
   async getEnvVars(): Promise<KeyValueField[]> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.getEnvVars();
 
     try {
-      const saved = getStoredItem(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
+      const saved = await getStoredItemAsync(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
       if (!saved) return [];
       const fields = JSON.parse(saved);
       // Await INSIDE the try so decrypt failures surface here instead of
@@ -571,12 +585,12 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveEnvVars(vars: KeyValueField[]): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.saveEnvVars(vars);
 
     try {
       const encrypted = await encryptKeyValueFields(vars, passphrase);
-      localStorage.setItem(STORAGE_KEYS.ENV_VARS, JSON.stringify(encrypted));
+      await writeValue(STORAGE_KEYS.ENV_VARS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted env vars", e);
     }
@@ -586,11 +600,11 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // Encrypts: variable values within each environment
 
   async getEnvironments(): Promise<Environment[]> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.getEnvironments();
 
     try {
-      const saved = getStoredItem(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS);
+      const saved = await getStoredItemAsync(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS);
       if (!saved) return [];
       const envs = JSON.parse(saved) as Environment[];
 
@@ -608,7 +622,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveEnvironments(envs: Environment[]): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.saveEnvironments(envs);
 
     try {
@@ -618,7 +632,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           variables: await encryptKeyValueFields(env.variables, passphrase),
         }))
       );
-      localStorage.setItem(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encrypted));
+      await writeValue(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted environments", e);
     }
@@ -639,11 +653,11 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // Encrypts: authConfig fields on presets
 
   async getCustomPresets(): Promise<LibraryPreset[]> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.getCustomPresets();
 
     try {
-      const saved = getStoredItem(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
+      const saved = await getStoredItemAsync(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
       if (!saved) return [];
       const presets = JSON.parse(saved) as LibraryPreset[];
 
@@ -669,7 +683,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   }
 
   async saveCustomPresets(presets: LibraryPreset[]): Promise<void> {
-    const passphrase = this.getKey();
+    const passphrase = await this.getKey();
     if (!passphrase) return this.fallback.saveCustomPresets(presets);
 
     try {
@@ -687,7 +701,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           return preset;
         })
       );
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encrypted));
+      await writeValue(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encrypted));
     } catch (e) {
       console.error("Failed to save encrypted custom presets", e);
     }
@@ -725,7 +739,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
       const parsed = JSON.parse(rawTabs);
       if (parsed && Array.isArray(parsed.tabs)) {
         let changed = false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const migratedTabs = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           parsed.tabs.map(async (t: any) => {
@@ -745,7 +759,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
             let newHeaders = t.headers;
             if (Array.isArray(t.headers)) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               const encHeaders = await Promise.all(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 t.headers.map(async (h: any) => {
@@ -818,7 +832,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
       const parsed = JSON.parse(rawVars);
       if (Array.isArray(parsed)) {
         let changed = false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const encVars = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           parsed.map(async (v: any) => {
@@ -846,14 +860,14 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
       const parsed = JSON.parse(rawEnvs);
       if (Array.isArray(parsed)) {
         let changed = false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const encEnvs = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           parsed.map(async (env: any) => {
             let envChanged = false;
             let newVars = env.variables;
             if (Array.isArray(env.variables)) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               newVars = await Promise.all(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 env.variables.map(async (v: any) => {
@@ -886,14 +900,14 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
       const parsed = JSON.parse(rawCols);
       if (Array.isArray(parsed)) {
         let changed = false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const encCols = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           parsed.map(async (col: any) => {
             let colChanged = false;
             let newRequests = col.requests;
             if (Array.isArray(col.requests)) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               
               newRequests = await Promise.all(
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 col.requests.map(async (req: any) => {
@@ -937,7 +951,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
       const parsed = JSON.parse(rawPresets);
       if (Array.isArray(parsed)) {
         let changed = false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const encPresets = await Promise.all(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           parsed.map(async (preset: any) => {
@@ -977,12 +991,13 @@ export const apiStorage: StorageAdapter = new EncryptedStorageAdapter();
 // Automatically encrypt any existing plaintext data in the background
 if (typeof window !== "undefined") {
   setTimeout(() => {
-    const key = getPassphrase();
-    if (key) {
-      migratePlaintextStorage(key).catch((err) => {
-        console.warn("Background migration notice:", err);
-      });
-    }
+    void getPassphrase().then((key) => {
+      if (key) {
+        migratePlaintextStorage(key).catch((err) => {
+          console.warn("Background migration notice:", err);
+        });
+      }
+    });
   }, 100);
 }
 

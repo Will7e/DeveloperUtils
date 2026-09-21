@@ -10,7 +10,7 @@ import React, {
   useMemo,
 } from "react";
 import { type OnMount } from "@monaco-editor/react";
-import { Globe, ChevronDown, Download, Check, Sliders } from "lucide-react";
+import { Globe, ChevronDown, Download, Check, Sliders, Menu } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
 import { ApiSidebarSkeleton, WorkspaceSkeleton } from "@/components/ui/skeleton";
@@ -174,6 +174,19 @@ export function ApiTester() {
   // Response expanded state (maximize response to fill view)
   const [isResponseExpanded, setIsResponseExpanded] = useState(false);
 
+  // ── Mobile drawer (≤760px) ───────────────────────────────
+  // The sidebar slides over the main view behind a scrim; the hamburger
+  // only renders on phones via CSS. Mirrors the chat drawer pattern.
+  const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 760px)");
+    const onChange = () => {
+      if (!mql.matches) setApiDrawerOpen(false);
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
   // Relative time ticker
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -296,7 +309,16 @@ export function ApiTester() {
   }
 
   return (
-    <div className="api-tester-container">
+    <div className={`api-tester-container${apiDrawerOpen ? " api-drawer-open" : ""}`}>
+      {/* Mobile drawer scrim — display controlled in styles/responsive.css */}
+      <button
+        type="button"
+        className="api-scrim"
+        aria-label="Close navigation"
+        onClick={() => setApiDrawerOpen(false)}
+        tabIndex={-1}
+      />
+
       <ApiSidebar
         onOpenSettings={() => setShowEnvVarsModal(true)}
         onOpenLibrary={() => setShowLibraryModal(true)}
@@ -322,6 +344,17 @@ export function ApiTester() {
             if (t) navigator.clipboard.writeText(t.name);
           }}
           newTabTooltip="New Request Tab"
+          leftContent={
+            /* Hamburger — CSS shows it only ≤760px */
+            <button
+              type="button"
+              className="api-mobile-menu-btn"
+              aria-label="Open API client navigation"
+              onClick={() => setApiDrawerOpen(true)}
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          }
           rightContent={
             <>
               <button

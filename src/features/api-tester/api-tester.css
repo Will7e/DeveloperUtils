@@ -793,8 +793,8 @@
 }
 
 .api-omnibox:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
   background: var(--bg-0);
 }
 
@@ -1238,7 +1238,7 @@
 }
 
 .api-kv-input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ds-focus-color);
   outline-offset: -1px;
   border-color: transparent;
 }
@@ -1411,7 +1411,7 @@
 }
 
 .api-raw-select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ds-focus-color);
   outline-offset: -1px;
   border-color: transparent;
 }
@@ -1557,7 +1557,7 @@
 }
 
 .api-auth-input:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--ds-focus-color);
   outline-offset: -1px;
   border-color: transparent;
 }
@@ -2173,7 +2173,7 @@ html.light .api-url-input-container {
 
 html.light .api-url-input-container:focus-within {
   background: #ffffff;
-  box-shadow: 0 0 0 1px var(--accent), 0 0 20px rgba(0, 112, 243, 0.06);
+  box-shadow: var(--ds-focus-ring);
 }
 
 html.light .api-kv-input {
@@ -2181,7 +2181,7 @@ html.light .api-kv-input {
 }
 
 html.light .api-kv-input:focus {
-  box-shadow: 0 0 0 1px rgba(0, 112, 243, 0.12);
+  box-shadow: 0 0 0 1px var(--ds-gray-alpha-400);
 }
 
 html.light .api-auth-input {
@@ -2363,9 +2363,9 @@ html.light .api-tab-trigger-active .api-tab-count {
 }
 
 .api-import-curl-textarea:focus {
-  border-color: var(--accent);
+  border-color: var(--ds-focus-color);
   background: var(--bg-0);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .api-import-curl-actions {
@@ -3302,8 +3302,8 @@ html.light .api-editor-format-btn:hover {
 
 .api-settings-title-input:focus {
   background: var(--bg-0);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .api-settings-subtitle {
@@ -3435,8 +3435,8 @@ html.light .api-editor-format-btn:hover {
 
 .api-settings-input:focus {
   background: var(--bg-0);
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-glow);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .api-settings-input-key {
@@ -3699,8 +3699,8 @@ html.light .api-editor-format-btn:hover {
 }
 
 .api-library-search-box:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 
 .api-library-search-box input {

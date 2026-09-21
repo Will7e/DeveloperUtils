@@ -8,6 +8,7 @@
 // vault encryption and legacy key fallbacks intact.
 
 import { apiStorage } from "./api-tester.storage";
+import { readValue } from "@/services/idb-storage.service";
 import type { TabState, HistoryItem, ImportedCollection, Environment, KeyValueField } from "./api-tester.store";
 
 const TABS_KEY = "intab_api_tabs";
@@ -80,9 +81,9 @@ export async function applyApiTesterSnapshot(snapshot: unknown): Promise<void> {
 }
 
 /** Whether the API tester store has already hydrated from storage. */
-export function isApiTesterInitialized(): boolean {
+export async function isApiTesterInitialized(): Promise<boolean> {
   try {
-    const raw = localStorage.getItem(TABS_KEY);
+    const raw = await readValue(TABS_KEY);
     return Boolean(raw);
   } catch {
     return false;

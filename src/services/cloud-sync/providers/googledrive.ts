@@ -11,7 +11,6 @@ import { OAuthError } from "../oauth-error";
 import {
   buildAuthorizeUrl,
   beginPkceFlow,
-  exchangeCodeForTokens,
   refreshTokens,
   openOAuthPopup,
   waitForOAuthResult,

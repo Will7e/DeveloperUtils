@@ -24,7 +24,6 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
@@ -305,7 +304,7 @@ export function CommandPalette() {
       },
       {
         id: "new-chat",
-        label: "New AI Chat",
+        label: "New Agents",
         category: "File",
         icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
         action: () => navigate("/chat"),
@@ -376,7 +375,7 @@ export function CommandPalette() {
       },
       {
         id: "nav-chat",
-        label: "Go to AI Chat",
+        label: "Go to Agents",
         shortcut: "⌘⌥9",
         category: "Navigation",
         icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
@@ -403,6 +402,7 @@ export function CommandPalette() {
   }, [
     activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, 
     createFile, updateEditorSettings, addToast, updateFileContent, toggleSidebar, 
+    toggleSidebarCollapse,
     createFormatterFile, createComparatorSession, createDiffSession,
     createWorkflow, addApiTesterTab, navigate
   ]);

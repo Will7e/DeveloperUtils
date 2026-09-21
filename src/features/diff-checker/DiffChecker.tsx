@@ -23,6 +23,7 @@ import {
   Rows,
   Columns,
   FileCode2,
+  FilePlus2,
   Minus,
   AlignLeft,
   ScanSearch,
@@ -45,6 +46,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
+import { useFileDrop } from "@/hooks/useFileDrop";
+import { DropOverlay } from "@/hooks/DropOverlay";
+import { importTextFiles } from "@/lib/file-import";
 import type { editor } from "monaco-editor";
 import {
   DIFF_LANGUAGES,
@@ -562,6 +566,61 @@ export function DiffChecker() {
     addToast({ message: "Diff cleared", type: "info" });
   }, [activeSession.id, updateSessionInput, updateSessionLanguage, addToast]);
 
+  // ── File import (drop / picker) ─────────────────────────
+  // One file fills the side it lands on; two files fill both sides.
+
+  const handleImportFiles = useCallback(
+    async (incoming: File[], target?: "original" | "modified") => {
+      const { imported, rejected } = await importTextFiles(incoming);
+      rejected.forEach(({ name, reason }) =>
+        addToast({ message: `${name}: ${reason}`, type: "error", duration: 3500 })
+      );
+      if (imported.length === 0) return;
+
+      const first = imported[0]!;
+      const second = imported[1];
+
+      const applyTo = (side: "original" | "modified", text: string) => {
+        updateSessionInput(activeSession.id, side, text);
+        if (side === "original") {
+          setLocalOriginal(text);
+          originalEditorRef.current?.setValue(text);
+        } else {
+          setLocalModified(text);
+          modifiedEditorRef.current?.setValue(text);
+        }
+      };
+
+      if (second) {
+        // Two files: first → Original, second → Modified
+        applyTo("original", first.text);
+        applyTo("modified", second.text);
+        addToast({ message: `Loaded ${first.name} ↦ Original, ${second.name} ↦ Modified`, type: "success", duration: 2500 });
+      } else {
+        const side = target ?? "original";
+        applyTo(side, first.text);
+        addToast({ message: `Loaded ${first.name} ↦ ${side === "original" ? "Original" : "Modified"}`, type: "success", duration: 2000 });
+      }
+    },
+    [activeSession.id, updateSessionInput, addToast]
+  );
+
+  const { isOver, dropHandlers } = useFileDrop(handleImportFiles);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // Split-side detection: left half → Original, right half → Modified
+  const onContainerDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault(); // keep the browser from opening the dropped file
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const target: "original" | "modified" =
+        e.clientX - rect.left < rect.width / 2 ? "original" : "modified";
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length > 0) void handleImportFiles(files, target);
+    },
+    [handleImportFiles]
+  );
+
   // Export diff file
   const handleExportDiff = useCallback(() => {
     const orig = originalEditorRef.current?.getValue() ?? localOriginal;
@@ -635,7 +694,30 @@ export function DiffChecker() {
   );
 
   return (
-    <div className="diff-checker-container">
+    <div
+      className="diff-checker-container"
+      {...dropHandlers}
+      onDrop={onContainerDrop}
+    >
+      <DropOverlay
+        show={isOver}
+        leftLabel="Drop ↦ Original"
+        rightLabel="Drop ↦ Modified"
+      />
+
+      {/* Hidden file picker for the Import action */}
+      <input
+        ref={importInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) void handleImportFiles(files);
+          e.target.value = "";
+        }}
+      />
+
       {/* 1. Reusable Workspace Tab Bar */}
       <WorkspaceTabBar
         tabs={tabs}
@@ -775,6 +857,10 @@ export function DiffChecker() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem onSelect={() => importInputRef.current?.click()}>
+                  <FilePlus2 className="h-3.5 w-3.5 mr-2" />
+                  <span>Import files…</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={handleExportDiff}>
                   <Download className="h-3.5 w-3.5 mr-2" />
                   <span>Export as .diff</span>

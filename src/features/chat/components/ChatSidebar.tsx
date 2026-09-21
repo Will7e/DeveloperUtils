@@ -327,12 +327,12 @@ export function ChatSidebar({
         {/* Sidebar Footer */}
         {onOpenSettings && (
           <div className="chat-sidebar-footer">
-            <SimpleTooltip content="AI Chat Settings" side="top">
+            <SimpleTooltip content="Agents Settings" side="top">
               <button
                 type="button"
                 className="chat-sidebar-footer-btn"
                 onClick={onOpenSettings}
-                aria-label="AI Chat Settings"
+                aria-label="Agents Settings"
               >
                 <div className="chat-sidebar-footer-icon-wrap">
                   <Settings className="h-4 w-4 chat-sidebar-settings-icon" />

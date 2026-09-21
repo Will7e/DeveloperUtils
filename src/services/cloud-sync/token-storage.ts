@@ -28,7 +28,7 @@ export async function saveTokens(
   tokens: OAuthTokens,
   licenseFp?: string
 ): Promise<void> {
-  const passphrase = getPassphrase();
+  const passphrase = await getPassphrase();
   if (!passphrase) throw new Error("Vault unavailable — cannot store tokens securely");
 
   const payload: StoredTokenPayload = { tokens, licenseFp };
@@ -38,7 +38,7 @@ export async function saveTokens(
 
 /** Loads and decrypts stored tokens. Returns null when absent/corrupt. */
 export async function loadTokens(provider: CloudProviderId): Promise<OAuthTokens | null> {
-  const passphrase = getPassphrase();
+  const passphrase = await getPassphrase();
   if (!passphrase) return null;
 
   try {

@@ -450,8 +450,8 @@
   background: var(--bg-3);
 }
 .formatter-setting-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--ds-focus-color);
+  box-shadow: var(--ds-focus-ring);
 }
 .formatter-setting-toggle {
   position: relative;

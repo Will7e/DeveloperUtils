@@ -46,7 +46,7 @@ interface NavItemProps {
   staggered?: boolean;
 }
 
-function NavItem({ to, icon, label, active, collapsed, onClick, labelClassName, staggered }: NavItemProps) {
+function NavItem({ to, icon, label, active, collapsed, onClick, staggered }: NavItemProps) {
   const content = (
     <>
       <span className="nav-item-icon">{icon}</span>
@@ -182,7 +182,7 @@ export function MainLayout() {
           <NavItem
             to="/chat"
             icon={<MessageSquareText className="h-[18px] w-[18px]" />}
-            label="AI Chat"
+            label="Agents"
             active={location.pathname === "/chat" || location.pathname === "/chatbot"}
             collapsed={sidebarCollapsed}
           />

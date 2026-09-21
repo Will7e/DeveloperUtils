@@ -1,14 +1,49 @@
 // ============================================================
-// Composer — Message Input with Send/Stop & Context Hint
+// Composer — Message Input with Slash Commands, Attachments & Send
 // ============================================================
 // Auto-growing textarea. Enter sends, Shift+Enter adds a newline.
-// While this conversation streams, the send button becomes Stop
-// (keeps partial output). When a stream is running in another
-// conversation, the composer is disabled with a clear hint.
+// Slash commands: a draft starting with "/" opens the command menu
+// above the input — arrows navigate, Enter/Tab runs, Esc closes;
+// /model swaps in the model catalog as an inline submenu.
+// Attachments: paperclip picker, clipboard image paste, and file
+// drop — image files become multimodal attachments, text files are
+// inlined as fenced code blocks in the draft. While this
+// conversation streams, the send button becomes Stop (keeps partial
+// output). When a stream runs in another conversation, the composer
+// is disabled with a clear hint.
 
-import React from "react";
-import { ArrowUp, Square } from "lucide-react";
+import React, { useRef, useState } from "react";
+import {
+  ArrowUp,
+  FileText,
+  ImagePlus,
+  Paperclip,
+  Slash,
+  Square,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useFileDrop } from "@/hooks/useFileDrop";
+import { DropOverlay } from "@/hooks/DropOverlay";
+import { useAppStore } from "@/stores/app.store";
+import { importChatFiles, MAX_ATTACHMENTS } from "../lib/attachments";
+import {
+  CHAT_COMMAND_BY_ID,
+  filterCommands,
+  type ChatCommand,
+} from "../lib/commands";
+import { CommandMenu, type CommandMenuMode } from "./CommandMenu";
+import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID, INTAB_VIRTUAL_MODEL, PINNED_MODEL_IDS } from "../constants";
+import type { ChatAttachment, ModelInfo } from "../types";
+
+/** Draft-level attachment state lives in ChatPage as ChatAttachment[] */
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+}
 
 interface ComposerProps {
   value: string;
@@ -23,6 +58,28 @@ interface ComposerProps {
   placeholder?: string;
   /** Optional external handle so the page can focus the input */
   inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** Pending image attachments (page-owned state) */
+  attachments?: ChatAttachment[];
+  /** Replace the pending image list */
+  onAttachmentsChange?: (next: ChatAttachment[]) => void;
+  /** Append inlined text-file content into the draft */
+  onTextFilesImported?: (markdown: string) => void;
+  /** Whether the resolved model advertises image input (null = unknown) */
+  modelSupportsImages?: boolean | null;
+  /** Live model catalog for the /model submenu */
+  models?: ModelInfo[];
+  /** True while the catalog request is in flight */
+  modelsLoading?: boolean;
+  /** Model id active for this conversation (checkmark in submenu) */
+  activeModelId?: string;
+  /**
+   * Runs a picked slash command with everything typed after it.
+   * The page clears the draft; the menu stays open for submenus
+   * (hasSubmenu) so the user can keep typing an argument.
+   */
+  onRunCommand?: (command: ChatCommand, arg: string) => void;
+  /** Switch model for this conversation (submenu pick) */
+  onModelChange?: (modelId: string) => void;
 }
 
 export function Composer({
@@ -34,8 +91,22 @@ export function Composer({
   disabled = false,
   placeholder,
   inputRef,
+  attachments = [],
+  onAttachmentsChange,
+  onTextFilesImported,
+  modelSupportsImages = null,
+  models = [],
+  modelsLoading = false,
+  activeModelId,
+  onRunCommand,
+  onModelChange,
 }: ComposerProps) {
   const innerRef = React.useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [cmdHighlighted, setCmdHighlighted] = useState(0);
+  const [cmdMode, setCmdMode] = useState<CommandMenuMode>("commands");
+  const addToast = useAppStore((s) => s.addToast);
 
   const setRefs = React.useCallback(
     (el: HTMLTextAreaElement | null) => {
@@ -63,33 +134,298 @@ export function Composer({
     return () => window.removeEventListener("resize", grow);
   }, [grow]);
 
-  const canSend = value.trim().length > 0 && !isStreaming && !disabled;
+  const hasImages = attachments.length > 0;
+  const canSend = (value.trim().length > 0 || hasImages) && !isStreaming && !disabled;
+
+  // ── Slash command menu state ──
+  // The menu exists while the draft starts with "/". The token is
+  // everything up to the first space; an argument may follow it.
+  const menuOpen = value.startsWith("/") && !disabled && !isStreaming;
+  const afterSlash = menuOpen ? value.slice(1) : "";
+  const spaceIdx = afterSlash.indexOf(" ");
+  const cmdToken = menuOpen ? (spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)) : "";
+  const cmdQuery = menuOpen ? cmdToken : "";
+  const cmdArg = menuOpen && spaceIdx !== -1 ? afterSlash.slice(spaceIdx + 1).trim() : "";
+  const activeCommand = CHAT_COMMAND_BY_ID.get(cmdToken);
+  const modelMode = menuOpen && activeCommand?.hasSubmenu === true;
+
+  const filteredCommands = React.useMemo(
+    () => (menuOpen ? filterCommands(cmdQuery) : []),
+    [menuOpen, cmdQuery]
+  );
+  const commandsValid = filteredCommands.some((c) => c.id === cmdToken);
+
+  const filteredModels = React.useMemo(() => {
+    if (!modelMode) return [];
+    const q = cmdArg.toLowerCase();
+    const baseCatalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
+    // InTab LLM leads the submenu (injected — it's not a real
+    // OpenRouter catalog entry).
+    const catalog = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
+      ? baseCatalog
+      : [INTAB_VIRTUAL_MODEL, ...baseCatalog];
+    const matches = q
+      ? catalog.filter(
+          (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+        )
+      : catalog;
+    const pinned = matches.filter((m) => PINNED_MODEL_IDS.includes(m.id));
+    const rest = matches
+      .filter((m) => !PINNED_MODEL_IDS.includes(m.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return [...pinned, ...rest].slice(0, 60);
+  }, [modelMode, cmdArg, models]);
+
+  // Highlight/highlighted list length converges on the current mode.
+  const menuRowCount = modelMode ? filteredModels.length : filteredCommands.length;
+
+  // Reset highlight to the top whenever the query or mode changes
+  // (render-time adjustment — converges before commit; see
+  // react.dev/learn/you-might-not-need-an-effect).
+  const navKey = `${cmdQuery}|${cmdArg}|${cmdMode}`;
+  const [prevNavKey, setPrevNavKey] = useState(navKey);
+  if (prevNavKey !== navKey) {
+    setPrevNavKey(navKey);
+    setCmdHighlighted(0);
+  } else if (cmdHighlighted >= menuRowCount && menuRowCount > 0) {
+    setCmdHighlighted(menuRowCount - 1);
+  }
+
+  const handleFiles = React.useCallback(
+    async (files: File[]) => {
+      if (disabled || isStreaming) return;
+      setImporting(true);
+      try {
+        const outcome = await importChatFiles(files);
+        outcome.rejected.forEach(({ name, reason }) =>
+          addToast({ message: `${name}: ${reason}`, type: "error", duration: 3500 })
+        );
+        if (outcome.attachments.length > 0 && onAttachmentsChange) {
+          onAttachmentsChange([...attachments, ...outcome.attachments].slice(0, MAX_ATTACHMENTS));
+        }
+        if (outcome.textBlocks && onTextFilesImported) {
+          onTextFilesImported(outcome.textBlocks);
+        }
+      } finally {
+        setImporting(false);
+      }
+    },
+    [attachments, disabled, isStreaming, addToast, onAttachmentsChange, onTextFilesImported]
+  );
+
+  const { isOver, dropHandlers } = useFileDrop(handleFiles, disabled || isStreaming);
+
+  const handlePaste = React.useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+        f.type.startsWith("image/")
+      );
+      if (files.length > 0) {
+        e.preventDefault();
+        void handleFiles(files);
+      }
+    },
+    [handleFiles]
+  );
+
+  const clearDraft = () => onChange("");
+
+  /** Runs a command from the menu (click or keyboard). */
+  const runCommand = (command: ChatCommand) => {
+    if (!onRunCommand) return;
+    if (command.hasSubmenu) {
+      // With an argument typed, run directly (e.g. "/model sonnet").
+      if (cmdArg.trim()) {
+        onRunCommand(command, cmdArg);
+        setCmdMode("commands");
+        clearDraft();
+        innerRef.current?.focus();
+      } else {
+        setCmdMode("model");
+      }
+      return;
+    }
+    onRunCommand(command, "");
+    setCmdMode("commands");
+    clearDraft();
+    innerRef.current?.focus();
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (menuOpen && menuRowCount > 0 && commandsValid) {
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setCmdHighlighted((i) => (i + 1) % menuRowCount);
+          return;
+        case "ArrowUp":
+          e.preventDefault();
+          setCmdHighlighted((i) => (i - 1 + menuRowCount) % menuRowCount);
+          return;
+        case "Tab":
+        case "Enter": {
+          if (!modelMode && activeCommand?.hasSubmenu) {
+            // Enter on a submenu command with no arg typed switches
+            // to the model list (same as runCommand's branch above).
+            e.preventDefault();
+            if (cmdArg.trim()) {
+              onRunCommand?.(activeCommand, cmdArg);
+              setCmdMode("commands");
+              clearDraft();
+            } else {
+              setCmdMode("model");
+            }
+            return;
+          }
+          e.preventDefault();
+          if (modelMode) {
+            const picked = filteredModels[cmdHighlighted];
+            if (picked && onModelChange) {
+              onModelChange(picked.id);
+              setCmdMode("commands");
+              clearDraft();
+            }
+          } else {
+            const picked = filteredCommands[cmdHighlighted];
+            if (picked) runCommand(picked);
+          }
+          return;
+        }
+        case "Escape":
+          e.preventDefault();
+          if (modelMode) {
+            setCmdMode("commands");
+          } else {
+            clearDraft();
+          }
+          innerRef.current?.focus();
+          return;
+      }
+      // While the menu is open with matches, space completes the
+      // highlighted command token ("arrow" → "arrow ").
+      if (e.key === " " && !modelMode && !activeCommand) {
+        const picked = filteredCommands[cmdHighlighted];
+        if (picked) {
+          e.preventDefault();
+          onChange(`/${picked.id} `);
+        }
+        return;
+      }
+
+      // Menu open without a runnable selection (e.g. "/zzz" or a
+      // /model arg with no matches): Enter must not leak the partial
+      // slash text into the thread as a message.
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (canSend) onSend();
     }
   };
 
+  const imageWarning = hasImages && modelSupportsImages === false;
+
   const placeholderText = disabled
     ? "Generating a response in another chat…"
-    : placeholder ?? "Ask anything… (Enter to send, Shift+Enter for newline)";
+    : placeholder ?? "Message models… (Enter to send · Shift+Enter newline · / for commands)";
 
   return (
-    <div className="chat-composer-wrap">
+    <div
+      className="chat-composer-wrap"
+      {...dropHandlers}
+      onPaste={handlePaste as unknown as React.ClipboardEventHandler<HTMLDivElement>}
+    >
+      <DropOverlay show={isOver} label="Drop files to attach" />
+
+      {/* Hidden image picker for the paperclip */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) void handleFiles(files);
+          e.target.value = "";
+        }}
+      />
+
+      {hasImages && (
+        <div className="chat-attach-chips" role="list" aria-label="Attached images">
+          {attachments.map((att) => (
+            <div key={att.id} className="chat-attach-chip" role="listitem">
+              {att.dataUrl ? (
+                <img src={att.dataUrl} alt={att.name} className="chat-attach-thumb" />
+              ) : (
+                <FileText className="chat-attach-thumb chat-attach-thumb-placeholder" />
+              )}
+              <div className="chat-attach-meta">
+                <span className="chat-attach-name" title={att.name}>{att.name}</span>
+                <span className="chat-attach-size">{formatBytes(att.size)}</span>
+              </div>
+              <button
+                type="button"
+                className="chat-attach-remove"
+                onClick={() => onAttachmentsChange?.(attachments.filter((a) => a.id !== att.id))}
+                aria-label={`Remove ${att.name}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+          {attachments.length >= MAX_ATTACHMENTS && (
+            <span className="chat-attach-cap">Max {MAX_ATTACHMENTS} images</span>
+          )}
+        </div>
+      )}
+
+      {imageWarning && (
+        <div className="chat-attach-warning" role="status">
+          <TriangleAlert className="h-3 w-3" />
+          <span>Current model may not support images — pick a vision model for best results.</span>
+        </div>
+      )}
+
       <div className={`chat-composer ${isStreaming ? "chat-composer-streaming" : ""}`}>
+        <SimpleTooltip content="Attach images" side="top">
+          <button
+            type="button"
+            className="chat-composer-attach"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled || isStreaming}
+            aria-label="Attach images"
+          >
+            {importing ? <ImagePlus className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
+          </button>
+        </SimpleTooltip>
+
+        {menuOpen && (
+          <span className="chat-command-indicator" aria-hidden="true">
+            <Slash className="h-3 w-3" />
+          </span>
+        )}
+
         <textarea
           ref={setRefs}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholderText}
-          className="chat-composer-input"
+          className={`chat-composer-input ${menuOpen ? "chat-composer-input-slash" : ""}`}
           rows={1}
           disabled={disabled}
           aria-label="Chat message"
           aria-busy={isStreaming}
+          aria-expanded={menuOpen}
+          aria-controls={menuOpen ? "chat-command-listbox" : undefined}
+          aria-activedescendant={
+            menuOpen && menuRowCount > 0 ? `chat-command-opt-${cmdHighlighted}` : undefined
+          }
         />
 
         {isStreaming ? (
@@ -118,11 +454,32 @@ export function Composer({
         )}
       </div>
 
+      {menuOpen && (
+        <CommandMenu
+          query={cmdQuery}
+          arg={cmdArg}
+          models={models}
+          activeModelId={activeModelId ?? ""}
+          modelsLoading={modelsLoading}
+          highlightedIdx={cmdHighlighted}
+          mode={cmdMode}
+          filteredCommands={filteredCommands}
+          filteredModels={filteredModels}
+          onSelectCommand={runCommand}
+          onSelectModel={(id) => {
+            onModelChange?.(id);
+            setCmdMode("commands");
+            clearDraft();
+            innerRef.current?.focus();
+          }}
+        />
+      )}
+
       <div className="chat-composer-footer">
         <span className="chat-composer-hint">
           {disabled
             ? "You can keep browsing — sending resumes when the other chat finishes."
-            : "Responses may be inaccurate — verify important information."}
+            : "Type / for commands · /compact frees context · Responses may be inaccurate — verify important information."}
         </span>
       </div>
       <span className="chat-sr-only" aria-live="polite">

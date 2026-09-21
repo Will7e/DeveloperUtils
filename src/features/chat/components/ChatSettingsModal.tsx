@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  GitBranch,
   Key,
   Loader2,
   MessageSquare,
@@ -33,13 +34,15 @@ import { Toggle } from "@/components/ui/toggle";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { checkKey, type KeyCheckResult } from "../lib/openrouter-client";
 import { OPENROUTER_CONSOLE_URL } from "../constants";
+import { connectViaOAuth, connectWithToken } from "../services/github-auth";
+import { invalidateRepoCache } from "../lib/github-client";
 import {
   downloadSkillFile,
   parseSkillFile,
   skillFromParsed,
 } from "../lib/skills";
 import { ModelPicker } from "./ModelPicker";
-import type { ChatSettings, ChatSkill, ModelInfo } from "../types";
+import type { ChatSettings, ChatSkill, GitHubConnectionState, ModelInfo } from "../types";
 
 interface ChatSettingsModalProps {
   open: boolean;
@@ -48,7 +51,7 @@ interface ChatSettingsModalProps {
   /** Model catalog for the default-model picker */
   models: ModelInfo[];
   /** Tab to focus on open (from store deep-links) */
-  initialTab?: "connection" | "chat" | "skills" | null;
+  initialTab?: "connection" | "chat" | "skills" | "github" | null;
   onClose: () => void;
   onUpdate: (patch: Partial<ChatSettings>) => void;
   onClearAllConversations: () => void;
@@ -64,7 +67,7 @@ type KeyState =
   | { status: "valid"; result: KeyCheckResult }
   | { status: "invalid"; result: KeyCheckResult };
 
-type SettingsTab = "connection" | "chat" | "skills";
+type SettingsTab = "connection" | "chat" | "skills" | "github";
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -213,7 +216,7 @@ function SettingsModalInner({
               <MessageSquareText className="w-5 h-5" />
             </div>
             <div>
-              <div className="settings-header-title-text">AI Chat Settings</div>
+              <div className="settings-header-title-text">Agents Settings</div>
               <div className="settings-header-desc">
                 One OpenRouter key unlocks GPT, Claude, Gemini and hundreds more
               </div>
@@ -251,6 +254,14 @@ function SettingsModalInner({
           >
             <Blocks size={14} />
             <span>Skills</span>
+          </button>
+          <button
+            type="button"
+            className={`settings-tab-item ${activeTab === "github" ? "active" : ""}`}
+            onClick={() => setActiveTab("github")}
+          >
+            <GitBranch size={14} />
+            <span>GitHub</span>
           </button>
         </div>
 
@@ -466,6 +477,26 @@ function SettingsModalInner({
                 <div className="settings-section-title">Data Management</div>
                 <div className="settings-row">
                   <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-sync-images-toggle">
+                      Sync image attachments
+                    </label>
+                    <span className="settings-sublabel">
+                      Include attached images in Cloud Sync. Turn off to keep
+                      image payloads local-only — text content still syncs, and
+                      remote devices see a placeholder instead of the image.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-sync-images-toggle"
+                      size="sm"
+                      checked={settings.syncImageAttachments !== false}
+                      onCheckedChange={(checked) => onUpdate({ syncImageAttachments: checked })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
                     <label className="settings-label">Stored conversations</label>
                     <span className="settings-sublabel">
                       {conversationCount} conversation{conversationCount === 1 ? "" : "s"} ·
@@ -543,6 +574,14 @@ function SettingsModalInner({
               onResetBuiltinSkills={onResetBuiltinSkills}
             />
           )}
+
+          {/* ── GitHub ── */}
+          {activeTab === "github" && (
+            <GitHubTabContent
+              settings={settings}
+              onUpdate={onUpdate}
+            />
+          )}
         </div>
 
         {/* Footer — same as SettingsPanel */}
@@ -561,6 +600,239 @@ export function ChatSettingsModal({ open, ...rest }: ChatSettingsModalProps) {
   // Keyed remount per open gives fresh draft state without
   // setState-in-effect (the old draft is intentionally discarded).
   return <SettingsModalInner key="chat-settings" {...rest} />;
+}
+
+// ============================================================
+// GitHub Tab — Agent Mode Connection (OAuth + PAT)
+// ============================================================
+
+const GITHUB_PAT_URL = "https://github.com/settings/personal-access-tokens/new";
+
+function GitHubTabContent({
+  settings,
+  onUpdate,
+}: {
+  settings: ChatSettings;
+  onUpdate: (patch: Partial<ChatSettings>) => void;
+}) {
+  const gh = settings.github;
+  const connected = Boolean(gh?.token);
+  const [ghState, setGhState] = React.useState<GitHubConnectionState>(
+    connected
+      ? {
+          status: "connected",
+          login: gh?.login ?? "github",
+          avatarUrl: gh?.avatarUrl ?? null,
+          mode: gh?.mode ?? "pat",
+        }
+      : { status: "disconnected" }
+  );
+  const [patDraft, setPatDraft] = React.useState("");
+  const [showPat, setShowPat] = React.useState(false);
+  const [ghBusy, setGhBusy] = React.useState<"oauth" | "pat" | null>(null);
+
+  const handleConnectOAuth = async () => {
+    setGhBusy("oauth");
+    setGhState({ status: "connecting" });
+    const result = await connectViaOAuth();
+    setGhBusy(null);
+    if (result.ok) {
+      setGhState({
+        status: "connected",
+        login: result.settings.login ?? "github",
+        avatarUrl: result.settings.avatarUrl,
+        mode: "oauth",
+      });
+      invalidateRepoCache();
+      onUpdate({ github: result.settings });
+    } else {
+      setGhState(result.state);
+    }
+  };
+
+  const handleConnectPat = async () => {
+    setGhBusy("pat");
+    setGhState({ status: "connecting" });
+    const result = await connectWithToken(patDraft);
+    setGhBusy(null);
+    if (result.ok) {
+      setGhState({
+        status: "connected",
+        login: result.settings.login ?? "github",
+        avatarUrl: result.settings.avatarUrl,
+        mode: "pat",
+      });
+      setPatDraft("");
+      invalidateRepoCache();
+      onUpdate({ github: result.settings });
+    } else {
+      setGhState(result.state);
+    }
+  };
+
+  const handleDisconnect = () => {
+    onUpdate({
+      github: {
+        token: "",
+        mode: null,
+        login: null,
+        avatarUrl: null,
+        connectedAt: null,
+      },
+    });
+    setGhState({ status: "disconnected" });
+  };
+
+  return (
+    <div className="settings-tab-content">
+      <div className="settings-security-card">
+        <div className="settings-security-badge-group">
+          <div className="settings-security-card-icon-wrap">
+            <GitBranch size={18} />
+          </div>
+          <div>
+            <div className="settings-security-card-title">Agent mode over your repositories</div>
+            <div className="settings-security-card-desc">
+              Connect GitHub to attach a repository to any chat. The assistant can then list files,
+              read code, and search the repo (read-only) to answer with real code references. Your
+              token is encrypted at rest and sent only to api.github.com.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {ghState.status === "connected" ? (
+        <div className="settings-section">
+          <div className="settings-section-title">Connected account</div>
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <div className="chat-gh-account-row">
+                {ghState.avatarUrl && (
+                  <img src={ghState.avatarUrl} alt="" className="chat-gh-avatar" />
+                )}
+                <span className="chat-gh-login">{ghState.login}</span>
+                <span className="chat-skill-badge chat-skill-badge-on">
+                  {ghState.mode === "oauth" ? "OAuth" : "PAT"}
+                </span>
+              </div>
+              <span className="settings-sublabel">
+                Read-only access · detach repos any time from the chat header
+              </span>
+            </div>
+            <div className="settings-control">
+              <button type="button" className="settings-action-btn" onClick={handleDisconnect}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="settings-section">
+            <div className="settings-section-title">Connect</div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <label className="settings-label">GitHub account</label>
+                <span className="settings-sublabel">
+                  One-click OAuth in a popup window
+                </span>
+              </div>
+              <div className="settings-control">
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={handleConnectOAuth}
+                  disabled={ghBusy !== null}
+                >
+                  {ghBusy === "oauth" ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Connecting…</span>
+                    </>
+                  ) : (
+                    "Sign in with GitHub"
+                  )}
+                </button>
+              </div>
+            </div>
+            {ghState.status === "error" && (
+              <div className="chat-key-status chat-key-status-invalid">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>{ghState.message}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="settings-divider" />
+
+          <div className="settings-section">
+            <div className="settings-section-title">Personal Access Token (alternative)</div>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <label className="settings-label" htmlFor="chat-gh-pat">
+                  Fine-grained PAT
+                </label>
+                <a
+                  href={GITHUB_PAT_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="chat-settings-link"
+                >
+                  Create one <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+              <div className="chat-key-controls">
+                <div className="chat-key-input-wrap">
+                  <input
+                    id="chat-gh-pat"
+                    type={showPat ? "text" : "password"}
+                    value={patDraft}
+                    onChange={(e) => setPatDraft(e.target.value)}
+                    placeholder="github_pat_… or ghp_…"
+                    className="settings-input chat-key-input"
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-1p-ignore="true"
+                  />
+                  <div className="chat-key-actions">
+                    <SimpleTooltip content={showPat ? "Hide token" : "Show token"} side="top">
+                      <button
+                        type="button"
+                        className="chat-key-action-btn"
+                        onClick={() => setShowPat((v) => !v)}
+                        aria-label={showPat ? "Hide token" : "Show token"}
+                      >
+                        {showPat ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </SimpleTooltip>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="settings-action-btn"
+                  onClick={handleConnectPat}
+                  disabled={!patDraft.trim() || ghBusy !== null}
+                >
+                  {ghBusy === "pat" ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Testing…</span>
+                    </>
+                  ) : (
+                    "Connect"
+                  )}
+                </button>
+              </div>
+            </div>
+            <span className="settings-sublabel">
+              Grant “Contents: read” (and “Metadata: read”) for the repos you want the assistant to
+              see. Works in local dev where OAuth needs server configuration.
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ============================================================

@@ -7,8 +7,12 @@
 //  - Mid-stream errors arrive as data events inside 200 responses
 //  - Comment lines keep-alive pings are skipped by the SSE parser
 
-import { OPENROUTER_BASE_URL } from "../constants";
-import type { ChatMessage, ModelInfo, UsageInfo } from "../types";
+import {
+  OPENROUTER_BASE_URL,
+  STREAM_FIRST_BYTE_TIMEOUT_MS,
+  STREAM_STALL_TIMEOUT_MS,
+} from "../constants";
+import type { ChatMessage, ModelInfo, ToolCallRequest, ToolDefinition, UsageInfo, WireContent } from "../types";
 import { readSseStream } from "./sse";
 
 export class OpenRouterError extends Error {
@@ -114,13 +118,40 @@ async function parseErrorResponse(res: Response): Promise<OpenRouterError> {
 
 // ── Stream Chat ─────────────────────────────────────────────
 
+/**
+ * Wire content: plain text, or OpenAI-compatible parts for
+ * multimodal (text + image) messages. Re-exported from shared types.
+ */
+export type { WireContent } from "../types";
+
+/** Wire-format message: plain content, or OpenAI tool protocol fields */
+export interface StreamWireMessage {
+  role: ChatMessage["role"];
+  content: WireContent | null;
+  tool_calls?: Array<{
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }>;
+}
+
 export interface StreamChatParams {
   apiKey: string;
   model: string;
-  /** Wire-format messages: role + content only */
-  messages: Array<Pick<ChatMessage, "role" | "content">>;
+  /** Wire-format messages (tool_calls allowed for agent mode) */
+  messages: StreamWireMessage[];
   systemPrompt?: string;
   temperature?: number;
+  /** Provider output cap (max_tokens) — protects the context budget */
+  maxTokens?: number;
+  /** OpenAI-style function tools the model may call (agent mode) */
+  tools?: ToolDefinition[];
+  /**
+   * Called once per stream with fully-assembled tool calls when the
+   * model requested any. Arguments arrive fragmented across chunks;
+   * they are reassembled here before the callback fires.
+   */
+  onToolCalls?: (calls: ToolCallRequest[]) => void;
   signal?: AbortSignal;
   onChunk: (text: string) => void;
   /** Called with reasoning-token deltas (reasoning models) when present */
@@ -136,6 +167,13 @@ interface ChatCompletionChunk {
       role?: string;
       /** Reasoning-token text (reasoning models via OpenRouter) */
       reasoning?: string | null;
+      /** Tool-call fragments (agent mode): id/name/arguments split across chunks */
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: string;
+        function?: { name?: string; arguments?: string };
+      }>;
     };
     finish_reason?: string | null;
   }>;
@@ -148,12 +186,35 @@ interface ChatCompletionChunk {
   error?: { code?: number | string; message?: string };
 }
 
+interface ToolCallAccumulator {
+  id: string;
+  name: string;
+  args: string;
+}
+
+/** Reassembles index-keyed tool-call fragments into complete calls */
+function assembleToolCalls(acc: Map<number, ToolCallAccumulator>): ToolCallRequest[] {
+  const calls: ToolCallRequest[] = [];
+  for (const [, entry] of [...acc.entries()].sort((a, b) => a[0] - b[0])) {
+    if (!entry.name) continue; // fragment noise without a function name
+    calls.push({
+      id: entry.id || `call_${calls.length}`,
+      name: entry.name as ToolCallRequest["name"],
+      arguments: entry.args || "{}",
+    });
+  }
+  return calls;
+}
+
 export async function streamChat({
   apiKey,
   model,
   messages,
   systemPrompt,
   temperature = 0.7,
+  maxTokens,
+  tools,
+  onToolCalls,
   signal,
   onChunk,
   onReasoning,
@@ -170,6 +231,8 @@ export async function streamChat({
     model,
     stream: true,
     temperature,
+    ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+    ...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
     messages: [
       ...(systemPrompt?.trim()
         ? [{ role: "system", content: systemPrompt.trim() }]
@@ -178,15 +241,63 @@ export async function streamChat({
     ],
   };
 
+  // Watchdogs: the user signal plus internal timers that abort when
+  // the response never starts or the stream stalls between chunks.
+  const watchdog = new AbortController();
+  let firstByteTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+
+  const clearTimers = () => {
+    if (firstByteTimer !== null) clearTimeout(firstByteTimer);
+    if (stallTimer !== null) clearTimeout(stallTimer);
+    firstByteTimer = null;
+    stallTimer = null;
+  };
+
+  const armFirstByte = () => {
+    firstByteTimer = setTimeout(() => {
+      timedOut = true;
+      watchdog.abort();
+    }, STREAM_FIRST_BYTE_TIMEOUT_MS);
+  };
+
+  const armStall = () => {
+    clearTimers();
+    stallTimer = setTimeout(() => {
+      timedOut = true;
+      watchdog.abort();
+    }, STREAM_STALL_TIMEOUT_MS);
+  };
+
+  // Combine the user signal with the watchdog controller
+  const onUserAbort = () => watchdog.abort();
+  signal?.addEventListener("abort", onUserAbort);
+
+  armFirstByte();
+
   let response: Response;
   try {
     response = await openRouterFetch("/chat/completions", {
       apiKey,
       body: payload,
-      signal,
+      signal: watchdog.signal,
     });
+    // Headers arrived — switch from first-byte to stall timing until
+    // the body reader starts delivering chunks.
+    armStall();
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    clearTimers();
+    signal?.removeEventListener("abort", onUserAbort);
+    if (timedOut) {
+      throw new OpenRouterError(
+        "The model took too long to respond. Please try again.",
+        0
+      );
+    }
+    if (err instanceof DOMException && err.name === "AbortError" && signal?.aborted) {
+      throw err; // user abort propagates unchanged
+    }
     throw new OpenRouterError(
       "Could not reach OpenRouter. Check your connection and try again.",
       0
@@ -194,6 +305,8 @@ export async function streamChat({
   }
 
   if (!response.ok) {
+    clearTimers();
+    signal?.removeEventListener("abort", onUserAbort);
     throw await parseErrorResponse(response);
   }
 
@@ -201,7 +314,16 @@ export async function streamChat({
   let gotUsage = false;
   let anyContent = false;
 
-  await readSseStream(response, {
+  // Agent mode: accumulate index-keyed tool-call fragments until the
+  // stream ends, then fire onToolCalls once with complete requests.
+  const toolAcc = new Map<number, ToolCallAccumulator>();
+
+  try {
+    await readSseStream(response, {
+    onRawChunk: () => {
+      // Any bytes reset the stall timer (keep-alives count)
+      armStall();
+    },
     onEvent: (data) => {
       if (data === "[DONE]") return;
       let chunk: ChatCompletionChunk;
@@ -228,6 +350,19 @@ export async function streamChat({
       if (delta?.reasoning) {
         onReasoning?.(delta.reasoning);
       }
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          let entry = toolAcc.get(idx);
+          if (!entry) {
+            entry = { id: tc.id ?? `call_${idx}`, name: "", args: "" };
+            toolAcc.set(idx, entry);
+          }
+          if (tc.id) entry.id = tc.id;
+          if (tc.function?.name) entry.name += tc.function.name;
+          if (tc.function?.arguments) entry.args += tc.function.arguments;
+        }
+      }
 
       if (chunk.usage) {
         gotUsage = true;
@@ -238,10 +373,28 @@ export async function streamChat({
         });
       }
     },
-  });
+    });
+  } catch (err) {
+    // Watchdog fired mid-stream: the provider stopped sending bytes.
+    if (timedOut) {
+      throw new OpenRouterError(
+        "The model stream stalled and was interrupted. Partial output was kept.",
+        0
+      );
+    }
+    throw err;
+  } finally {
+    clearTimers();
+    signal?.removeEventListener("abort", onUserAbort);
+  }
+
+  // Fire once with fully-assembled tool calls (agent mode)
+  const assembledCalls = assembleToolCalls(toolAcc);
+  if (assembledCalls.length > 0) onToolCalls?.(assembledCalls);
 
   // A 200 stream that errors before producing any content is a failure
-  if (sawError || (!anyContent && !gotUsage && !signal?.aborted)) {
+  // (tool calls alone count as a productive stream)
+  if (sawError || (!anyContent && !gotUsage && assembledCalls.length === 0 && !signal?.aborted)) {
     if (!signal?.aborted) {
       throw new OpenRouterError(
         "The model returned an empty response. Try again or switch models.",
@@ -251,12 +404,115 @@ export async function streamChat({
   }
 }
 
+// ── Non-Streaming Completion (summaries, titles, utilities) ─
+
+export interface CompleteChatParams {
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  temperature?: number;
+  maxTokens?: number;
+  signal?: AbortSignal;
+}
+
+export interface CompleteChatResult {
+  content: string;
+  usage: UsageInfo | null;
+}
+
+/**
+ * One-shot (non-streaming) chat completion. Same auth/proxy plumbing
+ * as streamChat but reads a plain JSON body — used for background
+ * work like history summarization where streaming adds nothing.
+ */
+export async function completeChat({
+  apiKey,
+  model,
+  messages,
+  temperature = 0,
+  maxTokens,
+  signal,
+}: CompleteChatParams): Promise<CompleteChatResult> {
+  if (!apiKey.trim()) {
+    throw new OpenRouterError(
+      "An OpenRouter API key is required. Add yours in Chat Settings.",
+      401
+    );
+  }
+
+  const payload: Record<string, unknown> = {
+    model,
+    stream: false,
+    temperature,
+    ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+    messages,
+  };
+
+  let response: Response;
+  try {
+    response = await openRouterFetch("/chat/completions", {
+      apiKey,
+      body: payload,
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new OpenRouterError(
+      "Could not reach OpenRouter. Check your connection and try again.",
+      0
+    );
+  }
+
+  if (!response.ok) {
+    throw await parseErrorResponse(response);
+  }
+
+  let json: {
+    choices?: Array<{ message?: { content?: string | null } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      cost?: number;
+    };
+    error?: { message?: string; code?: number | string };
+  };
+  try {
+    json = (await response.json()) as typeof json;
+  } catch {
+    throw new OpenRouterError("OpenRouter returned an unreadable response.", 200);
+  }
+
+  if (json.error) {
+    throw new OpenRouterError(
+      json.error.message || "The completion request failed.",
+      200,
+      String(json.error.code ?? "")
+    );
+  }
+
+  const content = json.choices?.[0]?.message?.content ?? "";
+  const u = json.usage;
+  return {
+    content,
+    usage: u
+      ? {
+          promptTokens: u.prompt_tokens ?? null,
+          completionTokens: u.completion_tokens ?? null,
+          cost: typeof u.cost === "number" ? u.cost : null,
+        }
+      : null,
+  };
+}
+
 // ── Models Catalog ──────────────────────────────────────────
 
 interface OpenRouterModel {
   id: string;
   name?: string;
   context_length?: number;
+  architecture?: {
+    input_modalities?: string[];
+  } | null;
   pricing?: {
     prompt?: string;
     completion?: string;
@@ -271,6 +527,7 @@ function toModelInfo(m: OpenRouterModel): ModelInfo {
   const isFree =
     (promptPrice !== undefined && promptPrice === 0) ||
     m.id.endsWith(":free");
+  const modalities = m.architecture?.input_modalities?.filter(Boolean);
 
   return {
     id: m.id,
@@ -279,6 +536,7 @@ function toModelInfo(m: OpenRouterModel): ModelInfo {
     promptPrice: Number.isFinite(promptPrice) ? promptPrice : undefined,
     completionPrice: Number.isFinite(completionPrice) ? completionPrice : undefined,
     isFree,
+    inputModalities: modalities && modalities.length > 0 ? modalities : undefined,
   };
 }
 

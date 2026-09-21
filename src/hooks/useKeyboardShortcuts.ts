@@ -222,12 +222,12 @@ export function useKeyboardShortcuts() {
           return;
         }
 
-        // 9. AI Chat
+        // 9. Agents
         if (e.code === "Digit9" || e.code === "Numpad9" || keyLower === "9" || e.key === "ª") {
           e.preventDefault();
           closePaletteIfOpen();
           navigate("/chat");
-          addToast({ message: "Navigated to AI Chat", type: "info", duration: 1500 });
+          addToast({ message: "Navigated to Agents", type: "info", duration: 1500 });
           return;
         }
 

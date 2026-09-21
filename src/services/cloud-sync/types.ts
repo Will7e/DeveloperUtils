@@ -7,6 +7,12 @@
 
 export type CloudProviderId = "onedrive" | "googledrive";
 
+/** Data domains the user can individually include in cloud sync. */
+export type SyncDomain = "appState" | "apiTester" | "chat";
+
+/** All syncable domains in a stable, display-friendly order. */
+export const SYNC_DOMAINS: readonly SyncDomain[] = ["appState", "apiTester", "chat"] as const;
+
 /** OAuth tokens issued via PKCE. Stored encrypted with the device vault. */
 export interface OAuthTokens {
   accessToken: string;
@@ -79,11 +85,16 @@ export interface SyncManifest {
 
 export type SyncStatus = "idle" | "syncing" | "synced" | "offline" | "error" | "conflict";
 
-/** The full snapshot envelope stored in the cloud (encrypted). */
+/**
+ * The full snapshot envelope stored in the cloud (encrypted).
+ * Domain payloads (`appState`, `apiTester`, `chat`) may be absent when that
+ * domain is not selected for sync on the device that produced the snapshot —
+ * appliers must treat a missing domain as "leave local data untouched".
+ */
 export interface CloudSnapshot {
   manifest: SyncManifest;
-  appState: unknown;
-  apiTester: unknown;
+  appState?: unknown;
+  apiTester?: unknown;
   /** AI chat conversations + settings (encrypted with the same envelope) */
   chat?: unknown;
 }

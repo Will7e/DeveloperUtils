@@ -9,6 +9,8 @@ export interface SseParserOptions {
   onEvent: (data: string) => void;
   /** Called for comment lines (e.g. keep-alive pings) */
   onComment?: (comment: string) => void;
+  /** Called with every raw bytes-chunk BEFORE parsing (watchdogs use it) */
+  onRawChunk?: () => void;
 }
 
 export function createSseParser({ onEvent, onComment }: SseParserOptions) {
@@ -96,6 +98,7 @@ export async function readSseStream(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      options.onRawChunk?.();
       parser.feed(decoder.decode(value, { stream: true }));
     }
     parser.feed(decoder.decode());

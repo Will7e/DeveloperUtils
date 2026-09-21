@@ -14,7 +14,6 @@ export interface PkcePair {
   state: string;
 }
 
-const VERIFIER_KEY_PREFIX = "intab_pkce_verifier_";
 const FLOW_KEY_PREFIX = "intab_oauth_flow_";
 
 function base64UrlEncode(bytes: Uint8Array): string {

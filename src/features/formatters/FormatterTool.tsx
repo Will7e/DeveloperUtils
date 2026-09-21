@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import Editor, { type OnMount } from "@monaco-editor/react";
+import { FilePlus2 } from "lucide-react";
+import { useFileDrop } from "@/hooks/useFileDrop";
+import { DropOverlay } from "@/hooks/DropOverlay";
+import { importTextFiles, formatterKindFromFilename } from "@/lib/file-import";
 import { JsonTreeView } from "./JsonTreeView";
 import { XmlTreeView } from "./XmlTreeView";
 import { formatXml, minifyXml, xmlToTreeData, type XmlTreeNode } from "./xmlUtils";
@@ -70,6 +74,8 @@ export function FormatterTool() {
   const renameFile = useAppStore((s) => s.renameFormatterFile);
   const reorderFiles = useAppStore((s) => s.reorderFormatterFiles);
   const addToast = useAppStore((s) => s.addToast);
+  const createFormatterFile = useAppStore((s) => s.createFormatterFile);
+  const setActiveFormatterFile = useAppStore((s) => s.setActiveFormatterFile);
   const currentThemeSetting = useAppStore((s) => s.editorSettings.theme);
 
   const [copied, setCopied] = useState(false);
@@ -262,6 +268,46 @@ export function FormatterTool() {
     updateContent(type, activeFile.id, "");
   };
 
+  // ── File import (drop / button) ──────────────────────────
+
+  const handleImportFiles = useCallback(
+    async (incoming: File[]) => {
+      const { imported, rejected } = await importTextFiles(incoming);
+      rejected.forEach(({ name, reason }) =>
+        addToast({ message: `${name}: ${reason}`, type: "error", duration: 3500 })
+      );
+
+      for (const file of imported) {
+        const kind = formatterKindFromFilename(file.name);
+        // Route to the matching formatter type (auto-switches)
+        if (kind !== type) setType(kind);
+
+        // Only replace the active tab when it's still pristine;
+        // otherwise add a new tab so nothing is overwritten.
+        if (kind === type && !activeFile.content.trim()) {
+          updateContent(type, activeFile.id, file.text);
+          renameFile(type, activeFile.id, file.name);
+        } else {
+          createFormatterFile(kind, file.name);
+          const created = useAppStore
+            .getState()
+            .formatterFiles[kind]
+            .find((f) => f.name === file.name);
+          if (created) {
+            updateContent(kind, created.id, file.text);
+            setActiveFormatterFile(kind, created.id);
+          }
+        }
+        addToast({ message: `Imported ${file.name}`, type: "success", duration: 2000 });
+      }
+    },
+    [type, activeFile, addToast, setType, updateContent, renameFile, createFormatterFile, setActiveFormatterFile]
+  );
+
+  const { isOver, dropHandlers } = useFileDrop(handleImportFiles);
+
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+
   const handleExpandAll = () => {
     setExpandTarget(true);
     setExpandVersion(v => v + 1);
@@ -304,7 +350,26 @@ export function FormatterTool() {
   };
 
   return (
-    <div className="json-formatter-container">
+    <div
+      className="json-formatter-container"
+      {...dropHandlers}
+    >
+      <DropOverlay show={isOver} label={`Drop to load ${type.toUpperCase()} into the formatter`} />
+
+      {/* Hidden file picker for the Import button */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,.jsonc,.json5,.xml,.svg,.txt,.md,.log,.yaml,.yml,.env,.properties,.ini,.csv,.html,.htm,.sql,.lua,.js,.mjs,.cjs,.jsx,.ts,.tsx,.mts"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length > 0) void handleImportFiles(files);
+          e.target.value = "";
+        }}
+      />
+
       {/* Header / Toolbar */}
       <div className="json-formatter-toolbar">
         <div className="toolbar-left">
@@ -381,6 +446,15 @@ export function FormatterTool() {
               onClick={handleSample}
             >
               Sample
+            </button>
+          </ActionTooltip>
+          <ActionTooltip content="Import a file (or drop it anywhere)" side="bottom">
+            <button
+              className="toolbar-btn"
+              onClick={() => importInputRef.current?.click()}
+            >
+              <FilePlus2 className="h-3.5 w-3.5" />
+              Import
             </button>
           </ActionTooltip>
           <div className="toolbar-sep" />

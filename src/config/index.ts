@@ -125,6 +125,12 @@ print(f"  Sum: {sum(numbers)}")
 word = "InTab"
 char_count = {c: word.count(c) for c in set(word.lower())}
 print(f"\\nCharacter count in '{word}': {char_count}")
+
+# Try the Stdin box below the console: type two names (one per line)
+# then Run — this script reads them live:
+# name1 = input("First name: ")
+# name2 = input("Second name: ")
+# print(f"Hello, {name1} and {name2}!")
 `,
   },
   html: {

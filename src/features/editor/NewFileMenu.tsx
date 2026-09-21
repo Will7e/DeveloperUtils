@@ -46,6 +46,17 @@ export function NewFileMenu({ open, anchor, onClose, onCreate }: NewFileMenuProp
   const [highlighted, setHighlighted] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+
+  // Reset search + highlight on the open-transition (render-phase state
+  // adjustment per React docs — avoids setState-in-effect cascades).
+  if (open && !wasOpen) {
+    setWasOpen(true);
+    if (query !== "") setQuery("");
+    if (highlighted !== 0) setHighlighted(0);
+  } else if (!open && wasOpen) {
+    setWasOpen(false);
+  }
 
   const languages = useMemo(() => Object.keys(LANGUAGE_CONFIGS) as Language[], []);
 
@@ -60,12 +71,9 @@ export function NewFileMenu({ open, anchor, onClose, onCreate }: NewFileMenuProp
     );
   }, [languages, query]);
 
-  // Reset search + highlight whenever the menu opens
+  // Focus after the popover mounts (external side effect only)
   useEffect(() => {
     if (open) {
-      setQuery("");
-      setHighlighted(0);
-      // Focus after the popover mounts
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);

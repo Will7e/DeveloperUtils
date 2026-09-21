@@ -23,6 +23,50 @@ interface ChatPersistedState {
   settings: unknown;
 }
 
+/**
+ * Fields copied onto an attachment when its image payload is stubbed
+ * for sync. Keeps names/sizes visible on remote devices; only the
+ * dataUrl (the bulky part) is dropped locally.
+ */
+interface StubbedAttachment {
+  dataUrl?: string;
+  synced?: false;
+}
+
+/**
+ * Returns a copy of conversations with image payloads stripped when
+ * the user excluded them from sync. Text content and attachment
+ * metadata (names, sizes) still sync; each attachment gets
+ * `synced: false` so the UI can explain why its thumbnail is gone.
+ */
+function stubImageAttachments(conversations: unknown): unknown {
+  if (!Array.isArray(conversations)) return conversations;
+  return conversations.map((conv) => {
+    const c = conv as { messages?: Array<{ attachments?: StubbedAttachment[] }> };
+    if (!Array.isArray(c?.messages)) return conv;
+    const hasImages = c.messages.some((m) =>
+      Array.isArray(m?.attachments) && m.attachments.some((a) => typeof a?.dataUrl === "string" && a.dataUrl.length > 0)
+    );
+    if (!hasImages) return conv;
+    return {
+      ...c,
+      messages: c.messages.map((m) => {
+        if (!Array.isArray(m?.attachments)) return m;
+        const hasData = m.attachments.some((a) => typeof a?.dataUrl === "string" && a.dataUrl.length > 0);
+        if (!hasData) return m;
+        return {
+          ...m,
+          attachments: m.attachments.map((a) =>
+            typeof a?.dataUrl === "string" && a.dataUrl.length > 0
+              ? { ...a, dataUrl: undefined, synced: false as const }
+            : a
+          ),
+        };
+      }),
+    };
+  });
+}
+
 /** Reads the persisted chat state, decrypting the storage envelope. */
 export async function getChatSnapshot(): Promise<ChatPersistedState | null> {
   try {
@@ -32,8 +76,15 @@ export async function getChatSnapshot(): Promise<ChatPersistedState | null> {
     const parsed = JSON.parse(raw) as { state?: Partial<ChatPersistedState> };
     const state = parsed.state;
     if (!state || !Array.isArray(state.conversations)) return null;
+
+    const settings = state.settings as { syncImageAttachments?: boolean } | null;
+    const conversations =
+      settings && settings.syncImageAttachments === false
+        ? stubImageAttachments(state.conversations)
+        : state.conversations;
+
     return {
-      conversations: state.conversations,
+      conversations,
       activeConversationId: state.activeConversationId ?? null,
       settings: state.settings ?? null,
     };

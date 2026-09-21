@@ -3,6 +3,18 @@
    The desktop shells (activity bar + tool sidebars + split panes)
    assume ~1100px. Stack or shrink them below that instead of
    crushing the editors to slivers.
+
+   Breakpoint ladder:
+     ≤1000px  tablet      — nav rail compacts, toolbars wrap
+     ≤760px   phone       — sidebars become drawers, single column
+     ≤480px   small phone — spacing tightens, status bar slims
+
+   Everything here is additive inside @media blocks: desktop
+   (>1000px) rendering is unchanged by construction.
+   ============================================================ */
+
+/* ============================================================
+   TABLET — ≤1000px
    ============================================================ */
 
 /* Nav rail: keep icons, drop labels and fixed width */
@@ -30,23 +42,6 @@
   }
 }
 
-/* Narrow: hide the tool sidebars entirely, full width to the editor */
-@media (max-width: 760px) {
-  .compiler-view > .sidebar {
-    display: none;
-  }
-  .app-main {
-    grid-template-columns: 1fr !important;
-  }
-  .app-output-section {
-    display: none;
-  }
-  .status-bar .status-item.status-shortcut,
-  .status-bar .status-dot {
-    display: none;
-  }
-}
-
 /* Formatter, Diff & Comparator toolbars: let rows wrap instead of clipping */
 @media (max-width: 1000px) {
   .json-formatter-toolbar,
@@ -58,3 +53,403 @@
     flex-direction: column;
   }
 }
+
+/* ============================================================
+   PHONE — ≤760px
+   ============================================================ */
+
+/* Compiler mobile pane toggle — never occupies a grid cell on desktop.
+   Keep these base rules BEFORE the @media overrides below (cascade order). */
+.compiler-mobile-toggle-bar {
+  display: none;
+}
+.compiler-mobile-toggle {
+  display: none;
+}
+
+/* Narrow: tool sidebars become off-canvas drawers, full width to the editor */
+@media (max-width: 760px) {
+  /* Compiler: single column, one pane at a time. CompilerPage puts
+     mobile-pane-editor / mobile-pane-output on .app-main; the toggle bar
+     is only rendered when an output pane exists. Force the stacking axis
+     explicitly — the page sets display:grid inline on desktop, and a
+     plain column flex is correct regardless of the display mode. */
+  .app-main {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .app-main > .app-editor-section,
+  .app-main > .app-output-section {
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+  .app-main.mobile-pane-output .app-editor-section {
+    display: none;
+  }
+  .app-main.mobile-pane-editor .app-output-section {
+    display: none;
+  }
+  .app-main .resize-handle {
+    display: none;
+  }
+
+  .compiler-mobile-toggle-bar {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .status-bar .status-item.status-shortcut,
+  .status-bar .status-dot {
+    display: none;
+  }
+}
+
+/* Compiler editor sidebar (file list) — collapse to a slim rail like tablet */
+@media (max-width: 760px) {
+  .compiler-view > .sidebar {
+    width: 48px;
+  }
+}
+
+/* ── Library drawer (≤760px) ─────────────────────────────────
+   LibraryTool adds lib-sidebar-open on .lib-layout; the sidebar
+   slides over the content with a scrim, mirroring the chat drawer. */
+@media (max-width: 760px) {
+  .lib-layout-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(84vw, 320px) !important;
+    min-width: 0 !important;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--ds-shadow-modal);
+  }
+  .lib-layout.lib-sidebar-open .lib-layout-sidebar {
+    transform: translateX(0);
+  }
+  .lib-layout .lib-scrim {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    padding: 0;
+    cursor: default;
+  }
+  .lib-layout.lib-sidebar-open .lib-scrim {
+    display: block;
+  }
+  .lib-resize-handle {
+    display: none;
+  }
+
+  /* Floating open-drawer affordance: hub view scrolls under it, and the
+     detail view's header is right-aligned (actions live top-right), so the
+     top-left corner is clear in both Library views. */
+  .lib-mobile-menu-btn {
+    display: flex;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 20;
+    background: var(--bg-1);
+    border: 1px solid var(--border-1);
+    box-shadow: var(--ds-shadow-border-small);
+  }
+
+  html.light .lib-layout .lib-scrim {
+    background: rgba(15, 23, 42, 0.4);
+  }
+}
+
+/* Library hamburger is hidden on desktop */
+.lib-mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.lib-mobile-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* ── API Tester drawer (≤760px) ──────────────────────────────
+   ApiTester adds api-drawer-open on .api-tester-container. The
+   sidebar's own collapse toggle keeps working inside the drawer. */
+@media (max-width: 760px) {
+  .api-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(84vw, 320px);
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--ds-shadow-modal);
+  }
+  .api-sidebar.api-sidebar-collapsed {
+    width: min(84vw, 320px);
+  }
+  .api-tester-container.api-drawer-open .api-sidebar {
+    transform: translateX(0);
+  }
+  .api-tester-container .api-scrim {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    padding: 0;
+    cursor: default;
+  }
+  .api-tester-container.api-drawer-open .api-scrim {
+    display: block;
+  }
+  .api-main {
+    width: 100%;
+  }
+
+  html.light .api-tester-container .api-scrim {
+    background: rgba(15, 23, 42, 0.4);
+  }
+
+  /* Omnibox: let protocol + method + URL flow onto two rows */
+  .api-omnibox {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .api-url-input-container {
+    flex-basis: 100%;
+    order: 10;
+  }
+
+  /* Chat: 16px input on touch screens — iOS Safari zooms any input
+     with font-size < 16px on focus, which janks the whole layout. */
+  .chat-composer-input {
+    font-size: 16px;
+  }
+  .chat-composer-wrap {
+    padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+  .api-omnibox {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .api-url-input-container {
+    flex-basis: 100%;
+    order: 10;
+  }
+}
+
+/* API hamburger lives in the workspace tab bar; hidden on desktop */
+.api-mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.api-mobile-menu-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+/* Left slot in the shared tab bar — width-collapsed when empty on desktop */
+.tabs-left-slot {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 8px;
+  flex-shrink: 0;
+}
+.tabs-bar:not(:has(.tabs-left-slot > *)) .tabs-left-slot {
+  display: none;
+}
+@media (max-width: 760px) {
+  .api-mobile-menu-btn {
+    display: flex;
+  }
+}
+
+/* ── Compiler mobile pane toggle buttons (≤760px) ──────────── */
+@media (max-width: 760px) {
+  .compiler-mobile-toggle {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    margin: 0 auto;
+    background: var(--bg-2);
+    border: 1px solid var(--border-1);
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+  .compiler-mobile-toggle button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-2);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .compiler-mobile-toggle button.active {
+    background: var(--bg-1);
+    color: var(--text-0);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* ── Safe areas (notched phones in landscape / home indicator) ── */
+@media (max-width: 760px) {
+  .activity-bar {
+    padding-left: env(safe-area-inset-left);
+  }
+  .status-bar {
+    padding-right: calc(10px + env(safe-area-inset-right));
+  }
+}
+
+/* ============================================================
+   CANVAS-HEAVY TOOLS — best effort, no "desktop required" hint.
+   React-flow style panes already stack via flex-col; here the A|B
+   editor pairs (react-panel groups) stack to one column so each
+   Monaco instance gets the full phone width. All rules scoped to
+   ≤760px only.
+   ============================================================ */
+@media (max-width: 760px) {
+  /* Comparators / Formatters / API Tester (GraphQL view): stack the
+     side-by-side editor pairs vertically so each Monaco instance gets
+     the full phone width. The library (react-resizable-panels v3) marks
+     its group with data-group and its panels with data-panel; both carry
+     inline flex styles, which flex heights correctly once the group's
+     axis is flipped. */
+  [data-group] {
+    flex-direction: column !important;
+  }
+
+  /* Side-by-side handles need axis-flip styling; row-oriented handles
+     (comparator-resize-handle-v, api-panel-resize-handle-vertical) are
+     untouched. */
+  [data-group] > .comparator-resize-handle-h,
+  [data-group] > .api-panel-resize-handle-horizontal {
+    width: auto !important;
+    height: 6px !important;
+    margin: 0 !important;
+    cursor: row-resize !important;
+  }
+
+  /* Comparators results search: don't let the 200px input crowd the bar */
+  .results-search {
+    width: min(200px, 40vw);
+  }
+
+  /* API Tester: request/response already stack vertically (flex-col);
+     give the panes a floor and let the vertical resize handle be hidden
+     so touch users scroll instead of dragging a 6px bar. */
+  .api-split-panes .api-pane {
+    min-height: 220px;
+  }
+  .api-resize-handle {
+    display: none;
+  }
+
+  /* Monaco keeps its own internal scrollbars; ensure the wrappers can
+     never push the page wider than the viewport. */
+  .monaco-wrapper,
+  .api-monaco-wrapper {
+    max-width: 100%;
+  }
+}
+
+/* ============================================================
+   MODALS & POPOVERS — phone-safe caps
+   Desktop geometry is untouched (these selectors have no desktop
+   media rules; the caps only bind on narrow viewports).
+   ============================================================ */
+@media (max-width: 760px) {
+  .settings-panel {
+    width: min(580px, 100vw);
+    max-width: 100vw;
+    max-height: 88dvh;
+    border-radius: 16px;
+  }
+
+  .palette-container {
+    max-width: calc(100vw - 20px);
+  }
+
+  /* API Tester modals (width/max-height were the only overflow risks) */
+  .api-modal-content {
+    max-height: 85dvh;
+    max-width: calc(100vw - 24px);
+  }
+  .api-settings-modal-content {
+    height: auto;
+    max-height: 88dvh;
+  }
+  .lib-modal-content {
+    max-height: 85dvh;
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* ============================================================
+   SMALL PHONE — ≤480px
+   ============================================================ */
+@media (max-width: 480px) {
+  .activity-bar {
+    width: 48px;
+  }
+  .status-bar {
+    padding: 0 8px;
+  }
+  .status-left .status-item:not(.status-brand) {
+    display: none;
+  }
+  .app-editor-section {
+    min-width: 0;
+  }
+
+  /* Settings panel docks to the bottom for comfortable reading */
+  .settings-panel {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+  }
+  .settings-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+}
+
+/* ============================================================
+   HEIGHT — handled in index.css (.main-layout uses 100vh → 100dvh
+   with a fallback line; desktop resolves both identically).
+   ============================================================ */

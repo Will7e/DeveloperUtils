@@ -16,6 +16,12 @@ import {
   type CipherEnvelope,
 } from "./crypto.service";
 import { resetMasterKeyCache } from "./encrypted-storage.service";
+import {
+  acquireDeviceSalt,
+  readValue,
+  writeValue,
+  removeIdbKeys,
+} from "./idb-storage.service";
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -47,7 +53,7 @@ export interface VaultState {
   // ── Actions ──────────────────────────────────────────────
   initAutomaticVault: () => Promise<void>;
   checkSetup: () => void;
-  resetVault: () => void;
+  resetVault: () => Promise<void>;
   clearError: () => void;
   pokeActivity: () => void;
 }
@@ -55,32 +61,71 @@ export interface VaultState {
 // ── Key Management ──────────────────────────────────────────
 
 /**
- * Gets or creates a random device-unique salt stored in localStorage.
- * Ensures that even with identical .env secrets, each device has a unique key.
+ * Gets or creates a random device-unique salt stored in IndexedDB —
+ * alongside the ciphertext it protects, so "clear site data" always
+ * removes key and data together. Falls back to the legacy localStorage
+ * key when IDB is unavailable, keeping fallback-mode data decryptable.
+ *
+ * Singleton promise + atomic acquire: concurrent first-boot tabs each
+ * run the acquire exactly once, and IndexedDB serializes the
+ * check-and-set so every tab converges on a single salt instead of
+ * racing into mismatched keys. Ensures that even with identical .env
+ * secrets, each device has a unique key.
  */
-export function getOrCreateDeviceId(): string {
-  if (typeof window === "undefined" || !window.localStorage) {
-    return "server-static-device-id";
+let deviceIdPromise: Promise<string> | null = null;
+
+function generateSalt(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function getOrCreateDeviceId(): Promise<string> {
+  if (typeof window === "undefined") {
+    return Promise.resolve("server-static-device-id");
   }
-  let id = localStorage.getItem(DEVICE_SALT_KEY) || localStorage.getItem(LEGACY_DEVICE_SALT_KEY);
-  if (!id) {
-    const bytes = crypto.getRandomValues(new Uint8Array(16));
-    id = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (!deviceIdPromise) {
+    const promise = (async () => {
+      let legacy: string | null = null;
+      try {
+        legacy =
+          localStorage.getItem(DEVICE_SALT_KEY) || localStorage.getItem(LEGACY_DEVICE_SALT_KEY);
+      } catch {
+        /* storage unavailable — start from scratch */
+      }
+      try {
+        return await acquireDeviceSalt(DEVICE_SALT_KEY, legacy, generateSalt);
+      } catch (err) {
+        console.warn("Device salt IDB access failed, using localStorage:", err);
+        const id = legacy ?? generateSalt();
+        try {
+          localStorage.setItem(DEVICE_SALT_KEY, id);
+        } catch {
+          /* nothing more we can do */
+        }
+        return id;
+      }
+    })();
+    deviceIdPromise = promise;
+    promise.catch(() => {
+      // Allow a retry on the next call after an unexpected rejection.
+      if (deviceIdPromise === promise) deviceIdPromise = null;
+    });
   }
-  localStorage.setItem(DEVICE_SALT_KEY, id);
-  return id;
+  return deviceIdPromise;
 }
 
 /**
  * Generates the automatic master encryption key.
  * Combines VITE_VAULT_KEY (from .env) with the unique device salt.
  */
-export function getAutomaticKey(): string {
+export async function getAutomaticKey(): Promise<string> {
   // Read VITE_VAULT_KEY from Vite environment, with resilient fallback
   const envKey =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (import.meta as any).env?.VITE_VAULT_KEY || "intab_sec_k9f2m8x4w1q7z5v3_vault";
-  const deviceId = getOrCreateDeviceId();
+  const deviceId = await getOrCreateDeviceId();
   return `${envKey}:${deviceId}`;
 }
 
@@ -88,7 +133,7 @@ export function getAutomaticKey(): string {
  * Returns the active passphrase for encryption / decryption.
  * In automatic transparent mode, this always returns the automatic device key.
  */
-export function getPassphrase(): string | null {
+export async function getPassphrase(): Promise<string | null> {
   return getAutomaticKey();
 }
 
@@ -107,7 +152,7 @@ export const useVaultStore = create<VaultState>((set) => ({
 
   initAutomaticVault: async () => {
     try {
-      const autoKey = getAutomaticKey();
+      const autoKey = await getAutomaticKey();
 
       // Check if there was an earlier vault (e.g. legacy devutils or version 1)
       const rawMeta = localStorage.getItem(VAULT_META_KEY) || localStorage.getItem(LEGACY_VAULT_META_KEY);
@@ -115,7 +160,7 @@ export const useVaultStore = create<VaultState>((set) => ({
         try {
           const meta = JSON.parse(rawMeta);
           // Check if encrypted with legacy default key
-          const oldDefaultKey = `devutils_sec_k9f2m8x4w1q7z5v3_vault:${getOrCreateDeviceId()}`;
+          const oldDefaultKey = `devutils_sec_k9f2m8x4w1q7z5v3_vault:${await getOrCreateDeviceId()}`;
           if (oldDefaultKey !== autoKey && meta?.canary) {
             const isOldDefaultPass = await verifyPassphrase(meta.canary, oldDefaultKey, "devutils-vault-canary-v2");
             if (isOldDefaultPass) {
@@ -152,7 +197,7 @@ export const useVaultStore = create<VaultState>((set) => ({
     }
   },
 
-  resetVault: () => {
+  resetVault: async () => {
     // Clear all encrypted API tester data
     const apiKeys = [
       "intab_api_tabs",
@@ -194,8 +239,25 @@ export const useVaultStore = create<VaultState>((set) => ({
       /* storage unavailable — nothing to sweep */
     }
 
+    // Wipe IDB copies: the device salt AND the heavy data that moved off
+    // localStorage. The salt MUST die with the data, or leftover ciphertext
+    // would be silently re-keyed (undecryptable) while looking intact.
+    await removeIdbKeys([
+      DEVICE_SALT_KEY,
+      "intab_api_tabs",
+      "intab_api_history",
+      "intab_api_collections",
+      "intab_api_env_vars",
+      "intab_api_environments",
+      "intab_api_active_env",
+      "intab_api_custom_presets",
+      "intab_api_added_preset_ids",
+      "intab_api_custom_proxy",
+    ]);
+
     // Generate fresh device ID
-    getOrCreateDeviceId();
+    deviceIdPromise = null;
+    await getOrCreateDeviceId();
 
     // CRITICAL: forget every cached derived key (they were bound to the old
     // device id). Without this, the session keeps encrypting with the OLD key
@@ -204,7 +266,7 @@ export const useVaultStore = create<VaultState>((set) => ({
     resetMasterKeyCache();
 
     // Re-initialize with new key
-    const autoKey = getAutomaticKey();
+    const autoKey = await getAutomaticKey();
     encrypt(CANARY_PLAINTEXT, autoKey).then((canary) => {
       const newMeta: VaultMeta = {
         canary,
@@ -249,13 +311,15 @@ async function reEncryptAllData(
   ];
 
   for (const key of keys) {
-    const raw = localStorage.getItem(key);
+    // readValue/writeValue span both IDB and the localStorage fallback
+    // (heavy keys moved off localStorage but may still exist there).
+    const raw = await readValue(key);
     if (!raw) continue;
 
     try {
       const data = JSON.parse(raw);
       const reEncrypted = await reEncryptDeep(data, oldPassphrase, newPassphrase);
-      localStorage.setItem(key, JSON.stringify(reEncrypted));
+      await writeValue(key, JSON.stringify(reEncrypted));
     } catch {
       console.warn(`Skipping re-encryption for ${key}`);
     }

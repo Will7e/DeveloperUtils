@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useVaultStore } from "@/services/vault.service";
-import { getLocalStorageUsage } from "@/services/encrypted-storage.service";
+import { getLocalStorageUsage, getStorageUsage } from "@/services/encrypted-storage.service";
 import {
   Tooltip,
   TooltipTrigger,
@@ -116,6 +116,19 @@ export function SettingsPanel() {
   const [storageUsage, setStorageUsage] = useState(() => getLocalStorageUsage());
   const [isRefreshingStorage, setIsRefreshingStorage] = useState(false);
 
+  // Real quota comes from the Storage Manager API (async, origin-wide);
+  // the initial value is the synchronous localStorage fallback until it
+  // resolves.
+  useEffect(() => {
+    let cancelled = false;
+    getStorageUsage().then((usage) => {
+      if (!cancelled) setStorageUsage(usage);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Deep-link support: other surfaces (e.g. sidebar "Cloud Sync") can open
   // Settings directly on a specific tab via the intab:open-settings event.
   useEffect(() => {
@@ -131,7 +144,7 @@ export function SettingsPanel() {
 
   const handleRefreshStorage = () => {
     setIsRefreshingStorage(true);
-    setStorageUsage(getLocalStorageUsage());
+    void getStorageUsage().then(setStorageUsage);
     setTimeout(() => {
       setIsRefreshingStorage(false);
     }, 650);
@@ -205,8 +218,8 @@ export function SettingsPanel() {
   useEffect(() => {
     if (settingsOpen && activeTab === "security") {
       let cancelled = false;
-      queueMicrotask(() => {
-        if (!cancelled) setStorageUsage(getLocalStorageUsage());
+      getStorageUsage().then((usage) => {
+        if (!cancelled) setStorageUsage(usage);
       });
       return () => {
         cancelled = true;
@@ -253,9 +266,9 @@ export function SettingsPanel() {
       }
     }
 
-    setTimeout(() => {
+    setTimeout(async () => {
       setCleaningState("done");
-      setStorageUsage(getLocalStorageUsage());
+      setStorageUsage(await getStorageUsage());
       addToast({
         message:
           closedCount > 0
@@ -275,9 +288,9 @@ export function SettingsPanel() {
     if (resettingState !== "idle") return;
     setResettingState("resetting");
 
-    setTimeout(() => {
-      resetVault();
-      setStorageUsage(getLocalStorageUsage());
+    setTimeout(async () => {
+      await resetVault();
+      setStorageUsage(await getStorageUsage());
       setResettingState("done");
       addToast({
         message: "Saved API credentials and environment secrets wiped",
@@ -703,7 +716,7 @@ export function SettingsPanel() {
                   <div className="flex items-center justify-between w-full">
                     <div className="flex items-center gap-2">
                       <HardDrive className="h-4 w-4 text-accent" />
-                      <span className="settings-label">Local Storage Utilization</span>
+                      <span className="settings-label">Storage Utilization</span>
                     </div>
                     <span className="text-xs font-mono font-medium text-text-1">
                       {storageUsage.usedFormatted} / {storageUsage.quotaFormatted} ({storageUsage.percentage}%)
