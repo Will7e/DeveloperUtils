@@ -3,6 +3,7 @@
 // ============================================================
 
 import { Link, useLocation, Outlet } from "react-router-dom";
+import { useEffect, useRef } from "react";
 import { Suspense } from "react";
 import { PageSkeleton } from "@/components/ui/page-skeleton";
 import { InTabLogo } from "@/components/ui/intab-logo";
@@ -120,6 +121,54 @@ export function MainLayout() {
 
   // Applies dashboard demo handoffs to the target tool, then navigates.
   useHandoffBridge();
+
+  // ── Sidebar auto-collapse on idle ──────────────────────────
+  // When enabled, the sidebar collapses after `delay` ms without any
+  // pointer/keyboard activity anywhere in the window. Interacting with
+  // the sidebar itself (or manually expanding it) keeps it open. The
+  // timer only collapses — it never re-expands on its own.
+  const sidebarAutoCollapse = useAppStore(
+    (s) => s.editorSettings.sidebarAutoCollapse
+  );
+  const sidebarAutoCollapseDelay = useAppStore(
+    (s) => s.editorSettings.sidebarAutoCollapseDelay
+  );
+  const collapsedRef = useRef(sidebarCollapsed);
+  collapsedRef.current = sidebarCollapsed;
+
+  useEffect(() => {
+    if (!sidebarAutoCollapse) return;
+    const delay = Math.max(5_000, sidebarAutoCollapseDelay);
+    let timer: number | undefined;
+
+    const collapse = () => {
+      // Never slam the bar shut while the user's cursor is resting on it.
+      if (collapsedRef.current) return;
+      const bar = document.querySelector(".activity-bar");
+      if (bar?.matches(":hover")) return;
+      toggleSidebarCollapse();
+    };
+    const reset = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(collapse, delay);
+    };
+
+    // Activity anywhere in the app resets the countdown.
+    const events: (keyof WindowEventMap)[] = [
+      "pointerdown",
+      "pointermove",
+      "keydown",
+      "wheel",
+      "focusin",
+    ];
+    for (const ev of events) window.addEventListener(ev, reset, { passive: true });
+    reset();
+
+    return () => {
+      window.clearTimeout(timer);
+      for (const ev of events) window.removeEventListener(ev, reset);
+    };
+  }, [sidebarAutoCollapse, sidebarAutoCollapseDelay, toggleSidebarCollapse]);
 
   const handleToggleTheme = () => {
     updateEditorSettings({ theme: currentTheme === "dark" ? "light" : "dark" });

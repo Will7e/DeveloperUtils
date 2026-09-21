@@ -1,26 +1,35 @@
 import * as React from "react";
-import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from "lucide-react";
+import { CircleCheck, CircleAlert, TriangleAlert, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type ToastVariant = "info" | "success" | "warning" | "error";
+/**
+ * Geist Toast — per vercel.com/geist/toast
+ * Variants: default (no icon), info, success, warning, error.
+ * Content: one sentence, sentence case, no trailing period.
+ */
+export type ToastVariant = "info" | "success" | "warning" | "error" | "default";
 
 export interface ToastProps
   extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   variant?: ToastVariant;
   title?: React.ReactNode;
   message: React.ReactNode;
+  icon?: React.ReactNode | false;
   action?: {
     label: string;
     onClick: () => void;
   };
   onClose?: () => void;
+  /** When true, plays the exit animation (managed by ToastContainer) */
+  leaving?: boolean;
 }
 
-const variantIcons: Record<ToastVariant, React.ReactNode> = {
-  info: <Info className="size-4 text-[var(--ds-blue-700)] shrink-0" />,
-  success: <CheckCircle2 className="size-4 text-[var(--ds-blue-700)] shrink-0" />,
-  warning: <AlertTriangle className="size-4 text-[var(--ds-amber-700)] shrink-0" />,
-  error: <AlertCircle className="size-4 text-[var(--ds-red-800)] shrink-0" />,
+const variantIcons: Record<ToastVariant, React.ReactNode | null> = {
+  default: null,
+  info: <Info className="size-4 text-[var(--ds-blue-900)] shrink-0" />,
+  success: <CircleCheck className="size-4 text-[var(--ds-green-900)] shrink-0" />,
+  warning: <TriangleAlert className="size-4 text-[var(--ds-amber-700)] shrink-0" />,
+  error: <CircleAlert className="size-4 text-[var(--ds-red-800)] shrink-0" />,
 };
 
 export const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
@@ -29,63 +38,83 @@ export const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
       variant = "info",
       title,
       message,
+      icon,
       action,
       onClose,
+      leaving = false,
       className,
       ...props
     },
     ref
   ) => {
+    const resolvedIcon =
+      icon !== undefined
+        ? icon === false
+          ? null
+          : icon
+        : (variantIcons[variant] ?? null);
+    const hasTitle = Boolean(title);
+
     return (
       <div
         ref={ref}
         role="status"
         aria-live="polite"
-        data-geist-toast=""
+        data-toast-state={leaving ? "leaving" : "entered"}
         className={cn(
-          "pointer-events-auto flex items-start gap-3 w-full max-w-[380px] p-3.5 rounded-lg select-none",
-          "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)] border border-[var(--ds-gray-400)]",
-          "shadow-[0_8px_30px_rgba(0,0,0,0.35)] transition-all duration-200",
-          "animate-toast-in",
+          "group pointer-events-auto relative flex items-center gap-3 w-full sm:w-[380px] min-h-[48px] px-4 py-3.5 rounded-lg select-none",
+          "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)]",
+          "border border-[var(--ds-gray-alpha-400)]",
+          "geist-toast-shadow",
+          "animate-toast-in text-[13px] leading-5",
           className
         )}
         {...props}
       >
-        <div className="mt-0.5">{variantIcons[variant]}</div>
+        {resolvedIcon && (
+          <div className="shrink-0 flex items-center justify-center">
+            {resolvedIcon}
+          </div>
+        )}
 
-        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
           {title && (
-            <div className="text-sm font-semibold text-[var(--ds-gray-1000)] leading-tight">
+            <div className="text-[13px] font-semibold text-[var(--ds-gray-1000)] leading-tight mb-0.5">
               {title}
             </div>
           )}
-          <div className="text-[13px] text-[var(--ds-gray-900)] leading-snug break-words">
+          <div className="text-[13px] text-[var(--ds-gray-1000)] leading-5 break-words select-text font-normal">
             {message}
           </div>
         </div>
 
-        {action && (
-          <button
-            type="button"
-            onClick={action.onClick}
-            className="shrink-0 h-7 px-2.5 text-xs font-medium rounded border border-[var(--ds-gray-400)] bg-transparent hover:bg-[var(--ds-gray-200)] text-[var(--ds-gray-1000)] transition-colors cursor-pointer outline-none focus-visible:shadow-[var(--ds-focus-ring)]"
-          >
-            {action.label}
-          </button>
-        )}
+        {(action || onClose) && (
+          <div className="shrink-0 flex items-center gap-2">
+            {action && !leaving && (
+              <button
+                type="button"
+                onClick={action.onClick}
+                className="h-7 px-2.5 text-xs font-medium rounded-md border border-[var(--ds-gray-alpha-400)] bg-[var(--ds-gray-100)] hover:bg-[var(--ds-gray-200)] active:bg-[var(--ds-gray-300)] text-[var(--ds-gray-1000)] transition-colors cursor-pointer outline-none focus-visible:shadow-[var(--ds-focus-ring)] active:scale-[0.97] whitespace-nowrap"
+              >
+                {action.label}
+              </button>
+            )}
 
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Dismiss notification"
-            className="shrink-0 text-[var(--ds-gray-700)] hover:text-[var(--ds-gray-1000)] p-0.5 rounded transition-colors cursor-pointer outline-none focus-visible:shadow-[var(--ds-focus-ring)]"
-          >
-            <X className="size-3.5" />
-          </button>
+            {onClose && !leaving && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Dismiss notification"
+                className="size-6 flex items-center justify-center text-[var(--ds-gray-700)] hover:text-[var(--ds-gray-1000)] hover:bg-[var(--ds-gray-200)] active:bg-[var(--ds-gray-300)] rounded-md transition-colors cursor-pointer outline-none focus-visible:shadow-[var(--ds-focus-ring)]"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     );
   }
 );
 Toast.displayName = "Toast";
+

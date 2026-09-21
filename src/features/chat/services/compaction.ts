@@ -101,7 +101,15 @@ async function performCompaction(
   const intab = isIntabModel(requestedModel);
   let modelId = requestedModel;
   if (intab) {
-    const pick = pickInTabModel({ conversationId, exclude });
+    // Summaries ride any capable pool model — purpose="summary"
+    // keeps this pick out of the last-turn routing record. The
+    // conversation's tier id selects the pool (High by default).
+    const pick = pickInTabModel({
+      conversationId,
+      exclude,
+      purpose: "summary",
+      tierModelId: requestedModel,
+    });
     if (pick) modelId = pick.modelId;
   }
   // Used for the budget below. On summarizer failover the retry loop
@@ -120,7 +128,8 @@ async function performCompaction(
   const { foldCount, foldTokens } = pickCompactionBoundary(
     conversation.messages,
     budgetTokens,
-    COMPACTION_TARGET
+    COMPACTION_TARGET,
+    modelId
   );
 
   if (foldCount <= 0) {
@@ -144,6 +153,9 @@ async function performCompaction(
         model: modelId,
         temperature: 0,
         maxTokens: SUMMARY_MAX_TOKENS,
+        // Summaries stay cheap/fast regardless of tier — never think
+        // hard about folding history. Keep the provider default.
+        requestState: undefined,
         signal: options.signal,
         messages: [
           { role: "system", content: SUMMARY_SYSTEM_PROMPT },
@@ -179,7 +191,7 @@ async function performCompaction(
       if (intab && isRetryableError(err)) {
         recordModelFailure(modelId, "hard");
         if (attempt === 0) {
-          const pick = pickInTabModel({ conversationId, exclude });
+          const pick = pickInTabModel({ conversationId, exclude, tierModelId: requestedModel });
           if (pick && pick.modelId !== modelId) {
             exclude.add(modelId);
             modelId = pick.modelId;
@@ -206,7 +218,8 @@ async function performCompaction(
   const targetTokens = Math.max(0, Math.floor(budgetTokens * COMPACTION_TARGET));
   const { hiddenCount, freedTokens } = compactMessages(
     conversation.messages,
-    targetTokens
+    targetTokens,
+    modelId
   );
 
   if (hiddenCount > 0) {

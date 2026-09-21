@@ -5,6 +5,13 @@
 // Slash commands: a draft starting with "/" opens the command menu
 // above the input — arrows navigate, Enter/Tab runs, Esc closes;
 // /model swaps in the model catalog as an inline submenu.
+//
+// Hard rule enforced here: a draft that starts with "/" is NEVER sent
+// as a message. Enter/Tab always belong to the menu while a slash
+// draft is present, so a half-typed command can't leak into the
+// transcript as a prompt (it used to, whenever the token wasn't an
+// exact command id). The menu also opens while a reply is streaming,
+// which is what makes /stop reachable from the keyboard.
 // Attachments: paperclip picker, clipboard image paste, and file
 // drop — image files become multimodal attachments, text files are
 // inlined as fenced code blocks in the draft. While this
@@ -28,13 +35,15 @@ import { useFileDrop } from "@/hooks/useFileDrop";
 import { DropOverlay } from "@/hooks/DropOverlay";
 import { useAppStore } from "@/stores/app.store";
 import { importChatFiles, MAX_ATTACHMENTS } from "../lib/attachments";
-import {
-  CHAT_COMMAND_BY_ID,
-  filterCommands,
-  type ChatCommand,
-} from "../lib/commands";
+import { CHAT_COMMAND_BY_ID, commandsFor, type ChatCommand } from "../lib/commands";
 import { CommandMenu, type CommandMenuMode } from "./CommandMenu";
-import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID, INTAB_VIRTUAL_MODEL, PINNED_MODEL_IDS } from "../constants";
+import {
+  CURATED_FALLBACK_MODELS,
+  INTAB_MODEL_ID,
+  INTAB_VIRTUAL_MODEL,
+  intabTierById,
+  PINNED_MODEL_IDS,
+} from "../constants";
 import type { ChatAttachment, ModelInfo } from "../types";
 
 /** Draft-level attachment state lives in ChatPage as ChatAttachment[] */
@@ -138,32 +147,48 @@ export function Composer({
   const canSend = (value.trim().length > 0 || hasImages) && !isStreaming && !disabled;
 
   // ── Slash command menu state ──
-  // The menu exists while the draft starts with "/". The token is
-  // everything up to the first space; an argument may follow it.
-  const menuOpen = value.startsWith("/") && !disabled && !isStreaming;
-  const afterSlash = menuOpen ? value.slice(1) : "";
+  // Two related flags, deliberately separate:
+  //  · isSlashDraft — the draft starts with "/". While true, Enter
+  //    and Tab belong to the menu and NEVER send the text.
+  //  · menuVisible — the list is on screen. Escape hides the list but
+  //    leaves the guard (and the text) in place, so Escape can't turn
+  //    a half-typed command into a sent message.
+  const isSlashDraft = value.startsWith("/") && !disabled;
+  const [menuDismissed, setMenuDismissed] = useState(false);
+  const menuVisible = isSlashDraft && !menuDismissed;
+
+  const afterSlash = isSlashDraft ? value.slice(1) : "";
   const spaceIdx = afterSlash.indexOf(" ");
-  const cmdToken = menuOpen ? (spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)) : "";
-  const cmdQuery = menuOpen ? cmdToken : "";
-  const cmdArg = menuOpen && spaceIdx !== -1 ? afterSlash.slice(spaceIdx + 1).trim() : "";
+  const cmdToken = isSlashDraft ? (spaceIdx === -1 ? afterSlash : afterSlash.slice(0, spaceIdx)) : "";
+  const cmdQuery = cmdToken;
+  const cmdArg = isSlashDraft && spaceIdx !== -1 ? afterSlash.slice(spaceIdx + 1).trim() : "";
   const activeCommand = CHAT_COMMAND_BY_ID.get(cmdToken);
-  const modelMode = menuOpen && activeCommand?.hasSubmenu === true;
+  const modelMode = menuVisible && activeCommand?.hasSubmenu === true;
 
   const filteredCommands = React.useMemo(
-    () => (menuOpen ? filterCommands(cmdQuery) : []),
-    [menuOpen, cmdQuery]
+    () => (isSlashDraft ? commandsFor(cmdQuery, { isStreaming }) : []),
+    [isSlashDraft, cmdQuery, isStreaming]
   );
   const commandsValid = filteredCommands.some((c) => c.id === cmdToken);
+
+  /** Edits reopen a dismissed menu (typing again is a new intent) */
+  const handleChange = (next: string) => {
+    if (menuDismissed) setMenuDismissed(false);
+    onChange(next);
+  };
 
   const filteredModels = React.useMemo(() => {
     if (!modelMode) return [];
     const q = cmdArg.toLowerCase();
     const baseCatalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
-    // InTab LLM leads the submenu (injected — it's not a real
-    // OpenRouter catalog entry).
-    const catalog = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
-      ? baseCatalog
-      : [INTAB_VIRTUAL_MODEL, ...baseCatalog];
+    // A single "InTab Flash" entry leads the submenu — the quality
+    // tier lives in the header's TierPicker, not the model list.
+    const injected = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
+      ? baseCatalog.filter((m) => !intabTierById(m.id))
+      : [INTAB_VIRTUAL_MODEL, ...baseCatalog.filter((m) => !intabTierById(m.id))];
+    const catalog = injected.some((m) => m.id === INTAB_VIRTUAL_MODEL.id)
+      ? injected
+      : [INTAB_VIRTUAL_MODEL, ...injected];
     const matches = q
       ? catalog.filter(
           (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
@@ -182,7 +207,7 @@ export function Composer({
   // Reset highlight to the top whenever the query or mode changes
   // (render-time adjustment — converges before commit; see
   // react.dev/learn/you-might-not-need-an-effect).
-  const navKey = `${cmdQuery}|${cmdArg}|${cmdMode}`;
+  const navKey = `${cmdQuery}|${cmdArg}|${cmdMode}|${isStreaming}`;
   const [prevNavKey, setPrevNavKey] = useState(navKey);
   if (prevNavKey !== navKey) {
     setPrevNavKey(navKey);
@@ -228,7 +253,11 @@ export function Composer({
     [handleFiles]
   );
 
-  const clearDraft = () => onChange("");
+  const clearDraft = () => {
+    onChange("");
+    setMenuDismissed(false);
+    setCmdMode("commands");
+  };
 
   /** Runs a command from the menu (click or keyboard). */
   const runCommand = (command: ChatCommand) => {
@@ -237,7 +266,6 @@ export function Composer({
       // With an argument typed, run directly (e.g. "/model sonnet").
       if (cmdArg.trim()) {
         onRunCommand(command, cmdArg);
-        setCmdMode("commands");
         clearDraft();
         innerRef.current?.focus();
       } else {
@@ -245,78 +273,87 @@ export function Composer({
       }
       return;
     }
-    onRunCommand(command, "");
-    setCmdMode("commands");
+    // Argument-taking commands (/tier light, /rename …) must receive
+    // what was typed after the token; passing "" here made every one
+    // of them run their usage/no-argument branch instead.
+    onRunCommand(command, cmdArg);
     clearDraft();
     innerRef.current?.focus();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (menuOpen && menuRowCount > 0 && commandsValid) {
-      switch (e.key) {
-        case "ArrowDown":
+    if (menuVisible) {
+      // Navigation works whenever there is a selectable row.
+      if (menuRowCount > 0) {
+        if (e.key === "ArrowDown") {
           e.preventDefault();
           setCmdHighlighted((i) => (i + 1) % menuRowCount);
           return;
-        case "ArrowUp":
+        }
+        if (e.key === "ArrowUp") {
           e.preventDefault();
           setCmdHighlighted((i) => (i - 1 + menuRowCount) % menuRowCount);
           return;
-        case "Tab":
-        case "Enter": {
-          if (!modelMode && activeCommand?.hasSubmenu) {
-            // Enter on a submenu command with no arg typed switches
-            // to the model list (same as runCommand's branch above).
-            e.preventDefault();
-            if (cmdArg.trim()) {
-              onRunCommand?.(activeCommand, cmdArg);
-              setCmdMode("commands");
-              clearDraft();
-            } else {
-              setCmdMode("model");
-            }
-            return;
-          }
-          e.preventDefault();
-          if (modelMode) {
-            const picked = filteredModels[cmdHighlighted];
-            if (picked && onModelChange) {
-              onModelChange(picked.id);
-              setCmdMode("commands");
-              clearDraft();
-            }
-          } else {
-            const picked = filteredCommands[cmdHighlighted];
-            if (picked) runCommand(picked);
-          }
-          return;
         }
-        case "Escape":
-          e.preventDefault();
-          if (modelMode) {
-            setCmdMode("commands");
-          } else {
-            clearDraft();
-          }
-          innerRef.current?.focus();
-          return;
       }
-      // While the menu is open with matches, space completes the
-      // highlighted command token ("arrow" → "arrow ").
-      if (e.key === " " && !modelMode && !activeCommand) {
-        const picked = filteredCommands[cmdHighlighted];
-        if (picked) {
-          e.preventDefault();
-          onChange(`/${picked.id} `);
+
+      if (e.key === "Tab" || e.key === "Enter") {
+        // The menu owns Enter/Tab for ANY slash draft — matched or
+        // not. Unmatched input keeps its text and is never sent.
+        e.preventDefault();
+        if (modelMode) {
+          const picked = filteredModels[cmdHighlighted];
+          if (picked && onModelChange) {
+            onModelChange(picked.id);
+            setCmdMode("commands");
+            clearDraft();
+            innerRef.current?.focus();
+          }
+          return;
         }
+        if (activeCommand?.hasSubmenu && !cmdArg.trim()) {
+          // "/model" with no argument opens the model list.
+          setCmdMode("model");
+          return;
+        }
+        const picked = commandsValid ? activeCommand : filteredCommands[cmdHighlighted];
+        if (picked) runCommand(picked);
+        return;
+      }
+    }
+
+    if (isSlashDraft) {
+      // The guard that matters: while the draft is a slash draft, a
+      // bare Enter never sends it. Unmatched commands keep their text
+      // (and the menu explains), instead of becoming a prompt.
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
         return;
       }
 
-      // Menu open without a runnable selection (e.g. "/zzz" or a
-      // /model arg with no matches): Enter must not leak the partial
-      // slash text into the thread as a message.
-      if (e.key === "Enter" || e.key === "Tab") {
+      if (e.key === "Escape") {
+        // First Escape closes the menu and keeps what was typed (the
+        // draft is often an argument being written); a second one
+        // clears it.
         e.preventDefault();
+        if (modelMode) {
+          setCmdMode("commands");
+        } else {
+          setMenuDismissed(true);
+        }
+        innerRef.current?.focus();
+        return;
+      }
+
+      if (e.key === " " && !modelMode && !activeCommand && menuRowCount > 0) {
+        // Complete the highlighted command and keep typing its
+        // argument ("comp" → "compact ").
+        const picked = filteredCommands[cmdHighlighted];
+        if (picked) {
+          e.preventDefault();
+          setCmdMode("commands");
+          handleChange(`/${picked.id} `);
+        }
         return;
       }
     }
@@ -404,7 +441,7 @@ export function Composer({
           </button>
         </SimpleTooltip>
 
-        {menuOpen && (
+        {isSlashDraft && (
           <span className="chat-command-indicator" aria-hidden="true">
             <Slash className="h-3 w-3" />
           </span>
@@ -413,18 +450,18 @@ export function Composer({
         <textarea
           ref={setRefs}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handleChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={placeholderText}
-          className={`chat-composer-input ${menuOpen ? "chat-composer-input-slash" : ""}`}
+          className={`chat-composer-input ${isSlashDraft ? "chat-composer-input-slash" : ""}`}
           rows={1}
           disabled={disabled}
           aria-label="Chat message"
           aria-busy={isStreaming}
-          aria-expanded={menuOpen}
-          aria-controls={menuOpen ? "chat-command-listbox" : undefined}
+          aria-expanded={menuVisible}
+          aria-controls={menuVisible ? "chat-command-listbox" : undefined}
           aria-activedescendant={
-            menuOpen && menuRowCount > 0 ? `chat-command-opt-${cmdHighlighted}` : undefined
+            menuVisible && menuRowCount > 0 ? `chat-command-opt-${cmdHighlighted}` : undefined
           }
         />
 
@@ -454,7 +491,7 @@ export function Composer({
         )}
       </div>
 
-      {menuOpen && (
+      {menuVisible && (
         <CommandMenu
           query={cmdQuery}
           arg={cmdArg}
@@ -465,10 +502,10 @@ export function Composer({
           mode={cmdMode}
           filteredCommands={filteredCommands}
           filteredModels={filteredModels}
+          isStreaming={isStreaming}
           onSelectCommand={runCommand}
           onSelectModel={(id) => {
             onModelChange?.(id);
-            setCmdMode("commands");
             clearDraft();
             innerRef.current?.focus();
           }}
@@ -479,7 +516,9 @@ export function Composer({
         <span className="chat-composer-hint">
           {disabled
             ? "You can keep browsing — sending resumes when the other chat finishes."
-            : "Type / for commands · /compact frees context · Responses may be inaccurate — verify important information."}
+            : isStreaming
+              ? "Replying… type / and press Enter for /stop · /status · /context"
+              : "Type / for commands · /help lists them all · Responses may be inaccurate — verify important information."}
         </span>
       </div>
       <span className="chat-sr-only" aria-live="polite">

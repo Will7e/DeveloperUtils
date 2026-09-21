@@ -11,11 +11,16 @@ import React from "react";
 import {
   ChevronDown,
   CircleAlert,
+  FileMinus2,
+  FilePen,
   FileText,
   FolderTree,
+  GitBranch,
+  GitPullRequest,
   Info,
   ListTree,
   Loader2,
+  MonitorPlay,
   Search,
   SquareArrowOutUpRight,
 } from "lucide-react";
@@ -31,6 +36,16 @@ function toolIcon(name: ToolName): React.ComponentType<{ className?: string }> {
       return Search;
     case "get_repo_overview":
       return ListTree;
+    case "write_file":
+      return FilePen;
+    case "delete_file":
+      return FileMinus2;
+    case "create_working_branch":
+      return GitBranch;
+    case "push_changes":
+      return GitPullRequest;
+    case "get_preview_feedback":
+      return MonitorPlay;
     default:
       return Info;
   }

@@ -19,7 +19,9 @@ export class OpenRouterError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly code?: string
+    public readonly code?: string,
+    /** Rate-limit headers from 429 responses (reset window learning) */
+    public readonly rateLimitHeaders?: Record<string, string>
   ) {
     super(message);
     this.name = "OpenRouterError";
@@ -113,7 +115,30 @@ async function parseErrorResponse(res: Response): Promise<OpenRouterError> {
   } catch {
     /* non-JSON error body */
   }
-  return new OpenRouterError(friendlyHttpMessage(res.status, detail), res.status);
+  // Capture rate-limit headers so the router can learn real reset
+  // windows instead of guessing fixed cooldowns.
+  const rateLimitHeaders: Record<string, string> | undefined =
+    res.status === 429
+      ? (() => {
+          const h: Record<string, string> = {};
+          for (const name of [
+            "retry-after",
+            "x-ratelimit-reset",
+            "x-ratelimit-limit-reqs-reset",
+            "x-ratelimit-limit-tokens-reset",
+          ]) {
+            const v = res.headers.get(name);
+            if (v) h[name] = v;
+          }
+          return Object.keys(h).length > 0 ? h : undefined;
+        })()
+      : undefined;
+  return new OpenRouterError(
+    friendlyHttpMessage(res.status, detail),
+    res.status,
+    undefined,
+    rateLimitHeaders
+  );
 }
 
 // ── Stream Chat ─────────────────────────────────────────────
@@ -146,6 +171,17 @@ export interface StreamChatParams {
   maxTokens?: number;
   /** OpenAI-style function tools the model may call (agent mode) */
   tools?: ToolDefinition[];
+  /**
+   * Ask OpenRouter to return exact usage accounting in the stream
+   * tail (prompt/completion/cost). Free for streaming requests.
+   */
+  requestUsage?: boolean;
+  /**
+   * Per-request model state merged into the JSON body (e.g.
+   * reasoning_effort / reasoning.exclude from the InTab tier).
+   * Ignored by models that don't support the keys.
+   */
+  requestState?: Record<string, unknown>;
   /**
    * Called once per stream with fully-assembled tool calls when the
    * model requested any. Arguments arrive fragmented across chunks;
@@ -214,6 +250,8 @@ export async function streamChat({
   temperature = 0.7,
   maxTokens,
   tools,
+  requestUsage,
+  requestState,
   onToolCalls,
   signal,
   onChunk,
@@ -233,6 +271,11 @@ export async function streamChat({
     temperature,
     ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
     ...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+    // Exact usage in the stream tail — feeds token calibration
+    ...(requestUsage ? { usage: { include: true } } : {}),
+    // Per-request state (InTab tier: reasoning effort/exclusion) —
+    // merged last so it can carry nested objects like `reasoning`.
+    ...requestState,
     messages: [
       ...(systemPrompt?.trim()
         ? [{ role: "system", content: systemPrompt.trim() }]
@@ -409,9 +452,11 @@ export async function streamChat({
 export interface CompleteChatParams {
   apiKey: string;
   model: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
   temperature?: number;
   maxTokens?: number;
+  /** Per-request model state merged into the JSON body (tier state) */
+  requestState?: Record<string, unknown>;
   signal?: AbortSignal;
 }
 
@@ -431,6 +476,7 @@ export async function completeChat({
   messages,
   temperature = 0,
   maxTokens,
+  requestState,
   signal,
 }: CompleteChatParams): Promise<CompleteChatResult> {
   if (!apiKey.trim()) {
@@ -445,6 +491,7 @@ export async function completeChat({
     stream: false,
     temperature,
     ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+    ...(requestState ?? {}),
     messages,
   };
 
@@ -517,6 +564,15 @@ interface OpenRouterModel {
     prompt?: string;
     completion?: string;
   };
+  /** Request parameters the model accepts ("reasoning_effort", …) */
+  supported_parameters?: string[];
+  /** Reasoning capability metadata (efforts, defaults) */
+  reasoning?: {
+    mandatory?: boolean;
+    default_enabled?: boolean;
+    supported_efforts?: string[];
+    default_effort?: string;
+  } | null;
 }
 
 function toModelInfo(m: OpenRouterModel): ModelInfo {
@@ -528,6 +584,23 @@ function toModelInfo(m: OpenRouterModel): ModelInfo {
     (promptPrice !== undefined && promptPrice === 0) ||
     m.id.endsWith(":free");
   const modalities = m.architecture?.input_modalities?.filter(Boolean);
+  const supportedParameters =
+    Array.isArray(m.supported_parameters) && m.supported_parameters.length > 0
+      ? m.supported_parameters
+      : undefined;
+  const reasoningMeta =
+    m.reasoning && typeof m.reasoning === "object"
+      ? {
+          mandatory: m.reasoning.mandatory === true,
+          defaultEnabled: m.reasoning.default_enabled === true,
+          supportedEfforts:
+            Array.isArray(m.reasoning.supported_efforts) && m.reasoning.supported_efforts.length > 0
+              ? m.reasoning.supported_efforts
+              : undefined,
+          defaultEffort:
+            typeof m.reasoning.default_effort === "string" ? m.reasoning.default_effort : undefined,
+        }
+      : undefined;
 
   return {
     id: m.id,
@@ -537,6 +610,8 @@ function toModelInfo(m: OpenRouterModel): ModelInfo {
     completionPrice: Number.isFinite(completionPrice) ? completionPrice : undefined,
     isFree,
     inputModalities: modalities && modalities.length > 0 ? modalities : undefined,
+    supportedParameters,
+    reasoning: reasoningMeta,
   };
 }
 

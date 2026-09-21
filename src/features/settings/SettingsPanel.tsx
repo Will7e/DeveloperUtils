@@ -653,6 +653,62 @@ export function SettingsPanel() {
 
               <div className="settings-divider" />
 
+              {/* Section: Sidebar */}
+              <div className="settings-section">
+                <div className="settings-section-title">Sidebar</div>
+
+                {/* Auto-collapse on idle */}
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label">Auto-Collapse Sidebar</label>
+                    <span className="settings-sublabel">
+                      Collapse the main navigation sidebar after a period of inactivity
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      checked={editorSettings.sidebarAutoCollapse}
+                      onCheckedChange={(checked) =>
+                        updateEditorSettings({
+                          sidebarAutoCollapse: checked,
+                        })
+                      }
+                      aria-label="Toggle Sidebar Auto-Collapse"
+                    />
+                  </div>
+                </div>
+
+                {/* Auto-collapse delay */}
+                {editorSettings.sidebarAutoCollapse && (
+                  <div className="settings-row">
+                    <div className="settings-row-info">
+                      <label className="settings-label">Collapse After</label>
+                      <span className="settings-sublabel">
+                        Idle time before the sidebar collapses
+                      </span>
+                    </div>
+                    <div className="settings-control">
+                      <SettingsDropdown
+                        value={String(editorSettings.sidebarAutoCollapseDelay)}
+                        onChange={(v) =>
+                          updateEditorSettings({ sidebarAutoCollapseDelay: Number(v) })
+                        }
+                        options={[
+                          { label: "15 seconds", value: "15000" },
+                          { label: "30 seconds", value: "30000" },
+                          { label: "1 minute", value: "60000" },
+                          { label: "2 minutes", value: "120000" },
+                          { label: "5 minutes", value: "300000" },
+                        ]}
+                        className="w-[130px]"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-divider" />
+
               {/* Section: Execution Engine */}
               <div className="settings-section">
                 <div className="settings-section-title">Execution Engine</div>

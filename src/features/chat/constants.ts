@@ -22,55 +22,234 @@ export const GITHUB_MAX_FILE_BYTES = 64_000;
 export const GITHUB_MAX_TREE_ENTRIES = 2_500;
 /** Hard cap on agent iterations (model turns) per user message */
 export const AGENT_MAX_ITERATIONS = 8;
+/** Default agent iteration cap (settings-overridable, hard-capped) */
+export const AGENT_ITERATIONS_DEFAULT = 24;
+export const AGENT_ITERATIONS_MAX = 50;
 /** Tool definitions are only sent when a repo is attached AND the model is known-capable */
 export const TOOL_RESULT_MAX_CHARS = 12_000;
 
-// ── InTab LLM (virtual model) ────────────────────────────
-// "intab/intab-llm" is not a real OpenRouter model — the runner
-// resolves it to a pool of free OpenRouter models (see
+/**
+ * run_tool_program — batched read-only tool programs (PTC-lite).
+ * One program = one transcript round trip instead of one per tool call.
+ */
+export const TOOL_PROGRAM_MAX_STEPS = 8;
+/** Aggregated, model-facing output budget across all steps of one program */
+export const TOOL_PROGRAM_MAX_CHARS = 24_000;
+/** Max bytes of a workspace file the preview bundler will inline */
+export const WORKSPACE_MAX_FILE_BYTES = 1_500_000;
+/** Debounce for workspace IDB persistence (ms) */
+export const WORKSPACE_SAVE_DEBOUNCE_MS = 600;
+/** Debounce for preview rebuilds after workspace edits (ms) */
+export const PREVIEW_REBUILD_DEBOUNCE_MS = 450;
+/** Branch prefix for agent-pushed working branches */
+export const AGENT_BRANCH_PREFIX = "agent/";
+
+// ── InTab Flash (virtual model) ──────────────────────────
+// "intab/intab-llm*" ids are not real OpenRouter models — the
+// runner resolves each to a pool of free OpenRouter models (see
 // lib/intab-llm.ts) with per-conversation sticky routing and
-// silent failover. The UI presents it as an ordinary model.
+// silent failover. The UI presents them as ordinary models.
+//
+// Three tiers share one router:
+//   · Light — fastest replies (small/quick models first)
+//   · High  — balanced quality/speed (default; = the legacy id)
+//   · Max   — strongest reasoning (large agentic models first)
+// The legacy id stays mapped to the default tier so existing
+// conversations, stored settings, and the v1 chat-store default
+// keep working unchanged.
 export const INTAB_MODEL_ID = "intab/intab-llm";
-export const INTAB_MODEL_NAME = "InTab LLM";
-/** Synthetic catalog entry so the picker/header resolve the id */
+export const INTAB_MODEL_NAME = "InTab Flash 5.5";
+/** Tagline shown under the default (High) tier in pickers & menus */
+export const INTAB_MODEL_TAGLINE = "Adaptive multi-model routing · v6.0";
+
+/**
+ * Tier registry. `id` is the synthetic conversation-facing model id;
+ * `baseId` is the legacy id kept for isIntabModel prefix matching.
+ * Order matters: Light first, then the default, then Max.
+ */
+export type InTabTierId =
+  | "intab/intab-llm-light"
+  | "intab/intab-llm"
+  | "intab/intab-llm-max";
+
+export interface InTabTierMeta {
+  /** Synthetic wire-facing model id (never goes to OpenRouter) */
+  id: InTabTierId;
+  /** User-facing picker name */
+  name: string;
+  /** One-liner shown under the tier in pickers & command menus */
+  tagline: string;
+  /** Display context length (largest window in the tier's pool) */
+  contextLength: number;
+}
+
+/** All tiers, in picker order (Light, High, Max) */
+export const INTAB_MODEL_TIERS: readonly InTabTierMeta[] = [
+  {
+    id: "intab/intab-llm-light",
+    name: "InTab Flash · Light",
+    tagline: "Fastest free models · instant replies",
+    contextLength: 262144,
+  },
+  {
+    id: INTAB_MODEL_ID,
+    name: "InTab Flash · High",
+    tagline: INTAB_MODEL_TAGLINE,
+    contextLength: 262144,
+  },
+  {
+    id: "intab/intab-llm-max",
+    name: "InTab Flash · Max",
+    tagline: "Deepest reasoning · strongest free models",
+    contextLength: 1000000,
+  },
+] as const;
+
+/** Look up a tier by synthetic id (undefined for non-InTab ids) */
+export function intabTierById(modelId: string): InTabTierMeta | undefined {
+  return INTAB_MODEL_TIERS.find((t) => t.id === modelId);
+}
+
+/** Synthetic catalog entries so pickers/headers resolve every tier id */
+export const INTAB_TIER_VIRTUAL_MODELS: ModelInfo[] = INTAB_MODEL_TIERS.map(
+  (t) => ({
+    id: t.id,
+    name: t.name,
+    contextLength: t.contextLength,
+  })
+);
+
+/** Virtual model entry for the default (legacy) id — existing imports.
+ *  Carries the product name ("InTab Flash 5.5"), NOT the High tier
+ *  name — the tier is a state chosen beside the model, not the model. */
 export const INTAB_VIRTUAL_MODEL: ModelInfo = {
   id: INTAB_MODEL_ID,
   name: INTAB_MODEL_NAME,
-  contextLength: 128000,
+  contextLength: 262144,
 };
 
 /**
+ * Per-tier DESIRED state — the "background" half of the tier
+ * selector. OpenRouter models expose per-request state (see the
+ * catalog's `supported_parameters` + `reasoning.supported_efforts`):
+ *
+ *  · reasoning_effort — xhigh|high|medium|low|minimal|none: how much
+ *    the model may think internally before answering.
+ *  · reasoning.exclude — keep thinking tokens out of the response
+ *    (faster render, fewer tokens over the wire).
+ *
+ * These are DESIRES, not wire payloads: pool models differ in which
+ * efforts they accept (some only ["xhigh","medium"], some none at
+ * all), so lib/intab-llm.ts snaps the desired effort to each model's
+ * declared capabilities per request (snapRequestStateForModel).
+ *
+ * Light optimizes latency (low effort, thinking suppressed), High
+ * balances (medium effort), Max thinks hard (high effort, thinking
+ * visible in the reasoning panel). Applied for InTab turns only;
+ * real OpenRouter models pass through untouched.
+ */
+export const INTAB_TIER_DESIRED_STATE: Record<
+  InTabTierId,
+  { reasoningEffort: "low" | "medium" | "high"; excludeThinking: boolean }
+> = {
+  "intab/intab-llm-light": { reasoningEffort: "low", excludeThinking: true },
+  "intab/intab-llm": { reasoningEffort: "medium", excludeThinking: false },
+  "intab/intab-llm-max": { reasoningEffort: "high", excludeThinking: false },
+};
+
+// ── Task-aware routing (see lib/intab-classify.ts) ────────
+// Each turn is classified (quick/code/analysis/vision/agent) and
+// routed by a per-kind preference order. A kind list REFINES the
+// tier's base pool: candidates are scored by the tier order first,
+// then nudged by the kind order (see scoreCandidate in
+// lib/intab-llm.ts) — a kind can lift a model within the tier but
+// can never pull a model in from another tier's pool.
+//
+// Pool refresh (Sep 2026): the new-generation free families lead —
+// dots-studio/dots-3-note-preview (280B MoE, only 16B active → very
+// fast TTFT), inclusionai/ling-3.0-flash (262k ctx), and nex-agi/
+// nex-n2.5-pro|mini (262k ctx, agentic). The old heavy-first orders
+// (nemotron-550b leading every analysis turn) were the main source
+// of slow time-to-first-token.
+
+/** Per-kind pool preference orders (prefix match, like the base list) */
+export const INTAB_TURN_KIND_PREFERENCE = {
+  // Short social/follow-up turns — smallest fastest models first
+  quick: ["dots-studio/dots-3-note-preview", "inclusionai/ling-3.0-flash", "openai/gpt-oss-20b"],
+  // Code authoring/debugging — coder/agentic-tuned models first
+  code: ["qwen/qwen3-coder", "nex-agi/nex-n2.5-pro", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
+  // Long-context comprehension/analysis — big windows first
+  analysis: ["nex-agi/nex-n2.5-pro", "inclusionai/ling-3.0-flash", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
+  // Vision turns: ordering is secondary (the vision gate filters)
+  vision: ["openai/gpt-oss-120b", "nex-agi/nex-n2.5-pro", "inclusionai/ling-3.0-flash"],
+  // Agent/tool turns — strong instruction-following & tool use
+  agent: ["nex-agi/nex-n2.5-pro", "qwen/qwen3-coder", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
+} as const;
+
+/** Turn kinds the classifier can emit */
+export const INTAB_TURN_KINDS = ["quick", "code", "analysis", "vision", "agent"] as const;
+
+/**
+ * Extra requests a pool model may serve after its daily free cap is
+ * believed exhausted before it is fully demoted for the day.
+ */
+export const INTAB_DAILY_CAP_GRACE_REQUESTS = 2;
+/** Slack between the reported cap and when we consider a model spent */
+export const INTAB_DAILY_CAP_SAFETY_MARGIN = 0;
+/** Milliseconds of silence before a hedged race fires the backup model.
+ *  2s (was 3s): free-tier TTFT tails are the #1 latency complaint, and
+ *  a duplicated request on free models costs nothing. */
+export const INTAB_HEDGE_TRIGGER_MS = 2_000;
+/** Maximum simultaneous streams in one hedged race (primary + 1 hedge) */
+export const INTAB_HEDGE_MAX_STREAMS = 2;
+/**
  * Static InTab pool used before/without the live catalog. Kept in
- * preference order — strong general models first, fast ones after.
+ * preference order — fast general models first, larger ones after.
  * The live catalog replaces this wholesale when it loads (see
  * buildInTabPool), so stale entries here degrade gracefully: the
  * runner failover skips ids OpenRouter rejects with 404.
+ *
+ * Every entry MUST carry isFree: true — buildInTabPool filters the
+ * fallback through the same isFree/≥32k gate as the live catalog.
+ * (The pre-refresh list omitted it and produced an EMPTY cold-start
+ * pool — the "does not even respond" bug on first run.)
  */
 export const INTAB_FALLBACK_POOL: ModelInfo[] = [
   {
-    id: "nvidia/nemotron-3-ultra-550b-a55b:free",
-    name: "Nemotron 3 Ultra (free)",
-    contextLength: 1000000,
+    id: "dots-studio/dots-3-note-preview:free",
+    name: "Dots3-Note Preview (free)",
+    contextLength: 262144,
+    isFree: true,
+  },
+  {
+    id: "nex-agi/nex-n2.5-pro:free",
+    name: "Nex-N2.5 Pro (free)",
+    contextLength: 262144,
+    isFree: true,
+  },
+  {
+    id: "inclusionai/ling-3.0-flash:free",
+    name: "Ling 3.0 Flash (free)",
+    contextLength: 262144,
+    isFree: true,
   },
   {
     id: "openai/gpt-oss-120b:free",
     name: "GPT-OSS 120B (free)",
     contextLength: 131072,
-  },
-  {
-    id: "google/gemma-4-31b:free",
-    name: "Gemma 4 31B (free)",
-    contextLength: 262144,
+    isFree: true,
   },
   {
     id: "openai/gpt-oss-20b:free",
     name: "GPT-OSS 20B (free)",
     contextLength: 131072,
+    isFree: true,
   },
   {
-    id: "google/gemma-4-26b:free",
-    name: "Gemma 4 26B (free)",
+    id: "google/gemma-4-31b:free",
+    name: "Gemma 4 31B (free)",
     contextLength: 262144,
+    isFree: true,
   },
 ];
 
@@ -92,6 +271,41 @@ export const COMPACTION_MAX_RETRIES = 2;
 export const STREAM_FIRST_BYTE_TIMEOUT_MS = 30_000;
 export const STREAM_STALL_TIMEOUT_MS = 60_000;
 
+// ── Session host (SharedWorker stream ownership) ─────────
+/** Bump when the host ⇄ page message contract changes */
+export const HOST_PROTOCOL_VERSION = 1;
+/** Pages must re-attach within this window or the orphan turn aborts */
+export const HOST_ORPHAN_GRACE_MS = 45_000;
+/** Default hedge delay inside the host (client passes its own per turn) */
+export const HOST_HEDGE_TRIGGER_MS = 3_000;
+/** Pages heartbeat the host at this cadence to prove liveness */
+export const HOST_HEARTBEAT_MS = 15_000;
+/** In-memory cap on buffered content replayable to late attachers */
+export const HOST_SNAPSHOT_MAX_CHARS = 200_000;
+/**
+ * Distinct pool models the host walks per round before asking the
+ * page for fresh candidates (parity with the page-side attempt cap,
+ * so a dead provider pool can't spin for minutes unnoticed).
+ */
+export const HOST_MAX_ATTEMPTS = 4;
+/**
+ * Renderer ceiling: with no event for this long the transport is
+ * considered dead (worker killed, port dropped) and the turn ends
+ * with an honest error instead of a spinner that never stops. Above
+ * the client's own 30s first-byte / 60s stall watchdogs, so a merely
+ * slow model still ends via a normal END.
+ */
+export const TURN_INACTIVITY_TIMEOUT_MS = 90_000;
+
+// ── Tool-result folding (agent context efficiency) ────────
+/** Tool results older than this many turns fold to digests in wire requests */
+export const TOOL_RESULT_FOLD_TURNS = 6;
+/** A folded result keeps at most this many characters of digest */
+export const TOOL_RESULT_DIGEST_MAX_CHARS = 240;
+
+/** Concurrency cap for parallel independent tool execution */
+export const TOOL_EXECUTION_CONCURRENCY = 3;
+
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   defaultModel: INTAB_MODEL_ID,
   apiKey: "",
@@ -100,6 +314,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
     "You are InTab AI, an expert developer assistant built into the developer workstation. Provide clear, accurate, concise answers with production-ready code examples.",
   skills: [],
   syncImageAttachments: true,
+  agentMaxIterations: AGENT_ITERATIONS_DEFAULT,
   github: {
     token: "",
     mode: null,

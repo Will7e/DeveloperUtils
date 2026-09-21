@@ -22,12 +22,14 @@ export interface CompactionResult {
  * Drops oldest messages until the remaining ones fit the budget.
  * Always keeps at least the most recent exchange. Prefer dropping
  * complete user/assistant pairs so the alternation invariant holds.
+ * An optional modelId sharpens estimates with calibration data.
  */
 export function compactMessages(
   messages: ChatMessage[],
-  budgetTokens: number
+  budgetTokens: number,
+  modelId?: string
 ): CompactionResult {
-  const totalTokens = messages.reduce((s, m) => s + estimateMessageTokens(m), 0);
+  const totalTokens = messages.reduce((s, m) => s + estimateMessageTokens(m, modelId), 0);
   if (totalTokens <= budgetTokens || messages.length <= 2) {
     return { messages, hiddenCount: 0, freedTokens: 0 };
   }
@@ -38,7 +40,7 @@ export function compactMessages(
   // Walk from the newest message backwards, accumulating tokens,
   // until adding the next message would exceed the budget.
   for (let i = messages.length - 1; i >= 0; i--) {
-    const t = estimateMessageTokens(messages[i]!);
+    const t = estimateMessageTokens(messages[i]!, modelId);
     if (acc + t > budgetTokens) break;
     acc += t;
     cutIndex = i;
@@ -57,7 +59,7 @@ export function compactMessages(
 
   const kept = messages.slice(cutIndex);
   const hiddenCount = messages.length - kept.length;
-  const keptTokens = kept.reduce((s, m) => s + estimateMessageTokens(m), 0);
+  const keptTokens = kept.reduce((s, m) => s + estimateMessageTokens(m, modelId), 0);
 
   return {
     messages: kept,

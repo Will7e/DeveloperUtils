@@ -15,11 +15,13 @@
 // prefers-reduced-motion by disabling smooth scrolling.
 
 import React from "react";
-import { ArrowDown, Brain } from "lucide-react";
+import { ArrowDown, Brain, RefreshCw, WifiOff } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
+import { visibleMessages } from "../types";
 import type { ChatMessage, ConversationSummary } from "../types";
+import { resumeUserTurn } from "../services/chat-runner";
 
 /**
  * Collapsible "Compacted memory" chip rendered above the kept
@@ -95,9 +97,28 @@ export function MessageList({
   // is exactly "streaming here".
   const streamingContent = useChatStore((s) => s.streamingContent);
   const streamingReasoning = useChatStore((s) => s.streamingReasoning);
+  const reconnecting = useChatStore((s) => s.reconnecting);
   const isStreamingHere = useChatStore(
     (s) => s.isStreaming && s.streamingConversationId === s.activeConversationId
   );
+
+  // Interrupted-turn recovery affordance: when auto-resume failed
+  // for this conversation, offer an explicit one-click Resume.
+  const activeId = useChatStore((s) => s.activeConversationId);
+  const [hasUnresumable, setHasUnresumable] = React.useState(false);
+  React.useEffect(() => {
+    if (!activeId) {
+      setHasUnresumable(false);
+      return;
+    }
+    const check = () => {
+      const conv = useChatStore.getState().conversations.find((c) => c.id === activeId);
+      setHasUnresumable(conv?.pendingTurn?.outcome === "unresumable");
+    };
+    check();
+    const unsub = useChatStore.subscribe(check);
+    return unsub;
+  }, [activeId]);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const innerRef = React.useRef<HTMLDivElement>(null);
@@ -195,10 +216,13 @@ export function MessageList({
     return -1;
   })();
 
+  // Soft-deleted messages (regenerate) stay in storage but never render.
+  const visible = React.useMemo(() => visibleMessages(messages), [messages]);
+
   const showStreamingBubble = isStreamingHere && streamingContent !== "";
   const showThinking = isStreamingHere && streamingContent === "";
 
-  if (messages.length === 0 && !isStreamingHere) {
+  if (visible.length === 0 && !isStreamingHere) {
     return (
       <ChatEmptyState
         onSuggestion={onSuggestion}
@@ -211,14 +235,32 @@ export function MessageList({
 
   return (
     <div className="chat-message-list-wrap">
+      {reconnecting && (
+        <div className="chat-reconnect-banner" role="status">
+          <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>Reconnecting to your response…</span>
+        </div>
+      )}
+      {hasUnresumable && !isStreamingHere && (
+        <button
+          type="button"
+          className="chat-resume-banner"
+          onClick={() => {
+            if (activeId) void resumeUserTurn(activeId);
+          }}
+        >
+          <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>A response was interrupted — click to resume</span>
+        </button>
+      )}
       <div ref={scrollRef} className="chat-message-list">
         <div ref={innerRef} className="chat-message-list-inner">
           {summary && <SummaryBlock summary={summary} />}
-          {messages.map((message, idx) => (
+          {visible.map((message, idx) => (
             <MessageItem
               key={message.id}
               message={message}
-              allMessages={messages}
+              allMessages={visible}
               canRegenerate={!isStreamingHere && idx === lastAssistantIdx}
               onRegenerate={onRegenerate}
             />

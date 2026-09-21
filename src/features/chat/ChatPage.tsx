@@ -5,8 +5,12 @@
 // The context engine keeps requests within the model's window and
 // the meter reflects live usage.
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
+import { MonitorPlay } from "lucide-react";
 import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
+import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
+import { flushWorkspaceSave } from "./workspace/workspace";
 import {
   displayNameFor,
   regenerateLastResponse,
@@ -15,15 +19,27 @@ import {
   stopChatStream,
   downloadConversation,
   ensureModelCatalog,
+  resumeInterruptedTurn,
+  resumeUserTurn,
+  commitPartialReply,
 } from "./services/chat-runner";
 import { getConversationContext, composeSystemPrompt } from "./context/engine";
 import { buildEffectiveSystemPrompt } from "./lib/skills";
+import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID } from "./lib/commands";
+import { resolveSlashInput } from "./lib/slash";
+import { useAppStore } from "@/stores/app.store";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatHeader } from "./components/ChatHeader";
 import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
+import { PushApprovalModal } from "./components/PushApprovalModal";
+import { PreviewPane } from "./preview/PreviewPane";
+import { usePreviewBridge } from "./preview/preview-bridge";
 import { modelSupportsImages } from "./services/chat-runner";
+import { sessionHost } from "./session/session-client";
+import { logTurnEvent } from "./session/turn-log";
+import { isTurnUnrecoverable } from "./session/turn-engine";
 import type { ChatAttachment, ModelInfo, RepoContext } from "./types";
 import type { ChatCommand } from "./lib/commands";
 import "./chat.css";
@@ -44,11 +60,57 @@ export function ChatPage() {
 
   const activeConversation = useChatStore(selectActiveConversation);
 
-  const [draft, setDraft] = useState("");
+  // Streaming is scoped to one conversation: other chats stay fully
+  // usable while a stream runs elsewhere. (Declared before the
+  // command helpers, which read it during render.)
+  const isStreamingHere = isStreaming && streamingConversationId === activeConversationId;
+
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // ── Per-conversation composer state ──
+  // A draft belongs to the chat it was typed in. Keeping one shared
+  // draft meant switching chats carried the text (and the attached
+  // images) into the wrong thread — where Enter would send it. Drafts
+  // are stashed per conversation and restored when you come back.
+  const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState<ChatAttachment[]>([]);
+  const composerByConversation = useRef(
+    new Map<string, { draft: string; images: ChatAttachment[] }>()
+  );
+  const draftOwnerRef = useRef<string | null>(activeConversationId);
+
+  // Render-time reconciliation: when the active conversation changes,
+  // stash what was typed and restore the new chat's own draft. (No
+  // effect: this must land in the same commit as the switch, or a
+  // keystroke could be attributed to the previous chat.)
+  if (draftOwnerRef.current !== activeConversationId) {
+    const previous = draftOwnerRef.current;
+    if (previous) {
+      composerByConversation.current.set(previous, { draft, images: pendingImages });
+    }
+    const restored = activeConversationId
+      ? composerByConversation.current.get(activeConversationId)
+      : undefined;
+    draftOwnerRef.current = activeConversationId;
+    setDraft(restored?.draft ?? "");
+    setPendingImages(restored?.images ?? []);
+  }
+
+  // Agent workspace: ensures the workspace exists on repo attach and
+  // exposes the attachment state for the preview toggle.
+  const { repoAttached } = useWorkspaceStoreSlice();
+  usePreviewBridge();
+
+  // Auto-open the preview on attach: derive from the repo context so
+  // no effect-based setState is needed. Once closed manually it stays
+  // closed for this attachment (tracked by attachedAt).
+  const attachedAt = activeConversation?.repoContext?.attachedAt ?? 0;
+  const [closedForAttachment, setClosedForAttachment] = useState<number | null>(null);
+  const shouldShowPreview = repoAttached && closedForAttachment !== attachedAt;
+  const previewVisible = previewOpen && shouldShowPreview;
 
   // Fetch the live model catalog whenever an API key becomes
   // available. Keying on the hydrated key value (not just mount)
@@ -96,6 +158,92 @@ export function ChatPage() {
 
     if (useChatStore.persist.hasHydrated()) ensureConversation();
     return useChatStore.persist.onFinishHydration(ensureConversation);
+  }, []);
+
+  // Resume a turn that was streaming when the page reloaded. The
+  // persisted pendingTurn marker + trailing user message identify the
+  // lost response; resumeInterruptedTurn validates and re-streams
+  // (or adopts the host's live stream) through the normal turn loop.
+  useEffect(() => {
+    const resume = () => {
+      const state = useChatStore.getState();
+      state.cleanupStalePendingTurns();
+      if (state.isStreaming) return;
+      // Most recently interrupted first; markers flagged unresumable
+      // wait for the explicit Resume affordance instead of retrying
+      // the failed auto path on every load.
+      const candidates = state.conversations
+        .filter((c) => c.pendingTurn && c.pendingTurn.outcome !== "unresumable")
+        .sort((a, b) => (b.pendingTurn!.startedAt ?? 0) - (a.pendingTurn!.startedAt ?? 0));
+      for (const conv of candidates) {
+        void resumeInterruptedTurn(conv.id);
+        break; // one stream at a time
+      }
+    };
+
+    if (useChatStore.persist.hasHydrated()) resume();
+    return useChatStore.persist.onFinishHydration(resume);
+  }, []);
+
+  // Session hardening, once per mount:
+  //  - pre-connect the session host so the first send skips the
+  //    handshake (and reloads re-attach a beat sooner),
+  //  - retire the old keep-alive service worker if a previous build
+  //    installed one (it could never keep a SharedWorker alive),
+  //  - flush streamed-but-uncommitted content on page hide so a
+  //    page-local (non-surviving) reply is preserved for resume.
+  useEffect(() => {
+    void sessionHost.connect();
+    // Fold the host's log into this page's log so one console handle
+    // (window.__intabTurnLog) tells the whole story of a turn.
+    const unsubscribeHostLog = sessionHost.subscribe((event) => {
+      if (event.type === "LOG") logTurnEvent(event.entry);
+    });
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => {
+          for (const registration of registrations) {
+            const url = registration.active?.scriptURL ?? "";
+            if (url.endsWith("/sw.js")) void registration.unregister();
+          }
+        })
+        .catch(() => {
+          /* SW API unavailable — nothing to retire */
+        });
+    }
+
+    const flushPartial = () => {
+      const state = useChatStore.getState();
+      const id = state.streamingConversationId ?? state.activeConversationId;
+      if (id) commitPartialReply(id);
+      // Workspaces save on a debounce — flush the active one so an
+      // instant close can't lose the last agent edit.
+      const ws = state.workspaces[id ?? ""];
+      if (ws) void flushWorkspaceSave(id!, ws);
+    };
+    window.addEventListener("pagehide", flushPartial);
+    const onVisChange = () => {
+      if (document.visibilityState === "hidden") flushPartial();
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+
+    // Last-chance guard ONLY for work a reload would actually lose: a
+    // page-local stream (the worker isn't holding it) or an in-flight
+    // tool phase. A host-owned stream is reload-surviving by design,
+    // so blocking that reload would fight the feature it provides.
+    const guardUnload = (e: BeforeUnloadEvent) => {
+      if (isTurnUnrecoverable()) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", guardUnload);
+    return () => {
+      unsubscribeHostLog();
+      window.removeEventListener("pagehide", flushPartial);
+      document.removeEventListener("visibilitychange", onVisChange);
+      window.removeEventListener("beforeunload", guardUnload);
+    };
   }, []);
 
   // Global shortcut: ⌘⇧N (or Ctrl+Shift+N) starts a new chat,
@@ -148,11 +296,50 @@ export function ChatPage() {
     [activeConversation, modelInfo, effectiveSystemPrompt]
   );
 
+  /** Runs a registry command against this conversation */
+  const runCommand = React.useCallback(
+    (command: ChatCommand, arg: string) => {
+      if (!activeConversationId) return;
+      const outcome = command.run({
+        conversationId: activeConversationId,
+        arg,
+        models,
+        isStreaming: isStreamingHere,
+      });
+      // Commands may hand the composer a draft (/help reopens the
+      // menu); otherwise the input is cleared.
+      void Promise.resolve(outcome).then((result) => {
+        setDraft(result && typeof result === "object" ? result.draft ?? "" : "");
+      });
+    },
+    [activeConversationId, models, isStreamingHere]
+  );
+
   const handleSend = () => {
     if (!activeConversationId) return;
     if (!draft.trim() && pendingImages.length === 0) return;
     const text = draft;
     const images = pendingImages;
+
+    // A slash draft is a command, never a prompt. Unmatched command
+    // tokens stay in the composer with an explanation instead of
+    // being sent to the model.
+    const resolution = resolveSlashInput(text, CHAT_COMMANDS);
+    if (resolution.kind === "unknown") {
+      useAppStore.getState().addToast({
+        message: `Unknown command “/${resolution.token}” — press / to browse commands.`,
+        type: "error",
+        duration: 4000,
+      });
+      return;
+    }
+    if (resolution.kind === "command") {
+      const command = CHAT_COMMAND_BY_ID.get(resolution.id);
+      setDraft("");
+      if (command) runCommand(command, resolution.arg);
+      return;
+    }
+
     setDraft("");
     setPendingImages([]);
     sendUserMessage(
@@ -206,21 +393,13 @@ export function ChatPage() {
   // draft; submenu commands keep it open for their argument.
   const handleRunCommand = (command: ChatCommand, arg: string) => {
     if (!activeConversationId) return;
-    if (command.hasSubmenu) {
+    if (command.hasSubmenu && !arg.trim()) {
       // /model without an arg enters the submenu in the composer —
       // the draft is still showing "/model", so leave it alone.
-      if (!arg.trim()) return;
-      command.run({ conversationId: activeConversationId, arg, models });
-      setDraft("");
       return;
     }
-    command.run({ conversationId: activeConversationId, arg, models });
-    setDraft("");
+    runCommand(command, arg);
   };
-
-  // Streaming is scoped to one conversation: other chats stay fully
-  // usable while a stream runs elsewhere.
-  const isStreamingHere = isStreaming && streamingConversationId === activeConversationId;
 
   return (
     <div className="chat-page">
@@ -265,42 +444,111 @@ export function ChatPage() {
           isSidebarOpen={sidebarOpen}
         />
 
-        <MessageList
-          key={activeConversationId ?? "empty"}
-          messages={activeConversation?.messages ?? []}
-          defaultModel={modelName}
-          hasApiKey={Boolean(settings.apiKey)}
-          summary={activeConversation?.summary}
-          onSuggestion={handleSuggestion}
-          onRegenerate={() =>
-            activeConversationId && regenerateLastResponse(activeConversationId)
-          }
-          onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
-        />
+        {previewVisible ? (
+          <div className="chat-agent-layout">
+            <Group orientation="horizontal">
+              <Panel defaultSize={55} minSize={30}>
+                <div className="chat-agent-chat-column">
+                  <MessageList
+                    key={activeConversationId ?? "empty"}
+                    messages={activeConversation?.messages ?? []}
+                    defaultModel={modelName}
+                    hasApiKey={Boolean(settings.apiKey)}
+                    summary={activeConversation?.summary}
+                    onSuggestion={handleSuggestion}
+                    onRegenerate={() =>
+                      activeConversationId && regenerateLastResponse(activeConversationId)
+                    }
+                    onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
+                  />
+                  <Composer
+                    value={draft}
+                    onChange={setDraft}
+                    onSend={handleSend}
+                    onStop={handleStop}
+                    isStreaming={isStreamingHere}
+                    disabled={isStreaming && !isStreamingHere}
+                    placeholder={
+                      activeConversation?.repoContext
+                        ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`
+                        : `Message ${modelName}…`
+                    }
+                    attachments={pendingImages}
+                    onAttachmentsChange={setPendingImages}
+                    onTextFilesImported={(md) => setDraft((d) => d + md)}
+                    modelSupportsImages={modelSupportsImages(modelId)}
+                    models={models}
+                    modelsLoading={modelsLoading}
+                    activeModelId={modelId}
+                    onRunCommand={handleRunCommand}
+                    onModelChange={handleModelChange}
+                  />
+                </div>
+              </Panel>
+              <Separator className="chat-agent-resize-handle" />
+              <Panel defaultSize={45} minSize={25}>
+                <PreviewPane
+                  onClose={() => {
+                    setPreviewOpen(false);
+                    if (attachedAt) setClosedForAttachment(attachedAt);
+                  }}
+                />
+              </Panel>
+            </Group>
+          </div>
+        ) : (
+          <>
+            <MessageList
+              key={activeConversationId ?? "empty"}
+              messages={activeConversation?.messages ?? []}
+              defaultModel={modelName}
+              hasApiKey={Boolean(settings.apiKey)}
+              summary={activeConversation?.summary}
+              onSuggestion={handleSuggestion}
+              onRegenerate={() =>
+                activeConversationId && regenerateLastResponse(activeConversationId)
+              }
+              onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
+            />
 
-        <Composer
-          value={draft}
-          onChange={setDraft}
-          onSend={handleSend}
-          onStop={handleStop}
-          isStreaming={isStreamingHere}
-          disabled={isStreaming && !isStreamingHere}
-          placeholder={
-            activeConversation?.repoContext
-              ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`
-              : `Message ${modelName}…`
-          }
-          attachments={pendingImages}
-          onAttachmentsChange={setPendingImages}
-          onTextFilesImported={(md) => setDraft((d) => d + md)}
-          modelSupportsImages={modelSupportsImages(modelId)}
-          models={models}
-          modelsLoading={modelsLoading}
-          activeModelId={modelId}
-          onRunCommand={handleRunCommand}
-          onModelChange={handleModelChange}
-        />
+            <Composer
+              value={draft}
+              onChange={setDraft}
+              onSend={handleSend}
+              onStop={handleStop}
+              isStreaming={isStreamingHere}
+              disabled={isStreaming && !isStreamingHere}
+              placeholder={
+                activeConversation?.repoContext
+                  ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`
+                  : `Message ${modelName}…`
+              }
+              attachments={pendingImages}
+              onAttachmentsChange={setPendingImages}
+              onTextFilesImported={(md) => setDraft((d) => d + md)}
+              modelSupportsImages={modelSupportsImages(modelId)}
+              models={models}
+              modelsLoading={modelsLoading}
+              activeModelId={modelId}
+              onRunCommand={handleRunCommand}
+              onModelChange={handleModelChange}
+            />
+            {repoAttached && !previewVisible && (
+              <button
+                type="button"
+                className="chat-preview-open-fab"
+                onClick={() => setPreviewOpen(true)}
+                title="Show live preview"
+              >
+                <MonitorPlay className="h-4 w-4" />
+                Preview
+              </button>
+            )}
+          </>
+        )}
       </main>
+
+      <PushApprovalModal />
 
       <ChatSettingsModal
         open={settingsOpen}

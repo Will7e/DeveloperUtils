@@ -14,6 +14,8 @@ export const DEFAULT_EDITOR_SETTINGS = {
   formatOnPaste: true,
   formatOnType: false,
   executionTimeout: 10000,
+  sidebarAutoCollapse: false,
+  sidebarAutoCollapseDelay: 30000,
 };
 
 /** Language configurations */

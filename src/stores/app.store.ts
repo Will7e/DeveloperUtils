@@ -864,19 +864,13 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      // Toast actions
+      // Toast actions — dismissal timers live in ToastContainer so hover
+      // can pause/resume them; the store only tracks presence.
       addToast: (toast) => {
         const id = generateId();
         set((state) => ({
           toasts: [...state.toasts, { ...toast, id }],
         }));
-        // Auto-remove after duration
-        const duration = toast.duration ?? 3000;
-        setTimeout(() => {
-          set((state) => ({
-            toasts: state.toasts.filter((t) => t.id !== id),
-          }));
-        }, duration);
       },
 
       removeToast: (id: string) => {

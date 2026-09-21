@@ -1,0 +1,421 @@
+// ============================================================
+// GitHub Write Client — Git Data API for the Gated Push Flow
+// ============================================================
+// Implements the standard low-level commit chain so one push can
+// carry every workspace change in a single commit:
+//
+//   getBranchHead → createBranch (agent/* from base)
+//   → createBlob per changed file → createTree(baseTreeSha, entries)
+//   → createCommit(parent, tree) → updateRef(branch, commit)
+//   → openPullRequest
+//
+// Reuses githubFetch from github-client.ts for auth headers, the
+// proxy fallback, and rate-limit handling. Never calls updateRef
+// on the base branch itself — pushes target the agent working
+// branch only. Concurrency is guarded by re-reading the head right
+// before the ref update (fast-forward check).
+
+import { githubFetch } from "./github-client";
+import { AGENT_BRANCH_PREFIX } from "../constants";
+
+// ── Types ────────────────────────────────────────────────────
+
+export interface BranchHead {
+  refName: string;
+  commitSha: string;
+  treeSha: string | null;
+}
+
+export interface TreeEntryInput {
+  path: string;
+  mode: "100644" | "100755" | "040000" | "160000" | "120000";
+  type: "blob" | "tree" | "commit";
+  /** null → delete this path in the new tree */
+  sha: string | null;
+}
+
+export interface PushChainResult {
+  branchName: string;
+  commitSha: string;
+}
+
+export interface PullRequestInfo {
+  number: number;
+  url: string;
+  htmlUrl: string;
+}
+
+export class GitHubWriteError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: "conflict" | "forbidden" | "not_found" | "rate_limited" | "validation"
+  ) {
+    super(message);
+    this.name = "GitHubWriteError";
+  }
+}
+
+function classifyStatus(status: number, message: string): GitHubWriteError["code"] {
+  if (status === 409 || status === 422) {
+    if (/fast-forward|non-fast-forward|not a fast-forward|updated|is at/i.test(message)) {
+      return "conflict";
+    }
+    return "validation";
+  }
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  return undefined;
+}
+
+function wrap(status: number, message: string, detail?: string): GitHubWriteError {
+  return new GitHubWriteError(detail ? `${message} — ${detail}` : message, status, classifyStatus(status, message));
+}
+
+// ── Refs & branches ──────────────────────────────────────────
+
+/** Head commit of a branch (GET /git/ref or /git/refs/heads fallback) */
+export async function getBranchHead(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string
+): Promise<BranchHead> {
+  const refPath = branch.split("/").map(encodeURIComponent).join("/");
+  let res: Response;
+  try {
+    res = await githubFetch(`/repos/${owner}/${repo}/git/ref/heads/${refPath}`, token);
+  } catch (err) {
+    // Older shapes: /git/refs/heads/<branch>
+    if (err instanceof Error && /404|not found/i.test(err.message)) {
+      const res2 = await githubFetch(`/repos/${owner}/${repo}/git/refs/heads/${refPath}`, token);
+      return parseRef(await res2.json());
+    }
+    throw err;
+  }
+  return parseRef(await res.json());
+}
+
+interface RefJson {
+  object?: { sha?: string; type?: string };
+}
+
+function parseRef(json: unknown): BranchHead {
+  const j = json as RefJson;
+  const obj = Array.isArray(json) ? (json as RefJson[])[0]?.object : j.object;
+  if (!obj?.sha) throw wrap(404, "Branch reference not found on GitHub.");
+  return { refName: "", commitSha: obj.sha, treeSha: null };
+}
+
+/** Resolves the tree sha of a commit (needed as the base for createTree) */
+export async function getCommit(
+  token: string,
+  owner: string,
+  repo: string,
+  sha: string
+): Promise<{ sha: string; treeSha: string; parentShas: string[] }> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/commits/${encodeURIComponent(sha)}`, token);
+  const json = (await res.json()) as {
+    sha?: string;
+    parents?: Array<{ sha?: string }>;
+    commit?: { tree?: { sha?: string } };
+  };
+  if (!json.sha || !json.commit?.tree?.sha) {
+    throw wrap(422, "Could not resolve the base commit tree.");
+  }
+  return {
+    sha: json.sha,
+    treeSha: json.commit.tree.sha,
+    parentShas: (json.parents ?? []).map((p) => p.sha ?? "").filter(Boolean),
+  };
+}
+
+/** Creates a new branch pointing at a commit sha */
+export async function createBranch(
+  token: string,
+  owner: string,
+  repo: string,
+  branchName: string,
+  fromSha: string
+): Promise<void> {
+  const res = await rawJson(
+    await githubFetch(
+      `/repos/${owner}/${repo}/git/refs`,
+      token,
+      "application/vnd.github+json",
+      {
+        method: "POST",
+        body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: fromSha }),
+      }
+    )
+  );
+  if (!res.ok && res.status !== 422) {
+    throw wrap(res.status, "Failed to create the working branch.");
+  }
+  // 422 "Reference already exists" is tolerated — branch reuse is fine
+}
+
+/** Updates (fast-forwards) a branch ref to a commit */
+export async function updateRef(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  sha: string
+): Promise<void> {
+  const refPath = branch.split("/").map(encodeURIComponent).join("/");
+  const res = await rawJson(
+    await githubFetch(
+      `/repos/${owner}/${repo}/git/refs/heads/${refPath}`,
+      token,
+      "application/vnd.github+json",
+      { method: "PATCH", body: JSON.stringify({ sha, force: false }) }
+    )
+  );
+  if (!res.ok) {
+    throw wrap(res.status, `Failed to update the branch ref (HTTP ${res.status}).`);
+  }
+}
+
+/** True when the branch name is a protected default branch we refuse to touch */
+export function isProtectedBranchName(branch: string): boolean {
+  const name = branch.toLowerCase();
+  return name === "main" || name === "master" || name === "develop" || name === "development";
+}
+
+/** Lists branch names (up to 300) — used for collision-safe naming */
+export async function listBranches(token: string, owner: string, repo: string): Promise<string[]> {
+  const res = await githubFetch(`/repos/${owner}/${repo}/branches?per_page=100`, token);
+  const json = (await res.json()) as Array<{ name?: string }>;
+  return (Array.isArray(json) ? json : []).map((b) => b.name ?? "").filter(Boolean);
+}
+
+// ── Blobs & trees & commits ──────────────────────────────────
+
+/** Creates a blob and returns its sha */
+export async function createBlob(
+  token: string,
+  owner: string,
+  repo: string,
+  content: string
+): Promise<string> {
+  const res = await rawJson(
+    await githubFetch(`/repos/${owner}/${repo}/git/blobs`, token, "application/vnd.github+json", {
+      method: "POST",
+      body: JSON.stringify({ content, encoding: "utf-8" }),
+    })
+  );
+  const json = (await res.body) as { sha?: string };
+  if (!res.ok || !json.sha) {
+    throw wrap(res.status, `Failed to create a blob for the push.`);
+  }
+  return json.sha;
+}
+
+export async function createTree(
+  token: string,
+  owner: string,
+  repo: string,
+  baseTreeSha: string,
+  entries: TreeEntryInput[]
+): Promise<string> {
+  const res = await rawJson(
+    await githubFetch(`/repos/${owner}/${repo}/git/trees`, token, "application/vnd.github+json", {
+      method: "POST",
+      body: JSON.stringify({ base_tree: baseTreeSha, tree: entries }),
+    })
+  );
+  const json = (await res.body) as { sha?: string };
+  if (!res.ok || !json.sha) {
+    throw wrap(res.status, "Failed to create the git tree for the push.");
+  }
+  return json.sha;
+}
+
+export async function createCommit(
+  token: string,
+  owner: string,
+  repo: string,
+  message: string,
+  treeSha: string,
+  parentShas: string[]
+): Promise<string> {
+  const res = await rawJson(
+    await githubFetch(`/repos/${owner}/${repo}/git/commits`, token, "application/vnd.github+json", {
+      method: "POST",
+      body: JSON.stringify({ message, tree: treeSha, parents: parentShas }),
+    })
+  );
+  const json = (await res.body) as { sha?: string };
+  if (!res.ok || !json.sha) {
+    throw wrap(res.status, "Failed to create the commit.");
+  }
+  return json.sha;
+}
+
+// ── Pull requests ────────────────────────────────────────────
+
+export async function openPullRequest(
+  token: string,
+  owner: string,
+  repo: string,
+  head: string,
+  base: string,
+  title: string,
+  body: string
+): Promise<PullRequestInfo> {
+  const res = await rawJson(
+    await githubFetch(`/repos/${owner}/${repo}/pulls`, token, "application/vnd.github+json", {
+      method: "POST",
+      body: JSON.stringify({ title, head, base, body, draft: false }),
+    })
+  );
+  const json = (await res.body) as {
+    number?: number;
+    url?: string;
+    html_url?: string;
+    message?: string;
+  };
+  if (!res.ok || !json.number) {
+    // A PR may already exist for this head/base — surface clearly
+    const msg = json.message || `Failed to open the pull request (HTTP ${res.status}).`;
+    throw wrap(res.status, msg);
+  }
+  return {
+    number: json.number,
+    url: json.url ?? "",
+    htmlUrl: json.html_url ?? `https://github.com/${owner}/${repo}/pull/${json.number}`,
+  };
+}
+
+// ── High-level gated push orchestration ──────────────────────
+
+export interface PushPlan {
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  baseCommitSha: string;
+  commitMessage: string;
+  prTitle: string;
+  prBody: string;
+  files: Array<{ path: string; content: string | null; baseSha: string | null }>;
+  /** Creates the working branch as part of the chain (recommended) */
+  createBranchIfNeeded: boolean;
+  /**
+   * Reuses an existing working branch when provided. Pushing again
+   * onto the same branch parents the new commit on the branch's
+   * CURRENT head (not baseCommitSha), so repeat pushes stack cleanly.
+   */
+  workingBranch?: string;
+}
+
+export interface PushChainOptions {
+  /** Called with a short progress note after each stage (UI toasts) */
+  onProgress?: (note: string) => void;
+}
+
+/**
+ * Executes the full push chain. The caller (push_changes executor)
+ * has already obtained user approval — this function performs the
+ * GitHub writes: branch → blobs → tree → commit → ref → PR.
+ */
+export async function executePushChain(
+  token: string,
+  plan: PushPlan,
+  options: PushChainOptions = {}
+): Promise<PushChainResult & { pr?: PullRequestInfo }> {
+  const { owner, repo, baseBranch, files, commitMessage } = plan;
+  // prTitle/prBody are applied by the caller after the push lands
+  // (see runPushChanges → openPullRequest)
+  const progress = options.onProgress ?? (() => {});
+
+  if (files.length === 0) {
+    throw new GitHubWriteError("No workspace changes to push.", 422, "validation");
+  }
+  if (isProtectedBranchName(plan.workingBranch ?? baseBranch)) {
+    throw new GitHubWriteError(
+      "Refusing to push to a protected default branch — pushes always target an agent working branch.",
+      403,
+      "forbidden"
+    );
+  }
+
+  // ── 1. Resolve the parent commit + tree ──
+  // Repeat pushes to an existing working branch parent on that
+  // branch's current head; a fresh push parents on the base branch.
+  progress("Resolving the base commit…");
+  const parentBranch = plan.workingBranch ?? baseBranch;
+  const parentHead = await getBranchHead(token, owner, repo, parentBranch);
+  const parentCommit = await getCommit(token, owner, repo, parentHead.commitSha);
+
+  // ── 2. Create (or reuse) the working branch ──
+  let workingBranch = plan.workingBranch ?? "";
+  if (!workingBranch) {
+    workingBranch = await uniqueBranchName(token, owner, repo, baseBranch);
+    progress(`Creating branch ${workingBranch}…`);
+    await createBranch(token, owner, repo, workingBranch, parentHead.commitSha);
+  } else {
+    progress(`Reusing branch ${workingBranch}…`);
+  }
+
+  // ── 3. Upload blobs ──
+  const treeEntries: TreeEntryInput[] = [];
+  for (const f of files) {
+    if (f.content === null) {
+      treeEntries.push({ path: f.path, mode: "100644", type: "blob", sha: null });
+    } else {
+      progress(`Uploading ${f.path}…`);
+      const sha = await createBlob(token, owner, repo, f.content);
+      treeEntries.push({ path: f.path, mode: "100644", type: "blob", sha });
+    }
+  }
+
+  // ── 4. Create tree on top of the parent tree ──
+  progress("Building the git tree…");
+  const newTreeSha = await createTree(token, owner, repo, parentCommit.treeSha, treeEntries);
+
+  // ── 5. Create the commit ──
+  progress("Creating the commit…");
+  const commitSha = await createCommit(token, owner, repo, commitMessage, newTreeSha, [parentHead.commitSha]);
+
+  // ── 6. Fast-forward the working branch ──
+  progress("Updating the branch…");
+  await updateRef(token, owner, repo, workingBranch, commitSha);
+
+  return { branchName: workingBranch, commitSha };
+}
+
+/** Generates a collision-safe agent branch name */
+export async function uniqueBranchName(
+  token: string,
+  owner: string,
+  repo: string,
+  baseBranch: string
+): Promise<string> {
+  const existing = await listBranches(token, owner, repo);
+  const taken = new Set(existing);
+  const slug = baseBranch.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20) || "base";
+  const stamp = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}`;
+  const time = `${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
+  let name = `${AGENT_BRANCH_PREFIX}${slug}-${day}-${time}`;
+  let n = 2;
+  while (taken.has(name)) {
+    name = `${AGENT_BRANCH_PREFIX}${slug}-${day}-${time}-${n}`;
+    n++;
+  }
+  return name;
+}
+
+// ── Raw JSON helper ──────────────────────────────────────────
+
+interface JsonResult {
+  ok: boolean;
+  status: number;
+  body: Promise<unknown>;
+}
+
+async function rawJson(res: Response): Promise<JsonResult> {
+  return { ok: res.ok, status: res.status, body: res.json() };
+}

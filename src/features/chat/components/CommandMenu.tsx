@@ -7,11 +7,18 @@
 // keyboard navigable via the textarea: arrows move the highlight,
 // Enter/Tab runs the command, Escape closes. /model swaps the list
 // for the loaded model catalog as an inline submenu.
+//
+// Rows are grouped by the registry's `group` label. Group headers
+// are rendered inline so the flat index the composer navigates with
+// stays identical to the flat index used here.
+//
+// Availability is the registry's concern, not this component's: it
+// receives the rows it should render.
 
 import React from "react";
 import { Bot, Check, CornerDownLeft } from "lucide-react";
 import { formatContext, formatPrice } from "./ModelPicker";
-import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID } from "../constants";
+import { CURATED_FALLBACK_MODELS, intabTierById } from "../constants";
 import type { ModelInfo } from "../types";
 import type { ChatCommand } from "../lib/commands";
 
@@ -32,7 +39,7 @@ interface CommandMenuProps {
   highlightedIdx: number;
   /** Which list is shown */
   mode: CommandMenuMode;
-  /** Commands matching the current query */
+  /** Commands matching the current query (availability already applied) */
   filteredCommands: ChatCommand[];
   /** Model rows matching the arg in submenu mode */
   filteredModels: ModelInfo[];
@@ -40,26 +47,22 @@ interface CommandMenuProps {
   onSelectCommand: (command: ChatCommand) => void;
   /** Picks the highlighted (or clicked) model in submenu mode */
   onSelectModel: (modelId: string) => void;
+  /** True while this conversation is replying (drives the hints) */
+  isStreaming?: boolean;
 }
 
-interface ModelRowMeta {
-  name: string;
-  id: string;
-  badges: string[];
-  free: boolean;
-}
-
-function toRowMeta(m: ModelInfo): ModelRowMeta {
-  const isInTab = m.id === INTAB_MODEL_ID;
+/** Per-model row metadata (badges + free flag for the submenu) */
+function toRowMeta(m: ModelInfo): { name: string; id: string; badges: string[]; free: boolean } {
+  const tier = intabTierById(m.id);
   return {
     name: m.name,
-    // InTab row: tagline instead of the slug — no hints at routing.
-    id: isInTab ? "Smart routing across top open models · 128k ctx" : m.id,
+    // InTab tier rows: tagline instead of the slug — no hints at routing.
+    id: tier ? tier.tagline : m.id,
     badges: [
       m.contextLength !== undefined ? formatContext(m.contextLength) : "",
       m.promptPrice !== undefined ? `${formatPrice(m.promptPrice)}/M in` : "",
     ].filter(Boolean),
-    free: Boolean(m.isFree) && !isInTab,
+    free: Boolean(m.isFree) && !tier,
   };
 }
 
@@ -75,6 +78,7 @@ export function CommandMenu({
   filteredModels,
   onSelectCommand,
   onSelectModel,
+  isStreaming = false,
 }: CommandMenuProps) {
   const listRef = React.useRef<HTMLDivElement>(null);
 
@@ -82,9 +86,7 @@ export function CommandMenu({
   React.useEffect(() => {
     const listEl = listRef.current;
     if (!listEl) return;
-    const el = listEl.querySelector<HTMLElement>(
-      `[data-option-index="${highlightedIdx}"]`
-    );
+    const el = listEl.querySelector<HTMLElement>(`[data-option-index="${highlightedIdx}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [highlightedIdx, mode]);
 
@@ -96,55 +98,75 @@ export function CommandMenu({
     <div className="chat-command-menu" role="presentation">
       {!isModelMode && (
         <>
-          <div ref={listRef} id="chat-command-listbox" className="chat-command-list" role="listbox" aria-label="Chat commands">
+          <div
+            ref={listRef}
+            id="chat-command-listbox"
+            className="chat-command-list"
+            role="listbox"
+            aria-label="Chat commands"
+          >
             {filteredCommands.length === 0 && (
               <div className="chat-command-empty">
-                No commands match “{query}”.
+                No command matches “{query}” — Enter keeps your text, Esc clears it.
               </div>
             )}
             {filteredCommands.map((command, index) => {
               const Icon = command.icon;
               const isHighlighted = index === highlightedIdx;
+              // Group headers ride on the flat (navigable) order, so
+              // keyboard indices and rendered rows stay in lockstep.
+              const prevGroup = index > 0 ? filteredCommands[index - 1]!.group : null;
+              const showGroup = command.group !== prevGroup;
               return (
-                <button
-                  key={command.id}
-                  type="button"
-                  id={`chat-command-opt-${index}`}
-                  role="option"
-                  aria-selected={isHighlighted}
-                  data-option-index={index}
-                  className={`chat-command-item ${isHighlighted ? "chat-command-item-highlighted" : ""}`}
-                  onMouseDown={(e) => {
-                    // Prevent textarea blur so the click still lands
-                    e.preventDefault();
-                  }}
-                  onClick={() => onSelectCommand(command)}
-                  title={command.description}
-                >
-                  <span className="chat-command-item-icon">
-                    <Icon className="h-3.5 w-3.5" />
-                  </span>
-                  <span className="chat-command-item-main">
-                    <span className="chat-command-item-name">/{command.id}</span>
-                    <span className="chat-command-item-desc">{command.description}</span>
-                  </span>
-                  {command.argsHint && (
-                    <span className="chat-command-item-hint">
-                      {isHighlighted ? (
-                        <CornerDownLeft className="h-3 w-3" />
-                      ) : (
-                        command.argsHint
-                      )}
-                    </span>
+                <React.Fragment key={command.id}>
+                  {showGroup && (
+                    <div className="chat-command-group" role="presentation">
+                      {command.group}
+                    </div>
                   )}
-                </button>
+                  <button
+                    type="button"
+                    id={`chat-command-opt-${index}`}
+                    role="option"
+                    aria-selected={isHighlighted}
+                    data-option-index={index}
+                    className={`chat-command-item ${isHighlighted ? "chat-command-item-highlighted" : ""}`}
+                    onMouseDown={(e) => {
+                      // Prevent textarea blur so the click still lands
+                      e.preventDefault();
+                    }}
+                    onClick={() => onSelectCommand(command)}
+                    title={command.description}
+                  >
+                    <span className="chat-command-item-icon">
+                      <Icon className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="chat-command-item-main">
+                      <span className="chat-command-item-name">/{command.id}</span>
+                      <span className="chat-command-item-desc">{command.description}</span>
+                    </span>
+                    {command.argsHint && (
+                      <span className="chat-command-item-hint">
+                        {isHighlighted ? <CornerDownLeft className="h-3 w-3" /> : command.argsHint}
+                      </span>
+                    )}
+                  </button>
+                </React.Fragment>
               );
             })}
           </div>
           <div className="chat-command-footer">
-            <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-            <span><kbd>↵</kbd> run</span>
-            <span><kbd>esc</kbd> close</span>
+            <span>
+              <kbd>↑</kbd>
+              <kbd>↓</kbd> navigate
+            </span>
+            <span>
+              <kbd>↵</kbd> run
+            </span>
+            <span>
+              <kbd>esc</kbd> close
+            </span>
+            {isStreaming && <span className="chat-command-footer-accent">/stop cancels the reply</span>}
           </div>
         </>
       )}
@@ -197,7 +219,9 @@ export function CommandMenu({
                       <span className="chat-command-badge chat-command-badge-free">FREE</span>
                     )}
                     {meta.badges.map((b) => (
-                      <span key={b} className="chat-command-badge">{b}</span>
+                      <span key={b} className="chat-command-badge">
+                        {b}
+                      </span>
                     ))}
                     {isSelected && <Check className="h-3.5 w-3.5 chat-command-check" />}
                   </span>
@@ -211,7 +235,9 @@ export function CommandMenu({
                 ? `${models.length} models via OpenRouter`
                 : "Curated defaults — full catalog loads with a valid key"}
             </span>
-            <span><kbd>esc</kbd> back</span>
+            <span>
+              <kbd>esc</kbd> back
+            </span>
           </div>
         </>
       )}

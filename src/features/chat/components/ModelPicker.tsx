@@ -10,9 +10,19 @@
 import React from "react";
 import { Bot, Check, ChevronDown, Search } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { InTabLogo } from "@/components/ui/intab-logo";
 import { useClickOutside } from "@/features/api-tester/hooks/useClickOutside";
-import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID, INTAB_VIRTUAL_MODEL, PINNED_MODEL_IDS } from "../constants";
+import {
+  CURATED_FALLBACK_MODELS,
+  INTAB_MODEL_ID,
+  INTAB_MODEL_NAME,
+  INTAB_MODEL_TAGLINE,
+  INTAB_VIRTUAL_MODEL,
+  intabTierById,
+  PINNED_MODEL_IDS,
+} from "../constants";
 import { ProviderLogo } from "./ProviderLogo";
+import { isIntabModel } from "../lib/intab-llm";
 import type { ModelInfo } from "../types";
 
 export function formatPrice(price?: number): string {
@@ -106,13 +116,12 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
   }, [open]);
 
   const baseCatalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
-  // InTab LLM leads the list. It never appears in the OpenRouter
-  // catalog, so it's injected here — no FREE badge, no sparkles, no
-  // hint that it routes to free models. The id line renders as the
-  // slug (or via tagline) exactly like any other entry.
+  // A single "InTab Flash" entry leads the list — the quality tier
+  // (Light/High/Max) is chosen in the separate TierPicker beside it.
+  // Tier ids never appear here (they'd render as duplicates).
   const catalog = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
-    ? baseCatalog
-    : [INTAB_VIRTUAL_MODEL, ...baseCatalog];
+    ? baseCatalog.filter((m) => !intabTierById(m.id))
+    : [INTAB_VIRTUAL_MODEL, ...baseCatalog.filter((m) => !intabTierById(m.id))];
   const effectiveQuery = open ? query : "";
 
   const filtered = React.useMemo(() => {
@@ -208,9 +217,21 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <ProviderLogo modelId={selected?.id ?? ""} className="h-3.5 w-3.5 chat-model-btn-logo" />
-          {!selected && <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />}
-          <span className="chat-model-btn-label">{selected?.name ?? "Model"}</span>
+          {isIntabModel(value) ? (
+            // Any InTab tier renders as the product model — the tier is
+            // a separate state selector, not a different model.
+            <InTabLogo size={16} variant="glyph" className="chat-model-btn-logo" />
+          ) : (
+            <ProviderLogo modelId={selected?.id ?? ""} className="h-3.5 w-3.5 chat-model-btn-logo" />
+          )}
+          {!isIntabModel(value) && !selected && (
+            <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />
+          )}
+          <span className="chat-model-btn-label">
+            {isIntabModel(value)
+              ? INTAB_MODEL_NAME
+              : (selected?.name ?? "Model")}
+          </span>
           <ChevronDown className="h-3 w-3 chat-model-btn-chevron" />
         </button>
       </SimpleTooltip>
@@ -268,13 +289,17 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
                   >
                     <div className="chat-model-item-main">
                       <div className="chat-model-item-head">
-                        <ProviderLogo modelId={m.id} className="h-3.5 w-3.5 chat-model-item-logo" />
+                        {isIntabModel(m.id) ? (
+                          <InTabLogo size={16} variant="glyph" className="chat-model-item-logo" />
+                        ) : (
+                          <ProviderLogo modelId={m.id} className="h-3.5 w-3.5 chat-model-item-logo" />
+                        )}
                         <span className="chat-model-item-name">{m.name}</span>
                       </div>
                       {m.id === INTAB_MODEL_ID ? (
-                        <span className="chat-model-item-id">
-                          Smart routing across top open models · 128k ctx
-                        </span>
+                        <span className="chat-model-item-id">{INTAB_MODEL_TAGLINE}</span>
+                      ) : intabTierById(m.id) ? (
+                        <span className="chat-model-item-id">{intabTierById(m.id)!.tagline}</span>
                       ) : (
                         <span className="chat-model-item-id">{m.id}</span>
                       )}

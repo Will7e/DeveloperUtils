@@ -14,7 +14,9 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
 import { ModelPicker } from "./ModelPicker";
+import { TierPicker } from "./TierPicker";
 import { ContextMeter } from "./ContextMeter";
+import { isIntabModel } from "../lib/intab-llm";
 import { RepoPicker, type RepoSelection } from "./RepoPicker";
 import type { ContextBreakdown, ModelInfo, RepoContext } from "../types";
 
@@ -100,6 +102,10 @@ export function ChatHeader({
           isLoading={modelsLoading}
           onChange={onModelChange}
         />
+        {/* InTab Flash state (Light/High/Max) — only exists while
+            InTab Flash is the model; applied in the background on
+            every send via the tier's request state. */}
+        {isIntabModel(model) && <TierPicker model={model} onChange={onModelChange} />}
         <ContextMeter context={context} />
         <RepoPicker
           repoContext={repoContext}

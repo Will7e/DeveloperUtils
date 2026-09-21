@@ -30,6 +30,41 @@
   animation: toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Exit animation used by features/toast/ToastContainer.tsx */
+.animate-toast-out {
+  animation: toast-out 0.15s ease-in forwards;
+}
+
+/* Geist toast elevation: hairline alpha ring + soft depth */
+.geist-toast-shadow {
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ds-gray-alpha-400);
+}
+
+html.light .geist-toast-shadow {
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--ds-gray-alpha-400);
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in,
+  .animate-toast-out {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;

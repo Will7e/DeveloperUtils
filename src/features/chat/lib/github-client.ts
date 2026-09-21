@@ -49,23 +49,31 @@ interface GitHubApiErrorBody {
   documentation_url?: string;
 }
 
-/** Single GitHub API request with auth + proxy fallback */
-async function githubFetch(
+/**
+ * Single GitHub API request with auth + proxy fallback.
+ * Exported for the write client (github-write.ts) which layers
+ * POST/PATCH git-data endpoints on the same transport.
+ */
+export async function githubFetch(
   path: string,
   token: string,
-  accept = "application/vnd.github+json"
+  accept = "application/vnd.github+json",
+  init?: { method?: string; body?: string }
 ): Promise<Response> {
   const url = `${GITHUB_API_BASE_URL}${path}`;
-  const init: RequestInit = {
+  const fullInit: RequestInit = {
     headers: {
       Accept: accept,
       Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": "2022-11-28",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
     },
+    ...(init?.method ? { method: init.method } : {}),
+    ...(init?.body ? { body: init.body } : {}),
   };
 
   const attempt = (useProxy: boolean) =>
-    fetch(useProxy ? `${PROXY_PREFIX}${encodeURIComponent(url)}` : url, init);
+    fetch(useProxy ? `${PROXY_PREFIX}${encodeURIComponent(url)}` : url, fullInit);
 
   let res: Response;
   try {

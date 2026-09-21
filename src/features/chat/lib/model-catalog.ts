@@ -6,7 +6,12 @@
 // an import cycle (runner → compaction → runner).
 
 import { listModels } from "../lib/openrouter-client";
-import { CURATED_FALLBACK_MODELS, INTAB_MODEL_ID, INTAB_VIRTUAL_MODEL } from "../constants";
+import {
+  CURATED_FALLBACK_MODELS,
+  INTAB_MODEL_ID,
+  INTAB_TIER_VIRTUAL_MODELS,
+  INTAB_VIRTUAL_MODEL,
+} from "../constants";
 import type { ModelInfo } from "../types";
 
 // Populated when the catalog is fetched; consulted synchronously
@@ -21,8 +26,11 @@ export function getCachedModelCatalog(): ModelInfo[] | null {
 /** Resolves model metadata (context length etc.) for a model id */
 export function resolveModelInfo(modelId?: string): ModelInfo | undefined {
   if (!modelId) return undefined;
-  // Virtual InTab model: synthetic 128k metadata — the runner swaps
-  // in the concrete pool model's info per attempt.
+  // Virtual InTab tiers: synthetic metadata — the runner swaps in
+  // the concrete pool model's info per attempt. All three tier ids
+  // resolve (the legacy id included, for stored conversations).
+  const tier = INTAB_TIER_VIRTUAL_MODELS.find((m) => m.id === modelId);
+  if (tier) return tier;
   if (modelId === INTAB_MODEL_ID) return INTAB_VIRTUAL_MODEL;
   const curated = CURATED_FALLBACK_MODELS.find((m) => m.id === modelId);
   if (curated?.contextLength) return curated;

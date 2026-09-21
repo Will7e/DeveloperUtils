@@ -42,6 +42,8 @@ import {
   skillFromParsed,
 } from "../lib/skills";
 import { ModelPicker } from "./ModelPicker";
+import { TierPicker } from "./TierPicker";
+import { isIntabModel } from "../lib/intab-llm";
 import type { ChatSettings, ChatSkill, GitHubConnectionState, ModelInfo } from "../types";
 
 interface ChatSettingsModalProps {
@@ -415,13 +417,19 @@ function SettingsModalInner({
                       Used for new chats — each chat remembers its own model once switched
                     </span>
                   </div>
-                  <div className="settings-control">
+                  <div className="settings-control" style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <ModelPicker
                       value={settings.defaultModel}
                       models={models}
                       isLoading={false}
                       onChange={(id) => onUpdate({ defaultModel: id })}
                     />
+                    {isIntabModel(settings.defaultModel) && (
+                      <TierPicker
+                        model={settings.defaultModel}
+                        onChange={(id) => onUpdate({ defaultModel: id })}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -467,6 +475,32 @@ function SettingsModalInner({
                       className="settings-slider"
                     />
                     <span className="settings-value">{settings.temperature.toFixed(1)}</span>
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-agent-iterations">
+                      Agent iteration cap
+                    </label>
+                    <span className="settings-sublabel">
+                      Max tool-loop turns per coding-agent task (8–50)
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <input
+                      id="chat-agent-iterations"
+                      type="range"
+                      min={8}
+                      max={50}
+                      step={1}
+                      value={settings.agentMaxIterations}
+                      onChange={(e) =>
+                        onUpdate({ agentMaxIterations: parseInt(e.target.value, 10) || 24 })
+                      }
+                      className="settings-slider"
+                    />
+                    <span className="settings-value">{settings.agentMaxIterations}</span>
                   </div>
                 </div>
               </div>
@@ -691,11 +725,13 @@ function GitHubTabContent({
             <GitBranch size={18} />
           </div>
           <div>
-            <div className="settings-security-card-title">Agent mode over your repositories</div>
+            <div className="settings-security-card-title">Coding agent over your repositories</div>
             <div className="settings-security-card-desc">
-              Connect GitHub to attach a repository to any chat. The assistant can then list files,
-              read code, and search the repo (read-only) to answer with real code references. Your
-              token is encrypted at rest and sent only to api.github.com.
+              Connect GitHub to attach a repository to any chat. The agent can read the code, edit a
+              local workspace with a live preview, and — only after you approve the diff — push a
+              commit to a new agent/* branch and open a pull request. Your token is encrypted at rest
+              and sent only to api.github.com. Fine-grained PATs need Contents: read &amp; write and
+              Pull requests: read &amp; write; the OAuth flow already carries full repo scope.
             </div>
           </div>
         </div>
@@ -716,7 +752,8 @@ function GitHubTabContent({
                 </span>
               </div>
               <span className="settings-sublabel">
-                Read-only access · detach repos any time from the chat header
+                Workspace edits preview live; GitHub writes always go through your approval · detach
+                repos any time from the chat header
               </span>
             </div>
             <div className="settings-control">

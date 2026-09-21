@@ -16,13 +16,22 @@ import type {
   ChatSettings,
   ChatSkill,
   ConversationSummary,
+  PendingPush,
   RepoContext,
   ToolCallRequest,
   ToolCallResult,
   UsageInfo,
+  WorkspaceState,
 } from "@/features/chat/types";
+import {
+  hydrateTree,
+  loadWorkspace,
+  flushWorkspaceSave,
+  deleteWorkspace as deleteWorkspaceFromIdb,
+} from "@/features/chat/workspace/workspace";
 import { DEFAULT_CHAT_SETTINGS, BUILTIN_SKILLS, INTAB_MODEL_ID } from "@/features/chat/constants";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
+import { PENDING_TURN_MAX_AGE_MS } from "@/features/chat/session/resume-plan";
 
 export interface ChatStoreState {
   conversations: ChatConversation[];
@@ -38,9 +47,33 @@ export interface ChatStoreState {
   streamingReasoning: string;
   /** True after abort — partial output is kept */
   wasAborted: boolean;
+  /** True while a resume attempt is reconnecting (transient banner) */
+  reconnecting: boolean;
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
   settingsTab: "connection" | "chat" | "skills" | "github" | null;
+
+  // ── Agent workspace (transient; hydrated from IndexedDB) ──
+  /** conversationId → workspace */
+  workspaces: Record<string, WorkspaceState>;
+  /** Push awaiting user approval (one at a time, app-wide) */
+  pendingPush: PendingPush | null;
+  /** Resolve callbacks for the push approval gate */
+  pushGate: {
+    resolve: (approved: boolean, note?: string) => void;
+    conversationId: string;
+  } | null;
+
+  // ── Workspace actions ──
+  setWorkspace: (conversationId: string, ws: WorkspaceState) => void;
+  patchWorkspace: (conversationId: string, ws: WorkspaceState) => void;
+  /** Ensures a workspace exists for the repo (creating + hydrating tree) */
+  ensureWorkspace: (conversationId: string) => Promise<WorkspaceState | null>;
+  removeWorkspace: (conversationId: string) => void;
+  /** Opens the approval gate; resolves when the user decides */
+  requestPushApproval: (pending: PendingPush) => Promise<{ approved: boolean; note?: string }>;
+  resolvePushApproval: (approved: boolean, note?: string) => void;
+  clearPendingPush: () => void;
 
   // ── Conversation actions ──
   createConversation: (model?: string) => string;
@@ -55,6 +88,12 @@ export interface ChatStoreState {
   setConversationRepo: (id: string, repo: RepoContext | undefined) => void;
   /** Replaces the oldest `summary.coversCount` messages with the rolling summary */
   applyCompaction: (conversationId: string, summary: ConversationSummary) => void;
+  /**
+   * Clears what the model sees for a conversation (/clear): every
+   * stored message is soft-hidden and the rolling summary dropped.
+   * Nothing is destroyed — the session log stays reconstructable.
+   */
+  clearConversationContext: (conversationId: string) => void;
 
   // ── Message actions ──
   addMessage: (conversationId: string, message: Omit<ChatMessage, "id" | "timestamp">) => string;
@@ -64,11 +103,17 @@ export interface ChatStoreState {
     patch: Partial<Pick<ChatMessage, "content" | "error" | "model" | "latencyMs" | "usage">>
   ) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
-  /** Removes messages after (and including) messageId — for regenerate */
+  /** Soft-hides messages from messageId on — for regenerate (session log) */
   truncateFrom: (conversationId: string, messageId: string) => void;
+  /** Restores soft-deleted messages from messageId on (inverse of truncateFrom) */
+  restoreHiddenFrom: (conversationId: string, messageId: string) => void;
 
   // ── Streaming ──
   beginStreaming: (conversationId: string) => void;
+  /** Marks a turn started-but-uncommitted (persisted, drives reload resume) */
+  markPendingTurn: (conversationId: string) => void;
+  /** Clears the pending-turn marker (turn outcome committed) */
+  clearPendingTurn: (conversationId: string) => void;
   appendStreamingContent: (chunk: string) => void;
   /** Appends reasoning-token text (reasoning models via OpenRouter) */
   appendStreamingReasoning: (chunk: string) => void;
@@ -81,6 +126,8 @@ export interface ChatStoreState {
     reasoningMs?: number;
     /** Message routed through the InTab LLM virtual model (UI mask) */
     viaInTab?: boolean;
+    /** Task kind the router classified this turn as (InTab messages) */
+    turnKind?: "quick" | "code" | "analysis" | "vision" | "agent";
   }) => string | null;
   /** Commits an in-flight assistant tool-calls message (agent mode) */
   commitToolCallsMessage: (
@@ -94,6 +141,15 @@ export interface ChatStoreState {
     result: ToolCallResult,
     content: string
   ) => void;
+  /**
+   * Host-mode rendering: commits the in-flight assistant message
+   * directly (streaming text bypasses streamingContent). Returns
+   * the new message id, or null when the conversation is gone.
+   */
+  commitDirectAssistantMessage: (
+    conversationId: string,
+    message: Pick<ChatMessage, "content"> & Partial<ChatMessage>
+  ) => string | null;
   /** Discards in-flight content (used when stream produced nothing) */
   discardStreaming: () => void;
   endStreaming: (aborted: boolean) => void;
@@ -105,7 +161,10 @@ export interface ChatStoreState {
   setSettingsModalState: (state: {
     settingsOpen: boolean;
     settingsTab: "connection" | "chat" | "skills" | "github" | null;
-  }) => void;
+  }) => void;  /** Hydration-time cleanup of stale pending-turn markers */
+  cleanupStalePendingTurns: () => void;
+  /** Toggles the reconnecting banner (resume retries) */
+  setReconnecting: (value: boolean) => void;
 
   // ── Skills ──
   addSkill: (skill: ChatSkill) => void;
@@ -146,10 +205,104 @@ export const useChatStore = create<ChatStoreState>()(
       streamingContent: "",
       streamingReasoning: "",
       wasAborted: false,
+      reconnecting: false,
       settingsOpen: false,
       settingsTab: null,
 
-      // ── Conversations ──
+      workspaces: {},
+      pendingPush: null,
+      pushGate: null,
+
+      // ── Workspace ──
+      setWorkspace: (conversationId, ws) =>
+        set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: ws } })),
+
+      patchWorkspace: (conversationId, ws) =>
+        set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: ws } })),
+
+      ensureWorkspace: async (conversationId) => {
+        const state = get();
+        const existing = state.workspaces[conversationId];
+        if (existing) return existing;
+        const conv = state.conversations.find((c) => c.id === conversationId);
+        const repo = conv?.repoContext;
+        const token = state.settings.github.token;
+        if (!repo || !token) return null;
+
+        // Rehydrate from IDB or create fresh; pin the base commit.
+        // Branch must match too: re-attaching the repo on a different
+        // branch invalidates the persisted tree, base commit, and
+        // pending diffs, so those start fresh rather than pushing
+        // from a stale base.
+        const persisted = await loadWorkspace(conversationId);
+        if (
+          persisted &&
+          persisted.owner === repo.owner &&
+          persisted.repo === repo.repo &&
+          persisted.branch === repo.branch
+        ) {
+          set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: persisted } }));
+          return persisted;
+        }
+
+        const [{ getBranchHead }, { createWorkspace }] = await Promise.all([
+          import("@/features/chat/lib/github-write"),
+          import("@/features/chat/workspace/workspace"),
+        ]);
+        let baseSha: string;
+        try {
+          baseSha = (await getBranchHead(token, repo.owner, repo.repo, repo.branch)).commitSha;
+        } catch {
+          return null; // no write-capable base — agent stays read-only
+        }
+        const fresh = createWorkspace(conversationId, repo.owner, repo.repo, repo.branch, baseSha);
+        try {
+          const hydrated = await hydrateTree(fresh, token);
+          set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: hydrated } }));
+          void flushWorkspaceSave(conversationId, hydrated);
+          return hydrated;
+        } catch {
+          // Tree fetch failed — workspace still usable for writes w/o tree
+          set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: fresh } }));
+          return fresh;
+        }
+      },
+
+      removeWorkspace: (conversationId) =>
+        set((s) => {
+          const next = { ...s.workspaces };
+          delete next[conversationId];
+          void deleteWorkspaceFromIdb(conversationId);
+          return { workspaces: next };
+        }),
+
+      requestPushApproval: (pending) =>
+        new Promise((resolve) => {
+          set({
+            pendingPush: pending,
+            pushGate: {
+              conversationId: pending.conversationId,
+              resolve: (approved, note) => resolve({ approved, note }),
+            },
+          });
+        }),
+
+      resolvePushApproval: (approved, note) =>
+        set((s) => {
+          const gate = s.pushGate;
+          if (gate) gate.resolve(approved, note);
+          return { pushGate: null, pendingPush: approved ? null : s.pendingPush };
+        }),
+
+      clearPendingPush: () =>
+        set((s) => {
+          // Defensive: if the gate is still open (e.g. the modal was
+          // unmounted without deciding, or a caller cleared before
+          // resolving), reject it so the awaiting tool executor never
+          // hangs on an unresolved promise.
+          if (s.pushGate) s.pushGate.resolve(false);
+          return { pendingPush: null, pushGate: null };
+        }),
       createConversation: (model) => {
         const id = generateId();
         const conv: ChatConversation = {
@@ -194,6 +347,8 @@ export const useChatStore = create<ChatStoreState>()(
           ...source,
           id: newId,
           title: `${source.title} (copy)`,
+          // A pending marker belongs to the original's turn, not the copy
+          pendingTurn: undefined,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           messages: source.messages.map((m) => ({ ...m, id: generateId() })),
@@ -252,6 +407,20 @@ export const useChatStore = create<ChatStoreState>()(
           ),
         })),
 
+      clearConversationContext: (conversationId) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({
+              ...c,
+              messages: c.messages.map((m) => (m.hidden ? m : { ...m, hidden: true })),
+              // The summary describes the history being cleared — it
+              // would otherwise keep feeding the model the very
+              // context the user just asked to drop.
+              summary: undefined,
+            })
+          ),
+        })),
+
       // ── Messages ──
       addMessage: (conversationId, message) => {
         const id = generateId();
@@ -288,6 +457,9 @@ export const useChatStore = create<ChatStoreState>()(
           ),
         })),
 
+      // Soft delete (append-only session log): regenerate hides the
+      // discarded reply instead of destroying it, so every request
+      // payload stays reconstructable from stored history.
       truncateFrom: (conversationId, messageId) =>
         set((s) => ({
           conversations: mapConversation(s.conversations, conversationId, (c) => {
@@ -295,7 +467,19 @@ export const useChatStore = create<ChatStoreState>()(
             if (idx === -1) return c;
             return touchConversation({
               ...c,
-              messages: c.messages.slice(0, idx),
+              messages: c.messages.map((m, i) => (i >= idx ? { ...m, hidden: true } : m)),
+            });
+          }),
+        })),
+
+      restoreHiddenFrom: (conversationId, messageId) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) => {
+            const idx = c.messages.findIndex((m) => m.id === messageId);
+            if (idx === -1) return c;
+            return touchConversation({
+              ...c,
+              messages: c.messages.map((m, i) => (i >= idx ? { ...m, hidden: false } : m)),
             });
           }),
         })),
@@ -310,8 +494,34 @@ export const useChatStore = create<ChatStoreState>()(
           wasAborted: false,
         }),
 
+      markPendingTurn: (conversationId) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({ ...c, pendingTurn: { startedAt: Date.now() } })
+          ),
+        })),
+
+      clearPendingTurn: (conversationId) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            // touchConversation would stamp updatedAt on every stream
+            // iteration; the marker is bookkeeping, not activity
+            c.pendingTurn
+              ? { ...c, pendingTurn: undefined }
+              : c
+          ),
+        })),
+
+      // Zombie-renderer guard: a stale renderer (adoption racing the
+      // fresh turn, or a torn-down round that missed its unsubscribe)
+      // must never append into a NEW turn's streaming buffer — that
+      // is exactly the doubled/garbled-output symptom.
       appendStreamingContent: (chunk) =>
-        set((s) => ({ streamingContent: s.streamingContent + chunk })),
+        set((s) =>
+          s.isStreaming && s.streamingConversationId
+            ? { streamingContent: s.streamingContent + chunk }
+            : s
+        ),
 
       appendStreamingReasoning: (chunk) =>
         set((s) => ({ streamingReasoning: s.streamingReasoning + chunk })),
@@ -405,6 +615,27 @@ export const useChatStore = create<ChatStoreState>()(
           wasAborted: aborted,
         }),
 
+      commitDirectAssistantMessage: (conversationId, message) => {
+        const id = generateId();
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            touchConversation({
+              ...c,
+              messages: [
+                ...c.messages,
+                {
+                  id,
+                  role: "assistant",
+                  timestamp: Date.now(),
+                  ...message,
+                },
+              ],
+            })
+          ),
+        }));
+        return id;
+      },
+
       // ── Skills ──
       addSkill: (skill) =>
         set((s) => ({
@@ -462,6 +693,26 @@ export const useChatStore = create<ChatStoreState>()(
 
       setSettingsModalState: ({ settingsOpen, settingsTab }) =>
         set({ settingsOpen, settingsTab }),
+
+      setReconnecting: (value) => set({ reconnecting: value }),
+
+      /** Clears pendingTurn markers that outlived their turn (>24h) */
+      cleanupStalePendingTurns: () =>
+        set((s) => {
+          const now = Date.now();
+          let changed = false;
+          const conversations = s.conversations.map((c) => {
+            if (
+              c.pendingTurn &&
+              now - c.pendingTurn.startedAt > PENDING_TURN_MAX_AGE_MS
+            ) {
+              changed = true;
+              return { ...c, pendingTurn: undefined };
+            }
+            return c;
+          });
+          return changed ? { conversations } : s;
+        }),
     }),
     {
       name: CHAT_STORAGE_NAME,
@@ -471,6 +722,8 @@ export const useChatStore = create<ChatStoreState>()(
         activeConversationId: state.activeConversationId,
         settings: state.settings,
       }),
+      // NOTE: pendingTurn rides inside conversations, so it persists
+      // automatically — that's what makes reload-resume detectable.
       // Never hydrate transient streaming flags from disk; reconcile
       // shipped builtins and sanitize skills arriving via cloud sync.
       merge: (persisted, current) => {
@@ -502,8 +755,12 @@ export const useChatStore = create<ChatStoreState>()(
           streamingConversationId: null,
           streamingContent: "",
           wasAborted: false,
+          reconnecting: false,
           settingsOpen: false,
           settingsTab: null,
+          workspaces: {},
+          pendingPush: null,
+          pushGate: null,
         };
       },
     }

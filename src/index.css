@@ -89,6 +89,14 @@
 :root {
   color-scheme: dark;
 
+  /* ---- Radii ---- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
   /* ---- Official Geist Backgrounds ---- */
   --ds-background-100: hsla(0, 0%, 4%, 1); /* #0a0a0a - Elevated surface, cards, navigation */
   --ds-background-200: hsla(0, 0%, 0%, 1); /* #000000 - Canvas Pitch Black */
@@ -697,8 +705,8 @@ html.light .palette-item-active .palette-item-shortcut {
 }
 
 /* ---- Light: Toasts ---- */
-html.light .toast {
-  background: var(--bg-1);
+html.light [data-toast-state] {
+  background: var(--ds-background-100);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 

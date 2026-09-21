@@ -2,52 +2,78 @@
 // Chat Commands — Slash Command Registry
 // ============================================================
 // Every command maps onto an existing store action or service —
-// no new backend behavior. The registry is consumed by the
-// composer's command menu (CommandMenu.tsx) and the plain-text
-// fallback in sendUserMessage keeps accepting typed commands.
+// no new backend behavior. One registry serves both entry paths:
 //
-// /compact's toast logic lives in services/compaction.ts
-// (runCompactCommand) so the menu and the typed fallback share one
-// implementation without a runner ↔ commands import cycle.
+//   · the composer's menu (CommandMenu.tsx) — grouped, filtered,
+//     availability-aware, keyboard driven
+//   · typed input (sendUserMessage / the composer's Enter) — routed
+//     through lib/slash.ts so the same token means the same thing
+//     whichever way it was submitted
+//
+// A command never sees raw UI state: it gets a small context
+// (conversation, argument, streaming flag) and returns an optional
+// outcome controlling the composer (e.g. /help reopens the menu).
+//
+// Import discipline: this module must stay importable from the turn
+// runner, so anything that lives in the runner (regenerate) is
+// loaded lazily inside the command that needs it.
 
 import {
   ArrowDownToLine,
   Bot,
+  Braces,
+  CircleStop,
+  Eraser,
+  Gauge,
+  LifeBuoy,
+  ListTree,
   MessageSquarePlus,
+  Pencil,
+  RotateCcw,
+  ScrollText,
   Settings,
   Shapes,
+  Signal,
+  Undo2,
   Zap,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
-import { downloadConversation } from "../services/chat-runner";
+import {
+  INTAB_MODEL_ID,
+  INTAB_MODEL_TIERS,
+  CURATED_FALLBACK_MODELS,
+} from "../constants";
+import { downloadConversation } from "../services/export-conversation";
 import { runCompactCommand } from "../services/compaction";
-import { CURATED_FALLBACK_MODELS } from "../constants";
+import { undoLastWorkspaceMutation } from "../services/agent-actions";
+import { canUndo } from "../workspace/undo";
+import { TOOL_REGISTRY } from "./tool-registry";
+import { getCachedModelCatalog } from "./model-catalog";
+import { getConversationContext, composeSystemPrompt } from "../context/engine";
+import { buildEffectiveSystemPrompt } from "./skills";
+import { isTurnRunning, stopTurn } from "../session/turn-engine";
+import { getTurnLog, formatTurnLog } from "../session/turn-log";
+import { sessionHost } from "../session/session-client";
+import { rankCommandSpecs } from "./slash";
 import type { ModelInfo } from "../types";
 
-function toast(message: string, type: "success" | "error" | "info"): void {
+function toast(message: string, type: "success" | "error" | "info" = "info"): void {
   useAppStore.getState().addToast({ message, type, duration: 5000 });
 }
 
-/**
- * Resolves a "/model <query>" argument against the available models:
- * exact id, then case-insensitive substring on id or display name.
- */
-export function matchModelArg(
-  arg: string,
-  models: ModelInfo[],
-  fallback: ModelInfo[]
-): ModelInfo | undefined {
-  const q = arg.trim().toLowerCase();
-  if (!q) return undefined;
-  const catalog = models.length > 0 ? models : fallback;
-  return (
-    catalog.find((m) => m.id.toLowerCase() === q) ??
-    catalog.find(
-      (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
-    )
-  );
+/** Menu sections — the order here is the order rendered */
+export const COMMAND_GROUPS = ["Turn", "Context", "Agent", "Model", "Session"] as const;
+export type CommandGroup = (typeof COMMAND_GROUPS)[number];
+
+/** What a command may hand back to the composer */
+export interface CommandOutcome {
+  /**
+   * Draft to leave in the composer. Default "" (cleared). "/help"
+   * returns "/" so the menu reopens on the full list.
+   */
+  draft?: string;
 }
 
 /** Context handed to a command when it runs */
@@ -58,6 +84,8 @@ export interface ChatCommandContext {
   arg: string;
   /** Live model catalog (empty before the key-backed fetch succeeds) */
   models: ModelInfo[];
+  /** True while THIS conversation is producing a reply */
+  isStreaming: boolean;
 }
 
 export interface ChatCommand {
@@ -66,6 +94,10 @@ export interface ChatCommand {
   /** One-line description shown in the menu */
   description: string;
   icon: LucideIcon;
+  /** Menu section */
+  group: CommandGroup;
+  /** Extra match terms the user might type ("ctx" for /context) */
+  keywords?: readonly string[];
   /** Placeholder shown when the command expects an argument */
   argsHint?: string;
   /**
@@ -73,36 +105,264 @@ export interface ChatCommand {
    * a custom arg source (e.g. /model lists the catalog).
    */
   hasSubmenu?: boolean;
-  run: (ctx: ChatCommandContext) => void;
+  /**
+   * Offered only when this returns true. Availability is a *menu*
+   * concern: typing /stop outside a turn still reaches the command,
+   * which then explains itself instead of silently doing nothing.
+   */
+  available?: (ctx: { isStreaming: boolean }) => boolean;
+  run: (ctx: ChatCommandContext) => void | Promise<void> | CommandOutcome;
 }
 
-export const CHAT_COMMANDS: ChatCommand[] = [
+/** Resolves "/model <query>" against the catalog: exact id, then substring */
+export function matchModelArg(
+  arg: string,
+  models: ModelInfo[],
+  fallback: ModelInfo[]
+): ModelInfo | undefined {
+  const q = arg.trim().toLowerCase();
+  if (!q) return undefined;
+  const catalog = models.length > 0 ? models : fallback;
+  return (
+    catalog.find((m) => m.id.toLowerCase() === q) ??
+    catalog.find((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+  );
+}
+
+/** Effective system prompt a turn would send (skills + rolling summary) */
+function effectiveSystemPrompt(conversationId: string): string {
+  const store = useChatStore.getState();
+  const conv = store.conversations.find((c) => c.id === conversationId);
+  if (!conv) return "";
+  const base = conv.systemPrompt?.trim() || store.settings.systemPrompt.trim() || "";
+  const composed = buildEffectiveSystemPrompt(base, store.settings.skills ?? []);
+  return composeSystemPrompt(composed, conv.summary) ?? "";
+}
+
+function activeConversation(conversationId: string) {
+  return useChatStore.getState().conversations.find((c) => c.id === conversationId);
+}
+
+/** InTab tier ids in display order, with the aliases users actually type */
+const TIER_ALIASES: Record<string, string> = {
+  light: "intab/intab-llm-light",
+  fast: "intab/intab-llm-light",
+  quick: "intab/intab-llm-light",
+  high: INTAB_MODEL_ID,
+  default: INTAB_MODEL_ID,
+  balanced: INTAB_MODEL_ID,
+  max: "intab/intab-llm-max",
+  deep: "intab/intab-llm-max",
+  smart: "intab/intab-llm-max",
+};
+
+function currentTierId(): string | undefined {
+  const store = useChatStore.getState();
+  const conv = activeConversation(store.activeConversationId ?? "");
+  const model = conv?.model ?? store.settings.defaultModel;
+  return INTAB_MODEL_TIERS.some((t) => t.id === model) ? model : undefined;
+}
+
+// ── Registry ────────────────────────────────────────────────
+
+export const CHAT_COMMANDS: readonly ChatCommand[] = [
+  // ── Turn ──
+  {
+    id: "stop",
+    description: "Stop the reply that is streaming now",
+    icon: CircleStop,
+    group: "Turn",
+    keywords: ["cancel", "halt", "abort"],
+    available: ({ isStreaming }) => isStreaming,
+    run: ({ isStreaming }) => {
+      if (!isStreaming) {
+        toast("Nothing is streaming right now.", "info");
+        return;
+      }
+      stopTurn();
+      toast("Stopped — the partial reply is kept.", "info");
+    },
+  },
+  {
+    id: "retry",
+    description: "Regenerate the last reply",
+    icon: RotateCcw,
+    group: "Turn",
+    keywords: ["regenerate", "again", "redo"],
+    available: ({ isStreaming }) => !isStreaming,
+    run: async ({ conversationId, isStreaming }) => {
+      if (isStreaming) return;
+      const conv = activeConversation(conversationId);
+      const hasReply = Boolean(conv?.messages.some((m) => m.role === "assistant" && !m.hidden));
+      if (!hasReply) {
+        toast("No reply to regenerate yet.", "info");
+        return;
+      }
+      // Lazy: regenerate orchestration lives in the turn facade, and
+      // importing it here would make the registry depend on it.
+      const { regenerateLastResponse } = await import("../services/chat-runner");
+      await regenerateLastResponse(conversationId);
+    },
+  },
+
+  // ── Context ──
   {
     id: "compact",
     description: "Summarize older history to free context window",
     icon: Zap,
+    group: "Context",
+    keywords: ["summarize", "shrink", "fold"],
     run: ({ conversationId }) => void runCompactCommand(conversationId),
   },
   {
-    id: "new",
-    description: "Start a new conversation",
-    icon: MessageSquarePlus,
-    run: () => {
-      const model = useChatStore.getState().settings.defaultModel;
-      useChatStore.getState().createConversation(model);
+    id: "context",
+    description: "Show what is in the context window",
+    icon: Gauge,
+    group: "Context",
+    keywords: ["ctx", "usage", "tokens", "budget"],
+    run: ({ conversationId }) => {
+      const conv = activeConversation(conversationId);
+      if (!conv) return;
+      const modelId = conv.model ?? useChatStore.getState().settings.defaultModel;
+      const info = getConversationContext({
+        conversation: conv,
+        effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
+        modelId,
+      });
+      const visible = conv.messages.filter((m) => !m.hidden).length;
+      const hidden = conv.messages.length - visible;
+      toast(
+        `${info.percentageUsed}% of ${info.maxTokens.toLocaleString()} tokens · ` +
+          `${info.sentTokens.toLocaleString()} in history · ${visible} messages` +
+          (hidden > 0 ? ` (+${hidden} hidden)` : "") +
+          (conv.summary ? ` · summary covers ${conv.summary.coversCount}` : "") +
+          (info.percentageUsed >= 70 ? " — run /compact to free room." : ""),
+        info.percentageUsed >= 85 ? "error" : "info"
+      );
     },
   },
+  {
+    id: "clear",
+    description: "Start this chat over — clear context, keep the history on disk",
+    icon: Eraser,
+    group: "Context",
+    keywords: ["reset", "forget", "wipe"],
+
+    available: ({ isStreaming }) => !isStreaming,
+    run: ({ conversationId, isStreaming }) => {
+      if (isStreaming) {
+        toast("Stop the current reply before clearing context.", "error");
+        return;
+      }
+      const conv = activeConversation(conversationId);
+      if (!conv || conv.messages.every((m) => m.hidden)) {
+        toast("Context is already empty.", "info");
+        return;
+      }
+      useChatStore.getState().clearConversationContext(conversationId);
+      toast("Context cleared — history stays stored but is no longer sent.", "success");
+    },
+  },
+
+  // ── Agent ──
+  {
+    id: "undo",
+    description: "Undo the last file the agent changed here",
+    icon: Undo2,
+    group: "Agent",
+    keywords: ["revert", "rollback"],
+    run: async ({ conversationId }) => {
+      const ws = useChatStore.getState().workspaces[conversationId];
+      if (!ws) {
+        toast("No agent workspace yet — attach a repo and let the agent edit.", "info");
+        return;
+      }
+      if (!canUndo(ws)) {
+        toast("Nothing to undo — the agent hasn't changed a file yet.", "info");
+        return;
+      }
+      const last = ws.mutations?.[ws.mutations.length - 1];
+      await undoLastWorkspaceMutation(conversationId);
+      toast(`Reverted ${last?.path ?? "the last change"}.`, "success");
+    },
+  },
+  {
+    id: "tools",
+    description: "List the tools the agent can use",
+    icon: Braces,
+    group: "Agent",
+    keywords: ["capabilities", "functions"],
+    run: () => {
+      const names = TOOL_REGISTRY.map((t) => t.name).join(", ");
+      toast(`Agent tools (${TOOL_REGISTRY.length}): ${names}`, "info");
+    },
+  },
+  {
+    id: "status",
+    description: "Report this session: model, transport, context, turn state",
+    icon: Signal,
+    group: "Agent",
+    keywords: ["health", "state", "session"],
+    run: ({ conversationId }) => {
+      const store = useChatStore.getState();
+      const conv = activeConversation(conversationId);
+      const modelId = conv?.model ?? store.settings.defaultModel;
+      const tier = currentTierId();
+      const info = getConversationContext({
+        conversation: conv ?? {
+          id: conversationId,
+          title: "",
+          messages: [],
+          createdAt: 0,
+          updatedAt: 0,
+        },
+        effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
+        modelId,
+      });
+      const tierMeta = INTAB_MODEL_TIERS.find((t) => t.id === tier);
+      const parts = [
+        tierMeta ? tierMeta.name : modelId,
+        `transport: ${sessionHost.available ? "session host" : "page-local"}`,
+        `streaming: ${store.isStreaming ? "yes" : "no"}${isTurnRunning() ? " (turn running)" : ""}`,
+        `context: ${info.percentageUsed}%`,
+        `messages: ${conv?.messages.filter((m) => !m.hidden).length ?? 0}`,
+        conv?.pendingTurn ? "pending turn marker SET" : null,
+        conv?.repoContext ? `repo: ${conv.repoContext.owner}/${conv.repoContext.repo}` : null,
+      ].filter(Boolean);
+      toast(parts.join(" · "), "info");
+    },
+  },
+  {
+    id: "log",
+    description: "Print the turn log to the console (debug)",
+    icon: ScrollText,
+    group: "Agent",
+    keywords: ["debug", "trace", "diagnostics", "console"],
+    run: () => {
+      const entries = getTurnLog();
+      // eslint-disable-next-line no-console
+      console.log(formatTurnLog() || "(turn log is empty)");
+      toast(
+        `${entries.length} turn-log entries printed to the console (window.__intabTurnLog).`,
+        "info"
+      );
+    },
+  },
+
+  // ── Model ──
   {
     id: "model",
     description: "Switch the model for this conversation",
     icon: Bot,
+    group: "Model",
+    keywords: ["models", "switch"],
     argsHint: "model name…",
     hasSubmenu: true,
     run: ({ conversationId, arg, models }) => {
       const model = matchModelArg(arg, models, CURATED_FALLBACK_MODELS);
       if (!model) {
         toast(`No model matches “${arg.trim()}”.`, "error");
-        return;
+        return { draft: `/model ${arg.trim()}` };
       }
       const store = useChatStore.getState();
       store.setConversationModel(conversationId, model.id);
@@ -113,13 +373,101 @@ export const CHAT_COMMANDS: ChatCommand[] = [
     },
   },
   {
+    id: "tier",
+    description: "Switch InTab Flash tier (light · high · max)",
+    icon: ListTree,
+    group: "Model",
+    keywords: ["flash", "free", "effort"],
+    argsHint: "light · high · max",
+    run: ({ conversationId, arg }) => {
+      const store = useChatStore.getState();
+      const requested = arg.trim().toLowerCase();
+      if (!requested) {
+        const current = currentTierId();
+        const currentName = INTAB_MODEL_TIERS.find((t) => t.id === current)?.name;
+        toast(
+          `Tier: ${currentName ?? "not on the InTab router"} — use /tier light, /tier high or /tier max.`,
+          "info"
+        );
+        return;
+      }
+      const tierId = TIER_ALIASES[requested];
+      const tier = INTAB_MODEL_TIERS.find((t) => t.id === tierId);
+      if (!tier) {
+        toast(`Unknown tier “${requested}” — try light, high or max.`, "error");
+        return { draft: "/tier " };
+      }
+      store.setConversationModel(conversationId, tier.id);
+      store.updateSettings({ defaultModel: tier.id });
+      toast(`Tier switched to ${tier.name} — ${tier.tagline}.`, "success");
+    },
+  },
+
+  // ── Session ──
+  {
+    id: "new",
+    description: "Start a new conversation",
+    icon: MessageSquarePlus,
+    group: "Session",
+    keywords: ["chat"],
+    run: () => {
+      const model = useChatStore.getState().settings.defaultModel;
+      useChatStore.getState().createConversation(model);
+    },
+  },
+  {
+    id: "rename",
+    description: "Rename this conversation",
+    icon: Pencil,
+    group: "Session",
+    keywords: ["title", "name"],
+    argsHint: "new title",
+    run: ({ conversationId, arg }) => {
+      if (!arg.trim()) {
+        toast("Usage: /rename <new title>", "info");
+        return { draft: "/rename " };
+      }
+      useChatStore.getState().renameConversation(conversationId, arg.trim());
+      toast(`Renamed to “${arg.trim()}”.`, "success");
+    },
+  },
+  {
+    id: "system",
+    description: "Set (or show) this chat's system prompt",
+    icon: Settings,
+    group: "Session",
+    keywords: ["prompt", "instructions", "persona"],
+    argsHint: "instructions (or 'clear')",
+    run: ({ conversationId, arg }) => {
+      const conv = activeConversation(conversationId);
+      const trimmed = arg.trim();
+      if (!trimmed) {
+        const current = conv?.systemPrompt?.trim();
+        toast(
+          current
+            ? `System prompt: ${current.slice(0, 180)}${current.length > 180 ? "…" : ""}`
+            : "No chat-specific system prompt. Use /system <instructions> to add one, or /system clear.",
+          "info"
+        );
+        return;
+      }
+      if (trimmed.toLowerCase() === "clear") {
+        useChatStore.getState().setConversationSystemPrompt(conversationId, undefined);
+        toast("Chat system prompt cleared.", "success");
+        return;
+      }
+      useChatStore.getState().setConversationSystemPrompt(conversationId, trimmed);
+      toast("System prompt set for this chat.", "success");
+    },
+  },
+  {
     id: "export",
     description: "Download this conversation as Markdown",
     icon: ArrowDownToLine,
+    group: "Session",
+    keywords: ["download", "save", "markdown"],
     run: ({ conversationId }) => {
-      const conv = useChatStore
-        .getState()
-        .conversations.find((c) => c.id === conversationId);
+      const conv = activeConversation(conversationId);
       if (!conv || conv.messages.length === 0) {
         toast("Nothing to export yet — send a message first.", "info");
         return;
@@ -128,16 +476,28 @@ export const CHAT_COMMANDS: ChatCommand[] = [
     },
   },
   {
-    id: "settings",
-    description: "Open chat settings",
-    icon: Settings,
-    run: () => useChatStore.getState().setSettingsOpen(true),
-  },
-  {
     id: "skills",
     description: "Manage skills and prompt modules",
     icon: Shapes,
+    group: "Session",
+    keywords: ["modules", "library"],
     run: () => useChatStore.getState().setSettingsOpen(true, "skills"),
+  },
+  {
+    id: "settings",
+    description: "Open chat settings",
+    icon: Settings,
+    group: "Session",
+    keywords: ["key", "api", "preferences"],
+    run: () => useChatStore.getState().setSettingsOpen(true),
+  },
+  {
+    id: "help",
+    description: "Show all commands",
+    icon: LifeBuoy,
+    group: "Session",
+    keywords: ["commands", "?"],
+    run: () => ({ draft: "/" }),
   },
 ];
 
@@ -147,17 +507,31 @@ export const CHAT_COMMAND_BY_ID: ReadonlyMap<string, ChatCommand> = new Map(
 );
 
 /**
- * Filters the registry for the menu: prefix matches on the command
- * name first, then substring matches on name or description.
+ * Commands offered in the menu right now: availability-filtered,
+ * then ranked against the typed token. `isStreaming` gates the
+ * streaming-only commands (/stop) and hides the ones that need a
+ * settled transcript (/retry, /clear).
  */
-export function filterCommands(query: string): ChatCommand[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return CHAT_COMMANDS;
-  const prefix = CHAT_COMMANDS.filter((c) => c.id.startsWith(q));
-  const rest = CHAT_COMMANDS.filter(
-    (c) =>
-      !c.id.startsWith(q) &&
-      (c.id.includes(q) || c.description.toLowerCase().includes(q))
-  );
-  return [...prefix, ...rest];
+export function commandsFor(query: string, ctx: { isStreaming: boolean }): ChatCommand[] {
+  const offered = CHAT_COMMANDS.filter((c) => !c.available || c.available(ctx));
+  const ranked = rankCommandSpecs(offered, query);
+  // A token typed in full is always offered, even when the command is
+  // not applicable right now — selecting it explains itself ("nothing
+  // is streaming") instead of leaving the keystroke silently dead.
+  const typed = query.trim().toLowerCase();
+  if (typed) {
+    const exact = CHAT_COMMANDS.find((c) => c.id === typed);
+    if (exact && !ranked.includes(exact)) ranked.unshift(exact);
+  }
+  return ranked;
+}
+
+/** Runs a command by id with the given argument (typed-input path) */
+export async function runCommandById(
+  id: string,
+  ctx: ChatCommandContext
+): Promise<CommandOutcome | void> {
+  const command = CHAT_COMMAND_BY_ID.get(id);
+  if (!command) return;
+  return command.run(ctx);
 }

@@ -46,9 +46,15 @@ export function InTabLogo({
       ? "intab-theme-light"
       : "intab-theme-auto";
 
+  // The glyph variant shows only the monogram, which occupies roughly
+  // x 13.6–34.4 / y 17.1–38.9 of the 48×48 canvas. Cropping the viewBox
+  // makes the mark fill the rendered box instead of floating in empty
+  // space at ~44% of it (which read as an undersized icon next to
+  // full-bleed provider logos).
+
   return (
     <svg
-      viewBox="0 0 48 48"
+      viewBox={variant === "glyph" ? "11 15 26 26" : "0 0 48 48"}
       width={size}
       height={size}
       fill="none"

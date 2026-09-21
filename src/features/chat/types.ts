@@ -39,7 +39,19 @@ export interface RepoContext {
 }
 
 /** Name of a tool the agent can call (see lib/tools.ts) */
-export type ToolName = "list_repo_files" | "read_file" | "search_code" | "get_repo_overview";
+export type ToolName =
+  | "list_repo_files"
+  | "read_file"
+  | "search_code"
+  | "get_repo_overview"
+  | "write_file"
+  | "delete_file"
+  | "create_working_branch"
+  | "push_changes"
+  | "get_preview_feedback"
+  | "run_in_preview"
+  | "query_preview_dom"
+  | "run_tool_program";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -113,17 +125,41 @@ export interface ChatMessage {
   /** Time spent emitting reasoning tokens, when reported (assistant) */
   reasoningMs?: number;
   /** Number of earlier messages hidden by compaction (marker message) */
-  compactedFrom?: number;
-  /**
-   * Message produced through the InTab LLM virtual router — the UI
-   * displays "InTab LLM" instead of the underlying free model in
+  compactedFrom?: number;  /**
+   * Message produced through the InTab virtual router — the UI
+   * displays "InTab Flash" instead of the underlying free model in
    * `model` (which keeps the real id for exports and debugging).
    */
   viaInTab?: boolean;
+  /** Task kind the router classified this turn as (InTab messages) */
+  turnKind?: "quick" | "code" | "analysis" | "vision" | "agent";
   /** Present on agent-activity messages: tool calls the model requested */
   toolCalls?: AssistantToolCallsMessage;
   /** Present on agent-activity messages: one tool result (role is "user") */
   toolResult?: ToolResultMessage;
+  /**
+   * Soft-deleted (append-only session log): hidden from the UI and
+   * from request payloads but retained in storage so what the model
+   * has seen stays reconstructable. Set by regenerate instead of
+   * destructively dropping the reply.
+   */
+  hidden?: boolean;
+  /**
+   * Committed by the pagehide partial flush: the page tore down
+   * mid-stream and this message is the truncated reply. Drives the
+   * resume planner (complete the answer rather than duplicate it).
+   */
+  resumedPartial?: boolean;
+}
+
+/**
+ * The model-visible (and user-visible) transcript: messages that
+ * were not soft-deleted. The session-log invariant — "model-visible
+ * means logged" — guarantees every wire payload derives from this
+ * list, so regenerate and friends hide instead of delete.
+ */
+export function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter((m) => !m.hidden);
 }
 
 export function isToolMessage(message: ChatMessage): boolean {
@@ -144,6 +180,19 @@ export interface ChatConversation {
   summary?: ConversationSummary;
   /** GitHub repo attached to this conversation (enables agent tools) */
   repoContext?: RepoContext;
+  /**
+   * A turn was started but its outcome (reply, error, or abort) is not
+   * yet committed to the transcript. Persisted so a page reload can
+   * detect the lost in-flight response and resume it.
+   */
+  /**
+   * A turn was started but its outcome (reply, error, or abort) is
+   * not yet committed to the transcript. Persisted so a page reload can
+   * detect the lost in-flight response and resume it. `outcome` is
+   * set when auto-resume was attempted and failed (the explicit
+   * Resume affordance takes over).
+   */
+  pendingTurn?: { startedAt: number; outcome?: "unresumable" };
 }
 
 /** Rolling conversation summary — persisted compaction state */
@@ -158,6 +207,89 @@ export interface ConversationSummary {
   model?: string;
   /** Estimated tokens the summary replaced */
   freedTokens: number;
+}
+
+// ── Agent workspace (virtual working copy) ──────────────────
+
+export type WorkspaceFileStatus = "unchanged" | "modified" | "added" | "deleted";
+
+export interface WorkspaceFile {
+  path: string;
+  /** Current working content ("" for deleted files) */
+  content: string;
+  /** Content at the workspace base ("" for added files) */
+  baseContent: string;
+  /** Blob sha at the base commit (null for added files) */
+  baseSha: string | null;
+  status: WorkspaceFileStatus;
+  updatedAt: number;
+}
+
+export interface WorkspaceTreeEntry {
+  path: string;
+  type: "blob" | "tree";
+  size?: number;
+}
+
+/**
+ * Per-conversation virtual working copy of the attached repo. The
+ * agent edits here freely; GitHub is only written via the gated
+ * push_changes flow.
+ */
+export interface WorkspaceState {
+  conversationId: string;
+  owner: string;
+  repo: string;
+  /** Base branch pinned from the attached repo context */
+  branch: string;
+  /** Head commit sha the workspace was created from */
+  baseCommitSha: string;
+  /** Remote working branch created for pushes (null until created) */
+  workingBranch: string | null;
+  /** Repo structure snapshot (paths only; contents load lazily) */
+  tree: WorkspaceTreeEntry[];
+  /** File contents held locally (read or edited) */
+  files: Record<string, WorkspaceFile>;
+  /**
+   * Agent-mutation effect log (LIFO, capped) — each agent write/
+   * delete records its inverse so individual steps can be undone.
+   * Present on workspaces created after this shipped; treat as []
+   * when absent (older persisted workspaces).
+   */
+  mutations?: import("./workspace/undo").WorkspaceMutation[];
+  updatedAt: number;
+}
+
+export interface WorkspaceChange {
+  path: string;
+  status: WorkspaceFileStatus;
+  additions: number;
+  deletions: number;
+  /** Unified diff preview (may be truncated) */
+  patch: string;
+}
+
+/** A push awaiting user approval — shown in the PushApprovalModal */
+export interface PendingPush {
+  conversationId: string;
+  createdAt: number;
+  branchName: string;
+  baseBranch: string;
+  commitMessage: string;
+  prTitle: string;
+  prBody?: string;
+  changes: WorkspaceChange[];
+  stats: { files: number; additions: number; deletions: number };
+}
+
+/** Result of the approved GitHub push chain */
+export interface PushOutcome {
+  ok: boolean;
+  branchName?: string;
+  commitSha?: string;
+  prUrl?: string;
+  prNumber?: number;
+  error?: string;
 }
 
 export type SkillScope = "global" | "conversation";
@@ -210,8 +342,22 @@ export interface ChatSettings {
    * text content always syncs.
    */
   syncImageAttachments: boolean;
+  /** Max agent tool-loop iterations per user message (coding-agent mode) */
+  agentMaxIterations: number;
   /** GitHub OAuth/PAT credentials for agent mode (encrypted at rest) */
   github: GitHubSettings;
+}
+
+/** Reasoning capability metadata advertised by the OpenRouter catalog */
+export interface ModelReasoningMetadata {
+  /** True when the model always reasons (effort only tunes depth) */
+  mandatory?: boolean;
+  /** True when reasoning is on by default */
+  defaultEnabled?: boolean;
+  /** Effort levels the model accepts (e.g. ["max", "high", "low"]) */
+  supportedEfforts?: string[];
+  /** Effort applied when the request doesn't specify one */
+  defaultEffort?: string;
 }
 
 export interface ModelInfo {
@@ -225,6 +371,10 @@ export interface ModelInfo {
   isFree?: boolean;
   /** Input modalities advertised by the catalog (e.g. ["text","image"]) */
   inputModalities?: string[];
+  /** Request parameters the model accepts (e.g. "reasoning_effort") */
+  supportedParameters?: string[];
+  /** Reasoning capability metadata (supported efforts, defaults) */
+  reasoning?: ModelReasoningMetadata;
 }
 
 /** OpenAI-compatible content part for multimodal requests */
@@ -249,6 +399,11 @@ export interface ToolDefinition {
 }
 
 export type ContextHealth = "optimal" | "moderate" | "near-limit" | "exceeded";
+
+/** Task-kind routing metadata attached to InTab messages */
+export interface TurnRoutingMeta {
+  turnKind: "quick" | "code" | "analysis" | "vision" | "agent";
+}
 
 export interface ContextBreakdown {
   /** Tokens of the full stored conversation (estimates + exacts where known) */

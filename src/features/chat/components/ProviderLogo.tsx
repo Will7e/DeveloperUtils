@@ -1,22 +1,34 @@
 import { PROVIDER_LOGOS, type ProviderLogo } from "../lib/provider-logos";
+import { INTAB_MODEL_ID } from "../constants";
 
 /** Simple Icons paths are authored on a 24x24 canvas */
 const VIEWBOX = "0 0 24 24";
 
 /** Root OpenRouter slug for a model id: "deepseek/deepseek-chat" → "deepseek" */
-export function providerSlug(modelId: string): string {
+function providerSlug(modelId: string): string {
   return modelId.split("/")[0]?.trim().toLowerCase() ?? "";
 }
 
 /** Brand match against the OpenRouter org slug (first path segment) */
-export function resolveProviderLogo(modelId: string): ProviderLogo | undefined {
+function resolveProviderLogo(modelId: string): ProviderLogo | undefined {
   const slug = providerSlug(modelId);
 
-  // Exact slug match first (openai, anthropic, deepseek, mistralai, …)
+  // The InTab virtual model carries the app's own mark
+  if (modelId === INTAB_MODEL_ID || slug === "intab") return undefined;
+
+  // Special cases where OpenRouter's slug and the brand diverge —
+  // checked before the exact slug match. Anthropic models use the
+  // Claude burst (the product mark users know); the plain Anthropic
+  // "A" stays available for non-Claude anthropic/... ids.
+  if (slug === "anthropic") {
+    if (modelId.toLowerCase().includes("claude")) return PROVIDER_LOGOS["claude"];
+    return PROVIDER_LOGOS["anthropic"];
+  }
+
+  // Exact slug match (openai, deepseek, mistralai, …)
   const exact = PROVIDER_LOGOS[slug];
   if (exact) return exact;
 
-  // Special cases where OpenRouter's slug and the brand diverge
   if (slug === "x-ai") return PROVIDER_LOGOS["x"]; // Grok → X mark
   if (slug === "meta-llama") return PROVIDER_LOGOS["meta"];
   if (slug === "google") return PROVIDER_LOGOS["googlegemini"];

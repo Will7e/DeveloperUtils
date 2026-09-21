@@ -13,6 +13,8 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { ProviderLogo } from "./ProviderLogo";
+import { InTabLogo } from "@/components/ui/intab-logo";
+import { INTAB_MODEL_NAME } from "../constants";
 import type { ChatMessage } from "../types";
 
 function formatTime(ts: number): string {
@@ -115,9 +117,13 @@ export const MessageItem = React.memo(function MessageItem({
         {message.model && !isUser && (
           <span className="chat-msg-model">
             {message.viaInTab ? (
-              // InTab-routed message — display only the product model,
-              // never the underlying free-model id.
-              "InTab LLM"
+              // InTab-routed message — display only the product model
+              // ("InTab Flash 5.5"), never the underlying free-model
+              // id or the tier state chosen beside the selector.
+              <>
+                <InTabLogo size={14} variant="glyph" className="chat-msg-model-logo" />
+                {INTAB_MODEL_NAME}
+              </>
             ) : (
               <>
                 <ProviderLogo modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />

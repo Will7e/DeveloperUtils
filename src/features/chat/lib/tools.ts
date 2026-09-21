@@ -1,15 +1,20 @@
 // ============================================================
 // Agent Tools — GitHub Tool Definitions & Executor
 // ============================================================
-// OpenAI-style tool schemas the model calls in agent mode, plus the
-// executor that maps a parsed tool call to the GitHub client. Tool
-// results are size-capped so one careless read can't consume the
-// whole context budget — the existing compaction engine covers the
-// rest. UI-free and store-free (deps passed in explicitly).
+// The executor that maps a parsed tool call to the GitHub client.
+// Tool schemas, kinds, cacheability, and summarizers live in the
+// declarative registry (lib/tool-registry.ts); this module only
+// executes. Every call is validated through the registry BEFORE
+// execution so malformed model calls fail fast with a precise,
+// self-correcting error. Tool results are size-capped so one
+// careless read can't consume the whole context budget — the
+// existing compaction engine covers the rest. UI-free and
+// store-free (deps passed in explicitly).
 
 import {
   GITHUB_MAX_FILE_BYTES,
   GITHUB_MAX_TREE_ENTRIES,
+  TOOL_PROGRAM_MAX_CHARS,
   TOOL_RESULT_MAX_CHARS,
 } from "../constants";
 import {
@@ -19,91 +24,17 @@ import {
   GitHubError,
   type GitHubTreeEntry,
 } from "./github-client";
-import type { RepoContext, ToolCallRequest, ToolCallResult, ToolDefinition, ToolName } from "../types";
+import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
+import { runToolProgram } from "./tool-program";
+import { AGENT_TOOLS, summarizeToolCall } from "./tool-registry";
 
-// ── Schemas ──────────────────────────────────────────────────
+// Schemas + tool metadata (including the single source of truth for
+// tool names, kinds, and summarizers) live in lib/tool-registry.ts.
+// AGENT_TOOLS is re-exported for existing importers.
+export { AGENT_TOOLS, summarizeToolCall };
 
-const SUBTREE_PARAM = {
-  type: "string",
-  description:
-    "Optional directory prefix to narrow the listing (e.g. 'src/features'). Omit for the whole repo.",
-};
-
-export const AGENT_TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "list_repo_files",
-      description:
-        "List files and directories in the attached GitHub repository. Returns a tree of paths; use this first to discover the project structure, then read specific files.",
-      parameters: {
-        type: "object",
-        properties: {
-          subtree: SUBTREE_PARAM,
-        },
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description:
-        "Read the full text content of one file from the repository. Prefer reading only files relevant to the question. Very large files are tail-truncated.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: {
-            type: "string",
-            description: "Full path from the repo root (e.g. 'src/App.tsx'). Required.",
-          },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_code",
-      description:
-        "Full-text code search inside the repository (GitHub code search). Returns matching file paths with fragments. Use for finding symbols, strings, or usages without knowing the file.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description:
-              "GitHub code search query text (e.g. a function name). Scoped automatically to the attached repo.",
-          },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_repo_overview",
-      description:
-        "Get a summary of the repository: top-level structure, the README's opening section, and the largest/dominant directories. Useful as the very first call when exploring an unknown repo.",
-      parameters: { type: "object", properties: {}, required: [] },
-    },
-  },
-];
-
-/** Names of valid tools — validation for model-emitted calls */
-const VALID_TOOL_NAMES = new Set<ToolName>([
-  "list_repo_files",
-  "read_file",
-  "search_code",
-  "get_repo_overview",
-]);
-
-export function isValidToolName(name: string): name is ToolName {
-  return VALID_TOOL_NAMES.has(name as ToolName);
-}
+/** Registry-backed summary line for the activity UI */
+const summarize = summarizeToolCall;
 
 // ── Formatting helpers (model-facing result shaping) ─────────
 
@@ -169,22 +100,8 @@ export interface ToolExecutionContext {
   token: string;
   repo: RepoContext;
   signal?: AbortSignal;
-}
-
-/** Human-readable summary line for the activity UI */
-function summarize(name: ToolName, args: Record<string, unknown>, ok: boolean): string {
-  switch (name) {
-    case "list_repo_files":
-      return typeof args.subtree === "string" && args.subtree ? args.subtree + "/" : "full tree";
-    case "read_file":
-      return typeof args.path === "string" ? args.path : "(unknown path)";
-    case "search_code":
-      return typeof args.query === "string" ? `"${args.query}"` : "(no query)";
-    case "get_repo_overview":
-      return ok ? "repository overview" : "overview failed";
-    default:
-      return "";
-  }
+  /** Owning conversation id — enables workspace-aware reads */
+  conversationId?: string;
 }
 
 /** Parses the model's raw arguments JSON defensively */
@@ -243,6 +160,38 @@ export async function executeToolCall(
       case "read_file": {
         const path = typeof args.path === "string" ? args.path.trim() : "";
         if (!path) return fail("Missing required argument: path");
+
+        // Workspace-first: the agent must see its own edits, and
+        // tombstoned files should read as deleted rather than resurrect
+        // pristine repo content.
+        try {
+          const { useChatStore } = await import("@/stores/chat.store");
+          const ws = useChatStore.getState().workspaces[ctx.conversationId ?? ""];
+          const local = ws?.files[path];
+          if (local) {
+            if (local.status === "deleted") {
+              return {
+                callId: call.id,
+                name: call.name,
+                ok: true,
+                data: { path, note: "File is deleted in the agent workspace (pending push)." },
+                durationMs: Date.now() - started,
+                summary: path,
+              };
+            }
+            return {
+              callId: call.id,
+              name: call.name,
+              ok: true,
+              data: { path, content: local.content, source: "workspace" },
+              durationMs: Date.now() - started,
+              summary: path,
+            };
+          }
+        } catch {
+          /* store unavailable — fall through to GitHub */
+        }
+
         const file = await readFileContent(token, repo.owner, repo.repo, path, repo.branch);
         if (signal?.aborted) return fail("Aborted by the user.");
         if (file.isBinary) {
@@ -353,6 +302,21 @@ export async function executeToolCall(
         };
       }
 
+      case "run_tool_program": {
+        // Programmatic tool calling: one wire call → up to 8 read-only
+        // steps, executed sequentially with per-step session-cache reuse.
+        // The injected executor re-enters this switch, but only with
+        // whitelisted read-only tools (enforced by the interpreter), so
+        // recursion depth is exactly 1 and writes can never run.
+        return runToolProgram({
+          call,
+          repo,
+          token,
+          signal,
+          execute: (stepCall) => executeToolCall(stepCall, ctx),
+        });
+      }
+
       default:
         return fail(`Unknown tool: ${String(call.name)}`);
     }
@@ -369,5 +333,13 @@ export async function executeToolCall(
 /** Serializes a ToolCallResult into the wire-format content string */
 export function serializeToolResult(result: ToolCallResult): string {
   const payload = result.ok ? result.data : { error: result.data };
+  // Program results already carry a shaped `output` (which embeds the
+  // per-step log) — send it as the payload; metadata would only add bulk.
+  if (result.name === "run_tool_program" && typeof (payload as { output?: unknown }).output === "string") {
+    return truncateForBudget(
+      (payload as { output: string }).output,
+      Math.max(TOOL_RESULT_MAX_CHARS, TOOL_PROGRAM_MAX_CHARS)
+    );
+  }
   return truncateForBudget(JSON.stringify(payload));
 }

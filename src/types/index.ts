@@ -107,6 +107,10 @@ export interface EditorSettings {
   formatOnPaste: boolean;
   formatOnType: boolean;
   executionTimeout: number; // milliseconds, default 10000
+  /** Auto-collapse the main sidebar after idle (no pointer/keyboard activity) */
+  sidebarAutoCollapse: boolean;
+  /** Idle delay in milliseconds before auto-collapse kicks in */
+  sidebarAutoCollapseDelay: number;
 }
 
 /** Output panel entry */
@@ -131,12 +135,18 @@ export interface TabExecutionState {
   restoredHistoryId: string | null;
 }
 
-/** Toast notification */
+/** Toast notification — Geist Toast (vercel.com/geist/toast) */
 export interface Toast {
   id: string;
+  title?: string;
   message: string;
-  type: "info" | "success" | "error";
+  type: "info" | "success" | "warning" | "error";
+  /** Auto-dismiss delay in ms; omit for the 3s default, Infinity to preserve */
   duration?: number;
+  /** Optional inline action button (e.g. "Undo") */
+  action?: { label: string; onClick: () => void };
+  /** Keep the toast on screen until manually dismissed */
+  preserve?: boolean;
 }
 
 /** Command palette action */

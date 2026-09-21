@@ -22,6 +22,8 @@ export interface RequestBudget {
 /**
  * Computes the request budget for a model. Falls back to a
  * conservative 128k window when the model's context length is unknown.
+ * The model's learned token-calibration ratio sharpens the system
+ * prompt estimate when available.
  */
 export function computeBudget(params: {
   model?: ModelInfo;
@@ -29,7 +31,7 @@ export function computeBudget(params: {
 }): RequestBudget {
   const window = params.model?.contextLength ?? 128_000;
   const outputReserve = Math.min(OUTPUT_RESERVE_TOKENS, Math.floor(window * 0.1));
-  const systemTokens = estimateTokens(params.systemPrompt);
+  const systemTokens = estimateTokens(params.systemPrompt, params.model?.id);
 
   return {
     window,
