@@ -9,6 +9,8 @@
 
 import React from "react";
 import { Check, Copy } from "lucide-react";
+import { HighlightedCodeSpan } from "./HighlightedCode";
+import { highlightCode } from "../highlight";
 
 // ── Code Block ──────────────────────────────────────────────
 
@@ -27,10 +29,21 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
     );
   }, [code]);
 
+  // Token coloring for supported languages (plain text otherwise).
+  // While streaming an open fence, the tail of `code` is still growing —
+  // re-tokenizing a bounded block is cheap.
+  const { language: displayLanguage, tokens } = React.useMemo(
+    () => highlightCode(code, language),
+    [code, language]
+  );
+
   return (
     <div className="chat-code-block">
       <div className="chat-code-block-bar">
-        <span className="chat-code-block-lang">{language || "code"}</span>
+        <span className="chat-code-block-lang" data-detected={!language || undefined}>
+          {displayLanguage || language || "code"}
+          {!language && displayLanguage ? " · detected" : ""}
+        </span>
         <button
           type="button"
           className="chat-code-block-copy"
@@ -49,7 +62,13 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         </button>
       </div>
       <pre className="chat-code-block-pre">
-        <code>{code}</code>
+        {tokens.length > 0 ? (
+          <code>
+            <HighlightedCodeSpan tokens={tokens} />
+          </code>
+        ) : (
+          <code>{code}</code>
+        )}
       </pre>
     </div>
   );

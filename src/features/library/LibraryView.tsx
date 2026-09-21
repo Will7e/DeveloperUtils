@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { LoadingState } from "@/components/ui/loading-state";
+import { CardsSkeleton } from "@/components/ui/skeleton";
 import {
   Copy,
   Check,
@@ -1222,12 +1222,7 @@ function DrawFlowLibraryGallery({
       </div>
 
       {loading ? (
-        <LoadingState
-          size="md"
-          message="Loading DrawFlow libraries..."
-          description="Fetching community component packs"
-          minHeight={260}
-        />
+        <CardsSkeleton count={6} />
       ) : filteredLibraries.length === 0 ? (
         <div className="p-12 text-center bg-bg-1 border border-border-1 rounded-2xl flex flex-col items-center justify-center">
           <Boxes className="w-10 h-10 text-text-3 opacity-40 mb-3" />

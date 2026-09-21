@@ -2,7 +2,7 @@
 // Editor Tabs — File tabs with new-file dropdown & run controls
 // ============================================================
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { useAppStore } from "@/stores/app.store";
@@ -15,6 +15,8 @@ import { LANGUAGE_CONFIGS } from "@/config";
 import { cn } from "@/lib/utils";
 import { compilerService } from "@/services/compiler.service";
 import { formatDuration } from "@/lib/utils";
+import { LanguageIcon } from "./language-icon";
+import { NewFileMenu } from "./NewFileMenu";
 import type { Language } from "@/types";
 
 interface ActionTooltipProps {
@@ -34,25 +36,20 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
   </Tooltip>
 );
 
-const tabIcons: Record<Language, string> = {
-  javascript: "JS",
-  typescript: "TS",
-  python: "PY",
-  html: "<>",
-};
+/** Languages whose runtime must be initialized before first run */
+const RUNTIME_LANGUAGES: Language[] = ["python", "typescript", "sql", "lua"];
 
-const langBadges: Record<Language, { cls: string; label: string }> = {
-  javascript: { cls: "lang-badge-js", label: "JavaScript" },
-  typescript: { cls: "lang-badge-ts", label: "TypeScript" },
-  python: { cls: "lang-badge-py", label: "Python" },
-  html: { cls: "lang-badge-html", label: "HTML" },
+const RUNTIME_LABELS: Partial<Record<Language, string>> = {
+  python: "Loading Python runtime (Pyodide)...",
+  typescript: "Loading TypeScript compiler...",
+  sql: "Loading SQLite runtime (WASM)...",
+  lua: "Loading Lua runtime (WASM)...",
 };
 
 export function EditorTabs() {
   const [showMenu, setShowMenu] = useState(false);
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const files = useAppStore((s) => s.files);
   const activeFileId = useAppStore((s) => s.activeFileId);
   const setActiveFile = useAppStore((s) => s.setActiveFile);
@@ -85,25 +82,10 @@ export function EditorTabs() {
   const isHtml = activeFile?.language === "html";
   const canRun = activeFile && !isHtml;
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!showMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        menuRef.current && !menuRef.current.contains(e.target as Node) &&
-        btnRef.current && !btnRef.current.contains(e.target as Node)
-      ) {
-        setShowMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showMenu]);
-
   const handleToggleMenu = () => {
     if (!showMenu && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      setMenuPos({ top: rect.bottom + 2, left: rect.left });
+      setMenuPos({ top: rect.bottom + 6, left: rect.left });
     }
     setShowMenu(!showMenu);
   };
@@ -111,7 +93,6 @@ export function EditorTabs() {
   const handleCreate = (lang: Language) => {
     const config = LANGUAGE_CONFIGS[lang];
     createFile(`untitled${config.extension}`, lang);
-    setShowMenu(false);
   };
 
   // ── Run Code ──────────────────────────────────────────────
@@ -135,25 +116,15 @@ export function EditorTabs() {
     addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
 
     try {
-      if (activeFile.language === "python") {
-        const ready = await compilerService.isReady("python");
+      // Initialize the WASM / compiler runtime on first use
+      if (RUNTIME_LANGUAGES.includes(activeFile.language)) {
+        const ready = await compilerService.isReady(activeFile.language);
         if (!ready) {
           addOutputEntry({
             type: "info",
-            content: "Loading Python runtime (Pyodide)...",
+            content: RUNTIME_LABELS[activeFile.language] ?? "Loading runtime...",
           });
-          await compilerService.initialize("python");
-        }
-      }
-
-      if (activeFile.language === "typescript") {
-        const ready = await compilerService.isReady("typescript");
-        if (!ready) {
-          addOutputEntry({
-            type: "info",
-            content: "Loading TypeScript compiler...",
-          });
-          await compilerService.initialize("typescript");
+          await compilerService.initialize(activeFile.language);
         }
       }
 
@@ -243,11 +214,7 @@ export function EditorTabs() {
       files.map((file) => ({
         id: file.id,
         name: file.name,
-        icon: (
-          <span className={cn("tab-icon", `tab-icon-${file.language}`)}>
-            {tabIcons[file.language]}
-          </span>
-        ),
+        icon: <LanguageIcon language={file.language} size="sm" />,
         isDirty: file.isDirty,
         closable: files.length > 1,
       })),
@@ -399,31 +366,13 @@ export function EditorTabs() {
         }
       />
 
-      {/* New file dropdown — rendered as fixed-position portal to avoid overflow clipping */}
-      {showMenu && (
-        <>
-          <div className="dropdown-backdrop" onClick={() => setShowMenu(false)} />
-          <div
-            ref={menuRef}
-            className="new-file-dropdown"
-            style={{ top: menuPos.top, left: menuPos.left }}
-          >
-            {(Object.keys(LANGUAGE_CONFIGS) as Language[]).map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                className="new-file-option"
-                onClick={() => handleCreate(lang)}
-              >
-                <span className={cn("lang-badge", langBadges[lang].cls)}>
-                  {tabIcons[lang]}
-                </span>
-                <span>{langBadges[lang].label}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {/* Shared language-picker popover (fixed-position to avoid overflow clipping) */}
+      <NewFileMenu
+        open={showMenu}
+        anchor={menuPos}
+        onClose={() => setShowMenu(false)}
+        onCreate={handleCreate}
+      />
     </>
   );
 }

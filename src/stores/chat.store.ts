@@ -30,6 +30,8 @@ export interface ChatStoreState {
   streamingConversationId: string | null;
   /** Content accumulated for the in-flight assistant message */
   streamingContent: string;
+  /** Reasoning-token text accumulated for the in-flight message */
+  streamingReasoning: string;
   /** True after abort — partial output is kept */
   wasAborted: boolean;
   settingsOpen: boolean;
@@ -60,8 +62,16 @@ export interface ChatStoreState {
   // ── Streaming ──
   beginStreaming: (conversationId: string) => void;
   appendStreamingContent: (chunk: string) => void;
+  /** Appends reasoning-token text (reasoning models via OpenRouter) */
+  appendStreamingReasoning: (chunk: string) => void;
   /** Commits the streaming content as a real message; returns its id */
-  commitStreamingMessage: (meta?: { model?: string; latencyMs?: number; usage?: UsageInfo }) => string | null;
+  commitStreamingMessage: (meta?: {
+    model?: string;
+    latencyMs?: number;
+    usage?: UsageInfo;
+    reasoning?: string;
+    reasoningMs?: number;
+  }) => string | null;
   /** Discards in-flight content (used when stream produced nothing) */
   discardStreaming: () => void;
   endStreaming: (aborted: boolean) => void;
@@ -109,6 +119,7 @@ export const useChatStore = create<ChatStoreState>()(
       isStreaming: false,
       streamingConversationId: null,
       streamingContent: "",
+      streamingReasoning: "",
       wasAborted: false,
       settingsOpen: false,
       settingsTab: null,
@@ -245,16 +256,21 @@ export const useChatStore = create<ChatStoreState>()(
           isStreaming: true,
           streamingConversationId: conversationId,
           streamingContent: "",
+          streamingReasoning: "",
           wasAborted: false,
         }),
 
       appendStreamingContent: (chunk) =>
         set((s) => ({ streamingContent: s.streamingContent + chunk })),
 
+      appendStreamingReasoning: (chunk) =>
+        set((s) => ({ streamingReasoning: s.streamingReasoning + chunk })),
+
       commitStreamingMessage: (meta) => {
-        const { streamingConversationId, streamingContent } = get();
+        const { streamingConversationId, streamingContent, streamingReasoning } = get();
         if (!streamingConversationId || !streamingContent.trim()) return null;
         const id = generateId();
+        const reasoning = meta?.reasoning ?? streamingReasoning;
         set((s) => ({
           conversations: mapConversation(s.conversations, streamingConversationId, (c) =>
             touchConversation({
@@ -266,6 +282,7 @@ export const useChatStore = create<ChatStoreState>()(
                   role: "assistant",
                   content: s.streamingContent,
                   timestamp: Date.now(),
+                  reasoning: reasoning || undefined,
                   ...meta,
                 },
               ],
@@ -275,10 +292,16 @@ export const useChatStore = create<ChatStoreState>()(
         return id;
       },
 
-      discardStreaming: () => set({ streamingContent: "" }),
+      discardStreaming: () => set({ streamingContent: "", streamingReasoning: "" }),
 
       endStreaming: (aborted) =>
-        set({ isStreaming: false, streamingConversationId: null, streamingContent: "", wasAborted: aborted }),
+        set({
+          isStreaming: false,
+          streamingConversationId: null,
+          streamingContent: "",
+          streamingReasoning: "",
+          wasAborted: aborted,
+        }),
 
       // ── Skills ──
       addSkill: (skill) =>

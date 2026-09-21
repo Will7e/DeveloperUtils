@@ -23,6 +23,10 @@ export interface ChatMessage {
   latencyMs?: number;
   /** Usage accounting (assistant messages) */
   usage?: UsageInfo;
+  /** Chain-of-thought text captured from reasoning models (assistant) */
+  reasoning?: string;
+  /** Time spent emitting reasoning tokens, when reported (assistant) */
+  reasoningMs?: number;
   /** Number of earlier messages hidden by compaction (marker message) */
   compactedFrom?: number;
 }

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Loader2 } from "lucide-react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import {
   Activity,
@@ -15,7 +16,8 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
-import { LoadingState } from "@/components/ui/loading-state";
+import { ResponseSkeleton } from "@/components/ui/skeleton";
+import { useSkeletonVisibility } from "../hooks/useSkeletonVisibility";
 import { EditorLoadingFallback } from "@/components/ui/editor-loader";
 import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore, type TabState } from "@/stores/api-tester.store";
@@ -56,6 +58,14 @@ export function ResponsePane({
   const responseLang = activeTab?.response?.headers
     ? getLanguageFromContentType(activeTab.response.headers["content-type"])
     : "text";
+
+  // Flash guard: the skeleton only mounts after ~250ms in flight and
+  // stays at least ~400ms, so fast responses swap straight from the
+  // empty state to content with no placeholder flicker.
+  const showSkeleton = useSkeletonVisibility(Boolean(activeTab.loading), {
+    delayMs: 250,
+    minMs: 400,
+  });
 
   const responseBody = activeTab?.response?.body;
   const prettyBody = useMemo(() => {
@@ -140,6 +150,9 @@ export function ResponsePane({
         <>
           <div className="api-pane-header">
             <span className="api-pane-title">Response</span>
+            {activeTab.loading && !activeTab.response && (
+              <Loader2 className="h-3.5 w-3.5 api-pane-spinner" aria-hidden="true" />
+            )}
             {activeTab.sseActive && (
               <div
                 style={{
@@ -236,16 +249,9 @@ export function ResponsePane({
             )}
           </div>
 
-          {/* Loading */}
-          {activeTab.loading && (
-            <div className="api-loading-state">
-              <LoadingState
-                size="md"
-                message="Connecting to server..."
-                description="Sending HTTP request and awaiting response"
-              />
-            </div>
-          )}
+          {/* Loading — skeleton shaped like the response layout.
+              Flash-guarded so quick responses never show it. */}
+          {showSkeleton && <ResponseSkeleton />}
 
           {/* Error */}
           {activeTab.error && (

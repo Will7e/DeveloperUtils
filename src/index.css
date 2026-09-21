@@ -845,13 +845,10 @@ html.light .lib-view-empty-icon-ring {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
 }
 
-/* ---- Light: Sidebar collapsed file active ---- */
-html.light .sidebar-collapsed-file-active::before {
+/* ---- Light: Sidebar collapsed file active + explorer pin-dots ---- */
+html.light .sidebar-rail-file-active::before,
+html.light .sidebar-file-pin {
   box-shadow: 0 0 6px rgba(0, 112, 243, 0.3);
-}
-
-html.light .sidebar-file-active::before {
-  box-shadow: 0 0 6px rgba(0, 112, 243, 0.2);
 }
 
 /* ---- Light: Lib Group Count ---- */
@@ -1206,6 +1203,19 @@ body {
   width: 56px;
 }
 
+/* Cloud Sync — pinned just above the sidebar footer divider */
+.activity-bar-cloudsync {
+  flex-shrink: 0;
+  margin-bottom: 2px;
+  padding: 0 10px;
+}
+.activity-bar-collapsed .activity-bar-cloudsync {
+  padding: 0 6px;
+}
+.activity-bar-cloudsync .nav-item-indicator {
+  display: none;
+}
+
 /* Brand */
 .activity-bar-brand {
   display: flex;
@@ -1410,6 +1420,20 @@ html.light .intab-logo-glow {
 .nav-item-label {
   opacity: 1;
   transition: opacity 0.2s ease 0.05s;
+}
+/* Support button — each letter does a tiny 2px hop, staggered left
+   to right, then rests until the next 7s cycle. Total wave ≈ 0.6s. */
+@keyframes support-letter-hop {
+  0%, 12%, 100% { transform: translateY(0); }
+  6% { transform: translateY(-2px); }
+}
+.nav-item-letter-hop {
+  display: inline-block;
+  animation: support-letter-hop 7s ease-in-out infinite;
+  will-change: transform;
+}
+.nav-item:hover .nav-item-letter-hop {
+  animation: none;
 }
 .nav-item-label-hidden {
   opacity: 0;

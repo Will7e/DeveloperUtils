@@ -5,7 +5,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { TopLoadingBar } from "@/components/ui/top-loading-bar";
+import { PageSkeleton } from "@/components/ui/page-skeleton";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import { CommandPalette } from "@/features/command-palette/CommandPalette";
@@ -52,8 +52,8 @@ if (typeof window !== "undefined") {
 
 function PageLoader() {
   return (
-    <div className="flex-1 flex items-center justify-center w-full h-full min-h-screen bg-bg-0 relative">
-      <TopLoadingBar />
+    <div className="flex-1 flex flex-col w-full h-full min-h-screen bg-bg-0">
+      <PageSkeleton />
     </div>
   );
 }

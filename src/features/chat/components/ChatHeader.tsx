@@ -7,6 +7,7 @@ import {
   Blocks,
   Download,
   Menu,
+  Settings,
   SlidersHorizontal,
   X,
 } from "lucide-react";
@@ -129,6 +130,16 @@ export function ChatHeader({
             aria-label="Export chat"
           >
             <Download className="h-3.5 w-3.5" />
+          </button>
+        </SimpleTooltip>
+        <SimpleTooltip content="Chat settings" side="bottom">
+          <button
+            type="button"
+            className="chat-header-btn"
+            onClick={onOpenSettings}
+            aria-label="Open chat settings"
+          >
+            <Settings className="h-3.5 w-3.5" />
           </button>
         </SimpleTooltip>
       </div>

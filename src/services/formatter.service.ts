@@ -5,14 +5,19 @@
 // ============================================================
 
 import type { Language } from "@/types";
-import * as prettier from "prettier/standalone";
-import * as parserBabel from "prettier/plugins/babel";
-import * as parserEstree from "prettier/plugins/estree";
-import * as parserHtml from "prettier/plugins/html";
-import * as parserPostcss from "prettier/plugins/postcss";
-import * as parserTypeScript from "prettier/plugins/typescript";
-import * as parserYaml from "prettier/plugins/yaml";
-import * as parserMarkdown from "prettier/plugins/markdown";
+// Prettier is ~1.5MB minified — the single biggest dependency in the
+// app. It's only needed when the user actually formats code, so every
+// module (including its plugins) is loaded on demand via dynamic
+// import. This keeps the main bundle lean for first paint.
+type PrettierModule = typeof import("prettier/standalone");
+
+let prettierPromise: Promise<PrettierModule> | null = null;
+async function loadPrettier(): Promise<PrettierModule> {
+  if (!prettierPromise) {
+    prettierPromise = import("prettier/standalone");
+  }
+  return prettierPromise;
+}
 
 import { formatJsonRobust } from "@/features/formatters/jsonUtils";
 import { formatXml } from "@/features/formatters/xmlUtils";
@@ -214,6 +219,14 @@ export async function formatContent(
 
     // 4. HTML formatting
     if (lang === "html") {
+      const [prettier, parserHtml, parserPostcss, parserBabel, parserEstree, parserTypeScript] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/html"),
+        import("prettier/plugins/postcss"),
+        import("prettier/plugins/babel"),
+        import("prettier/plugins/estree"),
+        import("prettier/plugins/typescript"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "html",
         plugins: [parserHtml, parserPostcss, parserBabel, parserEstree, parserTypeScript],
@@ -225,6 +238,10 @@ export async function formatContent(
 
     // 5. CSS / SCSS formatting
     if (lang === "css" || lang === "scss" || lang === "less") {
+      const [prettier, parserPostcss] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/postcss"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "css",
         plugins: [parserPostcss],
@@ -236,6 +253,11 @@ export async function formatContent(
 
     // 6. JavaScript / JSX formatting
     if (lang === "javascript" || lang === "js") {
+      const [prettier, parserBabel, parserEstree] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/babel"),
+        import("prettier/plugins/estree"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "babel",
         plugins: [parserBabel, parserEstree],
@@ -250,6 +272,11 @@ export async function formatContent(
 
     // 7. TypeScript / TSX formatting
     if (lang === "typescript" || lang === "ts") {
+      const [prettier, parserTypeScript, parserEstree] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/typescript"),
+        import("prettier/plugins/estree"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "typescript",
         plugins: [parserTypeScript, parserEstree],
@@ -264,6 +291,10 @@ export async function formatContent(
 
     // 8. YAML formatting
     if (lang === "yaml" || lang === "yml") {
+      const [prettier, parserYaml] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/yaml"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "yaml",
         plugins: [parserYaml],
@@ -274,6 +305,10 @@ export async function formatContent(
 
     // 9. Markdown formatting
     if (lang === "markdown" || lang === "md") {
+      const [prettier, parserMarkdown] = await Promise.all([
+        loadPrettier(),
+        import("prettier/plugins/markdown"),
+      ]);
       const formatted = await prettier.format(trimmed, {
         parser: "markdown",
         plugins: [parserMarkdown],

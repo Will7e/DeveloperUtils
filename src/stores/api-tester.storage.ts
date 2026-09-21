@@ -390,17 +390,54 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   // ── History ─────────────────────────────────────────────
   // Security: Strip auth & redact sensitive parameters/headers from history.
   // History records *what* was called, not *with which credentials*.
+  // Request bodies / form params CAN still carry secrets (tokens in JSON),
+  // so they are encrypted at rest and decrypted transparently on read.
 
   async getHistory(): Promise<HistoryItem[]> {
-    return this.fallback.getHistory();
+    const items = await this.fallback.getHistory();
+    const passphrase = this.getKey();
+    if (!passphrase) return items;
+
+    try {
+      return await Promise.all(
+        items.map(async (item) => {
+          const decrypted: HistoryItem = { ...item };
+          if (isCipherEnvelope(item.bodyValue)) {
+            try {
+              decrypted.bodyValue = await decrypt(item.bodyValue, passphrase);
+            } catch {
+              decrypted.bodyValue = "";
+            }
+          }
+          if (Array.isArray(item.formParams)) {
+            decrypted.formParams = await Promise.all(
+              item.formParams.map(async (f) => {
+                if (isCipherEnvelope(f.value)) {
+                  try {
+                    return { ...f, value: await decrypt(f.value, passphrase) };
+                  } catch {
+                    return { ...f, value: "" };
+                  }
+                }
+                return f;
+              })
+            );
+          }
+          return decrypted;
+        })
+      );
+    } catch {
+      return items;
+    }
   }
 
   async saveHistory(history: HistoryItem[]): Promise<void> {
-    const sensitiveParamRegex = /^(.*_)?(key|token|secret|password|auth|sig|signature|access|cred)(_.*)?$/i;
-    const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|cookie|set-cookie|cf-access-client-secret|x-amz-security-token)$/i;
+    const passphrase = this.getKey();
+    const sensitiveParamRegex = /^(.*_)?(key|token|secret|password|passwd|auth|sig|signature|cred|credential|api[-_]?key|client[-_]?secret|access[-_]?token|refresh[-_]?token|id[-_]?token|jwt)(_.*)?$/i;
+    const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|x-session-token|cookie|set-cookie|cf-access-client-secret|x-amz-security-token|x-csrf-token|x-xsrf-token)$/i;
 
     // Sanitize: remove auth credentials from history entries
-    const sanitized = history.map((item) => {
+    const sanitized = await Promise.all(history.map(async (item) => {
       let safeUrl = item.url;
       try {
         if (safeUrl && (safeUrl.startsWith("http://") || safeUrl.startsWith("https://"))) {
@@ -418,11 +455,34 @@ export class EncryptedStorageAdapter implements StorageAdapter {
         // Leave URL as is if parsing fails
       }
 
+      // Encrypt request body / form params at rest (they may embed secrets)
+      let safeBodyValue: string | CipherEnvelope | undefined = item.bodyValue;
+      if (passphrase && typeof safeBodyValue === "string" && safeBodyValue.trim() !== "") {
+        safeBodyValue = await encrypt(safeBodyValue, passphrase);
+      }
+      let safeFormParams:
+        | HistoryItem["formParams"]
+        | Array<{ key: string; value: string | CipherEnvelope }>
+        | undefined = item.formParams;
+      if (passphrase && Array.isArray(safeFormParams)) {
+        safeFormParams = await Promise.all(
+          safeFormParams.map(async (f) => ({
+            ...f,
+            value:
+              typeof f.value === "string" && f.value.trim() !== ""
+                ? await encrypt(f.value, passphrase)
+                : f.value,
+          }))
+        );
+      }
+
       return {
         ...item,
         url: safeUrl,
         authConfig: undefined,
         authType: item.authType ? item.authType : undefined,
+        bodyValue: safeBodyValue,
+        formParams: safeFormParams,
         // Redact Authorization and token headers from history
         headers: item.headers?.map((h) => {
           if (sensitiveHeaderRegex.test(h.key.trim())) {
@@ -431,8 +491,10 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           return h;
         }),
       };
-    });
-    return this.fallback.saveHistory(sanitized);
+    }));
+    // Encrypted fields are CipherEnvelopes at rest; the fallback only
+    // serializes, so the envelope-vs-string variance is erased on write.
+    return this.fallback.saveHistory(sanitized as unknown as HistoryItem[]);
   }
 
   // ── Collections ─────────────────────────────────────────
@@ -447,7 +509,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
       if (!saved) return [];
       const collections = JSON.parse(saved) as ImportedCollection[];
 
-      return Promise.all(
+      // Await INSIDE the try so a single failed decrypt surfaces here
+      // instead of escaping as an unhandled rejection.
+      return await Promise.all(
         collections.map(async (col) => ({
           ...col,
           requests: await Promise.all(
@@ -498,7 +562,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
       const saved = getStoredItem(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
       if (!saved) return [];
       const fields = JSON.parse(saved);
-      return decryptKeyValueFields(fields, passphrase);
+      // Await INSIDE the try so decrypt failures surface here instead of
+      // escaping as an unhandled rejection.
+      return await decryptKeyValueFields(fields, passphrase);
     } catch {
       return [];
     }
@@ -528,7 +594,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
       if (!saved) return [];
       const envs = JSON.parse(saved) as Environment[];
 
-      return Promise.all(
+      // Await INSIDE the try so a single failed decrypt surfaces here
+      // instead of escaping as an unhandled rejection.
+      return await Promise.all(
         envs.map(async (env) => ({
           ...env,
           variables: await decryptKeyValueFields(env.variables, passphrase),
@@ -579,7 +647,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
       if (!saved) return [];
       const presets = JSON.parse(saved) as LibraryPreset[];
 
-      return Promise.all(
+      // Await INSIDE the try so a single failed decrypt surfaces here
+      // instead of escaping as an unhandled rejection.
+      return await Promise.all(
         presets.map(async (preset) => {
           if (preset.authConfig) {
             return {

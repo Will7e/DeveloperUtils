@@ -41,7 +41,6 @@ export function ChatPage() {
   const settings = useChatStore((s) => s.settings);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const streamingConversationId = useChatStore((s) => s.streamingConversationId);
-  const streamingContent = useChatStore((s) => s.streamingContent);
   const settingsOpen = useChatStore((s) => s.settingsOpen);
   const settingsTab = useChatStore((s) => s.settingsTab);
 
@@ -234,8 +233,6 @@ export function ChatPage() {
         <MessageList
           key={activeConversationId ?? "empty"}
           messages={activeConversation?.messages ?? []}
-          streamingContent={streamingContent}
-          isStreaming={isStreamingHere}
           defaultModel={modelName}
           hasApiKey={Boolean(settings.apiKey)}
           onSuggestion={handleSuggestion}

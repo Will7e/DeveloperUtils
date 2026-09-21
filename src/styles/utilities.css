@@ -120,31 +120,283 @@ html.light .loader-bar-fill {
   opacity: 0.65;
 }
 
-/* Route Navigation Top Progress Bar */
-.route-top-loader {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    var(--ds-blue-700) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: route-progress 1.4s ease-in-out infinite;
-  z-index: 50;
-  box-shadow: 0 0 10px rgba(0, 112, 243, 0.35);
+/* ── Geist Skeletons ─────────────────────────────────────────
+   Recipe from Geist/zeit skeleton (accents_1→accents_2 wash):
+   270deg gray gradient, background-size 400% 100%, 3s
+   ease-in-out sweep, opacity .5. Shapes mirror the final
+   element (pill / rounded / squared). Blocks are decorative. */
+@keyframes geist-skeleton-loading {
+  0% { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes geist-skeleton-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.6; }
 }
 
-@keyframes route-progress {
-  0% {
-    background-position: 200% 0;
+.geist-skeleton {
+  flex-shrink: 0;
+  border-radius: 6px; /* Geist rounded (text/buttons) */
+  background-image: linear-gradient(
+    270deg,
+    var(--ds-gray-100) 0%,
+    var(--ds-gray-200) 25%,
+    var(--ds-gray-200) 75%,
+    var(--ds-gray-100) 100%
+  );
+  background-size: 400% 100%;
+  animation: geist-skeleton-loading 3s ease-in-out infinite;
+  opacity: 0.5;
+}
+.geist-skeleton-pill {
+  border-radius: 9999px;
+}
+.geist-skeleton-squared {
+  border-radius: 0;
+}
+
+/* Loading regions */
+.geist-skeleton-region {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.geist-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.geist-skeleton-tabs {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ds-gray-alpha-200);
+}
+.geist-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 14px; /* Geist: 1em-ish rhythm between text lines */
+  padding-top: 2px;
+}
+
+/* API Tester response pane region — fills the pane; children carry
+   the real paddings (rows use 12px 16px like .api-tab-content) */
+.api-response-skeleton {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: api-fadeIn 0.2s ease-out;
+}
+.api-response-skeleton .geist-skeleton-tabs {
+  padding-bottom: 0; /* tab strip owns its height (38px) */
+  margin-bottom: 0;
+}
+
+/* Editor skeleton: line-number gutters + code lines */
+.geist-editor-skeleton {
+  width: 100%;
+  height: 100%;
+  min-height: 140px;
+  padding: 16px 18px;
+  overflow: hidden;
+  gap: 15px; /* matches code line-height rhythm */
+}
+.geist-editor-row {
+  gap: 14px;
+}
+
+/* Cards skeleton (Library / DrawFlow grids) */
+.geist-cards-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+.geist-card-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px; /* Geist card padding */
+  border: 1px solid var(--ds-gray-alpha-200);
+  border-radius: 8px; /* Geist card radius */
+  background: var(--ds-background-100);
+}
+
+/* Page skeleton: lazy-route Suspense fallback */
+.geist-page-skeleton {
+  flex: 1;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.geist-page-skeleton-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--ds-gray-alpha-200);
+  border-radius: 8px;
+  background: var(--ds-background-100);
+}
+
+/* Workspace skeleton (API Tester init) — mirrors page geometry:
+   omnibox 42px, tab strip 38px, split panes like api-split-panes */
+.geist-workspace-skeleton {
+  width: 100%;
+  gap: 0; /* rows carry their own real paddings/borders */
+}
+.geist-urlbar-skeleton {
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ds-gray-alpha-200);
+}
+.geist-tabbar-skeleton {
+  min-height: 38px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ds-gray-alpha-200);
+}
+.geist-workspace-panes {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+.geist-workspace-pane {
+  border: 1px solid var(--ds-gray-alpha-200);
+  overflow: hidden;
+  min-height: 260px;
+  background: var(--ds-background-100);
+}
+.geist-workspace-pane + .geist-workspace-pane {
+  border-left: none;
+}
+@media (max-width: 760px) {
+  .geist-workspace-panes {
+    grid-template-columns: 1fr;
   }
-  100% {
-    background-position: -200% 0;
+}
+
+/* Pane header skeleton row — mirrors .api-pane-header (40px) */
+.geist-paneheader-skeleton {
+  min-height: 40px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--ds-gray-alpha-200);
+  flex-shrink: 0;
+}
+
+/* Response tab strip — mirrors .api-tabs-list (38px, 13px labels) */
+.geist-resptabs-skeleton {
+  min-height: 38px;
+  padding: 0 16px;
+}
+
+/* API Tester sidebar skeleton — mirrors section list rhythm */
+.api-sidebar-skeleton {
+  width: 280px;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-1);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.geist-sidebar-header-skeleton {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--ds-gray-alpha-200);
+}
+.api-sidebar-skeleton-sections {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 12px 16px;
+  overflow: hidden;
+}
+.api-sidebar-skeleton-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.geist-sidebar-footer-skeleton {
+  height: 48px;
+  min-height: 48px;
+  padding: 0 14px;
+  border-top: 1px solid var(--ds-gray-alpha-200);
+}
+.geist-sidebar-item-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px; /* mirrors .api-history-card */
+  border: 1px solid var(--ds-gray-alpha-200);
+  border-radius: var(--radius-md);
+  background: var(--ds-background-100);
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.geist-sidebar-item-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px; /* url 11.5px + meta 10px rhythm */
+}
+
+/* Embedded editor skeleton (inside response pane) — fills the
+   remaining pane height, line rhythm ≈ Monaco 12.5px code lines */
+.geist-editor-skeleton-embedded {
+  min-height: 0;
+  flex: 1;
+  padding: 12px 16px 16px;
+  gap: 15px;
+  overflow: hidden;
+  border-top: none;
+}
+
+/* Top-down cascade: composites fade/slide in slightly staggered.
+   Containers opt in with .geist-cascade; children animate via
+   the geist-cascade-in keyframe. */
+@keyframes geist-cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.geist-cascade > * {
+  animation: geist-cascade-in 0.28s ease-out backwards;
+}
+.geist-cascade > *:nth-child(1) { animation-delay: 0s; }
+.geist-cascade > *:nth-child(2) { animation-delay: 0.05s; }
+.geist-cascade > *:nth-child(3) { animation-delay: 0.1s; }
+.geist-cascade > *:nth-child(4) { animation-delay: 0.15s; }
+.geist-cascade > *:nth-child(5) { animation-delay: 0.2s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .geist-skeleton {
+    animation: geist-skeleton-pulse 2.4s ease-in-out infinite;
+  }
+
+  .geist-cascade > * {
+    animation: none;
+  }
+
+  .geist-sidebar-item-skeleton,
+  .geist-card-skeleton {
+    animation: none;
   }
 }
 

@@ -4,7 +4,7 @@
 
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { Suspense } from "react";
-import { TopLoadingBar } from "@/components/ui/top-loading-bar";
+import { PageSkeleton } from "@/components/ui/page-skeleton";
 import { InTabLogo } from "@/components/ui/intab-logo";
 import {
   Home,
@@ -41,14 +41,27 @@ interface NavItemProps {
   active?: boolean;
   collapsed?: boolean;
   onClick?: () => void;
+  labelClassName?: string;
+  /** Animate label letters with a tiny staggered hop */
+  staggered?: boolean;
 }
 
-function NavItem({ to, icon, label, active, collapsed, onClick }: NavItemProps) {
+function NavItem({ to, icon, label, active, collapsed, onClick, labelClassName, staggered }: NavItemProps) {
   const content = (
     <>
       <span className="nav-item-icon">{icon}</span>
       <span className={cn("nav-item-label", collapsed && "nav-item-label-hidden")}>
-        {label}
+        {staggered
+          ? label.split("").map((ch, i) => (
+              <span
+                key={`${i}-${ch}`}
+                className="nav-item-letter-hop"
+                style={{ animationDelay: `${i * 0.045}s` }}
+              >
+                {ch === " " ? "\u00A0" : ch}
+              </span>
+            ))
+          : label}
       </span>
       {active && <div className="nav-item-indicator" />}
     </>
@@ -238,22 +251,26 @@ export function MainLayout() {
           />
         </div>
 
-        {/* Bottom Actions */}
-        <div className="activity-bar-bottom">
-          <div className="activity-bar-divider" />
-
+        {/* Cloud Sync — just above the footer divider */}
+        <div className="activity-bar-cloudsync">
           <NavItem
             icon={<Cloud className="h-[18px] w-[18px]" />}
             label="Cloud Sync"
             collapsed={sidebarCollapsed}
             onClick={handleCloudSync}
           />
+        </div>
+
+        {/* Bottom Actions */}
+        <div className="activity-bar-bottom">
+          <div className="activity-bar-divider" />
 
           <NavItem
             icon={<Coffee className="h-[18px] w-[18px]" />}
             label="Support InTab"
             collapsed={sidebarCollapsed}
             onClick={handleSupport}
+            staggered
           />
 
           <NavItem
@@ -298,8 +315,8 @@ export function MainLayout() {
       <main className="main-content relative">
         <Suspense
           fallback={
-            <div className="flex-1 flex flex-col w-full h-full relative">
-              <TopLoadingBar />
+            <div className="flex-1 flex flex-col w-full h-full">
+              <PageSkeleton />
             </div>
           }
         >

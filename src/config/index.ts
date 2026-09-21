@@ -192,6 +192,70 @@ print(f"\\nCharacter count in '{word}': {char_count}")
 </body>
 </html>`,
   },
+  sql: {
+    id: "sql",
+    label: "SQL",
+    icon: "SQL",
+    monacoLanguage: "sql",
+    extension: ".sql",
+    defaultCode: `-- SQL — InTab
+-- Powered by SQLite (WebAssembly) — runs fully in your browser
+-- Every query's result renders as a table in the console.
+
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  score INTEGER
+);
+
+INSERT INTO users (name, role, score) VALUES
+  ('Alice', 'engineer', 92),
+  ('Bob', 'designer', 87),
+  ('Carol', 'engineer', 95),
+  ('Dave', 'manager', 78);
+
+-- Results print automatically as tables
+SELECT role, COUNT(*) AS members, ROUND(AVG(score), 1) AS avg_score
+FROM users
+GROUP BY role
+ORDER BY avg_score DESC;
+
+SELECT name, score
+FROM users
+WHERE score > 80
+ORDER BY score DESC;
+`,
+  },
+  lua: {
+    id: "lua",
+    label: "Lua",
+    icon: "LUA",
+    monacoLanguage: "lua",
+    extension: ".lua",
+    defaultCode: `-- Lua — InTab
+-- Powered by Lua 5.4 (WebAssembly) — runs fully in your browser
+
+local function fibonacci(n)
+  if n <= 1 then return n end
+  return fibonacci(n - 1) + fibonacci(n - 2)
+end
+
+print("Fibonacci sequence (first 12):")
+for i = 0, 11 do
+  print(string.format("  fib(%d) = %d", i, fibonacci(i)))
+end
+
+-- Tables work like arrays + dictionaries combined
+local numbers = {5, 3, 8, 1, 9, 2}
+table.sort(numbers)
+print("\\nSorted: " .. table.concat(numbers, ", "))
+
+local sum = 0
+for _, n in ipairs(numbers) do sum = sum + n end
+print("Sum: " .. sum)
+`,
+  },
 };
 
 /** Application metadata */

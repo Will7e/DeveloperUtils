@@ -6,6 +6,8 @@
 //   • TypeScript  → Real TS compiler (CDN) → Web Worker sandbox
 //   • Python      → Pyodide WASM (in-page, with timeout wrapper)
 //   • HTML        → Preview stub (rendered in iframe elsewhere)
+//   • SQL         → SQLite WASM (official @sqlite.org build, in worker)
+//   • Lua         → Lua 5.4 via wasmoon WASM (in worker)
 //
 // The Web Worker approach ensures:
 //   1. Infinite-loop protection via configurable timeout
@@ -579,6 +581,562 @@ async function executePython(
 }
 
 // ============================================================
+// SQL (SQLite WASM) Web Worker Sandboxed Engine
+// ============================================================
+// Official @sqlite.org/sqlite-wasm build running in an isolated
+// module worker. The script is split into individual statements so
+// SELECT results can be rendered as per-statement ASCII tables.
+// Infinite loops in triggers / pathological queries are cancelled
+// via worker.terminate() without freezing the UI.
+// ============================================================
+
+const SQLITE_WASM_URL =
+  "https://cdn.jsdelivr.net/npm/@sqlite.org/sqlite-wasm@3.53.4-build1/dist/index.mjs";
+
+let activeSqlWorker: Worker | null = null;
+let sqlWorkerBlobUrl: string | null = null;
+
+const SQL_WORKER_CODE = `
+  'use strict';
+  let sqlite3 = null;
+  let sqlite3ReadyPromise = null;
+  let db = null;
+
+  async function getOrInitSqlite() {
+    if (db) return db;
+    if (sqlite3ReadyPromise) return sqlite3ReadyPromise;
+
+    sqlite3ReadyPromise = (async () => {
+      const { default: sqlite3InitModule } = await import(
+        ${JSON.stringify(SQLITE_WASM_URL)}
+      );
+      sqlite3 = await sqlite3InitModule();
+      db = new sqlite3.oo1.DB(':memory:');
+      return db;
+    })();
+
+    return sqlite3ReadyPromise;
+  }
+
+  // Split a SQL script into individual statements, respecting string
+  // literals, comments, quoted identifiers and trigger BEGIN..END bodies.
+  // Comment-only / whitespace-only chunks are dropped.
+  function splitSqlStatements(code) {
+    const stmts = [];
+    let current = '';
+    let hasCode = false;
+    let beginDepth = 0;
+    const n = code.length;
+    let i = 0;
+
+    const isSpace = (c) => { const k = c.charCodeAt(0); return k === 32 || k === 9 || k === 10 || k === 13; };
+
+    while (i < n) {
+      const ch = code[i];
+
+      // -- line comment
+      if (ch === '-' && code[i + 1] === '-') {
+        while (i < n && code[i].charCodeAt(0) !== 10) { current += code[i]; i++; }
+        continue;
+      }
+
+      // /* block comment */
+      if (ch === '/' && code[i + 1] === '*') {
+        current += code[i]; i++;
+        current += code[i]; i++;
+        while (i < n) {
+          current += code[i];
+          if (code[i] === '*' && code[i + 1] === '/') {
+            i++;
+            current += code[i];
+            i++;
+            break;
+          }
+          i++;
+        }
+        continue;
+      }
+
+      // 'string' / "identifier" with '' escaping — quote chars are
+      // handled by char code (39 = ', 34 = ") to stay unambiguous
+      // inside this template literal
+      const qk = ch.charCodeAt(0);
+      if (qk === 39 || qk === 34) {
+        current += ch; i++;
+        while (i < n) {
+          const ck = code[i].charCodeAt(0);
+          if (ck === qk) {
+            if (i + 1 < n && code[i + 1].charCodeAt(0) === qk) {
+              // Doubled quote ('' or "") — keep both, skip past both
+              current += ch;
+              current += code[i + 1];
+              i += 2;
+            } else {
+              // Closing quote
+              current += code[i];
+              i++;
+              break;
+            }
+          } else {
+            current += code[i];
+            i++;
+          }
+        }
+        continue;
+      }
+
+      // [bracket identifier] / backtick identifier
+      // (BACKTICK via charCode: a literal backtick inside this worker
+      // template would terminate the string and break the file's parse)
+      const BACKTICK = String.fromCharCode(96);
+      if (ch === '[' || ch === BACKTICK) {
+        const close = ch === '[' ? ']' : BACKTICK;
+        current += ch; i++;
+        while (i < n) {
+          current += code[i];
+          if (code[i] === close) { i++; break; }
+          i++;
+        }
+        continue;
+      }
+
+      // word — track BEGIN / END for trigger bodies
+      if (/[A-Za-z_]/.test(ch)) {
+        let word = '';
+        while (i < n && /[A-Za-z0-9_]/.test(code[i])) { word += code[i]; i++; }
+        const upper = word.toUpperCase();
+        if (upper === 'BEGIN') beginDepth++;
+        else if (upper === 'END' && beginDepth > 0) beginDepth--;
+        current += word;
+        hasCode = true;
+        continue;
+      }
+
+      // statement separator (only outside trigger bodies)
+      if (ch === ';' && beginDepth === 0) {
+        if (hasCode && current.trim()) stmts.push(current.trim());
+        current = '';
+        hasCode = false;
+        i++;
+        continue;
+      }
+
+      if (!isSpace(ch)) hasCode = true;
+      current += ch;
+      i++;
+    }
+
+    if (hasCode && current.trim()) stmts.push(current.trim());
+    return stmts;
+  }
+
+  self.onmessage = async (e) => {
+    const data = e.data;
+    if (data.type === 'init') {
+      try {
+        await getOrInitSqlite();
+        self.postMessage({ type: 'init_done' });
+      } catch (err) {
+        self.postMessage({ type: 'init_error', error: String(err && err.message || err) });
+      }
+      return;
+    }
+
+    if (data.type === 'execute') {
+      const { id, code } = data;
+      const startTime = performance.now();
+      try {
+        const engine = await getOrInitSqlite();
+
+        const statements = splitSqlStatements(String(code));
+
+        const blocks = [];
+        const notices = [];
+        let executed = 0;
+
+        for (const stmtSql of statements) {
+          const columnNames = [];
+          const resultRows = [];
+          try {
+            engine.exec({
+              sql: stmtSql,
+              rowMode: 'array',
+              columnNames,
+              resultRows,
+              returnValue: 'resultRows',
+            });
+            executed++;
+            if (columnNames.length > 0) {
+              blocks.push({ cols: columnNames, rows: resultRows });
+            }
+          } catch (stmtErr) {
+            const msg = String(stmtErr && stmtErr.message || stmtErr);
+            self.postMessage({
+              type: 'result', id, partial: true,
+              blocks, notices,
+              stderr: msg,
+              exitCode: 1,
+              duration: performance.now() - startTime,
+            });
+            return;
+          }
+        }
+
+        self.postMessage({
+          type: 'result',
+          id,
+          blocks,
+          notices,
+          executed,
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+          duration: performance.now() - startTime,
+        });
+      } catch (err) {
+        const duration = performance.now() - startTime;
+        const stderr = err instanceof Error ? err.message : String(err);
+        self.postMessage({ type: 'result', id, stdout: '', stderr, exitCode: 1, duration });
+      }
+    }
+  };
+`;
+
+function getOrCreateSqlWorker(): Worker {
+  if (activeSqlWorker) return activeSqlWorker;
+
+  if (!sqlWorkerBlobUrl) {
+    const blob = new Blob([SQL_WORKER_CODE], { type: "application/javascript" });
+    sqlWorkerBlobUrl = URL.createObjectURL(blob);
+  }
+
+  activeSqlWorker = new Worker(sqlWorkerBlobUrl, { type: "module" });
+  return activeSqlWorker;
+}
+
+async function initSql(): Promise<void> {
+  if (activeSqlWorker) return;
+  return new Promise((resolve, reject) => {
+    const worker = getOrCreateSqlWorker();
+    const handleInit = (e: MessageEvent) => {
+      if (e.data.type === "init_done") {
+        worker.removeEventListener("message", handleInit);
+        resolve();
+      } else if (e.data.type === "init_error") {
+        worker.removeEventListener("message", handleInit);
+        reject(new Error(e.data.error));
+      }
+    };
+    worker.addEventListener("message", handleInit);
+    worker.addEventListener(
+      "error",
+      () => {
+        worker.removeEventListener("message", handleInit);
+        reject(new Error("Failed to load SQLite WASM runtime"));
+      },
+      { once: true }
+    );
+    worker.postMessage({ type: "init" });
+  });
+}
+
+/** Format a result block as an ASCII table for the console */
+function formatSqlTable(cols: string[], rows: unknown[][]): string {
+  const cells = rows.map((row) =>
+    row.map((v) => (v === null || v === undefined ? "NULL" : String(v)))
+  );
+  const widths = cols.map((c, i) =>
+    Math.max(c.length, ...cells.map((r) => (r[i] ?? "").length))
+  );
+  const line = (l: string, m: string, r: string) =>
+    l + widths.map((w) => "─".repeat(w + 2)).join(m) + r;
+  const fmtRow = (r: (string | null)[]) =>
+    "│" + r.map((cell, i) => ` ${String(cell ?? "").padEnd(widths[i] ?? 0)} `).join("│") + "│";
+
+  return [
+    line("┌", "┬", "┐"),
+    fmtRow(cols),
+    line("├", "┼", "┤"),
+    ...cells.map((r) => fmtRow(r)),
+    line("└", "┴", "┘"),
+  ].join("\n");
+}
+
+interface SqlResultMessage {
+  type: string;
+  id?: string;
+  partial?: boolean;
+  blocks?: { cols: string[]; rows: unknown[][] }[];
+  notices?: string[];
+  executed?: number;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  duration?: number;
+}
+
+/** Execute SQL inside a dedicated, isolated Web Worker sandbox */
+async function executeSql(
+  code: string,
+  options?: ExecutionOptions
+): Promise<ExecutionResult> {
+  const timeout = options?.timeout ?? 30000;
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const worker = getOrCreateSqlWorker();
+    const execId = Math.random().toString(36).substring(2);
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    };
+
+    timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      // True cancellation via worker.terminate()
+      if (activeSqlWorker) {
+        activeSqlWorker.terminate();
+        activeSqlWorker = null;
+      }
+      resolve({
+        stdout: "",
+        stderr: `⏱ SQL execution timed out after ${(timeout / 1000).toFixed(0)}s\n\nTip: You can increase the timeout in Settings, or check your queries for expensive scans.`,
+        exitCode: 1,
+        duration: timeout,
+        timestamp: Date.now(),
+      });
+    }, timeout);
+
+    const handleMessage = (e: MessageEvent) => {
+      const data = e.data as SqlResultMessage;
+      if (resolved || data.type !== "result" || data.id !== execId) return;
+      resolved = true;
+      cleanup();
+
+      const stdoutParts: string[] = [];
+      for (const block of data.blocks ?? []) {
+        if (stdoutParts.length > 0) stdoutParts.push("");
+        stdoutParts.push(formatSqlTable(block.cols, block.rows));
+      }
+      if ((data.notices?.length ?? 0) > 0) {
+        stdoutParts.push(...(data.notices ?? []));
+      }
+
+      resolve({
+        stdout: stdoutParts.join("\n"),
+        stderr: data.stderr ?? "",
+        exitCode: data.exitCode ?? 0,
+        duration: data.duration ?? 0,
+        timestamp: Date.now(),
+      });
+    };
+
+    const handleError = (e: ErrorEvent) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve({
+        stdout: "",
+        stderr: `SQL worker error: ${e.message || "Unknown error"}`,
+        exitCode: 1,
+        duration: 0,
+        timestamp: Date.now(),
+      });
+    };
+
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "execute", id: execId, code });
+  });
+}
+
+// ============================================================
+// Lua 5.4 (wasmoon WASM) Web Worker Sandboxed Engine
+// ============================================================
+// Lua 5.4 VM compiled to WebAssembly, running in an isolated module
+// worker. print() output is captured via a Lua→JS bridge function;
+// errors surface to stderr. Infinite loops are cancelled via
+// worker.terminate() without freezing the UI.
+// ============================================================
+
+const WASMOON_ESM_URL = "https://cdn.jsdelivr.net/npm/wasmoon@1.16.0/+esm";
+
+let activeLuaWorker: Worker | null = null;
+let luaWorkerBlobUrl: string | null = null;
+
+const LUA_WORKER_CODE = `
+  'use strict';
+  let luaEngine = null;
+  let luaReadyPromise = null;
+  let luaLogs = [];
+
+  async function getOrInitLua() {
+    if (luaEngine) return luaEngine;
+    if (luaReadyPromise) return luaReadyPromise;
+
+    luaReadyPromise = (async () => {
+      const { LuaFactory } = await import(${JSON.stringify(WASMOON_ESM_URL)});
+      const factory = new LuaFactory();
+      const engine = await factory.createEngine();
+      engine.global.set('print', (...args) => {
+        luaLogs.push(args.map((v) => typeof v === 'string' ? v : String(v)).join('\\t'));
+      });
+      return engine;
+    })();
+
+    return luaReadyPromise;
+  }
+
+  self.onmessage = async (e) => {
+    const data = e.data;
+    if (data.type === 'init') {
+      try {
+        await getOrInitLua();
+        self.postMessage({ type: 'init_done' });
+      } catch (err) {
+        self.postMessage({ type: 'init_error', error: String(err && err.message || err) });
+      }
+      return;
+    }
+
+    if (data.type === 'execute') {
+      const { id, code } = data;
+      const startTime = performance.now();
+      try {
+        const engine = await getOrInitLua();
+        luaLogs = [];
+        await engine.doString(code);
+        const duration = performance.now() - startTime;
+        self.postMessage({
+          type: 'result',
+          id,
+          stdout: luaLogs.join('\\n'),
+          stderr: '',
+          exitCode: 0,
+          duration,
+        });
+      } catch (err) {
+        const duration = performance.now() - startTime;
+        const stderr = err instanceof Error ? err.message : String(err);
+        self.postMessage({ type: 'result', id, stdout: luaLogs.join('\\n'), stderr, exitCode: 1, duration });
+      }
+    }
+  };
+`;
+
+function getOrCreateLuaWorker(): Worker {
+  if (activeLuaWorker) return activeLuaWorker;
+
+  if (!luaWorkerBlobUrl) {
+    const blob = new Blob([LUA_WORKER_CODE], { type: "application/javascript" });
+    luaWorkerBlobUrl = URL.createObjectURL(blob);
+  }
+
+  activeLuaWorker = new Worker(luaWorkerBlobUrl, { type: "module" });
+  return activeLuaWorker;
+}
+
+async function initLua(): Promise<void> {
+  if (activeLuaWorker) return;
+  return new Promise((resolve, reject) => {
+    const worker = getOrCreateLuaWorker();
+    const handleInit = (e: MessageEvent) => {
+      if (e.data.type === "init_done") {
+        worker.removeEventListener("message", handleInit);
+        resolve();
+      } else if (e.data.type === "init_error") {
+        worker.removeEventListener("message", handleInit);
+        reject(new Error(e.data.error));
+      }
+    };
+    worker.addEventListener("message", handleInit);
+    worker.addEventListener(
+      "error",
+      () => {
+        worker.removeEventListener("message", handleInit);
+        reject(new Error("Failed to load Lua WASM runtime"));
+      },
+      { once: true }
+    );
+    worker.postMessage({ type: "init" });
+  });
+}
+
+/** Execute Lua inside a dedicated, isolated Web Worker sandbox */
+async function executeLua(
+  code: string,
+  options?: ExecutionOptions
+): Promise<ExecutionResult> {
+  const timeout = options?.timeout ?? 30000;
+  return new Promise((resolve) => {
+    let resolved = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const worker = getOrCreateLuaWorker();
+    const execId = Math.random().toString(36).substring(2);
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      worker.removeEventListener("message", handleMessage);
+      worker.removeEventListener("error", handleError);
+    };
+
+    timer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      // True infinite-loop cancellation via worker.terminate()
+      if (activeLuaWorker) {
+        activeLuaWorker.terminate();
+        activeLuaWorker = null;
+      }
+      resolve({
+        stdout: "",
+        stderr: `⏱ Lua execution timed out after ${(timeout / 1000).toFixed(0)}s\n\nTip: You can increase the timeout in Settings, or check your code for infinite loops.`,
+        exitCode: 1,
+        duration: timeout,
+        timestamp: Date.now(),
+      });
+    }, timeout);
+
+    const handleMessage = (e: MessageEvent) => {
+      if (resolved) return;
+      const data = e.data;
+      if (data.type !== "result" || data.id !== execId) return;
+      resolved = true;
+      cleanup();
+      resolve({
+        stdout: data.stdout || "",
+        stderr: data.stderr || "",
+        exitCode: data.exitCode ?? 0,
+        duration: data.duration ?? 0,
+        timestamp: Date.now(),
+      });
+    };
+
+    const handleError = (e: ErrorEvent) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve({
+        stdout: "",
+        stderr: `Lua worker error: ${e.message || "Unknown error"}`,
+        exitCode: 1,
+        duration: 0,
+        timestamp: Date.now(),
+      });
+    };
+
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.postMessage({ type: "execute", id: execId, code });
+  });
+}
+
+// ============================================================
 // CompilerService Implementation
 // ============================================================
 export class BrowserCompilerService implements ICompilerService {
@@ -594,6 +1152,10 @@ export class BrowserCompilerService implements ICompilerService {
         return executeTypeScript(code, options);
       case "python":
         return executePython(code, options);
+      case "sql":
+        return executeSql(code, options);
+      case "lua":
+        return executeLua(code, options);
       case "html":
         // HTML is previewed, not executed — return a success stub
         return {
@@ -625,6 +1187,16 @@ export class BrowserCompilerService implements ICompilerService {
       isPythonReady = false;
       cancelled = true;
     }
+    if (activeSqlWorker) {
+      activeSqlWorker.terminate();
+      activeSqlWorker = null;
+      cancelled = true;
+    }
+    if (activeLuaWorker) {
+      activeLuaWorker.terminate();
+      activeLuaWorker = null;
+      cancelled = true;
+    }
     if (!cancelled) {
       // No active worker was running
     }
@@ -637,6 +1209,12 @@ export class BrowserCompilerService implements ICompilerService {
     if (language === "typescript") {
       return tsModule !== null;
     }
+    if (language === "sql") {
+      return activeSqlWorker !== null;
+    }
+    if (language === "lua") {
+      return activeLuaWorker !== null;
+    }
     return true;
   }
 
@@ -646,6 +1224,12 @@ export class BrowserCompilerService implements ICompilerService {
     }
     if (language === "typescript") {
       await loadTypeScriptCompiler();
+    }
+    if (language === "sql") {
+      await initSql();
+    }
+    if (language === "lua") {
+      await initLua();
     }
   }
 }

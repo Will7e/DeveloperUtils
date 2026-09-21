@@ -58,6 +58,27 @@ export function beginPkceFlow(config: {
     startedAt: Date.now(),
   });
 
+  // Hygiene: expired handoffs (≥15 min old) are useless — the flow would
+  // fail client-side anyway. Sweep them so cancelled sign-ins don't leave
+  // PKCE verifiers lying around in localStorage indefinitely.
+  try {
+    const doomed: string[] = [];
+    const now = Date.now();
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith(OAUTH_HANDOFF_PREFIX)) continue;
+      try {
+        const ctx = JSON.parse(localStorage.getItem(k) || "{}") as { startedAt?: number };
+        if (!ctx.startedAt || now - ctx.startedAt > 15 * 60 * 1000) doomed.push(k);
+      } catch {
+        doomed.push(k);
+      }
+    }
+    doomed.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* storage unavailable */
+  }
+
   // Handoff for the callback page (cross-window) + opener-side copy
   localStorage.setItem(OAUTH_HANDOFF_PREFIX + state, flowContext);
   sessionStorage.setItem(FLOW_KEY_PREFIX + state, flowContext);
@@ -78,9 +99,31 @@ export function consumeOAuthResult(state: string):
   localStorage.removeItem(OAUTH_RESULT_PREFIX + state);
   localStorage.removeItem(OAUTH_HANDOFF_PREFIX + state);
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as {
+      ok?: boolean;
+      error?: string;
+      tokens?: { accessToken?: unknown; refreshToken?: unknown; expiresIn?: unknown; scope?: unknown };
+    };
+    if (parsed && parsed.ok) {
+      // Shape validation: a malformed/corrupt entry must never be treated
+      // as a usable credential.
+      const t = parsed.tokens;
+      if (!t || typeof t.accessToken !== "string" || t.accessToken.length === 0) {
+        return { ok: false, error: "Sign-in completed but the token payload was invalid." };
+      }
+      return {
+        ok: true,
+        tokens: {
+          accessToken: t.accessToken,
+          refreshToken: typeof t.refreshToken === "string" ? t.refreshToken : null,
+          expiresIn: typeof t.expiresIn === "number" && Number.isFinite(t.expiresIn) ? t.expiresIn : 3600,
+          scope: typeof t.scope === "string" ? t.scope : "",
+        },
+      };
+    }
+    return { ok: false, error: parsed?.error || "Sign-in failed." };
   } catch {
-    return null;
+    return { ok: false, error: "Sign-in result was unreadable." };
   }
 }
 

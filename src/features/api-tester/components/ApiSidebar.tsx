@@ -14,6 +14,7 @@ import {
   BookmarkPlus,
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { ApiSidebarSkeleton } from "@/components/ui/skeleton";
 import { useApiTesterStore, type ImportedRequest } from "@/stores/api-tester.store";
 import { useLocalStorageState } from "../hooks/useLocalStorageState";
 import { formatRelativeTime } from "../constants";
@@ -189,6 +190,12 @@ export function ApiSidebar({ onOpenSettings, onOpenLibrary }: ApiSidebarProps) {
 
     if (e.target) e.target.value = "";
   };
+
+  // Store may still be rehydrating from encrypted storage — show a
+  // sidebar-shaped skeleton instead of empty sections.
+  if (!store.isInitialized) {
+    return <ApiSidebarSkeleton />;
+  }
 
   return (
     <aside

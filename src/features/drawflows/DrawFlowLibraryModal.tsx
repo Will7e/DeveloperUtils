@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import { LoadingState } from "@/components/ui/loading-state";
+import { CardsSkeleton } from "@/components/ui/skeleton";
 import { useAppStore } from "@/stores/app.store";
 import {
   getDrawFlowLibraries,
@@ -132,7 +132,7 @@ export function DrawFlowLibraryModal({ isOpen, onClose, canvasAPI }: Props) {
         {/* Body */}
         <div className="lib-modal-body">
           {loading ? (
-            <LoadingState size="md" message="Loading libraries..." minHeight={240} />
+            <CardsSkeleton count={4} />
           ) : filteredLibs.length === 0 ? (
             <div className="p-12 text-center flex flex-col items-center justify-center">
               <Boxes className="w-10 h-10 text-text-3 opacity-30 mb-2" />

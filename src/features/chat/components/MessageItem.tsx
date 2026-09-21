@@ -1,13 +1,14 @@
 // ============================================================
-// Message Item — Chat Bubble with Markdown & Actions
+// Message Item — Chat Bubble with Markdown, Reasoning & Actions
 // ============================================================
 // User messages render in an aligned neutral bubble; assistant
-// messages render full-width with markdown + code blocks. Error
-// messages use Geist red tokens. Streaming content is rendered
-// inline with a blinking caret.
+// messages render full-width with markdown + highlighted code
+// blocks. Reasoning-model output gets a collapsible "thinking"
+// panel above the answer. Error messages use Geist red tokens.
+// Streaming content is rendered inline with a blinking caret.
 
 import React from "react";
-import { Check, Copy, RefreshCw, TriangleAlert } from "lucide-react";
+import { Brain, Check, ChevronDown, Copy, RefreshCw, TriangleAlert } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
 import type { ChatMessage } from "../types";
@@ -25,12 +26,23 @@ function formatTokens(n: number | null): string {
   return String(n);
 }
 
+/** Tokens per second from usage + latency, or null when unknown */
+function tokensPerSecond(message: ChatMessage): number | null {
+  const tokens = message.usage?.completionTokens;
+  if (!tokens || !message.latencyMs) return null;
+  const seconds = message.latencyMs / 1000;
+  if (seconds <= 0) return null;
+  return tokens / seconds;
+}
+
 interface MessageItemProps {
   message: ChatMessage;
   /** True while this message's content is still streaming */
   isStreaming?: boolean;
   /** Live streaming text; overrides message.content when set */
   streamingContentOverride?: string;
+  /** Live reasoning text for the in-flight message */
+  streamingReasoningOverride?: string;
   canRegenerate?: boolean;
   onRegenerate?: () => void;
 }
@@ -39,10 +51,17 @@ export const MessageItem = React.memo(function MessageItem({
   message,
   isStreaming = false,
   streamingContentOverride,
+  streamingReasoningOverride,
   canRegenerate = false,
   onRegenerate,
 }: MessageItemProps) {
   const [copied, setCopied] = React.useState(false);
+  const [reasoningOpen, setReasoningOpen] = React.useState(false);
+
+  const reasoning = isStreaming
+    ? (streamingReasoningOverride ?? message.reasoning ?? "")
+    : (message.reasoning ?? "");
+  const hasReasoning = reasoning.trim().length > 0;
 
   const handleCopy = React.useCallback(() => {
     navigator.clipboard.writeText(streamingContentOverride ?? message.content).then(
@@ -72,6 +91,7 @@ export const MessageItem = React.memo(function MessageItem({
 
   const content = streamingContentOverride ?? message.content;
   const isUser = message.role === "user";
+  const tps = tokensPerSecond(message);
 
   return (
     <div className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"} ${message.error ? "chat-msg-error" : ""}`}>
@@ -86,10 +106,38 @@ export const MessageItem = React.memo(function MessageItem({
             {formatTokens(message.usage.completionTokens)} tok
           </span>
         )}
+        {tps !== null && !isUser && (
+          <span className="chat-msg-tokens" title="Completion throughput">
+            {tps.toFixed(1)} tok/s
+          </span>
+        )}
         {message.usage?.cost != null && !isUser && message.usage.cost > 0 && (
           <span className="chat-msg-tokens">${message.usage.cost.toFixed(4)}</span>
         )}
       </div>
+
+      {/* Reasoning panel — collapsible chain-of-thought from reasoning models */}
+      {hasReasoning && !isUser && (
+        <div className={`chat-reasoning ${reasoningOpen ? "chat-reasoning-open" : ""}`}>
+          <button
+            type="button"
+            className="chat-reasoning-header"
+            onClick={() => setReasoningOpen((v) => !v)}
+            aria-expanded={reasoningOpen}
+          >
+            <Brain className="chat-reasoning-icon h-3 w-3" aria-hidden="true" />
+            <span className="chat-reasoning-label">
+              {isStreaming && !content
+                ? "Thinking…"
+                : `Thought process${message.reasoningMs ? ` · ${(message.reasoningMs / 1000).toFixed(1)}s` : ""}`}
+            </span>
+            <ChevronDown className="chat-reasoning-chevron h-3 w-3" aria-hidden="true" />
+          </button>
+          {(reasoningOpen || (isStreaming && !content)) && (
+            <div className="chat-reasoning-body">{reasoning}</div>
+          )}
+        </div>
+      )}
 
       <div className={`chat-msg-bubble ${isUser ? "chat-msg-bubble-user" : "chat-msg-bubble-assistant"}`}>
         {message.error ? (

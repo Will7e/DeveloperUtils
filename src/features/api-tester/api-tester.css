@@ -994,6 +994,32 @@
   box-shadow: none;
 }
 
+/* Pending state: red Cancel treatment while a request is in flight */
+.api-send-btn-loading {
+  background: var(--bg-2);
+  color: var(--red);
+  box-shadow: none;
+}
+
+/* Small inline spinner in pane headers (e.g. RESPONSE while loading) */
+.api-pane-spinner {
+  color: var(--text-3);
+  animation: api-spin 1s linear infinite;
+  margin-left: 8px;
+}
+
+@keyframes api-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-pane-spinner {
+    animation: none;
+  }
+}
+
 .api-send-shortcut {
   font-size: 10px;
   opacity: 0.6;
@@ -1848,6 +1874,14 @@
   justify-content: center;
   flex: 1;
   padding: 32px 16px;
+}
+
+/* ── Response Skeleton ──────────────────────────────────────
+   Geist skeleton styling lives in styles/utilities.css
+   (.geist-skeleton*). Only the response-pane placement here. */
+.api-response-skeleton {
+  flex: 1;
+  overflow: hidden;
 }
 
 /* ── Error Card ───────────────────────────────────────────── */

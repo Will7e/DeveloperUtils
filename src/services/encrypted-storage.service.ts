@@ -11,57 +11,63 @@ import {
   base64ToBuffer,
   generateRandomBytes,
   isCipherEnvelope,
+  deriveEnvelopeKey,
   type CipherEnvelope,
 } from "./crypto.service";
 import { getAutomaticKey, getOrCreateDeviceId } from "./vault.service";
 
 const ALGORITHM = "AES-GCM";
-const KEY_LENGTH = 256;
 const IV_LENGTH = 12; // 96-bit IV recommended for AES-GCM
-const PBKDF2_ITERATIONS = 100_000; // Fast yet robust derivation for cached session key
 
 let cachedMasterKeyPromise: Promise<CryptoKey> | null = null;
 
 /**
  * Derives and caches the master AES-256-GCM CryptoKey.
- * Key derivation runs only once per session, ensuring sub-millisecond encryptions.
+ * Routes through the shared cached derivation in crypto.service so the
+ * expensive PBKDF2 run happens exactly once per session — subsequent
+ * encrypt/decrypt calls are sub-millisecond.
  */
 export async function getMasterCryptoKey(): Promise<CryptoKey> {
-  if (cachedMasterKeyPromise) {
-    return cachedMasterKeyPromise;
+  if (!cachedMasterKeyPromise) {
+    cachedMasterKeyPromise = deriveEnvelopeKey(getAutomaticKey()).catch((err) => {
+      cachedMasterKeyPromise = null;
+      throw err;
+    });
   }
-
-  cachedMasterKeyPromise = (async () => {
-    const passphrase = getAutomaticKey();
-    const deviceId = getOrCreateDeviceId();
-    const encoder = new TextEncoder();
-
-    // Derive stable device salt from deviceId
-    const saltBytes = encoder.encode(deviceId.padEnd(16, "0")).slice(0, 16);
-
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(passphrase),
-      "PBKDF2",
-      false,
-      ["deriveKey"]
-    );
-
-    return crypto.subtle.deriveKey(
-      {
-        name: "PBKDF2",
-        salt: saltBytes as BufferSource,
-        iterations: PBKDF2_ITERATIONS,
-        hash: "SHA-256",
-      },
-      keyMaterial,
-      { name: ALGORITHM, length: KEY_LENGTH },
-      false, // non-extractable for maximum security
-      ["encrypt", "decrypt"]
-    );
-  })();
-
   return cachedMasterKeyPromise;
+}
+
+/**
+ * Legacy master-key derivation (pre-cache builds): 100k iterations over a
+ * deviceId-padded salt. Kept ONLY so envelopes written by older builds can
+ * still be decrypted and transparently migrated; new writes never use it.
+ */
+async function getLegacyMasterCryptoKey(): Promise<CryptoKey> {
+  const passphrase = getAutomaticKey();
+  const deviceId = getOrCreateDeviceId();
+  const encoder = new TextEncoder();
+  const saltBytes = encoder.encode(deviceId.padEnd(16, "0")).slice(0, 16);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: saltBytes as BufferSource,
+      iterations: 100_000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: ALGORITHM, length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
 }
 
 /**
@@ -98,34 +104,49 @@ export async function encryptState(plaintext: string): Promise<string> {
 
 /**
  * Decrypts raw storage content.
- * Automatically detects legacy plaintext data and passes it through unharmed.
+ * Tries the current master key, then the legacy pre-cache key (envelopes
+ * written by older builds), then passes legacy plaintext through unharmed.
  */
 export async function decryptState(rawStorage: string): Promise<string> {
   if (!rawStorage || rawStorage.trim() === "") return rawStorage;
 
-  // Check if rawStorage is an encrypted CipherEnvelope
+  let parsed: CipherEnvelope;
   try {
-    const parsed = JSON.parse(rawStorage);
-    if (isCipherEnvelope(parsed)) {
-      const key = await getMasterCryptoKey();
-      const iv = new Uint8Array(base64ToBuffer(parsed.iv));
-      const ciphertext = base64ToBuffer(parsed.ct);
-
-      const decrypted = await crypto.subtle.decrypt(
-        { name: ALGORITHM, iv: iv as BufferSource },
-        key,
-        ciphertext
-      );
-
-      const decoder = new TextDecoder();
-      return decoder.decode(decrypted);
-    }
+    const json = JSON.parse(rawStorage);
+    if (!isCipherEnvelope(json)) return rawStorage;
+    parsed = json;
   } catch {
-    // If JSON parsing or decryption fails, it may be legacy plaintext — return as is
+    // Not JSON — legacy plaintext, pass through
+    return rawStorage;
   }
 
-  // Pass through legacy plaintext for seamless migration
-  return rawStorage;
+  const iv = new Uint8Array(base64ToBuffer(parsed.iv));
+  const ciphertext = base64ToBuffer(parsed.ct);
+
+  try {
+    const key = await getMasterCryptoKey();
+    const decrypted = await crypto.subtle.decrypt(
+      { name: ALGORITHM, iv: iv as BufferSource },
+      key,
+      ciphertext
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch {
+    // Current key failed — try the legacy derivation before giving up
+  }
+
+  try {
+    const legacyKey = await getLegacyMasterCryptoKey();
+    const decrypted = await crypto.subtle.decrypt(
+      { name: ALGORITHM, iv: iv as BufferSource },
+      legacyKey,
+      ciphertext
+    );
+    return new TextDecoder().decode(decrypted);
+  } catch {
+    // Unreadable with any known key — hand back as-is (caller treats as legacy)
+    return rawStorage;
+  }
 }
 
 /**
@@ -191,6 +212,16 @@ export function getLocalStorageUsage(): StorageUsageStats {
     percentage,
     isNearLimit: percentage >= 80,
   };
+}
+
+/**
+ * Called when the vault is reset: forgets the cached master key so the next
+ * read derives from the NEW device id. In-flight promises resolve with the
+ * old key; legacy fallback keeps any pre-reset envelope readable until the
+ * next write replaces it.
+ */
+export function resetMasterKeyCache(): void {
+  cachedMasterKeyPromise = null;
 }
 
 let lastQuotaAlertTime = 0;

@@ -3,11 +3,20 @@
 // ============================================================
 // Renders the conversation transcript. Auto-scrolls to the bottom
 // while streaming unless the user has scrolled up (then a
-// "jump to latest" pill appears). Streaming state is scoped to
-// the active conversation by the page before it reaches here.
+// "jump to latest" pill with a missed-message count appears).
+// Streaming state is read directly from the chat store so token
+// appends never re-render the page, sidebar, header, or composer.
+//
+// Scroll mechanics: a ResizeObserver on the transcript body reacts
+// to ANY height change (streamed tokens, code-block wrapping,
+// image loads, font swaps) while the user is pinned to bottom;
+// an IntersectionObserver sentinel decides "pinned" so pinning
+// stays correct during streaming-induced scrolls. Honors
+// prefers-reduced-motion by disabling smooth scrolling.
 
 import React from "react";
 import { ArrowDown } from "lucide-react";
+import { useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
 import type { ChatMessage } from "../types";
@@ -22,10 +31,6 @@ const STREAMING_PLACEHOLDER_MESSAGE: ChatMessage = {
 
 interface MessageListProps {
   messages: ChatMessage[];
-  /** Streaming text appended after the last committed message */
-  streamingContent: string;
-  /** True while THIS conversation is streaming */
-  isStreaming: boolean;
   /** Display name of the active model */
   defaultModel: string;
   /** OpenRouter key present — controls the empty-state CTA */
@@ -37,37 +42,103 @@ interface MessageListProps {
 
 export function MessageList({
   messages,
-  streamingContent,
-  isStreaming,
   defaultModel,
   hasApiKey,
   onSuggestion,
   onRegenerate,
   onOpenSettings,
 }: MessageListProps) {
+  // Subscribe to streaming state here — the page, header, sidebar and
+  // composer stay untouched while tokens arrive. This component is
+  // keyed by conversation id, so "streaming in the active conversation"
+  // is exactly "streaming here".
+  const streamingContent = useChatStore((s) => s.streamingContent);
+  const streamingReasoning = useChatStore((s) => s.streamingReasoning);
+  const isStreamingHere = useChatStore(
+    (s) => s.isStreaming && s.streamingConversationId === s.activeConversationId
+  );
+
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const innerRef = React.useRef<HTMLDivElement>(null);
+  const sentinelRef = React.useRef<HTMLDivElement>(null);
+  const jumpUntilRef = React.useRef(0);
   const [isPinned, setIsPinned] = React.useState(true);
+  const [unseenCount, setUnseenCount] = React.useState(0);
+  const [reducedMotion, setReducedMotion] = React.useState(false);
 
-  const scrollToBottom = React.useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior });
-  }, []);
+  const scrollToBottom = React.useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const smooth = behavior === "smooth" && !reducedMotion;
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    },
+    [reducedMotion]
+  );
 
-  // Track whether the user is at (or near) the bottom.
-  // Also re-pins when a new conversation mounts (new key from the parent).
-  const handleScroll = React.useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setIsPinned(distance < 80);
-  }, []);
-
-  // Stick to bottom while streaming (only when the user hasn't scrolled up)
+  // Track prefers-reduced-motion
   React.useEffect(() => {
-    if (isStreaming && isPinned) {
-      scrollToBottom("auto");
+    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = () => setReducedMotion(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  // Pinning via bottom sentinel: fires when the sentinel scrolls in
+  // or out of view, including when streaming grows the content while
+  // we program-scroll — so the flag never gets stale. The generous
+  // bottom rootMargin defines "near the bottom" (it must exceed the
+  // list's bottom padding or the sentinel never intersects at rest);
+  // it matches the old scroll-handler threshold. A short grace window
+  // after an explicit jump keeps smooth-scroll flights pinned.
+  React.useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        const pinned = entry.isIntersecting || Date.now() < jumpUntilRef.current;
+        setIsPinned(pinned);
+        if (entry.isIntersecting) setUnseenCount(0);
+      },
+      { root: scrollRef.current, rootMargin: "0px 0px 80px 0px", threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
+  // Follow content growth while pinned: any size change of the
+  // transcript body (tokens, wrapping, media) re-anchors to bottom.
+  // Height is only ever written, never read — no layout thrash.
+  React.useEffect(() => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    const observer = new ResizeObserver(() => {
+      if (isPinned) scrollToBottom("auto");
+    });
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [isPinned, scrollToBottom]);
+
+  // While unpinned, count committed messages the user hasn't seen
+  // (streaming growth itself is continuous, so it isn't counted).
+  const seenCountRef = React.useRef(messages.length);
+  React.useEffect(() => {
+    if (messages.length > seenCountRef.current && !isPinned) {
+      setUnseenCount((c) => c + (messages.length - seenCountRef.current));
     }
-  }, [streamingContent, isStreaming, isPinned, scrollToBottom]);
+    seenCountRef.current = messages.length;
+  }, [messages.length, isPinned]);
+
+  // Jump to latest resets the unseen counter and re-pins. The grace
+  // window keeps the pin flag stable while the smooth scroll flies.
+  const handleJump = React.useCallback(() => {
+    setUnseenCount(0);
+    jumpUntilRef.current = Date.now() + 500;
+    scrollToBottom("smooth");
+  }, [scrollToBottom]);
 
   // Initial scroll position on mount (per conversation — the parent
   // remounts this component with a key on conversation switch)
@@ -76,15 +147,17 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visibleMessages = messages;
   const lastAssistantIdx = (() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      if (visibleMessages[i]?.role === "assistant") return i;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === "assistant") return i;
     }
     return -1;
   })();
 
-  if (visibleMessages.length === 0 && !isStreaming) {
+  const showStreamingBubble = isStreamingHere && streamingContent !== "";
+  const showThinking = isStreamingHere && streamingContent === "";
+
+  if (messages.length === 0 && !isStreamingHere) {
     return (
       <ChatEmptyState
         onSuggestion={onSuggestion}
@@ -97,28 +170,36 @@ export function MessageList({
 
   return (
     <div className="chat-message-list-wrap">
-      <div ref={scrollRef} className="chat-message-list" onScroll={handleScroll}>
-        <div className="chat-message-list-inner">
-          {visibleMessages.map((message, idx) => (
+      <div ref={scrollRef} className="chat-message-list">
+        <div ref={innerRef} className="chat-message-list-inner">
+          {messages.map((message, idx) => (
             <MessageItem
               key={message.id}
               message={message}
-              canRegenerate={!isStreaming && idx === lastAssistantIdx}
+              canRegenerate={!isStreamingHere && idx === lastAssistantIdx}
               onRegenerate={onRegenerate}
             />
           ))}
 
-          {isStreaming && streamingContent !== "" && (
+          {showStreamingBubble && (
             <MessageItem
               message={STREAMING_PLACEHOLDER_MESSAGE}
               streamingContentOverride={streamingContent}
+              streamingReasoningOverride={streamingReasoning}
               isStreaming
             />
           )}
 
-          {isStreaming && streamingContent === "" && (
+          {showThinking && (
             <div className="chat-msg chat-msg-assistant" aria-live="polite">
               <div className="chat-msg-bubble chat-msg-bubble-assistant">
+                {streamingReasoning !== "" && (
+                  <div className="chat-reasoning chat-reasoning-streaming">
+                    <div className="chat-reasoning-header">
+                      <span className="chat-reasoning-label">Thinking…</span>
+                    </div>
+                  </div>
+                )}
                 <span className="chat-thinking" role="status" aria-label="Assistant is thinking">
                   <span className="chat-thinking-dot" />
                   <span className="chat-thinking-dot" />
@@ -127,6 +208,9 @@ export function MessageList({
               </div>
             </div>
           )}
+
+          {/* Bottom sentinel — IntersectionObserver target for pinning */}
+          <div ref={sentinelRef} className="chat-scroll-sentinel" aria-hidden="true" />
         </div>
       </div>
 
@@ -134,13 +218,11 @@ export function MessageList({
         <button
           type="button"
           className="chat-jump-latest"
-          onClick={() => {
-            setIsPinned(true);
-            scrollToBottom();
-          }}
-          aria-label="Jump to latest"
+          onClick={handleJump}
+          aria-label={`Jump to latest${unseenCount > 0 ? ` (${unseenCount} new)` : ""}`}
         >
           <ArrowDown className="h-3.5 w-3.5" />
+          {unseenCount > 0 && <span className="chat-jump-badge">{unseenCount > 99 ? "99+" : unseenCount}</span>}
         </button>
       )}
     </div>

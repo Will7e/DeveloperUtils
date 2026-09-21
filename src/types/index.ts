@@ -3,7 +3,7 @@
 // ============================================================
 
 /** Supported programming languages */
-export type Language = "javascript" | "typescript" | "python" | "html";
+export type Language = "javascript" | "typescript" | "python" | "html" | "sql" | "lua";
 
 /** Language metadata for UI and engine selection */
 export interface LanguageConfig {

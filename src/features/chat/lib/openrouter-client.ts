@@ -123,13 +123,20 @@ export interface StreamChatParams {
   temperature?: number;
   signal?: AbortSignal;
   onChunk: (text: string) => void;
+  /** Called with reasoning-token deltas (reasoning models) when present */
+  onReasoning?: (text: string) => void;
   /** Called once at stream end with the usage frame (when present) */
   onUsage?: (usage: UsageInfo) => void;
 }
 
 interface ChatCompletionChunk {
   choices?: Array<{
-    delta?: { content?: string | null; role?: string };
+    delta?: {
+      content?: string | null;
+      role?: string;
+      /** Reasoning-token text (reasoning models via OpenRouter) */
+      reasoning?: string | null;
+    };
     finish_reason?: string | null;
   }>;
   usage?: {
@@ -149,6 +156,7 @@ export async function streamChat({
   temperature = 0.7,
   signal,
   onChunk,
+  onReasoning,
   onUsage,
 }: StreamChatParams): Promise<void> {
   if (!apiKey.trim()) {
@@ -216,6 +224,9 @@ export async function streamChat({
       if (delta?.content) {
         anyContent = true;
         onChunk(delta.content);
+      }
+      if (delta?.reasoning) {
+        onReasoning?.(delta.reasoning);
       }
 
       if (chunk.usage) {

@@ -33,8 +33,14 @@ function isAllowedOrigin(originStr: string | null): boolean {
       host.endsWith(".in-tab.se") ||
       host === "intab.dev" ||
       host.endsWith(".intab.dev") ||
-      host === "vercel.app" ||
-      host.endsWith(".vercel.app")
+      host === process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+      host === process.env.VERCEL_URL ||
+      // Preview deployments: any <project>.vercel.app subdomain of this app
+      (host.endsWith(".vercel.app") && process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? host.endsWith(
+            "." + String(process.env.VERCEL_PROJECT_PRODUCTION_URL).replace(/^www\./, "")
+          )
+        : false)
     );
   } catch {
     return false;

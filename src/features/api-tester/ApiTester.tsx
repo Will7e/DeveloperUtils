@@ -13,8 +13,7 @@ import { type OnMount } from "@monaco-editor/react";
 import { Globe, ChevronDown, Download, Check, Sliders } from "lucide-react";
 import { setupMonacoTheme } from "@/utils/monaco-theme";
 import { registerMonacoFormatShortcut } from "@/utils/monaco-format";
-import { LoadingState } from "@/components/ui/loading-state";
-import { TopLoadingBar } from "@/components/ui/top-loading-bar";
+import { ApiSidebarSkeleton, WorkspaceSkeleton } from "@/components/ui/skeleton";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { useApiTesterStore } from "@/stores/api-tester.store";
@@ -283,16 +282,15 @@ export function ApiTester() {
     typeof window !== "undefined" &&
     /macintosh|mac os x/i.test(navigator.userAgent);
 
-  // Loading state during store initialization or when no active tab exists
+  // Loading state during store initialization or when no active tab exists.
+  // Mirrors the real page: sidebar skeleton beside the workspace skeleton.
   if (!store.isInitialized || !activeTab) {
     return (
-      <div className="api-tester-container flex flex-col items-center justify-center p-8 relative">
-        <TopLoadingBar />
-        <LoadingState
-          size="lg"
-          title="Loading Workspace..."
-          description="Please wait while we initialize the API Tester."
-        />
+      <div className="api-tester-container">
+        <ApiSidebarSkeleton />
+        <main className="api-main api-main-skeleton">
+          <WorkspaceSkeleton />
+        </main>
       </div>
     );
   }

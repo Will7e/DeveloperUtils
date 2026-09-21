@@ -48,48 +48,111 @@ export function generateRandomBytes(length: number): Uint8Array {
 // ── Key Derivation ──────────────────────────────────────────
 
 /**
- * Derive an AES-256 key from a passphrase using PBKDF2.
- * The salt ensures the same passphrase produces different keys
- * across different encryption operations.
+ * Derived-key cache. PBKDF2 at 600k iterations costs ~150ms+ of main-thread
+ * time; without caching every single field decrypt re-ran the full KDF.
+ * Keys are non-extractable CryptoKeys, so caching them is safe — the cache
+ * never holds passphrase material.
+ */
+const derivedKeyCache = new Map<string, Promise<CryptoKey>>();
+const DERIVED_KEY_CACHE_MAX = 32;
+
+/**
+ * Derive an AES-256 key from a passphrase using PBKDF2 (cached).
+ * Identical (passphrase, salt) pairs return the same derived key.
  */
 export async function deriveKey(
   passphrase: string,
   salt: Uint8Array
 ): Promise<CryptoKey> {
-  const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(passphrase),
-    "PBKDF2",
-    false,
-    ["deriveKey"]
-  );
+  const cacheKey = `${passphrase}::${bufferToBase64(salt.buffer as ArrayBuffer)}`;
+  const cached = derivedKeyCache.get(cacheKey);
+  if (cached) return cached;
 
-  return crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: salt as BufferSource,
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256",
-    },
-    keyMaterial,
-    { name: ALGORITHM, length: KEY_LENGTH },
-    false, // not extractable
-    ["encrypt", "decrypt"]
-  );
+  const derivation = (async () => {
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(passphrase),
+      "PBKDF2",
+      false,
+      ["deriveKey"]
+    );
+
+    return crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt: salt as BufferSource,
+        iterations: PBKDF2_ITERATIONS,
+        hash: "SHA-256",
+      },
+      keyMaterial,
+      { name: ALGORITHM, length: KEY_LENGTH },
+      false, // not extractable
+      ["encrypt", "decrypt"]
+    );
+  })();
+
+  derivedKeyCache.set(cacheKey, derivation);
+  if (derivedKeyCache.size > DERIVED_KEY_CACHE_MAX) {
+    // Evict the oldest entry (insertion order)
+    const oldest = derivedKeyCache.keys().next().value;
+    if (oldest !== undefined) derivedKeyCache.delete(oldest);
+  }
+  return derivation;
+}
+
+/**
+ * Deterministic per-passphrase salt (SHA-256 of a domain-separated
+ * passphrase). The salt is not secret and adds no entropy — its job is to
+ * make envelopes self-describing so `decrypt` derives the SAME key that
+ * `encrypt` used and hits the cache, instead of re-running PBKDF2.
+ * Cached per passphrase so repeated encrypts cost one digest each.
+ */
+const DETERMINISTIC_SALT_DOMAIN = "intab-envelope-salt-v1::";
+const deterministicSaltCache = new Map<string, Promise<Uint8Array>>();
+
+async function deterministicSalt(passphrase: string): Promise<Uint8Array> {
+  let saltPromise = deterministicSaltCache.get(passphrase);
+  if (!saltPromise) {
+    saltPromise = crypto.subtle
+      .digest("SHA-256", new TextEncoder().encode(DETERMINISTIC_SALT_DOMAIN + passphrase))
+      .then((digest) => new Uint8Array(digest.slice(0, SALT_LENGTH)));
+    deterministicSaltCache.set(passphrase, saltPromise);
+  }
+  return saltPromise;
+}
+
+/** Clears the derived-key cache (used on vault reset). */
+export function clearDerivedKeyCache(): void {
+  derivedKeyCache.clear();
+  deterministicSaltCache.clear();
+}
+
+/**
+ * Cached derivation for the transparent-storage master key. Same recipe as
+ * `deriveKey`, but with a fixed domain-separated salt so every store adapter
+ * derives the SAME key. Exists because `encrypted-storage.service` holds a
+ * module-level `cachedMasterKeyPromise` that cannot be invalidated from the
+ * crypto core — this route can (via `clearDerivedKeyCache` on vault reset).
+ */
+export async function deriveEnvelopeKey(passphrase: string): Promise<CryptoKey> {
+  const salt = await deterministicSalt(passphrase);
+  return deriveKey(passphrase, salt);
 }
 
 // ── Encrypt / Decrypt ───────────────────────────────────────
 
 /**
  * Encrypt a plaintext string into a CipherEnvelope.
- * Each call generates a fresh IV and salt for maximum security.
+ * Each call generates a fresh random IV. The salt is deterministic per
+ * passphrase so decryption resolves the cached derived key (see
+ * `deterministicSalt`) — per-message secrecy comes from the fresh IV.
  */
 export async function encrypt(
   plaintext: string,
   passphrase: string
 ): Promise<CipherEnvelope> {
-  const salt = generateRandomBytes(SALT_LENGTH);
+  const salt = await deterministicSalt(passphrase);
   const iv = generateRandomBytes(IV_LENGTH);
   const key = await deriveKey(passphrase, salt);
 

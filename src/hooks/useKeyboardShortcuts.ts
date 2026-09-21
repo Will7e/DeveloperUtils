@@ -82,25 +82,22 @@ export function useKeyboardShortcuts() {
           addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
 
           try {
-            if (activeFile.language === "python") {
-              const ready = await compilerService.isReady("python");
+            // Initialize the WASM / compiler runtime on first use
+            const runtimeLanguages = ["python", "typescript", "sql", "lua"] as const;
+            const runtimeLabels: Record<(typeof runtimeLanguages)[number], string> = {
+              python: "Loading Python runtime...",
+              typescript: "Loading TypeScript compiler...",
+              sql: "Loading SQLite runtime (WASM)...",
+              lua: "Loading Lua runtime (WASM)...",
+            };
+            if ((runtimeLanguages as readonly string[]).includes(activeFile.language)) {
+              const ready = await compilerService.isReady(activeFile.language);
               if (!ready) {
                 addOutputEntry({
                   type: "info",
-                  content: "Loading Python runtime...",
+                  content: runtimeLabels[activeFile.language as (typeof runtimeLanguages)[number]],
                 });
-                await compilerService.initialize("python");
-              }
-            }
-
-            if (activeFile.language === "typescript") {
-              const ready = await compilerService.isReady("typescript");
-              if (!ready) {
-                addOutputEntry({
-                  type: "info",
-                  content: "Loading TypeScript compiler...",
-                });
-                await compilerService.initialize("typescript");
+                await compilerService.initialize(activeFile.language);
               }
             }
 

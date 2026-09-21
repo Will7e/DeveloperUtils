@@ -7,7 +7,6 @@
 
 import { useState } from "react";
 import {
-  Cloud,
   CloudOff,
   RefreshCw,
   CheckCircle2,
@@ -22,6 +21,7 @@ import { connectProvider, disconnectProvider, syncNow } from "@/services/cloud-s
 import { getProvider } from "@/services/cloud-sync/providers";
 import type { CloudProviderId } from "@/services/cloud-sync/types";
 import { cn } from "@/lib/utils";
+import { GoogleDriveIcon, OneDriveIcon } from "@/components/ui/provider-icons";
 
 type ConnectTarget = "onedrive" | "googledrive";
 
@@ -204,7 +204,7 @@ export function CloudSyncSettings() {
             {(Object.keys(PROVIDER_META) as ConnectTarget[]).map((id) => (
               <div key={id} className="settings-provider-card">
                 <div className="settings-provider-head">
-                  <Cloud className="h-4 w-4 text-accent" />
+                  {id === "googledrive" ? <GoogleDriveIcon size={16} brandColor /> : <OneDriveIcon size={16} brandColor />}
                   <span className="settings-provider-name">{PROVIDER_META[id].label}</span>
                 </div>
                 <p className="settings-provider-desc">{PROVIDER_META[id].description}</p>
@@ -227,7 +227,7 @@ export function CloudSyncSettings() {
                     </>
                   ) : (
                     <>
-                      <Cloud className="h-3.5 w-3.5" /> Sign in with {PROVIDER_META[id].label}
+                      {id === "googledrive" ? <GoogleDriveIcon size={14} /> : <OneDriveIcon size={14} />} Sign in with {PROVIDER_META[id].label}
                     </>
                   )}
                 </button>

@@ -3,7 +3,15 @@
 // ============================================================
 
 import { create } from "zustand";
-import JSZip from "jszip";
+// JSZip (~100KB) is only needed for Postman/export — loaded on demand.
+type JSZipConstructor = import("jszip");
+let jszipPromise: Promise<JSZipConstructor> | null = null;
+function loadJSZip(): Promise<JSZipConstructor> {
+  if (!jszipPromise) {
+    jszipPromise = import("jszip").then(m => (m.default ?? m) as JSZipConstructor);
+  }
+  return jszipPromise;
+}
 import { useAppStore } from "./app.store";
 import type { LibraryPreset, EnvVariableTemplate } from "@/features/api-tester/data/preset-library.data";
 
@@ -1632,7 +1640,8 @@ export const useApiTesterStore = create<ApiTesterState>((set, get) => {
       const { tabs } = get();
       const tabsToExport = tabs.filter(t => tabIds.includes(t.id));
       if (tabsToExport.length === 0) return;
-      
+
+      const JSZip = await loadJSZip();
       const zip = new JSZip();
       const sensitiveKeyRegex = /^(.*_)?(key|token|secret|password|auth|sig|signature|access|cred)(_.*)?$/i;
       const sensitiveHeaderRegex = /^(authorization|proxy-authorization|x-api-key|api-key|x-auth-token|private-token|session-token|cookie|set-cookie|cf-access-client-secret|secret|password|token)$/i;

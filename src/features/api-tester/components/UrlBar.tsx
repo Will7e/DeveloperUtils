@@ -8,6 +8,7 @@ import {
   Square,
   Wifi,
   WifiOff,
+  Loader2,
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { ProtocolDropdown } from "./dropdowns/ProtocolDropdown";
@@ -281,8 +282,11 @@ export function UrlBar({
           >
             {activeTab.loading || activeTab.sseActive ? (
               <>
-                <Square className="h-4 w-4 text-red animate-pulse" />
-                <span>Cancel</span>
+                <Loader2
+                  className={`h-4 w-4 ${activeTab.sseActive ? "animate-spin" : ""}`}
+                  aria-hidden="true"
+                />
+                <span>{activeTab.sseActive ? "Streaming" : "Cancel"}</span>
               </>
             ) : (
               <>

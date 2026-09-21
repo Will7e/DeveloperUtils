@@ -111,6 +111,43 @@ html.light .lang-diff {
   border-color: rgba(219, 39, 119, 0.15);
 }
 
+/* ---- Light: language tiles (compiler sidebar / tabs / menus) ---- */
+html.light .lang-tile-js {
+  background: rgba(202, 138, 4, 0.10);
+  color: #a16207;
+  border-color: rgba(202, 138, 4, 0.18);
+}
+
+html.light .lang-tile-ts {
+  background: rgba(37, 99, 235, 0.10);
+  color: #1d4ed8;
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+html.light .lang-tile-py {
+  background: rgba(217, 119, 6, 0.10);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.18);
+}
+
+html.light .lang-tile-html {
+  background: rgba(220, 38, 38, 0.10);
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.18);
+}
+
+html.light .lang-tile-sql {
+  background: rgba(13, 148, 136, 0.10);
+  color: #0f766e;
+  border-color: rgba(13, 148, 136, 0.18);
+}
+
+html.light .lang-tile-lua {
+  background: rgba(29, 78, 216, 0.10);
+  color: #1e40af;
+  border-color: rgba(29, 78, 216, 0.18);
+}
+
 /* ============================================================
    MONACO-TWEAKS
    ============================================================ */

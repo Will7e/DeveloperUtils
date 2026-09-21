@@ -94,6 +94,54 @@ export async function executeChatStream(conversationId: string): Promise<void> {
   const startedAt = Date.now();
   let usage: UsageInfo | null = null;
 
+  // Tokens are coalesced into one store update per animation frame.
+  // Without this, each SSE chunk is its own zustand set() + React
+  // render, which breaks down on fast models and long replies. The
+  // rAF callback is skipped entirely in non-DOM environments.
+  const rafAvailable = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function";
+  let pendingContent = "";
+  let pendingReasoning = "";
+  let rafId: number | null = null;
+
+  const flushPending = () => {
+    rafId = null;
+    const api = useChatStore.getState();
+    if (pendingReasoning) {
+      api.appendStreamingReasoning(pendingReasoning);
+      pendingReasoning = "";
+    }
+    if (pendingContent) {
+      api.appendStreamingContent(pendingContent);
+      pendingContent = "";
+    }
+  };
+
+  const queueContent = (chunk: string) => {
+    pendingContent += chunk;
+    if (rafAvailable && rafId === null) {
+      rafId = window.requestAnimationFrame(flushPending);
+    }
+  };
+
+  const queueReasoning = (chunk: string) => {
+    pendingReasoning += chunk;
+    if (rafAvailable && rafId === null) {
+      rafId = window.requestAnimationFrame(flushPending);
+    }
+  };
+
+  const stopBatching = () => {
+    if (rafId !== null && rafAvailable) window.cancelAnimationFrame(rafId);
+    rafId = null;
+    flushPending();
+  };
+
+  /** Reasoning text accumulated before a flush point (for abort commits) */
+  const pendingReasoningCommitted = () => {
+    const streamed = useChatStore.getState().streamingReasoning;
+    return streamed + pendingReasoning;
+  };
+
   try {
     await streamChat({
       apiKey,
@@ -101,11 +149,14 @@ export async function executeChatStream(conversationId: string): Promise<void> {
       messages: prepared.messages,
       systemPrompt: effectiveSystemPrompt,
       temperature: settings.temperature,
-      onChunk: (chunk) => useChatStore.getState().appendStreamingContent(chunk),
+      onChunk: queueContent,
+      onReasoning: queueReasoning,
       onUsage: (u) => {
         usage = u;
       },
     });
+
+    stopBatching();
 
     const latencyMs = Date.now() - startedAt;
     const committedId = useChatStore
@@ -128,6 +179,7 @@ export async function executeChatStream(conversationId: string): Promise<void> {
       });
     }
   } catch (err) {
+    stopBatching();
     const aborted =
       err instanceof DOMException
         ? err.name === "AbortError"
@@ -138,6 +190,7 @@ export async function executeChatStream(conversationId: string): Promise<void> {
       useChatStore.getState().commitStreamingMessage({
         model: modelId,
         latencyMs: Date.now() - startedAt,
+        reasoning: pendingReasoningCommitted(),
       });
     } else {
       useChatStore.getState().discardStreaming();

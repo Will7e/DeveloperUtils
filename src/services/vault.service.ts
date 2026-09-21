@@ -12,8 +12,10 @@ import {
   decrypt,
   verifyPassphrase,
   isCipherEnvelope,
+  clearDerivedKeyCache,
   type CipherEnvelope,
 } from "./crypto.service";
+import { resetMasterKeyCache } from "./encrypted-storage.service";
 
 // ── Constants ───────────────────────────────────────────────
 
@@ -178,8 +180,28 @@ export const useVaultStore = create<VaultState>((set) => ({
     ];
     apiKeys.forEach((key) => localStorage.removeItem(key));
 
+    // Wipe orphaned OAuth flow artifacts + sync-side state the reset above
+    // doesn't cover (vault reset revokes the device key that encrypted them).
+    try {
+      const oauthPrefixes = ["intab_oauth_handoff_", "intab_oauth_result_", "intab_cloud_etag_"];
+      const doomed: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && oauthPrefixes.some((p) => k.startsWith(p))) doomed.push(k);
+      }
+      doomed.forEach((k) => localStorage.removeItem(k));
+    } catch {
+      /* storage unavailable — nothing to sweep */
+    }
+
     // Generate fresh device ID
     getOrCreateDeviceId();
+
+    // CRITICAL: forget every cached derived key (they were bound to the old
+    // device id). Without this, the session keeps encrypting with the OLD key
+    // while fresh readers derive the NEW one — silent data loss.
+    clearDerivedKeyCache();
+    resetMasterKeyCache();
 
     // Re-initialize with new key
     const autoKey = getAutomaticKey();
