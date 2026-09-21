@@ -80,6 +80,24 @@
   font-family: var(--font-mono);
   box-shadow: 0 0 10px rgba(14, 165, 233, 0.1);
 }
+/* Which tab's console this panel is showing */
+.output-tab-name {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--bg-hover, rgba(148, 163, 184, 0.12));
+  border: 1px solid var(--ds-gray-alpha-300, rgba(148, 163, 184, 0.25));
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-2, var(--accent));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .output-content {
   flex: 1;
   overflow-y: auto;

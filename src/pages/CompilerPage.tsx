@@ -12,10 +12,12 @@ import { useAppStore } from "@/stores/app.store";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { formatDuration } from "@/lib/utils";
 
-/** Live execution timer hook */
+/** Live execution timer for the ACTIVE tab's run */
 function useExecutionTimer() {
-  const isRunning = useAppStore((s) => s.isRunning);
-  const executionStartTime = useAppStore((s) => s.executionStartTime);
+  const activeFileId = useAppStore((s) => s.activeFileId);
+  const activeExec = useAppStore((s) => (s.activeFileId ? s.tabExec[s.activeFileId] : undefined));
+  const isRunning = Boolean(activeExec?.isRunning);
+  const executionStartTime = activeExec?.executionStartTime ?? null;
   const [now, setNow] = useState(() => 0);
 
   useEffect(() => {
@@ -29,16 +31,16 @@ function useExecutionTimer() {
   }, [isRunning, executionStartTime]);
 
   const elapsed = isRunning && executionStartTime ? Math.max(0, now - executionStartTime) : 0;
-  return { isRunning, elapsed };
+  return { isRunning, elapsed, activeFileId, activeExec };
 }
 
 export function CompilerPage() {
   const activeFileId = useAppStore((s) => s.activeFileId);
   const files = useAppStore((s) => s.files);
   const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
-  const executionResults = useAppStore((s) => s.executionResults);
+  const anyRunning = useAppStore((s) => s.isRunning);
 
-  const { isRunning, elapsed } = useExecutionTimer();
+  const { isRunning, elapsed, activeExec } = useExecutionTimer();
 
   const {
     size: editorSize,
@@ -55,7 +57,9 @@ export function CompilerPage() {
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
 
-  const lastResult = executionResults.length > 0 ? executionResults[executionResults.length - 1] : null;
+  // Last result of the ACTIVE tab's own console
+  const activeResults = activeExec?.executionResults ?? [];
+  const lastResult = activeResults.length > 0 ? activeResults[activeResults.length - 1] : null;
 
   return (
     <div className="compiler-view">
@@ -132,6 +136,15 @@ export function CompilerPage() {
                 <span className="status-item status-timer">
                   <span className="status-timer-dot" />
                   {formatDuration(elapsed)}
+                </span>
+                <span className="status-dot">·</span>
+              </>
+            )}
+            {!isRunning && anyRunning && (
+              <>
+                <span className="status-item status-timer" title="Another tab is running — switch to it to see its console">
+                  <span className="status-timer-dot" />
+                  Background run
                 </span>
                 <span className="status-dot">·</span>
               </>

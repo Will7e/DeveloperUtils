@@ -6,29 +6,16 @@ import { useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
-import { compilerService } from "@/services/compiler.service";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
-import { formatDuration } from "@/lib/utils";
 
 export function useKeyboardShortcuts() {
   const navigate = useNavigate();
   const files = useAppStore((s) => s.files);
   const activeFileId = useAppStore((s) => s.activeFileId);
-  const isRunning = useAppStore((s) => s.isRunning);
-  const setIsRunning = useAppStore((s) => s.setIsRunning);
-  const clearOutput = useAppStore((s) => s.clearOutput);
-  const addOutputEntry = useAppStore((s) => s.addOutputEntry);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
-  const addExecutionResult = useAppStore((s) => s.addExecutionResult);
-  const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
-  const setExecutionStartTime = useAppStore((s) => s.setExecutionStartTime);
-  const setOutputFlash = useAppStore((s) => s.setOutputFlash);
   const addToast = useAppStore((s) => s.addToast);
-  const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
-  const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
-  const cancelExecution = useAppStore((s) => s.cancelExecution);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
   const closeCommandPalette = useAppStore((s) => s.closeCommandPalette);
@@ -47,18 +34,12 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl/Cmd + Shift + C = Cancel execution
+      // Ctrl/Cmd + Shift + C = Cancel execution (active tab's console)
       if (mod && e.shiftKey && (keyLower === "c" || e.code === "KeyC")) {
         e.preventDefault();
+        const { cancelRun, isRunning } = useAppStore.getState();
         if (isRunning) {
-          await compilerService.cancel();
-          cancelExecution();
-          addOutputEntry({
-            type: "error",
-            content: "⛔ Execution cancelled by user",
-          });
-          setOutputFlash("error");
-          addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+          await cancelRun();
         }
         return;
       }
@@ -68,68 +49,12 @@ export function useKeyboardShortcuts() {
         const pathname = window.location.pathname;
         if (pathname === "/" || pathname.startsWith("/compiler")) {
           e.preventDefault();
-          if (!activeFile || isRunning || activeFile.language === "html") return;
-
-          // Ensure output panel is visible
-          if (!outputPanelOpen) {
-            toggleOutputPanel();
-          }
-
-          setIsRunning(true);
-          setExecutionStartTime(Date.now());
-          clearOutput();
-          addOutputEntry({ type: "info", content: `Running ${activeFile.name}...` });
-          addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
-
-          try {
-            // Initialize the WASM / compiler runtime on first use
-            const runtimeLanguages = ["python", "typescript", "sql", "lua"] as const;
-            const runtimeLabels: Record<(typeof runtimeLanguages)[number], string> = {
-              python: "Loading Python runtime...",
-              typescript: "Loading TypeScript compiler...",
-              sql: "Loading SQLite runtime (WASM)...",
-              lua: "Loading Lua runtime (WASM)...",
-            };
-            if ((runtimeLanguages as readonly string[]).includes(activeFile.language)) {
-              const ready = await compilerService.isReady(activeFile.language);
-              if (!ready) {
-                addOutputEntry({
-                  type: "info",
-                  content: runtimeLabels[activeFile.language as (typeof runtimeLanguages)[number]],
-                });
-                await compilerService.initialize(activeFile.language);
-              }
-            }
-
-            const result = await compilerService.execute(
-              activeFile.content,
-              activeFile.language,
-              { timeout: executionTimeout }
-            );
-            addExecutionResult(result);
-            if (result.stdout) addOutputEntry({ type: "stdout", content: result.stdout });
-            if (result.stderr) addOutputEntry({ type: "stderr", content: result.stderr });
-
-            const isSuccess = result.exitCode === 0;
-            addOutputEntry({
-              type: isSuccess ? "success" : "error",
-              content: isSuccess
-                ? `Completed in ${formatDuration(result.duration)}`
-                : `Exit code ${result.exitCode} (${formatDuration(result.duration)})`,
-            });
-
-            setOutputFlash(isSuccess ? "success" : "error");
-
-          } catch (error) {
-            addOutputEntry({
-              type: "error",
-              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-            });
-            setOutputFlash("error");
-          } finally {
-            setIsRunning(false);
-            setExecutionStartTime(null);
-          }
+          const state = useAppStore.getState();
+          const file = state.files.find((f) => f.id === state.activeFileId);
+          if (!file || file.language === "html") return;
+          const alreadyRunning = Boolean(file.id && state.tabExec[file.id]?.isRunning);
+          if (alreadyRunning) return;
+          void state.runFile(file.id);
           return;
         }
       }
@@ -198,7 +123,7 @@ export function useKeyboardShortcuts() {
           navigate("/compiler");
           addToast({ message: "Console opened in Compiler", type: "info", duration: 1500 });
         } else {
-          toggleOutputPanel();
+          useAppStore.getState().toggleOutputPanel();
         }
         return;
       }
@@ -335,7 +260,7 @@ export function useKeyboardShortcuts() {
         }
       }
     },
-    [activeFile, isRunning, outputPanelOpen, executionTimeout, setIsRunning, clearOutput, addOutputEntry, addExecutionResult, toggleOutputPanel, toggleSettings, toggleCommandPalette, closeCommandPalette, setExecutionStartTime, setOutputFlash, addToast, cancelExecution, updateFileContent, toggleSidebar, toggleSidebarCollapse, navigate]
+    [activeFile, updateFileContent, toggleSettings, toggleCommandPalette, closeCommandPalette, addToast, toggleSidebar, toggleSidebarCollapse, navigate]
   );
 
   useEffect(() => {

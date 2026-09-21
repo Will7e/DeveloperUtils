@@ -37,6 +37,7 @@ export interface TabItem {
   name: string;
   icon?: React.ReactNode;
   isDirty?: boolean;
+  isRunning?: boolean;
   closable?: boolean;
   tooltip?: string;
 }
@@ -250,6 +251,9 @@ export function WorkspaceTabBar<T extends TabItem = TabItem>({
                       <>
                         <span className="tab-name">{tab.name}</span>
                         {tab.isDirty && <span className="tab-dirty" />}
+                        {tab.isRunning && tab.id !== activeTabId && (
+                          <span className="tab-running-dot" aria-label="Running" />
+                        )}
                       </>
                     )}
 

@@ -5,9 +5,48 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { createEncryptedStorage } from "@/services/encrypted-storage.service";
-import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession } from "@/types";
+import { compilerService } from "@/services/compiler.service";
+import { formatDuration } from "@/lib/utils";
+import type { AppState, Language, EditorFile, Workflow, DiffSession, DiffSettings, ComparatorSession, TabExecutionState, OutputEntry, ExecutionResult } from "@/types";
 import { DEFAULT_EDITOR_SETTINGS, LANGUAGE_CONFIGS } from "@/config";
 import { generateId } from "@/lib/utils";
+
+/** Languages whose runtime must be initialized before first run */
+const RUNTIME_LANGUAGES: Language[] = ["python", "typescript", "sql", "lua"];
+
+const RUNTIME_LABELS: Partial<Record<Language, string>> = {
+  python: "Loading Python runtime (Pyodide)...",
+  typescript: "Loading TypeScript compiler...",
+  sql: "Loading SQLite runtime (WASM)...",
+  lua: "Loading Lua runtime (WASM)...",
+};
+
+/** Create an empty per-tab execution state */
+function createTabExec(): TabExecutionState {
+  return {
+    isRunning: false,
+    outputEntries: [],
+    executionResults: [],
+    executionStartTime: null,
+  };
+}
+
+/** Ensure a tab has execution state, creating it lazily */
+function ensureTabExec(state: AppState, fileId: string): TabExecutionState {
+  return state.tabExec[fileId] ?? createTabExec();
+}
+
+/** Append an output entry to a specific tab's console */
+function pushTabOutput(state: AppState, fileId: string, entry: Omit<OutputEntry, "id" | "timestamp">): Partial<AppState> {
+  const exec = ensureTabExec(state, fileId);
+  const newEntry: OutputEntry = { ...entry, id: generateId(), timestamp: Date.now() };
+  return {
+    tabExec: {
+      ...state.tabExec,
+      [fileId]: { ...exec, outputEntries: [...exec.outputEntries, newEntry] },
+    },
+  };
+}
 
 /** Move an element in an array from one index to another (immutable) */
 function arrayMove<T>(arr: T[], from: number, to: number): T[] {
@@ -307,11 +346,9 @@ export const useAppStore = create<AppState>()(
       files: [initialFile],
       activeFileId: initialFile.id,
 
-      // Execution
+      // Execution — per-tab console state; isRunning = any tab running
       isRunning: false,
-      executionResults: [],
-      outputEntries: [],
-      executionStartTime: null,
+      tabExec: {},
 
       // UI
       sidebarOpen: false,
@@ -377,21 +414,34 @@ export const useAppStore = create<AppState>()(
         const index = get().files.findIndex((f) => f.id === id);
         const newFiles = [...get().files];
         newFiles.splice(index + 1, 0, newFile);
-        set({
+        const sourceExec = get().tabExec[id];
+        set((state) => ({
           files: newFiles,
           activeFileId: newId,
-        });
+          tabExec: sourceExec
+            ? {
+                ...state.tabExec,
+                // Fresh console for the copy, history preserved on the original
+                [newId]: {
+                  ...createTabExec(),
+                  executionResults: sourceExec.executionResults,
+                },
+              }
+            : state.tabExec,
+        }));
       },
 
       deleteFile: (id: string) => {
         const state = get();
         const remaining = state.files.filter((f) => f.id !== id);
+        const { [id]: _removedExec, ...remainingTabExec } = state.tabExec;
         if (remaining.length === 0) {
           // Always keep at least one file
           const fallback = createDefaultFile("javascript");
           set({
             files: [fallback],
             activeFileId: fallback.id,
+            tabExec: {},
           });
         } else {
           set({
@@ -400,6 +450,7 @@ export const useAppStore = create<AppState>()(
               state.activeFileId === id
                 ? remaining[remaining.length - 1]!.id
                 : state.activeFileId,
+            tabExec: remainingTabExec,
           });
         }
       },
@@ -468,38 +519,135 @@ export const useAppStore = create<AppState>()(
         }));
       },
 
-      // Output actions
-      addOutputEntry: (entry) => {
+      // ── Per-tab execution ─────────────────────────────────
+      runFile: async (fileId: string) => {
+        const file = get().files.find((f) => f.id === fileId);
+        if (!file || get().tabExec[fileId]?.isRunning) return;
+        if (file.language === "html") return; // HTML is previewed, not run
+
+        // Ensure the console panel is visible when running
+        if (!get().outputPanelOpen) {
+          get().toggleOutputPanel();
+        }
+
         set((state) => ({
-          outputEntries: [
-            ...state.outputEntries,
-            { ...entry, id: generateId(), timestamp: Date.now() },
-          ],
+          isRunning: true,
+          tabExec: {
+            ...state.tabExec,
+            [fileId]: {
+              ...ensureTabExec(state, fileId),
+              isRunning: true,
+              outputEntries: [],
+              executionStartTime: Date.now(),
+            },
+          },
         }));
+
+        set((state) => ({ ...pushTabOutput(state, fileId, { type: "info", content: `Running ${file.name}...` }) }));
+
+        get().addToast({ message: `Running ${file.name}...`, type: "info", duration: 2000 });
+
+        try {
+          // Initialize the WASM / compiler runtime on first use
+          if (RUNTIME_LANGUAGES.includes(file.language)) {
+            const ready = await compilerService.isReady(file.language);
+            if (!ready) {
+              set((state) => ({
+                ...pushTabOutput(state, fileId, {
+                  type: "info",
+                  content: RUNTIME_LABELS[file.language] ?? "Loading runtime...",
+                }),
+              }));
+              await compilerService.initialize(file.language);
+            }
+          }
+
+          const result = await compilerService.execute(file.content, file.language, {
+            timeout: get().editorSettings.executionTimeout,
+          });
+
+          set((state) => {
+            const exec = ensureTabExec(state, fileId);
+            const isSuccess = result.exitCode === 0;
+            const entries: OutputEntry[] = [];
+            const mk = (type: OutputEntry["type"], content: string): OutputEntry =>
+              ({ id: generateId(), timestamp: Date.now(), type, content });
+            if (result.stdout) entries.push(mk("stdout", result.stdout));
+            if (result.stderr) entries.push(mk("stderr", result.stderr));
+            entries.push(
+              mk(
+                isSuccess ? "success" : "error",
+                isSuccess
+                  ? `Completed in ${formatDuration(result.duration)}`
+                  : `Exit code ${result.exitCode} (${formatDuration(result.duration)})`
+              )
+            );
+            return {
+              isRunning: false,
+              tabExec: {
+                ...state.tabExec,
+                [fileId]: {
+                  ...exec,
+                  isRunning: false,
+                  executionStartTime: null,
+                  executionResults: [...exec.executionResults, result],
+                  outputEntries: [...exec.outputEntries, ...entries],
+                },
+              },
+            };
+          });
+
+          get().setOutputFlash(result.exitCode === 0 ? "success" : "error");
+        } catch (error) {
+          set((state) => ({
+            ...pushTabOutput(state, fileId, {
+              type: "error",
+              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            }),
+            isRunning: false,
+          }));
+          get().setOutputFlash("error");
+        }
       },
 
-      clearOutput: () => {
-        set({ outputEntries: [] });
+      cancelRun: async (fileId?: string) => {
+        await compilerService.cancel();
+        set((state) => {
+          const runningIds = Object.entries(state.tabExec)
+            .filter(([, exec]) => exec.isRunning)
+            .map(([id]) => id);
+          const targets = fileId ? [fileId] : runningIds;
+          if (targets.length === 0) return { isRunning: false };
+          const nextTabExec = { ...state.tabExec };
+          for (const id of targets) {
+            const exec = nextTabExec[id];
+            if (!exec || !exec.isRunning) continue;
+            nextTabExec[id] = {
+              ...exec,
+              isRunning: false,
+              executionStartTime: null,
+              outputEntries: [
+                ...exec.outputEntries,
+                { id: generateId(), timestamp: Date.now(), type: "error", content: "⛔ Execution cancelled by user" },
+              ],
+            };
+          }
+          return {
+            tabExec: nextTabExec,
+            isRunning: Object.values(nextTabExec).some((exec) => exec.isRunning),
+          };
+        });
+        get().setOutputFlash("error");
+        get().addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
       },
 
-      setIsRunning: (running: boolean) => {
-        set({ isRunning: running });
-      },
-
-      addExecutionResult: (result) => {
-        set((state) => ({
-          executionResults: [...state.executionResults, result],
-        }));
-      },
-
-      setExecutionStartTime: (time: number | null) => {
-        set({ executionStartTime: time });
-      },
-
-      cancelExecution: () => {
-        set({
-          isRunning: false,
-          executionStartTime: null,
+      clearTabOutput: (fileId: string) => {
+        set((state) => {
+          const exec = state.tabExec[fileId];
+          if (!exec) return state;
+          return {
+            tabExec: { ...state.tabExec, [fileId]: { ...exec, outputEntries: [] } },
+          };
         });
       },
 
@@ -1199,6 +1347,35 @@ export const useAppStore = create<AppState>()(
             // Ignore storage write error
           }
         }
+        // Migration: legacy single-console outputEntries → per-tab console
+        if (state && Array.isArray((state as { outputEntries?: unknown }).outputEntries)) {
+          void (state as { outputEntries?: unknown }).outputEntries;
+          const legacy = (state as unknown as { outputEntries: OutputEntry[]; executionResults?: ExecutionResult[] }).outputEntries;
+          const legacyResults = (state as unknown as { executionResults?: ExecutionResult[] }).executionResults ?? [];
+          if (legacy.length > 0 || legacyResults.length > 0) {
+            const tabExec: Record<string, TabExecutionState> = {};
+            if (state.activeFileId) {
+              tabExec[state.activeFileId] = {
+                isRunning: false,
+                outputEntries: legacy,
+                executionResults: legacyResults,
+                executionStartTime: null,
+              };
+            }
+            useAppStore.setState({ tabExec });
+          }
+        }
+        // Safety: never restore a "running" flag across reloads
+        if (state && state.tabExec && Object.keys(state.tabExec).length > 0) {
+          const hadRunning = Object.values(state.tabExec).some((e) => e.isRunning || e.executionStartTime);
+          if (hadRunning) {
+            const fixed: Record<string, TabExecutionState> = {};
+            for (const [id, e] of Object.entries(state.tabExec)) {
+              fixed[id] = { ...e, isRunning: false, executionStartTime: null };
+            }
+            useAppStore.setState({ tabExec: fixed });
+          }
+        }
         if (state && state.workflows && Array.isArray(state.workflows)) {
           state.workflows = state.workflows.map((w) => ({
             ...w,
@@ -1246,6 +1423,7 @@ export const useAppStore = create<AppState>()(
         sidebarCollapsed: state.sidebarCollapsed,
         outputPanelOpen: state.outputPanelOpen,
         editorSettings: state.editorSettings,
+        tabExec: state.tabExec,
         formatterFiles: state.formatterFiles,
         activeFormatterFileId: state.activeFormatterFileId,
         formatterType: state.formatterType,

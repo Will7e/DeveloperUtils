@@ -48,16 +48,12 @@ export function CommandPalette() {
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const createFile = useAppStore((s) => s.createFile);
-  const clearOutput = useAppStore((s) => s.clearOutput);
   const files = useAppStore((s) => s.files);
   const activeFileId = useAppStore((s) => s.activeFileId);
   const editorSettings = useAppStore((s) => s.editorSettings);
   const updateEditorSettings = useAppStore((s) => s.updateEditorSettings);
   const addToast = useAppStore((s) => s.addToast);
   const isRunning = useAppStore((s) => s.isRunning);
-  const cancelExecution = useAppStore((s) => s.cancelExecution);
-  const setOutputFlash = useAppStore((s) => s.setOutputFlash);
-  const addOutputEntry = useAppStore((s) => s.addOutputEntry);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
@@ -86,12 +82,8 @@ export function CommandPalette() {
         shortcut: "⌘⇧C",
         category: "Actions",
         icon: <StopCircle style={{ width: 14, height: 14, color: "var(--red)" }} />,
-        action: async () => {
-          await compilerService.cancel();
-          cancelExecution();
-          addOutputEntry({ type: "error", content: "⛔ Execution cancelled by user" });
-          setOutputFlash("error");
-          addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
+        action: () => {
+          void useAppStore.getState().cancelRun();
         },
       });
     }
@@ -128,7 +120,10 @@ export function CommandPalette() {
         category: "Actions",
         icon: <Trash2 style={{ width: 14, height: 14 }} />,
         action: () => {
-          clearOutput();
+          const state = useAppStore.getState();
+          if (state.activeFileId) {
+            state.clearTabOutput(state.activeFileId);
+          }
           addToast({ message: "Console cleared", type: "info", duration: 1500 });
         },
       },
@@ -407,8 +402,7 @@ export function CommandPalette() {
     return list;
   }, [
     activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, 
-    clearOutput, createFile, updateEditorSettings, addToast, cancelExecution, 
-    setOutputFlash, addOutputEntry, updateFileContent, toggleSidebar, 
+    createFile, updateEditorSettings, addToast, updateFileContent, toggleSidebar, 
     createFormatterFile, createComparatorSession, createDiffSession,
     createWorkflow, addApiTesterTab, navigate
   ]);

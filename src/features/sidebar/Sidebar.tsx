@@ -7,7 +7,7 @@
 // slim accent pin-dot for the active file. Collapses to a compact
 // icon rail with the same visual treatment.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { LanguageIcon } from "@/features/editor/language-icon";
 import { NewFileMenu } from "@/features/editor/NewFileMenu";
+import { DeleteConfirmPopover } from "./DeleteConfirmPopover";
 
 /** Files matching the search query (name only — contents can be huge) */
 function filterFiles(
@@ -53,6 +54,7 @@ export function Sidebar() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteAnchor, setDeleteAnchor] = useState<{ top: number; left: number } | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number } | null>(null);
@@ -60,14 +62,6 @@ export function Sidebar() {
   const newFileRailRef = useRef<HTMLButtonElement>(null);
 
   const isCollapsed = !sidebarOpen;
-
-  // Disarm a pending delete when the target changes or after a delay,
-  // so the armed state never goes stale (same as chat sidebar).
-  useEffect(() => {
-    if (!confirmDeleteId) return;
-    const t = window.setTimeout(() => setConfirmDeleteId(null), 4000);
-    return () => window.clearTimeout(t);
-  }, [confirmDeleteId]);
 
   const visibleFiles = useMemo(() => filterFiles(files, query), [files, query]);
 
@@ -85,7 +79,7 @@ export function Sidebar() {
   const startRename = (fileId: string, name: string) => {
     setRenamingId(fileId);
     setRenameValue(name);
-    setConfirmDeleteId(null);
+    cancelDelete();
   };
 
   const commitRename = () => {
@@ -95,13 +89,24 @@ export function Sidebar() {
     setRenamingId(null);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirmDeleteId === id) {
-      deleteFile(id);
-      setConfirmDeleteId(null);
-    } else {
-      setConfirmDeleteId(id);
-    }
+  const handleDelete = (id: string, rect: DOMRect | null) => {
+    setConfirmDeleteId(id);
+    setDeleteAnchor(
+      rect
+        ? { top: rect.bottom + 6, left: rect.left + rect.width / 2 - 118 }
+        : null
+    );
+  };
+
+  const confirmDelete = () => {
+    if (confirmDeleteId) deleteFile(confirmDeleteId);
+    setConfirmDeleteId(null);
+    setDeleteAnchor(null);
+  };
+
+  const cancelDelete = () => {
+    setConfirmDeleteId(null);
+    setDeleteAnchor(null);
   };
 
   return (
@@ -287,27 +292,17 @@ export function Sidebar() {
                             </button>
                           </SimpleTooltip>
                           <SimpleTooltip
-                            content={isConfirmingDelete ? "Click again to delete" : "Delete"}
+                            content={isConfirmingDelete ? "Choose an option" : "Delete"}
                             side="top"
                           >
                             <button
                               type="button"
-                              className={cn(
-                                "sidebar-file-action sidebar-file-action-danger",
-                                isConfirmingDelete && "sidebar-file-action-confirm"
-                              )}
-                              onMouseLeave={() =>
-                                setConfirmDeleteId((id) => (id === file.id ? null : id))
-                              }
+                              className="sidebar-file-action sidebar-file-action-danger"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDelete(file.id);
+                                handleDelete(file.id, e.currentTarget.getBoundingClientRect());
                               }}
-                              aria-label={
-                                isConfirmingDelete
-                                  ? "Click again to confirm delete"
-                                  : "Delete file"
-                              }
+                              aria-label="Delete file"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -352,6 +347,15 @@ export function Sidebar() {
         anchor={menuAnchor}
         onClose={() => setMenuOpen(false)}
         onCreate={handleCreateFile}
+      />
+
+      {/* Delete confirmation popover (anchored to the delete button) */}
+      <DeleteConfirmPopover
+        open={Boolean(confirmDeleteId)}
+        file={files.find((f) => f.id === confirmDeleteId) ?? null}
+        anchor={deleteAnchor}
+        onCancel={cancelDelete}
+        onConfirm={confirmDelete}
       />
     </>
   );

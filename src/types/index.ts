@@ -96,6 +96,14 @@ export interface OutputEntry {
   timestamp: number;
 }
 
+/** Per-tab console & run state (each editor tab owns its own console) */
+export interface TabExecutionState {
+  isRunning: boolean;
+  outputEntries: OutputEntry[];
+  executionResults: ExecutionResult[];
+  executionStartTime: number | null;
+}
+
 /** Toast notification */
 export interface Toast {
   id: string;
@@ -119,11 +127,9 @@ export interface AppState {
   files: EditorFile[];
   activeFileId: string | null;
 
-  // Execution
+  // Execution — per-tab console state; isRunning = any tab currently running
   isRunning: boolean;
-  executionResults: ExecutionResult[];
-  outputEntries: OutputEntry[];
-  executionStartTime: number | null;
+  tabExec: Record<string, TabExecutionState>;
 
   // UI
   sidebarOpen: boolean;
@@ -162,12 +168,12 @@ export interface AppState {
   saveFile: (id: string) => void;
   renameFile: (id: string, name: string) => void;
 
-  addOutputEntry: (entry: Omit<OutputEntry, "id" | "timestamp">) => void;
-  clearOutput: () => void;
-  setIsRunning: (running: boolean) => void;
-  addExecutionResult: (result: ExecutionResult) => void;
-  setExecutionStartTime: (time: number | null) => void;
-  cancelExecution: () => void;
+  /** Run a file in its own console (per-tab execution) */
+  runFile: (fileId: string) => Promise<void>;
+  /** Cancel a tab's run, or all running tabs when no id is given */
+  cancelRun: (fileId?: string) => Promise<void>;
+  /** Clear a single tab's console */
+  clearTabOutput: (fileId: string) => void;
 
   toggleSidebar: () => void;
   toggleSidebarCollapse: () => void;

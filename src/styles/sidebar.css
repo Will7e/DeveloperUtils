@@ -416,12 +416,100 @@
   background: var(--red-dim);
 }
 
-/* Two-step delete: armed state */
-.sidebar-file-action-confirm,
-.sidebar-file-action-confirm:hover {
-  color: var(--red);
-  background: var(--red-dim);
+/* ── Delete confirmation popover ─────────────────────────── */
+.delete-confirm-popover {
+  position: fixed;
+  z-index: 100002;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-md);
+  box-shadow:
+    0 20px 48px -8px rgba(0, 0, 0, 0.65),
+    0 0 0 1px var(--border-1);
+  overflow: hidden;
+  animation: newfile-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
+html.light .delete-confirm-popover {
+  box-shadow:
+    0 20px 48px -12px rgba(0, 0, 0, 0.18),
+    0 0 0 1px var(--border-1);
+}
+.delete-confirm-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+}
+.delete-confirm-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--red, #ef4444);
+}
+.delete-confirm-text {
+  display: block;
+}
+.delete-confirm-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+.delete-confirm-dirty {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 12px 10px;
+}
+.delete-confirm-cancel {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.delete-confirm-cancel:hover {
+  background: var(--bg-hover);
+}
+.delete-confirm-cancel:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+.delete-confirm-delete {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--red, #ef4444);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.delete-confirm-delete:hover {
+  filter: brightness(1.1);
+}
+.delete-confirm-delete:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* Rename row (chat-conv-rename treatment) */
 
 /* Rename row (chat-conv-rename treatment) */
 .sidebar-file-rename {

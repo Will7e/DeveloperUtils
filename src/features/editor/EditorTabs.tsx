@@ -1,8 +1,10 @@
 // ============================================================
 // Editor Tabs — File tabs with new-file dropdown & run controls
 // ============================================================
+// Each tab owns its own console: runs, output, and history are
+// tracked per file (tabExec) instead of a single shared console.
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useMemo } from "react";
 import { Plus, Terminal, Play, Square, Eye, Copy, Check } from "lucide-react";
 import { WorkspaceTabBar, type TabItem } from "@/components/ui/WorkspaceTabBar";
 import { useAppStore } from "@/stores/app.store";
@@ -11,10 +13,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { LANGUAGE_CONFIGS } from "@/config";
 import { cn } from "@/lib/utils";
-import { compilerService } from "@/services/compiler.service";
-import { formatDuration } from "@/lib/utils";
+import { LANGUAGE_CONFIGS } from "@/config";
 import { LanguageIcon } from "./language-icon";
 import { NewFileMenu } from "./NewFileMenu";
 import type { Language } from "@/types";
@@ -36,16 +36,6 @@ const ActionTooltip = ({ children, content, side = "top" }: ActionTooltipProps) 
   </Tooltip>
 );
 
-/** Languages whose runtime must be initialized before first run */
-const RUNTIME_LANGUAGES: Language[] = ["python", "typescript", "sql", "lua"];
-
-const RUNTIME_LABELS: Partial<Record<Language, string>> = {
-  python: "Loading Python runtime (Pyodide)...",
-  typescript: "Loading TypeScript compiler...",
-  sql: "Loading SQLite runtime (WASM)...",
-  lua: "Loading Lua runtime (WASM)...",
-};
-
 export function EditorTabs() {
   const [showMenu, setShowMenu] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -62,25 +52,19 @@ export function EditorTabs() {
   const createFile = useAppStore((s) => s.createFile);
   const reorderFiles = useAppStore((s) => s.reorderFiles);
 
-  // Run-related state
-  const isRunning = useAppStore((s) => s.isRunning);
-  const setIsRunning = useAppStore((s) => s.setIsRunning);
-  const addOutputEntry = useAppStore((s) => s.addOutputEntry);
-  const addExecutionResult = useAppStore((s) => s.addExecutionResult);
-  const clearOutput = useAppStore((s) => s.clearOutput);
+  // Per-tab execution — each tab runs against its own console
+  const runFile = useAppStore((s) => s.runFile);
+  const cancelRun = useAppStore((s) => s.cancelRun);
+  const tabExec = useAppStore((s) => s.tabExec);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
   const outputPanelOpen = useAppStore((s) => s.outputPanelOpen);
-  const setExecutionStartTime = useAppStore((s) => s.setExecutionStartTime);
-  const setOutputFlash = useAppStore((s) => s.setOutputFlash);
-  const addToast = useAppStore((s) => s.addToast);
-  const executionTimeout = useAppStore((s) => s.editorSettings.executionTimeout);
-  const cancelExecution = useAppStore((s) => s.cancelExecution);
 
   const [isCopied, setIsCopied] = useState(false);
 
   const activeFile = files.find((f) => f.id === activeFileId);
   const isHtml = activeFile?.language === "html";
-  const canRun = activeFile && !isHtml;
+  const activeExec = activeFileId ? tabExec[activeFileId] : undefined;
+  const isActiveRunning = Boolean(activeExec?.isRunning);
 
   const handleToggleMenu = () => {
     if (!showMenu && btnRef.current) {
@@ -95,120 +79,35 @@ export function EditorTabs() {
     createFile(`untitled${config.extension}`, lang);
   };
 
-  // ── Run Code ──────────────────────────────────────────────
-  const handleRun = useCallback(async () => {
-    if (!activeFile || isRunning || isHtml) return;
+  // ── Run / Cancel (delegated to store — per-tab console) ────
+  const handleRun = () => {
+    if (!activeFileId || isActiveRunning || isHtml) return;
+    void runFile(activeFileId);
+  };
 
-    // Ensure output panel is visible when running
-    if (!outputPanelOpen) {
-      toggleOutputPanel();
-    }
+  const handleCancel = () => {
+    if (!activeFileId || !isActiveRunning) return;
+    void cancelRun(activeFileId);
+  };
 
-    setIsRunning(true);
-    setExecutionStartTime(Date.now());
-    clearOutput();
-
-    addOutputEntry({
-      type: "info",
-      content: `Running ${activeFile.name}...`,
-    });
-
-    addToast({ message: `Running ${activeFile.name}...`, type: "info", duration: 2000 });
-
-    try {
-      // Initialize the WASM / compiler runtime on first use
-      if (RUNTIME_LANGUAGES.includes(activeFile.language)) {
-        const ready = await compilerService.isReady(activeFile.language);
-        if (!ready) {
-          addOutputEntry({
-            type: "info",
-            content: RUNTIME_LABELS[activeFile.language] ?? "Loading runtime...",
-          });
-          await compilerService.initialize(activeFile.language);
-        }
-      }
-
-      const result = await compilerService.execute(
-        activeFile.content,
-        activeFile.language,
-        { timeout: executionTimeout }
-      );
-
-      addExecutionResult(result);
-
-      if (result.stdout) {
-        addOutputEntry({ type: "stdout", content: result.stdout });
-      }
-      if (result.stderr) {
-        addOutputEntry({ type: "stderr", content: result.stderr });
-      }
-
-      const isSuccess = result.exitCode === 0;
-      addOutputEntry({
-        type: isSuccess ? "success" : "error",
-        content: isSuccess
-          ? `Completed in ${formatDuration(result.duration)}`
-          : `Exit code ${result.exitCode} (${formatDuration(result.duration)})`,
-      });
-
-      setOutputFlash(isSuccess ? "success" : "error");
-
-    } catch (error) {
-      addOutputEntry({
-        type: "error",
-        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-      });
-      setOutputFlash("error");
-    } finally {
-      setIsRunning(false);
-      setExecutionStartTime(null);
-    }
-  }, [
-    activeFile,
-    isRunning,
-    isHtml,
-    outputPanelOpen,
-    setIsRunning,
-    clearOutput,
-    addOutputEntry,
-    addExecutionResult,
-    toggleOutputPanel,
-    setExecutionStartTime,
-    setOutputFlash,
-    addToast,
-    executionTimeout,
-  ]);
-
-  const handleCopy = useCallback(() => {
+  const handleCopy = () => {
     if (!activeFile) return;
 
     navigator.clipboard.writeText(activeFile.content);
     setIsCopied(true);
-    addToast({ message: "Content copied to clipboard", type: "success", duration: 2000 });
+    addCopyToast();
 
     setTimeout(() => {
       setIsCopied(false);
     }, 2000);
-  }, [activeFile, addToast]);
+  };
 
-  // ── Cancel Execution ──────────────────────────────────────
-  const handleCancel = useCallback(async () => {
-    if (!isRunning) return;
+  const addCopyToast = () => {
+    useAppStore.getState().addToast({ message: "Content copied to clipboard", type: "success", duration: 2000 });
+  };
 
-    await compilerService.cancel();
-    cancelExecution();
-
-    addOutputEntry({
-      type: "error",
-      content: "⛔ Execution cancelled by user",
-    });
-
-    setOutputFlash("error");
-
-    addToast({ message: "Execution cancelled", type: "error", duration: 2000 });
-  }, [isRunning, cancelExecution, addOutputEntry, setOutputFlash, addToast]);
-
-  // Map files to standardized TabItems
+  // Map files to standardized TabItems — tabs running in the
+  // background get a pulsing dot so users don't lose track of them
   const tabs: TabItem[] = useMemo(
     () =>
       files.map((file) => ({
@@ -216,32 +115,27 @@ export function EditorTabs() {
         name: file.name,
         icon: <LanguageIcon language={file.language} size="sm" />,
         isDirty: file.isDirty,
+        isRunning: Boolean(tabExec[file.id]?.isRunning),
         closable: files.length > 1,
       })),
-    [files]
+    [files, tabExec]
   );
 
-  const handleCopyTabContent = useCallback(
-    (id: string) => {
-      const file = files.find((f) => f.id === id);
-      if (file) {
-        navigator.clipboard.writeText(file.content);
-        addToast({ message: `Copied ${file.name} content to clipboard`, type: "success", duration: 2000 });
-      }
-    },
-    [files, addToast]
-  );
+  const handleCopyTabContent = (id: string) => {
+    const file = files.find((f) => f.id === id);
+    if (file) {
+      navigator.clipboard.writeText(file.content);
+      useAppStore.getState().addToast({ message: `Copied ${file.name} content to clipboard`, type: "success", duration: 2000 });
+    }
+  };
 
-  const handleCopyTabName = useCallback(
-    (id: string) => {
-      const file = files.find((f) => f.id === id);
-      if (file) {
-        navigator.clipboard.writeText(file.name);
-        addToast({ message: "File name copied", type: "info", duration: 1500 });
-      }
-    },
-    [files, addToast]
-  );
+  const handleCopyTabName = (id: string) => {
+    const file = files.find((f) => f.id === id);
+    if (file) {
+      navigator.clipboard.writeText(file.name);
+      useAppStore.getState().addToast({ message: "File name copied", type: "info", duration: 1500 });
+    }
+  };
 
   return (
     <>
@@ -332,7 +226,7 @@ export function EditorTabs() {
                 <Eye className="h-3.5 w-3.5" />
                 <span>Preview</span>
               </div>
-            ) : isRunning ? (
+            ) : isActiveRunning ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -353,7 +247,7 @@ export function EditorTabs() {
                     type="button"
                     className="tabs-run-btn"
                     onClick={handleRun}
-                    disabled={!canRun}
+                    disabled={!activeFile}
                   >
                     <Play className="h-3.5 w-3.5" style={{ fill: "currentColor" }} />
                     <span>Run</span>

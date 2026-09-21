@@ -305,6 +305,23 @@
   flex-shrink: 0;
   box-shadow: 0 0 5px rgba(251, 191, 36, 0.35);
 }
+/* Running-in-background indicator on a tab */
+.tab-running-dot {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tab-running-pulse 1.1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes tab-running-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
 .tab-close {
   display: flex;
   align-items: center;

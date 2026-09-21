@@ -15,12 +15,21 @@ import { cn } from "@/lib/utils";
 
 export function OutputPanel() {
   const outputRef = useRef<HTMLDivElement>(null);
-  const outputEntries = useAppStore((s) => s.outputEntries);
-  const executionResults = useAppStore((s) => s.executionResults);
-  const clearOutput = useAppStore((s) => s.clearOutput);
+
+  // Per-tab console: read the active file's own output & history
+  const activeFileId = useAppStore((s) => s.activeFileId);
+  const files = useAppStore((s) => s.files);
+  const tabExec = useAppStore((s) => s.tabExec);
+  const clearTabOutput = useAppStore((s) => s.clearTabOutput);
   const toggleOutputPanel = useAppStore((s) => s.toggleOutputPanel);
-  const isRunning = useAppStore((s) => s.isRunning);
   const outputFlash = useAppStore((s) => s.outputFlash);
+
+  const activeFile = files.find((f) => f.id === activeFileId);
+  const exec = activeFileId ? tabExec[activeFileId] : undefined;
+  const outputEntries = exec?.outputEntries ?? [];
+  const executionResults = exec?.executionResults ?? [];
+  const isRunning = Boolean(exec?.isRunning);
+
   const [showHistory, setShowHistory] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -53,6 +62,11 @@ export function OutputPanel() {
           {outputEntries.length > 0 && (
             <span className={cn("output-count", outputEntries.length > 0 && "output-count-pulse")}>
               {outputEntries.length}
+            </span>
+          )}
+          {activeFile && (
+            <span className="output-tab-name" title={`Console for ${activeFile.name}`}>
+              {activeFile.name}
             </span>
           )}
         </div>
@@ -104,7 +118,8 @@ export function OutputPanel() {
             <TooltipTrigger asChild>
               <button
                 className="toolbar-icon-btn"
-                onClick={clearOutput}
+                onClick={() => activeFileId && clearTabOutput(activeFileId)}
+                disabled={outputEntries.length === 0}
                 style={{ width: 24, height: 24 }}
               >
                 <Trash2 style={{ width: 12, height: 12 }} />
