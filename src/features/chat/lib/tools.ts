@@ -26,7 +26,24 @@ import {
 } from "./github-client";
 import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
 import { runToolProgram } from "./tool-program";
+import { findSkill, matchSkills } from "./skills";
+import { isUntrustedTool, wrapUntrusted } from "./untrusted";
 import { AGENT_TOOLS, summarizeToolCall } from "./tool-registry";
+import type { ChatSkill } from "../types";
+
+/**
+ * Reads the installed skills (builtins + user) from the chat store.
+ * Imported lazily so this module stays usable in tests and workers
+ * where no store exists.
+ */
+async function loadSkills(): Promise<ChatSkill[]> {
+  try {
+    const { useChatStore } = await import("@/stores/chat.store");
+    return useChatStore.getState().settings.skills ?? [];
+  } catch {
+    return [];
+  }
+}
 
 // Schemas + tool metadata (including the single source of truth for
 // tool names, kinds, and summarizers) live in lib/tool-registry.ts.
@@ -83,6 +100,32 @@ function formatTreeListing(
     : "";
 
   return `Repository files${prefix ? ` under '${prefix}'` : " (root)"} — ${files.length} files:\n${lines.join("\n")}${dirNote}${omittedNote}${apiNote}`;
+}
+
+/**
+ * Applies an optional 1-based, inclusive line window to file text.
+ * Windows are how the agent reads (and therefore safely edits) files
+ * that are larger than the per-read budget.
+ */
+function windowLines(
+  text: string,
+  startLine?: number,
+  endLine?: number
+): { text: string; startLine: number; endLine: number; totalLines: number; windowed: boolean } {
+  const totalLines = text === "" ? 0 : text.split("\n").length;
+  if (startLine === undefined && endLine === undefined) {
+    return { text, startLine: 1, endLine: totalLines, totalLines, windowed: false };
+  }
+  const lines = text.split("\n");
+  const from = Math.min(Math.max(1, startLine ?? 1), Math.max(1, lines.length));
+  const to = Math.min(Math.max(from, endLine ?? lines.length), lines.length);
+  return {
+    text: lines.slice(from - 1, to).join("\n"),
+    startLine: from,
+    endLine: to,
+    totalLines,
+    windowed: true,
+  };
 }
 
 /** Extracts the README's opening markdown for the overview tool */
@@ -160,6 +203,14 @@ export async function executeToolCall(
       case "read_file": {
         const path = typeof args.path === "string" ? args.path.trim() : "";
         if (!path) return fail("Missing required argument: path");
+        const startLine =
+          typeof args.startLine === "number" && Number.isFinite(args.startLine)
+            ? Math.floor(args.startLine)
+            : undefined;
+        const endLine =
+          typeof args.endLine === "number" && Number.isFinite(args.endLine)
+            ? Math.floor(args.endLine)
+            : undefined;
 
         // Workspace-first: the agent must see its own edits, and
         // tombstoned files should read as deleted rather than resurrect
@@ -179,11 +230,23 @@ export async function executeToolCall(
                 summary: path,
               };
             }
+            const win = windowLines(local.content, startLine, endLine);
             return {
               callId: call.id,
               name: call.name,
               ok: true,
-              data: { path, content: local.content, source: "workspace" },
+              data: {
+                path,
+                content: win.text,
+                source: "workspace",
+                ...(win.windowed
+                  ? {
+                      startLine: win.startLine,
+                      endLine: win.endLine,
+                      totalLines: win.totalLines,
+                    }
+                  : {}),
+              },
               durationMs: Date.now() - started,
               summary: path,
             };
@@ -218,11 +281,15 @@ export async function executeToolCall(
           };
         }
 
-        let text = file.text;
+        const win = windowLines(file.text, startLine, endLine);
+        let text = win.text;
         let truncatedNote: string | undefined;
         if (text.length > GITHUB_MAX_FILE_BYTES) {
           const omitted = text.length - GITHUB_MAX_FILE_BYTES;
-          text = `${text.slice(0, GITHUB_MAX_FILE_BYTES)}\n…[tail truncated — ${omitted} chars omitted; read a narrower file if needed]`;
+          // Never let a truncated read look complete: rewriting a file
+          // from a truncated view destroys its tail, so point the model
+          // at the windowed + targeted-edit path instead.
+          text = `${text.slice(0, GITHUB_MAX_FILE_BYTES)}\n…[tail truncated — ${omitted} chars omitted. Do NOT rewrite this file wholesale: read it with startLine/endLine and change it with edit_file.]`;
           truncatedNote = "tail-truncated";
         }
 
@@ -230,7 +297,15 @@ export async function executeToolCall(
           callId: call.id,
           name: call.name,
           ok: true,
-          data: { path, truncated: truncatedNote, content: text },
+          data: {
+            path,
+            truncated: truncatedNote,
+            content: text,
+            totalLines: win.totalLines,
+            ...(win.windowed
+              ? { startLine: win.startLine, endLine: win.endLine }
+              : {}),
+          },
           durationMs: Date.now() - started,
           summary: path,
         };
@@ -302,6 +377,103 @@ export async function executeToolCall(
         };
       }
 
+      case "read_skill": {
+        // Skills are advertised in the system prompt as an index (name,
+        // description, triggers) and their bodies load on demand here.
+        // That keeps the instruction block small and byte-stable while
+        // still making every skill available — and because the body
+        // arrives as a normal tool result, it persists in the transcript
+        // for the rest of the conversation.
+        const requested = typeof args.name === "string" ? args.name.trim() : "";
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        const skills = await loadSkills();
+        if (skills.length === 0) {
+          return fail("No skills are available in this installation.");
+        }
+
+        const listLines = skills.map(
+          (s) => `- ${s.name}${s.enabled ? " (active)" : ""}${s.description ? ` — ${s.description}` : ""}`
+        );
+        const catalog = `Available skills:\n${listLines.join("\n")}`;
+
+        if (!requested && !query) {
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: true,
+            data: { skills: skills.map((s) => ({ name: s.name, description: s.description, enabled: s.enabled })), catalog },
+            durationMs: Date.now() - started,
+            summary: `${skills.length} skills`,
+          };
+        }
+
+        if (!requested && query) {
+          const matches = matchSkills(query, skills);
+          if (matches.length === 0) {
+            return {
+              callId: call.id,
+              name: call.name,
+              ok: true,
+              data: { matches: [], catalog, note: "No skill matches that description — proceed with your own judgement." },
+              durationMs: Date.now() - started,
+              summary: "no matching skill",
+            };
+          }
+          // A single match is the answer — return its body, not just its name.
+          if (matches.length === 1) {
+            const only = matches[0]!;
+            return {
+              callId: call.id,
+              name: call.name,
+              ok: true,
+              data: { name: only.name, description: only.description, content: only.content },
+              durationMs: Date.now() - started,
+              summary: only.name,
+            };
+          }
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: true,
+            data: {
+              matches: matches.map((s) => ({ name: s.name, description: s.description, triggers: s.triggers ?? [] })),
+              note: "Several skills match — call read_skill with the name you want.",
+            },
+            durationMs: Date.now() - started,
+            summary: `${matches.length} matches`,
+          };
+        }
+
+        const skill = findSkill(skills, requested);
+        if (!skill) {
+          return {
+            callId: call.id,
+            name: call.name,
+            ok: false,
+            data: {
+              error: `No skill named \`${requested}\`. ${catalog}`,
+            },
+            durationMs: Date.now() - started,
+            summary: `unknown skill: ${requested}`,
+          };
+        }
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: {
+            name: skill.name,
+            description: skill.description,
+            content: skill.content,
+            note: skill.enabled
+              ? "This skill is already active for every turn."
+              : "Follow these instructions for the rest of this task.",
+          },
+          durationMs: Date.now() - started,
+          summary: skill.name,
+        };
+      }
+
       case "run_tool_program": {
         // Programmatic tool calling: one wire call → up to 8 read-only
         // steps, executed sequentially with per-step session-cache reuse.
@@ -330,16 +502,27 @@ export async function executeToolCall(
   }
 }
 
-/** Serializes a ToolCallResult into the wire-format content string */
+/**
+ * Serializes a ToolCallResult into the wire-format content string.
+ *
+ * This is the single seam where externally-authored text reaches the
+ * model, so it is also where the injection defence lives: results from
+ * tools that carry repository content are wrapped in <untrusted-content>
+ * tags, and the standing rule in the system prompt (lib/untrusted.ts)
+ * tells the model what those tags mean. Wrapping happens LAST, after
+ * truncation, so a truncation marker can never land outside the tags.
+ */
 export function serializeToolResult(result: ToolCallResult): string {
   const payload = result.ok ? result.data : { error: result.data };
   // Program results already carry a shaped `output` (which embeds the
   // per-step log) — send it as the payload; metadata would only add bulk.
   if (result.name === "run_tool_program" && typeof (payload as { output?: unknown }).output === "string") {
-    return truncateForBudget(
+    const text = truncateForBudget(
       (payload as { output: string }).output,
       Math.max(TOOL_RESULT_MAX_CHARS, TOOL_PROGRAM_MAX_CHARS)
     );
+    return wrapUntrusted(result.name, text);
   }
-  return truncateForBudget(JSON.stringify(payload));
+  const text = truncateForBudget(JSON.stringify(payload));
+  return isUntrustedTool(result.name) ? wrapUntrusted(result.name, text) : text;
 }

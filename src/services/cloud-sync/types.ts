@@ -42,8 +42,13 @@ export interface CloudProvider {
   /** Revoke server-side when possible, then clear local tokens. */
   signOut(tokens: OAuthTokens | null): Promise<void>;
 
-  /** Read a text file from the app folder. Null when the file doesn't exist. */
-  readFile(tokens: OAuthTokens, path: string): Promise<string | null>;
+  /**
+   * Read a text file from the app folder. `content` is null when the file does
+   * not exist yet. `etag` is the revision token the next `writeFile` must send
+   * for optimistic concurrency — it has to be refreshed on every read, or the
+   * next push is guaranteed to conflict after any change from another device.
+   */
+  readFile(tokens: OAuthTokens, path: string): Promise<FileReadResult>;
 
   /**
    * Create or update a text file in the app folder.
@@ -67,6 +72,12 @@ export interface WriteResult {
   etag: string | null;
 }
 
+/** Body + revision token returned by `CloudProvider.readFile`. */
+export interface FileReadResult {
+  content: string | null;
+  etag: string | null;
+}
+
 /** Metadata about the last cloud snapshot — the sync "manifest". */
 export interface SyncManifest {
   /** ISO timestamp of the snapshot creation */
@@ -75,9 +86,19 @@ export interface SyncManifest {
   deviceId: string;
   /** Provider id that holds the payload */
   provider: CloudProviderId;
-  /** Monotonic local revision counter */
+  /**
+   * Lamport-style revision: every push continues the highest revision it has
+   * seen, which makes it the primary ordering signal across devices (the
+   * `updatedAt` wall clock is only a tie-breaker, since clocks disagree).
+   */
   rev: number;
-  /** Tombstoned (deleted) snapshot keys so deletions propagate */
+  /**
+   * Reserved for propagating deletions of whole snapshot keys. Currently
+   * always empty: a domain missing from a snapshot means the producing device
+   * does not sync that domain, NOT that its data was deleted — so appliers must
+   * treat absence as a no-op. Domain-level deletions propagate as ordinary
+   * content changes instead.
+   */
   tombstones: string[];
   /** Schema version of the payload envelope */
   v: 1;

@@ -12,7 +12,7 @@
 
 import { useChatStore } from "@/stores/chat.store";
 import { DEFAULT_CHAT_SETTINGS } from "../constants";
-import { displayNameFor } from "../lib/intab-llm";
+import { modelDisplayName } from "../lib/model-catalog";
 import { visibleMessages } from "../types";
 
 /** Exports a conversation to a Markdown string */
@@ -23,7 +23,7 @@ export function exportConversationToMarkdown(conversationId: string): string | n
   const lines: string[] = [
     `# ${conv.title}`,
     "",
-    `_Model: ${displayNameFor(conv.model ?? DEFAULT_CHAT_SETTINGS.defaultModel, [])} · Exported ${new Date().toLocaleString()}_`,
+    `_Model: ${modelDisplayName(conv.model ?? DEFAULT_CHAT_SETTINGS.defaultModel)} · Exported ${new Date().toLocaleString()}_`,
     "",
   ];
 

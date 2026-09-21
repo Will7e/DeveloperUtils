@@ -31,11 +31,15 @@ const basePayload: HostStartTurnPayload = {
     { modelId: "model-a", contextLength: 128000 },
     { modelId: "model-b", contextLength: 128000 },
   ],
-  turnKind: "code",
 };
 
-/** Host events are untyped on the wire; tests read them loosely */
-type AnyEvent = Record<string, any>;
+/** The pieces of the wire events these tests read */
+interface AnyEvent {
+  type: string;
+  turnId?: string;
+  payload: { reason?: string; modelId?: string; turnId?: string; error?: string };
+  delta?: { seq: number; content?: string; reasoning?: string };
+}
 
 /** Waits until predicate lands on the sink (bounded) */
 async function waitFor(
@@ -50,11 +54,6 @@ async function waitFor(
     await new Promise((r) => setTimeout(r, 5));
   }
   return null;
-}
-
-function endEvent(sink: SinkRecord): { payload: Record<string, unknown> } | null {
-  const end = sink.events.find((e) => (e as { type: string }).type === "END");
-  return end ? (end as { payload: Record<string, unknown> }) : null;
 }
 
 beforeEach(() => {
@@ -83,18 +82,30 @@ describe("HostTurnController", () => {
     expect(end!.payload.reason).toBe("done");
     expect(end!.payload.modelId).toBe("model-a");
 
-    const deltas = sink.events.filter((e) => (e as { type: string }).type === "DELTA");
-    // Both chunks arrive pre-decision (hedged race), so they flush as
-    // a single buffered delta — content must be complete either way.
+    const deltas = sink.events.filter((e) => (e as AnyEvent).type === "DELTA");
     const total = deltas.reduce(
-      (acc, d) => acc + ((d as { delta: { content?: string } }).delta.content ?? ""),
+      (acc, d) => acc + ((d as AnyEvent).delta?.content ?? ""),
       ""
     );
     expect(total).toBe("Hello world");
     expect(controller.currentTurn).toBeNull();
+    expect(controller.snapshot().turnId).toBeNull();
+  });
 
-    const snapshot = controller.snapshot();
-    expect(snapshot.turnId).toBeNull();
+  it("passes the candidate's per-request state (reasoning effort) to the stream", async () => {
+    const sink = makeSink();
+    let seen: unknown;
+    const controller = new HostTurnController(sink, async (params) => {
+      seen = params.requestState;
+      params.onChunk("ok");
+    });
+
+    controller.startTurn({
+      ...basePayload,
+      candidates: [{ modelId: "model-a", requestState: { reasoning_effort: "high" } }],
+    });
+    await waitFor(sink, (e) => e.type === "END");
+    expect(seen).toEqual({ reasoning_effort: "high" });
   });
 
   it("fails over to the next candidate on a retryable error", async () => {
@@ -110,13 +121,6 @@ describe("HostTurnController", () => {
     const end = await waitFor(sink, (e) => e.type === "END");
     expect(end!.payload.reason).toBe("done");
     expect(end!.payload.modelId).toBe("model-b");
-
-    const modelFailures = sink.events.filter(
-      (e) =>
-        (e as { type: string }).type === "TELEMETRY" &&
-        (e as { event?: { kind?: { type?: string } } }).event?.kind?.type === "modelFailure"
-    );
-    expect(modelFailures.length).toBeGreaterThan(0);
   });
 
   it("surfaces non-retryable errors as END(failed)", async () => {
@@ -131,66 +135,36 @@ describe("HostTurnController", () => {
     expect(controller.currentTurn).toBeNull();
   });
 
-  it("emits REROUTE_NEEDED when the candidate list is exhausted", async () => {
+  it("ends with exhausted (and the real reason) when every candidate fails", async () => {
     const sink = makeSink();
     const controller = new HostTurnController(sink, async () => {
       throw new TypeError("network down");
     });
 
     controller.startTurn({ ...basePayload });
-    const reroute = await waitFor(sink, (e) => e.type === "REROUTE_NEEDED");
-    expect(reroute).not.toBeNull();
-    expect((reroute!.excluded as string[])).toContain("model-a");
-    expect((reroute!.excluded as string[])).toContain("model-b");
-    expect(controller.currentTurn?.status).toBe("reroute");
-  });
-
-  it("ends with exhausted when the reroute reply is empty", async () => {
-    const sink = makeSink();
-    const controller = new HostTurnController(sink, async () => {
-      throw new TypeError("network down");
-    });
-
-    controller.startTurn({ ...basePayload });
-    await waitFor(sink, (e) => e.type === "REROUTE_NEEDED");
-    controller.addCandidates("turn_test", []);
     const end = await waitFor(sink, (e) => e.type === "END");
     expect(end!.payload.reason).toBe("exhausted");
+    // The underlying error is surfaced, not swallowed by a generic give-up
+    expect(String(end!.payload.error)).toContain("network down");
     expect(controller.currentTurn).toBeNull();
   });
 
-  it("resumes with fresh candidates after reroute", async () => {
+  it("aborts a streaming turn on ABORT_TURN", async () => {
     const sink = makeSink();
     const controller = new HostTurnController(sink, async (params) => {
-      if (params.model === "model-c") {
-        params.onChunk("third time lucky");
-      } else {
-        throw new TypeError("network down");
-      }
+      params.onChunk("partial");
+      await new Promise<void>((_resolve, reject) => {
+        params.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError"))
+        );
+      });
     });
 
     controller.startTurn({
       ...basePayload,
-      candidates: [
-        { modelId: "model-a" },
-        { modelId: "model-b" },
-      ],
+      candidates: [{ modelId: "model-a", contextLength: 128000 }],
     });
-    await waitFor(sink, (e) => e.type === "REROUTE_NEEDED");
-    controller.addCandidates("turn_test", [{ modelId: "model-c", contextLength: 64000 }]);
-    const end = await waitFor(sink, (e) => e.type === "END");
-    expect(end!.payload.reason).toBe("done");
-    expect(end!.payload.modelId).toBe("model-c");
-  });
-
-  it("aborts a reroute-parked turn on ABORT_TURN", async () => {
-    const sink = makeSink();
-    const controller = new HostTurnController(sink, async () => {
-      throw new TypeError("network down");
-    });
-
-    controller.startTurn({ ...basePayload });
-    await waitFor(sink, (e) => e.type === "REROUTE_NEEDED");
+    await waitFor(sink, (e) => e.type === "DELTA");
     controller.abortTurn("turn_test");
     const end = await waitFor(sink, (e) => e.type === "END");
     expect(end!.payload.reason).toBe("aborted");
@@ -216,8 +190,7 @@ describe("HostTurnController", () => {
     const controller = new HostTurnController(sink, () => gate);
 
     controller.startTurn({ ...basePayload, turnId: "turn_1" });
-    const busySnapshot = controller.snapshot();
-    expect(busySnapshot.turnId).toBe("turn_1");
+    expect(controller.snapshot().turnId).toBe("turn_1");
     // Second request on a busy host is a no-op inside the controller
     controller.startTurn({ ...basePayload, turnId: "turn_2" });
     expect(controller.snapshot().turnId).toBe("turn_1");
@@ -247,19 +220,19 @@ describe("HostTurnController", () => {
     await waitFor(sink, (e) => e.type === "END");
   });
 
-  it("does not route pre-decision loser chunks into the transcript", async () => {
+  it("emits one delta per chunk, in order", async () => {
     const sink = makeSink();
-    // Single-racer path: everything flows (winner is the only stream)
     const controller = new HostTurnController(sink, async (params) => {
-      params.onChunk("only");
+      params.onChunk("a");
+      params.onChunk("b");
+      params.onReasoning?.("think");
     });
     controller.startTurn({ ...basePayload });
     await waitFor(sink, (e) => e.type === "END");
-    const deltas = sink.events.filter((e) => (e as { type: string }).type === "DELTA");
-    const total = deltas.reduce(
-      (acc, d) => acc + ((d as { delta: { content?: string } }).delta.content ?? ""),
-      ""
-    );
-    expect(total).toBe("only");
+    const deltas = sink.events
+      .filter((e) => (e as AnyEvent).type === "DELTA")
+      .map((d) => (d as AnyEvent).delta!);
+    expect(deltas.map((d) => d.seq)).toEqual([1, 2, 3]);
+    expect(deltas.map((d) => d.content ?? d.reasoning)).toEqual(["a", "b", "think"]);
   });
 });

@@ -20,7 +20,6 @@ import { LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-sour
 import { resetTurnLog } from "./turn-log";
 import { useChatStore } from "@/stores/chat.store";
 import type {
-  HostCandidate,
   HostEvent,
   HostSnapshot,
   HostStartTurnPayload,
@@ -45,9 +44,9 @@ function snapshot(turnId: string, conversationId: string): HostSnapshot {
 /** A transport whose behaviour per round is scripted by the test */
 class ScriptedSource implements TurnSource {
   readonly listeners = new Set<(event: HostEvent) => void>();
-  readonly starts: HostStartTurnPayload[] = [];
+  readonly  starts: HostStartTurnPayload[] = [];
   aborted: string[] = [];
-  reroutes: Array<{ turnId: string; candidates: HostCandidate[] }> = [];
+
 
   constructor(
     readonly label: "host" | "local",
@@ -66,10 +65,6 @@ class ScriptedSource implements TurnSource {
     return () => this.listeners.delete(listener);
   }
 
-  sendReroute(turnId: string, candidates: HostCandidate[]): void {
-    this.reroutes.push({ turnId, candidates });
-  }
-
   abortTurn(turnId: string): void {
     this.aborted.push(turnId);
   }
@@ -82,15 +77,71 @@ class ScriptedSource implements TurnSource {
 function preparedTurn(): PreparedTurn {
   return {
     modelId: "model-a",
-    turnKind: "analysis",
-    intab: false,
-    needsVision: false,
-    ranked: [{ modelId: "model-a" }],
+    mode: "build",
+    effort: "medium",
     systemPrompt: "sys",
     temperature: 0.7,
     messages: [{ role: "user", content: "hi" }],
     sentTokens: 10,
+    candidates: [{ modelId: "model-a" }],
   };
+}
+
+/** A turn that was sent tool definitions (agent mode with a repo) */
+function preparedTurnWithTools(): PreparedTurn {
+  return {
+    ...preparedTurn(),
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "read_file",
+          description: "read a file",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ],
+  };
+}
+
+/** Streams a plain reply and ends the round normally */
+function replySource(text: string): ScriptedSource {
+  return new ScriptedSource("local", false, (source, payload) => {
+    queueMicrotask(() => {
+      source.emit({ type: "DELTA", delta: { turnId: payload.turnId, seq: 1, content: text } });
+      source.emit({ type: "END", payload: { turnId: payload.turnId, reason: "done" } });
+    });
+  });
+}
+
+/**
+ * Streams the SAME tool call every round for the first `rounds` starts,
+ * then a plain reply. Models the loop a weak model gets stuck in.
+ */
+function repeatingCallSource(
+  rounds: number,
+  call: { id: string; name: string; arguments: string }
+): ScriptedSource {
+  return new ScriptedSource("local", false, (source, payload) => {
+    const n = source.starts.length;
+    queueMicrotask(() => {
+      if (n <= rounds) {
+        source.emit({
+          type: "TOOL_CALLS",
+          payload: { turnId: payload.turnId, calls: [{ ...call }] },
+        });
+        source.emit({ type: "END", payload: { turnId: payload.turnId, reason: "tool-calls" } });
+        return;
+      }
+      source.emit({ type: "DELTA", delta: { turnId: payload.turnId, seq: 1, content: "stopped" } });
+      source.emit({ type: "END", payload: { turnId: payload.turnId, reason: "done" } });
+    });
+  });
+}
+
+function toolResultMessages() {
+  const conv = store().conversations.find((c) => c.id === conversationId);
+  return (conv?.messages ?? []).filter((m) => m.toolResult !== undefined);
 }
 
 // ── Harness ─────────────────────────────────────────────────
@@ -226,6 +277,84 @@ describe("turn engine — transport failure", () => {
     const conv = store().conversations.find((c) => c.id === conversationId);
     expect(conv?.pendingTurn ?? null).toBeNull();
   });
+});
+
+describe("turn engine — weak-model recovery", () => {
+  it(
+    "recovers a tool call the model wrote as text and runs it as a real call",
+    { timeout: 5000 },
+    async () => {
+      const source = replySource(
+        'Let me look at the file:\n\n```json\n{"name":"read_file","arguments":{"path":"src/a.ts"}}\n```\n\nThat should do it.'
+      );
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurnWithTools(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+      });
+
+      const toolCalls = (store().conversations.find((c) => c.id === conversationId)?.messages ?? [])
+        .filter((m) => m.toolCalls !== undefined);
+      expect(toolCalls).toHaveLength(1);
+      expect(toolCalls[0]!.toolCalls!.calls[0]!.name).toBe("read_file");
+      // The correction is visible in the transcript, not silent.
+      expect(toolCalls[0]!.content).toMatch(/described tool calls in text/);
+      // Recovery happens once: the second round's identical text is not re-run.
+      expect(source.starts).toHaveLength(2);
+    }
+  );
+
+  it(
+    "does not invent calls when tools were never sent",
+    { timeout: 5000 },
+    async () => {
+      const source = replySource('{"name":"read_file","arguments":{"path":"src/a.ts"}}');
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurn(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+      });
+
+      const toolCalls = (store().conversations.find((c) => c.id === conversationId)?.messages ?? [])
+        .filter((m) => m.toolCalls !== undefined);
+      expect(toolCalls).toHaveLength(0);
+      expect(source.starts).toHaveLength(1);
+    }
+  );
+
+  it(
+    "stops re-running a call that has already failed twice",
+    { timeout: 5000 },
+    async () => {
+      // The shape a cheap model produces when it stops emitting JSON:
+      // a known tool with unparseable arguments.
+      const source = repeatingCallSource(6, {
+        id: "call_1",
+        name: "read_file",
+        arguments: "src/a.ts",
+      });
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurnWithTools(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+      });
+
+      const results = toolResultMessages().map((m) => m.toolResult!);
+      // The first two attempts ran for real and failed on validation.
+      expect(results.filter((r) => r.summary === "invalid arguments")).toHaveLength(2);
+      // From the third attempt on the ledger refuses instead of retrying,
+      // and the refusal text tells the model what to do differently.
+      const refusals = results.filter((r) => r.summary === "repeated failing call refused");
+      expect(refusals.length).toBeGreaterThan(0);
+      expect(refusals[0]!.content).toMatch(/Change your approach/);
+    }
+  );
 });
 
 describe("turn engine — single flight", () => {

@@ -29,15 +29,20 @@ import { computeBudget, healthFromPercentage, type RequestBudget } from "./budge
 import { buildCompactionMarker, compactMessages } from "./compactor";
 import { estimateConversationTokens, estimateTokens } from "./tokenizer";
 
-/** Wire message with optional OpenAI tool_calls (assistant) payload */
+/**
+ * Wire message in the OpenAI tool protocol: an assistant row may carry
+ * `tool_calls`, and every one of those calls is answered by a `tool`
+ * row carrying the same `tool_call_id`.
+ */
 export interface WireMessage {
-  role: ChatMessage["role"];
+  role: ChatMessage["role"] | "tool";
   content: WireContent | null;
   tool_calls?: Array<{
     id: string;
     type: "function";
     function: { name: string; arguments: string };
   }>;
+  tool_call_id?: string;
 }
 
 export interface PreparedRequest {
@@ -70,8 +75,12 @@ export function composeSystemPrompt(
 
 // ── Tool-result folding (request-time digests) ──────────────
 
-/** Turns one tool result message into a one-line digest */
-function toolResultDigest(tr: ToolResultMessageForFold): string {
+/**
+ * Turns one tool result message into a one-line digest. Exported so the
+ * folded shape is pinnable in tests — it is the only thing the model
+ * retains of an old tool result, so its contents are a contract.
+ */
+export function toolResultDigestText(tr: ToolResultMessageForFold): string {
   const status = tr.ok ? "ok" : "ERROR";
   const dur = tr.durationMs > 0 ? ` · ${tr.durationMs}ms` : "";
   const summary = tr.summary ? ` — ${tr.summary}` : "";
@@ -109,12 +118,13 @@ export function staleToolResultIds(messages: ChatMessage[]): Set<string> {
 }
 
 /**
- * Maps one stored message to its wire format. Agent-activity
- * messages map to the OpenAI tool protocol: a tool-calls assistant
- * message carries `tool_calls`; each result rides as a user-role
- * message with a labeled JSON payload (widely compatible with
- * OpenRouter models, including those without native tool support).
- * Stale tool results (fold=true) collapse to their digest line.
+ * Maps one stored message to its wire format. Agent-activity messages
+ * map to the real OpenAI tool protocol: a tool-calls assistant message
+ * carries `tool_calls`, and each result is a `tool` row bound to it by
+ * `tool_call_id`. Providers validate that pairing and return 400 when
+ * it is missing or mislabelled, so this must never degrade to plain
+ * user text. Stale tool results (fold=true) collapse their *content*
+ * to a digest line while keeping the pairing intact.
  */
 function wireMessage(message: ChatMessage, fold: boolean): WireMessage {
   if (message.toolCalls) {
@@ -132,15 +142,68 @@ function wireMessage(message: ChatMessage, fold: boolean): WireMessage {
   }
   if (message.toolResult) {
     const tr = message.toolResult;
-    if (fold) {
-      return { role: "user", content: toolResultDigest(tr) };
-    }
     return {
-      role: "user",
-      content: `[Tool result: ${tr.name}${tr.ok ? "" : " — ERROR"}]\n${tr.content}`,
+      role: "tool",
+      tool_call_id: tr.callId,
+      content: fold ? toolResultDigestText(tr) : tr.content,
     };
   }
   return { role: message.role, content: wireContent(message) };
+}
+
+/**
+ * Makes the tool protocol well-formed for one request slice:
+ *
+ *  - an assistant turn keeps only the calls that have a matching
+ *    result in the slice (a request must not reference an unanswered
+ *    call — strict providers reject it);
+ *  - a result whose call was truncated/folded away is dropped;
+ *  - an assistant turn with no answered calls left degrades to plain
+ *    text, and disappears when it has no text either;
+ *  - a leading `tool` row (its call was cut off at the boundary) goes.
+ *
+ * Pure — never mutates the input messages.
+ */
+export function sanitizeToolProtocol(messages: ChatMessage[]): ChatMessage[] {
+  const answered = new Set<string>();
+  for (const m of messages) {
+    if (m.toolResult) answered.add(m.toolResult.callId);
+  }
+
+  const keptCallIds = new Set<string>();
+  const out: ChatMessage[] = [];
+
+  for (const m of messages) {
+    if (m.toolCalls) {
+      const calls = m.toolCalls.calls.filter((c) => answered.has(c.id));
+      if (calls.length === 0) {
+        // No answer will ever arrive for these calls — drop the
+        // protocol row, keeping any prose the model wrote.
+        if (!m.content.trim()) continue;
+        out.push({ ...m, toolCalls: undefined });
+        continue;
+      }
+      for (const c of calls) keptCallIds.add(c.id);
+      out.push(
+        calls.length === m.toolCalls.calls.length
+          ? m
+          : { ...m, toolCalls: { kind: "tool_calls", calls } }
+      );
+      continue;
+    }
+    if (m.toolResult) {
+      if (!keptCallIds.has(m.toolResult.callId)) continue;
+      out.push(m);
+      continue;
+    }
+    out.push(m);
+  }
+
+  // A request may never open with a `tool` row: its assistant turn was
+  // cropped by compaction, so the boundary moves forward.
+  let start = 0;
+  while (start < out.length && out[start]!.toolResult) start++;
+  return start === 0 ? out : out.slice(start);
 }
 
 /**
@@ -201,14 +264,11 @@ export function prepareRequest(params: {
   // the summary itself rides in the system prompt.
   const wireCandidates = messages.filter((m) => m.compactedFrom === undefined);
 
-  // Truncation can orphan tool results (a kept tail starting with a
-  // result whose tool_calls assistant message was folded away) —
-  // drop them so requests never reference unknown call ids.
-  let start = 0;
-  while (start < wireCandidates.length && wireCandidates[start]?.toolResult) {
-    start++;
-  }
-  const cleanMessages = wireCandidates.slice(start);
+  // Truncation can orphan half of a tool exchange (a kept tail whose
+  // tool_calls turn was cropped, or a cut turn whose results never
+  // committed) — sanitize so the wire payload is always a valid
+  // protocol sequence for strict providers.
+  const cleanMessages = sanitizeToolProtocol(wireCandidates);
 
   // Fold stale tool results to digests (request-time only)
   const stale = staleToolResultIds(visible);
@@ -218,9 +278,10 @@ export function prepareRequest(params: {
 
   // Session-log invariant (dev-mode): every wire payload must be
   // reconstructable from stored, model-visible history — "model-visible
-  // means logged". Walks the payload against the visible transcript
-  // and warns with a compact diff when they diverge.
-  assertLogInvariant(visible, wire);
+  // means logged". The payload maps 1:1 onto the sanitized slice, and
+  // that slice must itself be an ordered subsequence of the visible
+  // transcript.
+  assertLogInvariant(visible, cleanMessages, wire);
 
   return {
     messages: wire,
@@ -233,30 +294,41 @@ export function prepareRequest(params: {
 
 /**
  * Dev-mode check of the "model-visible means logged" invariant:
- * the wire payload derived by prepareRequest must map 1:1 onto the
- * visible stored transcript (compaction markers excluded — the
- * summary rides in the system prompt, not the message list).
+ *  (a) the sanitized slice is an ordered subsequence of the visible
+ *      stored transcript, and
+ *  (b) the wire payload maps 1:1 onto that slice, with matching roles.
+ * Compaction markers are excluded — the summary rides in the system
+ * prompt, not the message list.
  */
-function assertLogInvariant(visible: ChatMessage[], wire: WireMessage[]): void {
+function assertLogInvariant(
+  visible: ChatMessage[],
+  sanitized: ChatMessage[],
+  wire: WireMessage[]
+): void {
   if (!import.meta.env?.DEV) return;
-  if (wire.length === visible.length) return; // fast path
-  // The only legal divergence: boundary-snapping in the truncation
-  // compactor (it may keep FEWER messages than exist to land on a
-  // user-role start). The payload must always be a SUFFIX of the
-  // visible transcript, aligned at the end.
-  if (wire.length > visible.length || wire.length === 0) {
-    reportLogInvariantViolation(visible.length, wire.length, "payload exceeds visible history");
+
+  if (wire.length !== sanitized.length) {
+    reportLogInvariantViolation(visible.length, wire.length, "payload is not a 1:1 map of stored history");
     return;
   }
-  for (let i = 1; i <= wire.length; i++) {
-    const stored = visible[visible.length - i];
-    const sent = wire[wire.length - i];
+
+  let cursor = 0;
+  for (const row of sanitized) {
+    const idx = visible.indexOf(row, cursor);
+    if (idx === -1) {
+      reportLogInvariantViolation(visible.length, wire.length, "sanitized slice left stored order");
+      return;
+    }
+    cursor = idx + 1;
+  }
+
+  for (let i = 0; i < wire.length; i++) {
+    const stored = sanitized[i];
+    const sent = wire[i];
     if (!stored || !sent) break;
-    // Role + a content fingerprint must line up from the end.
-    const storedRole = stored.toolResult ? "user" : stored.role;
-    const sentRole = sent.role;
-    if (storedRole !== sentRole) {
-      reportLogInvariantViolation(visible.length, wire.length, `role mismatch at offset -${i}`);
+    const storedRole = stored.toolResult ? "tool" : stored.role;
+    if (storedRole !== sent.role) {
+      reportLogInvariantViolation(visible.length, wire.length, `role mismatch at offset ${i}`);
       return;
     }
   }

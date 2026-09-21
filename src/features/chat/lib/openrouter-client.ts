@@ -149,15 +149,38 @@ async function parseErrorResponse(res: Response): Promise<OpenRouterError> {
  */
 export type { WireContent } from "../types";
 
-/** Wire-format message: plain content, or OpenAI tool protocol fields */
+/**
+ * Wire-format message: plain content, or OpenAI tool protocol fields.
+ *
+ * "tool" is a distinct wire role (the OpenAI tool protocol), which is
+ * why it is wider than the stored ChatMessage role union. Assistant
+ * rows may carry `tool_calls`; every one of those calls MUST be
+ * answered by a `tool` row carrying the same `tool_call_id` — strict
+ * providers (OpenAI, Groq, Fireworks, vLLM…) reject the request
+ * otherwise.
+ */
 export interface StreamWireMessage {
-  role: ChatMessage["role"];
+  role: ChatMessage["role"] | "tool";
   content: WireContent | null;
   tool_calls?: Array<{
     id: string;
     type: "function";
     function: { name: string; arguments: string };
   }>;
+  tool_call_id?: string;
+}
+
+/**
+ * Serializes one assembled wire message for the request body.
+ * Keeps the tool-protocol fields: an assistant turn that requested
+ * tools and the `tool` rows answering it are meaningless (and
+ * rejected) without them.
+ */
+export function toWireBodyMessage(m: StreamWireMessage): Record<string, unknown> {
+  const body: Record<string, unknown> = { role: m.role, content: m.content };
+  if (m.tool_calls && m.tool_calls.length > 0) body.tool_calls = m.tool_calls;
+  if (m.tool_call_id) body.tool_call_id = m.tool_call_id;
+  return body;
 }
 
 export interface StreamChatParams {
@@ -280,7 +303,7 @@ export async function streamChat({
       ...(systemPrompt?.trim()
         ? [{ role: "system", content: systemPrompt.trim() }]
         : []),
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ...messages.map(toWireBodyMessage),
     ],
   };
 
@@ -541,6 +564,146 @@ export async function completeChat({
   const u = json.usage;
   return {
     content,
+    usage: u
+      ? {
+          promptTokens: u.prompt_tokens ?? null,
+          completionTokens: u.completion_tokens ?? null,
+          cost: typeof u.cost === "number" ? u.cost : null,
+        }
+      : null,
+  };
+}
+
+// ── Non-Streaming Completion WITH Tools (delegation) ────────
+
+/**
+ * Wire message accepted by the tool-calling completion below: the same
+ * OpenAI tool protocol as the streaming path (assistant rows may carry
+ * `tool_calls`, `tool` rows answer them by id).
+ */
+export type ToolWireMessage = StreamWireMessage;
+
+export interface CompleteChatWithToolsParams {
+  apiKey: string;
+  model: string;
+  messages: ToolWireMessage[];
+  /** Model-facing instructions for this nested agent */
+  systemPrompt?: string;
+  tools?: ToolDefinition[];
+  temperature?: number;
+  maxTokens?: number;
+  /** Per-request state merged into the body (reasoning effort, etc.) */
+  requestState?: Record<string, unknown>;
+  signal?: AbortSignal;
+}
+
+export interface CompleteChatWithToolsResult {
+  content: string;
+  /** Fully-assembled tool calls, empty when the model answered directly */
+  toolCalls: ToolCallRequest[];
+  usage: UsageInfo | null;
+}
+
+/**
+ * One non-streaming completion that may return tool calls.
+ *
+ * Delegation needs this shape and streaming cannot provide it: a nested
+ * helper agent's output is a report for the parent, not something a
+ * human watches arrive token by token. Non-streaming also means one
+ * request per round instead of a stream teardown per round, which is
+ * what makes a nested loop cheap enough to be worth having.
+ */
+export async function completeChatWithTools({
+  apiKey,
+  model,
+  messages,
+  systemPrompt,
+  tools,
+  temperature = 0.2,
+  maxTokens,
+  requestState,
+  signal,
+}: CompleteChatWithToolsParams): Promise<CompleteChatWithToolsResult> {
+  if (!apiKey.trim()) {
+    throw new OpenRouterError(
+      "An OpenRouter API key is required. Add yours in Chat Settings.",
+      401
+    );
+  }
+
+  const payload: Record<string, unknown> = {
+    model,
+    stream: false,
+    temperature,
+    ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+    ...(tools && tools.length > 0 ? { tools, tool_choice: "auto" } : {}),
+    ...(requestState ?? {}),
+    messages: [
+      ...(systemPrompt?.trim()
+        ? [{ role: "system", content: systemPrompt.trim() }]
+        : []),
+      ...messages.map(toWireBodyMessage),
+    ],
+  };
+
+  let response: Response;
+  try {
+    response = await openRouterFetch("/chat/completions", {
+      apiKey,
+      body: payload,
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    throw new OpenRouterError(
+      "Could not reach OpenRouter. Check your connection and try again.",
+      0
+    );
+  }
+
+  if (!response.ok) throw await parseErrorResponse(response);
+
+  let json: {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+        tool_calls?: Array<{
+          id?: string;
+          type?: string;
+          function?: { name?: string; arguments?: string };
+        }>;
+      };
+    }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    error?: { message?: string; code?: number | string };
+  };
+  try {
+    json = (await response.json()) as typeof json;
+  } catch {
+    throw new OpenRouterError("OpenRouter returned an unreadable response.", 200);
+  }
+
+  if (json.error) {
+    throw new OpenRouterError(
+      json.error.message || "The completion request failed.",
+      200,
+      String(json.error.code ?? "")
+    );
+  }
+
+  const message = json.choices?.[0]?.message;
+  const toolCalls: ToolCallRequest[] = (message?.tool_calls ?? [])
+    .filter((tc) => typeof tc.function?.name === "string" && tc.function.name)
+    .map((tc, i) => ({
+      id: tc.id || `call_${i}`,
+      name: tc.function!.name as ToolCallRequest["name"],
+      arguments: tc.function!.arguments || "{}",
+    }));
+
+  const u = json.usage;
+  return {
+    content: message?.content ?? "",
+    toolCalls,
     usage: u
       ? {
           promptTokens: u.prompt_tokens ?? null,

@@ -71,7 +71,7 @@ describe("command registry integrity", () => {
   });
 
   it("documents arguments for the commands that need them", () => {
-    for (const id of ["rename", "model", "tier", "system"]) {
+    for (const id of ["rename", "model", "effort", "mode", "system"]) {
       expect(CHAT_COMMAND_BY_ID.get(id)?.argsHint, `/${id} needs an argsHint`).toBeTruthy();
     }
   });

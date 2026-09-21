@@ -288,6 +288,92 @@ export async function openPullRequest(
   };
 }
 
+// ── Push preflight (stale base + write permission) ───────────
+
+export interface PushPreflight {
+  /** Head commit of the base branch right now */
+  currentHeadSha: string;
+  /** True when the base branch moved since the workspace was hydrated */
+  baseMoved: boolean;
+  /** Paths whose content on the base branch is no longer what the agent read */
+  upstreamChanged: string[];
+  /**
+   * Whether the token may push to this repo, when the API reports it
+   * (`permissions.push`). null → unknown/not reported.
+   */
+  canPush: boolean | null;
+}
+
+/**
+ * Recursive blob shas of a tree (path → blob sha). Used to detect
+ * whether a file the agent edited has moved on since it read it.
+ * Tree listings are the only way to get upstream shas in one call.
+ */
+export async function getTreeBlobShas(
+  token: string,
+  owner: string,
+  repo: string,
+  treeSha: string
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const res = await githubFetch(
+    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`,
+    token
+  );
+  const json = (await res.json()) as {
+    tree?: Array<{ path?: string; type?: string; sha?: string }>;
+  };
+  for (const entry of json.tree ?? []) {
+    if (entry.type === "blob" && entry.path && entry.sha) out.set(entry.path, entry.sha);
+  }
+  return out;
+}
+
+/**
+ * Preflight for a push: has the base branch moved, did any file the
+ * agent touched change upstream, and may this token write at all?
+ *
+ * Every failure here is non-fatal by design — the write path is
+ * path-scoped so a push cannot corrupt unrelated files. The point is
+ * to tell the human (and the model) when they are about to overwrite
+ * someone else's work, or to fail for a missing scope, instead of
+ * discovering it after commit.
+ */
+export async function inspectPushPreconditions(
+  token: string,
+  params: {
+    owner: string;
+    repo: string;
+    baseBranch: string;
+    baseCommitSha: string;
+    files: Array<{ path: string; baseSha: string | null }>;
+  }
+): Promise<PushPreflight> {
+  const { owner, repo, baseBranch, baseCommitSha, files } = params;
+  const head = await getBranchHead(token, owner, repo, baseBranch);
+  const baseMoved = Boolean(baseCommitSha) && head.commitSha !== baseCommitSha;
+
+  let upstreamChanged: string[] = [];
+  if (baseMoved) {
+    const commit = await getCommit(token, owner, repo, head.commitSha);
+    const shas = await getTreeBlobShas(token, owner, repo, commit.treeSha);
+    upstreamChanged = files
+      .filter((f) => f.baseSha !== null && shas.get(f.path) !== f.baseSha)
+      .map((f) => f.path);
+  }
+
+  let canPush: boolean | null = null;
+  try {
+    const res = await githubFetch(`/repos/${owner}/${repo}`, token);
+    const json = (await res.json()) as { permissions?: { push?: boolean } };
+    if (typeof json.permissions?.push === "boolean") canPush = json.permissions.push;
+  } catch {
+    // Permission probing is advisory — never block a push on it.
+  }
+
+  return { currentHeadSha: head.commitSha, baseMoved, upstreamChanged, canPush };
+}
+
 // ── High-level gated push orchestration ──────────────────────
 
 export interface PushPlan {

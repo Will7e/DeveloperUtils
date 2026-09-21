@@ -37,14 +37,8 @@ import { useAppStore } from "@/stores/app.store";
 import { importChatFiles, MAX_ATTACHMENTS } from "../lib/attachments";
 import { CHAT_COMMAND_BY_ID, commandsFor, type ChatCommand } from "../lib/commands";
 import { CommandMenu, type CommandMenuMode } from "./CommandMenu";
-import {
-  CURATED_FALLBACK_MODELS,
-  INTAB_MODEL_ID,
-  INTAB_VIRTUAL_MODEL,
-  intabTierById,
-  PINNED_MODEL_IDS,
-} from "../constants";
-import type { ChatAttachment, ModelInfo } from "../types";
+import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
+import type { ChatAttachment, ChatMode, ModelInfo } from "../types";
 
 /** Draft-level attachment state lives in ChatPage as ChatAttachment[] */
 
@@ -81,6 +75,8 @@ interface ComposerProps {
   modelsLoading?: boolean;
   /** Model id active for this conversation (checkmark in submenu) */
   activeModelId?: string;
+  /** Agent mode — surfaces a read-only notice while Plan is active */
+  mode?: ChatMode;
   /**
    * Runs a picked slash command with everything typed after it.
    * The page clears the draft; the menu stays open for submenus
@@ -107,6 +103,7 @@ export function Composer({
   models = [],
   modelsLoading = false,
   activeModelId,
+  mode = "build",
   onRunCommand,
   onModelChange,
 }: ComposerProps) {
@@ -180,15 +177,8 @@ export function Composer({
   const filteredModels = React.useMemo(() => {
     if (!modelMode) return [];
     const q = cmdArg.toLowerCase();
-    const baseCatalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
-    // A single "InTab Flash" entry leads the submenu — the quality
-    // tier lives in the header's TierPicker, not the model list.
-    const injected = baseCatalog.some((m) => m.id === INTAB_MODEL_ID)
-      ? baseCatalog.filter((m) => !intabTierById(m.id))
-      : [INTAB_VIRTUAL_MODEL, ...baseCatalog.filter((m) => !intabTierById(m.id))];
-    const catalog = injected.some((m) => m.id === INTAB_VIRTUAL_MODEL.id)
-      ? injected
-      : [INTAB_VIRTUAL_MODEL, ...injected];
+    // Real models only — the catalog IS the list.
+    const catalog = models.length > 0 ? models : CURATED_FALLBACK_MODELS;
     const matches = q
       ? catalog.filter(
           (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
@@ -513,12 +503,19 @@ export function Composer({
       )}
 
       <div className="chat-composer-footer">
+        {mode === "plan" && (
+          <span className="chat-composer-mode-badge" role="status">
+            Plan mode — read-only: the agent proposes changes, it cannot apply them
+          </span>
+        )}
         <span className="chat-composer-hint">
           {disabled
             ? "You can keep browsing — sending resumes when the other chat finishes."
             : isStreaming
               ? "Replying… type / and press Enter for /stop · /status · /context"
-              : "Type / for commands · /help lists them all · Responses may be inaccurate — verify important information."}
+              : mode === "plan"
+                ? "Type / for commands · /build switches back to editing"
+                : "Type / for commands · /help lists them all · Responses may be inaccurate — verify important information."}
         </span>
       </div>
       <span className="chat-sr-only" aria-live="polite">

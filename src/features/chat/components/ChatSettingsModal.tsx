@@ -42,8 +42,9 @@ import {
   skillFromParsed,
 } from "../lib/skills";
 import { ModelPicker } from "./ModelPicker";
-import { TierPicker } from "./TierPicker";
-import { isIntabModel } from "../lib/intab-llm";
+import { EffortPicker } from "./EffortPicker";
+import { availableEfforts } from "../lib/model-state";
+import { resolveModelInfo } from "../lib/model-catalog";
 import type { ChatSettings, ChatSkill, GitHubConnectionState, ModelInfo } from "../types";
 
 interface ChatSettingsModalProps {
@@ -138,6 +139,12 @@ function SettingsModalInner({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // Rungs the default model can express (empty hides the control)
+  const defaultEfforts = React.useMemo(
+    () => availableEfforts(models.find((m) => m.id === settings.defaultModel) ?? resolveModelInfo(settings.defaultModel)),
+    [models, settings.defaultModel]
+  );
 
   const saveKey = () => {
     const trimmed = keyDraft.trim();
@@ -417,18 +424,35 @@ function SettingsModalInner({
                       Used for new chats — each chat remembers its own model once switched
                     </span>
                   </div>
-                  <div className="settings-control" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div className="settings-control">
                     <ModelPicker
                       value={settings.defaultModel}
                       models={models}
                       isLoading={false}
                       onChange={(id) => onUpdate({ defaultModel: id })}
                     />
-                    {isIntabModel(settings.defaultModel) && (
-                      <TierPicker
-                        model={settings.defaultModel}
-                        onChange={(id) => onUpdate({ defaultModel: id })}
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label">Reasoning effort</label>
+                    <span className="settings-sublabel">
+                      How much the model may think before answering — sent as its
+                      OpenRouter reasoning effort
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    {defaultEfforts.length > 0 ? (
+                      <EffortPicker
+                        value={settings.defaultReasoningEffort}
+                        efforts={defaultEfforts}
+                        onChange={(effort) => onUpdate({ defaultReasoningEffort: effort })}
                       />
+                    ) : (
+                      <span className="settings-value">
+                        This model has no reasoning controls
+                      </span>
                     )}
                   </div>
                 </div>
@@ -440,7 +464,7 @@ function SettingsModalInner({
                 <div className="settings-section-title">Behavior</div>
 
                 <div className="settings-row">
-                  <div className="settings-row-info" style={{ flex: 1 }}>
+                  <div className="settings-row-info">
                     <label className="settings-label">System prompt</label>
                     <span className="settings-sublabel">
                       Applied to all chats that don't define their own
@@ -719,14 +743,14 @@ function GitHubTabContent({
 
   return (
     <div className="settings-tab-content">
-      <div className="settings-security-card">
-        <div className="settings-security-badge-group">
-          <div className="settings-security-card-icon-wrap">
+      <div className="settings-info-card">
+        <div className="settings-info-badge-group">
+          <div className="settings-info-card-icon-wrap">
             <GitBranch size={18} />
           </div>
           <div>
-            <div className="settings-security-card-title">Coding agent over your repositories</div>
-            <div className="settings-security-card-desc">
+            <div className="settings-info-card-title">Coding agent over your repositories</div>
+            <div className="settings-info-card-desc">
               Connect GitHub to attach a repository to any chat. The agent can read the code, edit a
               local workspace with a live preview, and — only after you approve the diff — push a
               commit to a new agent/* branch and open a pull request. Your token is encrypted at rest
@@ -804,19 +828,25 @@ function GitHubTabContent({
 
           <div className="settings-section">
             <div className="settings-section-title">Personal Access Token (alternative)</div>
-            <div className="settings-row">
+            <div className="settings-row chat-key-row">
               <div className="settings-row-info">
-                <label className="settings-label" htmlFor="chat-gh-pat">
-                  Fine-grained PAT
-                </label>
-                <a
-                  href={GITHUB_PAT_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="chat-settings-link"
-                >
-                  Create one <ExternalLink className="h-3 w-3" />
-                </a>
+                <div className="chat-key-label-row">
+                  <label className="settings-label" htmlFor="chat-gh-pat">
+                    Fine-grained PAT
+                  </label>
+                  <a
+                    href={GITHUB_PAT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="chat-settings-link"
+                  >
+                    Create one <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                <span className="settings-sublabel">
+                  Grant “Contents: read” (and “Metadata: read”) for the repos you want the assistant to
+                  see. Works in local dev where OAuth needs server configuration.
+                </span>
               </div>
               <div className="chat-key-controls">
                 <div className="chat-key-input-wrap">
@@ -861,10 +891,6 @@ function GitHubTabContent({
                 </button>
               </div>
             </div>
-            <span className="settings-sublabel">
-              Grant “Contents: read” (and “Metadata: read”) for the repos you want the assistant to
-              see. Works in local dev where OAuth needs server configuration.
-            </span>
           </div>
         </>
       )}

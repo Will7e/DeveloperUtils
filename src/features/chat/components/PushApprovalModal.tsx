@@ -16,6 +16,7 @@ import {
   GitPullRequest,
   Loader2,
   ShieldCheck,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
@@ -54,8 +55,9 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
 
   const handleApprove = () => {
     setExecuting(true);
-    (window as unknown as { __intabPrApproved?: boolean }).__intabPrApproved = openPr;
-    resolvePushApproval(true);
+    // The PR choice rides with the decision — a window global would be
+    // read by a different module at an unpredictable time.
+    resolvePushApproval(true, undefined, openPr);
   };
 
   const handleReject = () => {
@@ -81,6 +83,17 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
             </p>
           </div>
         </div>
+
+        {(pendingPush.warnings ?? []).length > 0 ? (
+          <div className="chat-approval-warnings" role="alert">
+            {pendingPush.warnings!.map((w, i) => (
+              <p key={`${w.kind}-${i}`} className="chat-approval-warning">
+                <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{w.message}</span>
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         <div className="chat-approval-files">
           {pendingPush.changes.map((c) => {

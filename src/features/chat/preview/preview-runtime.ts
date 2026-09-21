@@ -19,9 +19,12 @@
 // import maps so common repos work out of the box.
 
 import * as esbuild from "esbuild-wasm";
+import { useChatStore } from "@/stores/chat.store";
 import type { WorkspaceState } from "../types";
 import { PREVIEW_REBUILD_DEBOUNCE_MS } from "../constants";
 import { usePreviewStore, type PreviewDiagnostic } from "./preview.store";
+import { createWorkspaceVfs, type VFS } from "./vfs";
+import { preloadForPreview, preloadSeeds } from "./preload";
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
@@ -75,53 +78,7 @@ export function detectEntry(ws: WorkspaceState): DetectedEntry | null {
 }
 
 // ── Virtual FS plugin ────────────────────────────────────────
-
-interface VFS {
-  read(path: string): string | null;
-  exists(path: string): boolean;
-  resolveRel(from: string, rel: string): string | null;
-}
-
-function makeVfs(ws: WorkspaceState): VFS {
-  const allPaths = new Set<string>(ws.tree.filter((e) => e.type === "blob").map((e) => e.path));
-
-  const read = (path: string): string | null => {
-    const f = ws.files[path];
-    if (f && f.status !== "deleted") return f.content;
-    return null; // contents not loaded → resolution failure, surfaced as a diagnostic
-  };
-
-  return {
-    read,
-    exists: (path) => allPaths.has(path) || ws.files[path] !== undefined,
-    resolveRel: (from, rel) => {
-      if (rel.startsWith("/")) {
-        const p = rel.slice(1);
-        return candidates(p).find(hasAny) ?? null;
-      }
-      const dirParts = from.split("/").slice(0, -1);
-      const relParts = rel.split("/");
-      const stack = [...dirParts];
-      for (const part of relParts) {
-        if (part === "." || part === "") continue;
-        if (part === "..") stack.pop();
-        else stack.push(part);
-      }
-      const joined = stack.join("/");
-      return candidates(joined).find(hasAny) ?? null;
-    },
-  };
-
-  function hasAny(p: string): boolean {
-    return allPaths.has(p) || ws.files[p] !== undefined;
-  }
-
-  /** Adds extension candidates like ./Button → ./Button.tsx */
-  function candidates(p: string): string[] {
-    if (/\.(tsx?|jsx?|css|json|svg|png|jpg|jpeg|gif|webp)$/.test(p)) return [p];
-    return [p, `${p}.ts`, `${p}.tsx`, `${p}.js`, `${p}.jsx`, `${p}.css`, `${p}/index.ts`, `${p}/index.tsx`, `${p}/index.js`, `${p}/index.jsx`];
-  }
-}
+// Path resolution lives in ./vfs (shared with the preloader).
 
 const VFS_PLUGIN_NAME = "intab-workspace-vfs";
 
@@ -196,6 +153,29 @@ export function schedulePreviewBuild(ws: WorkspaceState): void {
   }, PREVIEW_REBUILD_DEBOUNCE_MS);
 }
 
+/**
+ * Fetches the files a build will need (entry + transitive local
+ * imports) into the workspace. Without this the bundler fails on any
+ * repo the conversation has not already read file by file.
+ *
+ * Fetched files are published to the chat store so the file tree,
+ * read_file, and the next build all see them.
+ */
+async function preloadForBuild(
+  ws: WorkspaceState
+): Promise<WorkspaceState> {
+  const token = useChatStore.getState().settings.github.token;
+  if (!token) return ws;
+  const seeds = preloadSeeds(detectEntry(ws));
+  if (seeds.length === 0) return ws;
+
+  const outcome = await preloadForPreview(ws, seeds, token);
+  if (outcome.loaded.length === 0) return ws;
+
+  useChatStore.getState().setWorkspace(ws.conversationId, outcome.ws);
+  return outcome.ws;
+}
+
 /** Immediate build (used on pane open) */
 export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome> {
   const store = usePreviewStore.getState();
@@ -208,7 +188,8 @@ export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome>
 
   try {
     await ensureEsbuild();
-    const outcome = await buildWorkspace(ws);
+    const loaded = await preloadForBuild(ws);
+    const outcome = await buildWorkspace(loaded);
     lastBuildResult = outcome;
     usePreviewStore.getState().setBuild({
       url: outcome.url,
@@ -258,7 +239,7 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
     };
   }
 
-  const vfs = makeVfs(ws);
+  const vfs = createWorkspaceVfs(ws);
 
   if (entry.kind === "html" && !entry.scriptSrc) {
     // Pure static HTML — rewrite relative assets to blob URLs
@@ -310,7 +291,7 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
 /** Static HTML path: rewrite src/href references to blob URLs */
 async function buildStaticHtml(ws: WorkspaceState, htmlPath: string): Promise<BuildOutcome> {
   const raw = ws.files[htmlPath]?.content ?? "";
-  const vfs = makeVfs(ws);
+  const vfs = createWorkspaceVfs(ws);
   const blobUrls = new Map<string, string>();
 
   // Inline local scripts + stylesheets as blobs

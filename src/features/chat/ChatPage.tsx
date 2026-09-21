@@ -12,7 +12,7 @@ import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
 import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
 import { flushWorkspaceSave } from "./workspace/workspace";
 import {
-  displayNameFor,
+  modelDisplayName,
   regenerateLastResponse,
   resolveModelInfo,
   sendUserMessage,
@@ -40,14 +40,17 @@ import { modelSupportsImages } from "./services/chat-runner";
 import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
 import { isTurnUnrecoverable } from "./session/turn-engine";
-import type { ChatAttachment, ModelInfo, RepoContext } from "./types";
+import { availableEfforts } from "./lib/model-state";
+import { DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "./constants";
+import type {
+  ChatAttachment,
+  ChatMode,
+  ModelInfo,
+  ReasoningEffort,
+  RepoContext,
+} from "./types";
 import type { ChatCommand } from "./lib/commands";
 import "./chat.css";
-
-/** Display name for a model id (masks InTab routing; falls back to the id) */
-function modelDisplayName(modelId: string, models: ModelInfo[]): string {
-  return displayNameFor(modelId, models);
-}
 
 export function ChatPage() {
   const conversations = useChatStore((s) => s.conversations);
@@ -276,6 +279,12 @@ export function ChatPage() {
     [modelId, models]
   );
 
+  // Model state: conversation override → settings default.
+  const effort = activeConversation?.reasoningEffort ?? settings.defaultReasoningEffort ?? DEFAULT_REASONING_EFFORT;
+  const mode = activeConversation?.mode ?? settings.defaultMode ?? DEFAULT_CHAT_MODE;
+  // Rungs this model can actually express (empty → the picker hides).
+  const efforts = useMemo(() => availableEfforts(modelInfo), [modelInfo]);
+
   // Compose the same effective prompt the runner will send — skills
   // plus the rolling summary — so the context meter reflects exactly
   // what the next request costs.
@@ -388,6 +397,22 @@ export function ChatPage() {
     useChatStore.getState().updateSettings({ defaultModel: modelId });
   };
 
+  const handleEffortChange = (next: ReasoningEffort) => {
+    if (activeConversationId) {
+      useChatStore.getState().setConversationEffort(activeConversationId, next);
+      return;
+    }
+    useChatStore.getState().updateSettings({ defaultReasoningEffort: next });
+  };
+
+  const handleModeChange = (next: ChatMode) => {
+    if (activeConversationId) {
+      useChatStore.getState().setConversationMode(activeConversationId, next);
+      return;
+    }
+    useChatStore.getState().updateSettings({ defaultMode: next });
+  };
+
   // Slash command entry point from the composer's command menu.
   // Clears the composer when the page (not the command) owns the
   // draft; submenu commands keep it open for their argument.
@@ -423,6 +448,11 @@ export function ChatPage() {
           models={models}
           modelsLoading={modelsLoading}
           onModelChange={handleModelChange}
+          effort={effort}
+          efforts={efforts}
+          onEffortChange={handleEffortChange}
+          mode={mode}
+          onModeChange={handleModeChange}
           context={context}
           onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
           onExport={() => activeConversationId && downloadConversation(activeConversationId)}

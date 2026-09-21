@@ -6,7 +6,7 @@
 // as a sensitive scope: the app ships unverified in production,
 // which shows users a one-time warning screen during consent.
 
-import type { CloudProvider, OAuthTokens, WriteResult } from "../types";
+import type { CloudProvider, FileReadResult, OAuthTokens, WriteResult } from "../types";
 import { OAuthError } from "../oauth-error";
 import {
   buildAuthorizeUrl,
@@ -134,13 +134,15 @@ export const googleDriveProvider: CloudProvider = {
     }
   },
 
-  async readFile(tokens: OAuthTokens, path: string): Promise<string | null> {
+  async readFile(tokens: OAuthTokens, path: string): Promise<FileReadResult> {
     const meta = await findSyncFile(tokens, path);
-    if (!meta) return null;
+    if (!meta) return { content: null, etag: null };
     const res = await driveFetch(tokens, `/drive/v3/files/${meta.id}?alt=media`);
-    if (res.status === 404) return null;
+    if (res.status === 404) return { content: null, etag: null };
     if (!res.ok) throw new Error(`Drive read failed (${res.status})`);
-    return res.text();
+    // headRevisionId is the Drive analogue of an ETag, captured alongside the
+    // body so the caller can keep its concurrency token in step.
+    return { content: await res.text(), etag: meta.headRevisionId ?? null };
   },
 
   async writeFile(tokens: OAuthTokens, path: string, content: string, _etag: string | null): Promise<WriteResult> {

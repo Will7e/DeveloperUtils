@@ -44,214 +44,50 @@ export const PREVIEW_REBUILD_DEBOUNCE_MS = 450;
 /** Branch prefix for agent-pushed working branches */
 export const AGENT_BRANCH_PREFIX = "agent/";
 
-// ── InTab Flash (virtual model) ──────────────────────────
-// "intab/intab-llm*" ids are not real OpenRouter models — the
-// runner resolves each to a pool of free OpenRouter models (see
-// lib/intab-llm.ts) with per-conversation sticky routing and
-// silent failover. The UI presents them as ordinary models.
+// ── Model state (reasoning effort) ───────────────────────
+// OpenRouter normalizes reasoning control across providers through
+// the request's `reasoning` object (`effort`, `max_tokens`, `exclude`)
+// plus the OpenAI-style `reasoning_effort` alias. Every model declares
+// what it accepts in the catalog (`supported_parameters` and
+// `reasoning.supported_efforts`), so one effort selector can drive ANY
+// model — free or paid — and lib/model-state.ts snaps the chosen rung
+// to what that model actually supports.
 //
-// Three tiers share one router:
-//   · Light — fastest replies (small/quick models first)
-//   · High  — balanced quality/speed (default; = the legacy id)
-//   · Max   — strongest reasoning (large agentic models first)
-// The legacy id stays mapped to the default tier so existing
-// conversations, stored settings, and the v1 chat-store default
-// keep working unchanged.
-export const INTAB_MODEL_ID = "intab/intab-llm";
-export const INTAB_MODEL_NAME = "InTab Flash 5.5";
-/** Tagline shown under the default (High) tier in pickers & menus */
-export const INTAB_MODEL_TAGLINE = "Adaptive multi-model routing · v6.0";
+//   low    — minimal thinking: fastest time-to-first-token
+//   medium — balanced (the default)
+//   high   — deeper reasoning for hard problems
+//   max    — the model's deepest setting (xhigh/max where offered)
+export const REASONING_EFFORTS = ["low", "medium", "high", "max"] as const;
+export const DEFAULT_REASONING_EFFORT = "medium" as const;
+
+/** Agent modes: build edits the workspace, plan is read-only */
+export const CHAT_MODES = ["build", "plan"] as const;
+export const DEFAULT_CHAT_MODE = "build" as const;
 
 /**
- * Tier registry. `id` is the synthetic conversation-facing model id;
- * `baseId` is the legacy id kept for isIntabModel prefix matching.
- * Order matters: Light first, then the default, then Max.
+ * Free model shipped as the default for new chats. A real OpenRouter
+ * slug (unlike the retired "InTab Flash" virtual model) so the picker,
+ * the transcript, and exports all name the model that actually ran.
+ * Chosen for tool calling + a reasoning-capable catalog entry + a
+ * 131k window, which makes it a usable coding-agent default at $0.
  */
-export type InTabTierId =
-  | "intab/intab-llm-light"
-  | "intab/intab-llm"
-  | "intab/intab-llm-max";
-
-export interface InTabTierMeta {
-  /** Synthetic wire-facing model id (never goes to OpenRouter) */
-  id: InTabTierId;
-  /** User-facing picker name */
-  name: string;
-  /** One-liner shown under the tier in pickers & command menus */
-  tagline: string;
-  /** Display context length (largest window in the tier's pool) */
-  contextLength: number;
-}
-
-/** All tiers, in picker order (Light, High, Max) */
-export const INTAB_MODEL_TIERS: readonly InTabTierMeta[] = [
-  {
-    id: "intab/intab-llm-light",
-    name: "InTab Flash · Light",
-    tagline: "Fastest free models · instant replies",
-    contextLength: 262144,
-  },
-  {
-    id: INTAB_MODEL_ID,
-    name: "InTab Flash · High",
-    tagline: INTAB_MODEL_TAGLINE,
-    contextLength: 262144,
-  },
-  {
-    id: "intab/intab-llm-max",
-    name: "InTab Flash · Max",
-    tagline: "Deepest reasoning · strongest free models",
-    contextLength: 1000000,
-  },
-] as const;
-
-/** Look up a tier by synthetic id (undefined for non-InTab ids) */
-export function intabTierById(modelId: string): InTabTierMeta | undefined {
-  return INTAB_MODEL_TIERS.find((t) => t.id === modelId);
-}
-
-/** Synthetic catalog entries so pickers/headers resolve every tier id */
-export const INTAB_TIER_VIRTUAL_MODELS: ModelInfo[] = INTAB_MODEL_TIERS.map(
-  (t) => ({
-    id: t.id,
-    name: t.name,
-    contextLength: t.contextLength,
-  })
-);
-
-/** Virtual model entry for the default (legacy) id — existing imports.
- *  Carries the product name ("InTab Flash 5.5"), NOT the High tier
- *  name — the tier is a state chosen beside the model, not the model. */
-export const INTAB_VIRTUAL_MODEL: ModelInfo = {
-  id: INTAB_MODEL_ID,
-  name: INTAB_MODEL_NAME,
-  contextLength: 262144,
-};
+export const DEFAULT_CHAT_MODEL = "openai/gpt-oss-120b:free";
 
 /**
- * Per-tier DESIRED state — the "background" half of the tier
- * selector. OpenRouter models expose per-request state (see the
- * catalog's `supported_parameters` + `reasoning.supported_efforts`):
- *
- *  · reasoning_effort — xhigh|high|medium|low|minimal|none: how much
- *    the model may think internally before answering.
- *  · reasoning.exclude — keep thinking tokens out of the response
- *    (faster render, fewer tokens over the wire).
- *
- * These are DESIRES, not wire payloads: pool models differ in which
- * efforts they accept (some only ["xhigh","medium"], some none at
- * all), so lib/intab-llm.ts snaps the desired effort to each model's
- * declared capabilities per request (snapRequestStateForModel).
- *
- * Light optimizes latency (low effort, thinking suppressed), High
- * balances (medium effort), Max thinks hard (high effort, thinking
- * visible in the reasoning panel). Applied for InTab turns only;
- * real OpenRouter models pass through untouched.
+ * Legacy virtual-model ids that used to identify the InTab router.
+ * Kept ONLY so stored conversations/settings can be migrated onto a
+ * real model — every routing behaviour behind them is gone.
  */
-export const INTAB_TIER_DESIRED_STATE: Record<
-  InTabTierId,
-  { reasoningEffort: "low" | "medium" | "high"; excludeThinking: boolean }
-> = {
-  "intab/intab-llm-light": { reasoningEffort: "low", excludeThinking: true },
-  "intab/intab-llm": { reasoningEffort: "medium", excludeThinking: false },
-  "intab/intab-llm-max": { reasoningEffort: "high", excludeThinking: false },
-};
-
-// ── Task-aware routing (see lib/intab-classify.ts) ────────
-// Each turn is classified (quick/code/analysis/vision/agent) and
-// routed by a per-kind preference order. A kind list REFINES the
-// tier's base pool: candidates are scored by the tier order first,
-// then nudged by the kind order (see scoreCandidate in
-// lib/intab-llm.ts) — a kind can lift a model within the tier but
-// can never pull a model in from another tier's pool.
-//
-// Pool refresh (Sep 2026): the new-generation free families lead —
-// dots-studio/dots-3-note-preview (280B MoE, only 16B active → very
-// fast TTFT), inclusionai/ling-3.0-flash (262k ctx), and nex-agi/
-// nex-n2.5-pro|mini (262k ctx, agentic). The old heavy-first orders
-// (nemotron-550b leading every analysis turn) were the main source
-// of slow time-to-first-token.
-
-/** Per-kind pool preference orders (prefix match, like the base list) */
-export const INTAB_TURN_KIND_PREFERENCE = {
-  // Short social/follow-up turns — smallest fastest models first
-  quick: ["dots-studio/dots-3-note-preview", "inclusionai/ling-3.0-flash", "openai/gpt-oss-20b"],
-  // Code authoring/debugging — coder/agentic-tuned models first
-  code: ["qwen/qwen3-coder", "nex-agi/nex-n2.5-pro", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
-  // Long-context comprehension/analysis — big windows first
-  analysis: ["nex-agi/nex-n2.5-pro", "inclusionai/ling-3.0-flash", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
-  // Vision turns: ordering is secondary (the vision gate filters)
-  vision: ["openai/gpt-oss-120b", "nex-agi/nex-n2.5-pro", "inclusionai/ling-3.0-flash"],
-  // Agent/tool turns — strong instruction-following & tool use
-  agent: ["nex-agi/nex-n2.5-pro", "qwen/qwen3-coder", "openai/gpt-oss-120b", "dots-studio/dots-3-note-preview"],
-} as const;
-
-/** Turn kinds the classifier can emit */
-export const INTAB_TURN_KINDS = ["quick", "code", "analysis", "vision", "agent"] as const;
-
-/**
- * Extra requests a pool model may serve after its daily free cap is
- * believed exhausted before it is fully demoted for the day.
- */
-export const INTAB_DAILY_CAP_GRACE_REQUESTS = 2;
-/** Slack between the reported cap and when we consider a model spent */
-export const INTAB_DAILY_CAP_SAFETY_MARGIN = 0;
-/** Milliseconds of silence before a hedged race fires the backup model.
- *  2s (was 3s): free-tier TTFT tails are the #1 latency complaint, and
- *  a duplicated request on free models costs nothing. */
-export const INTAB_HEDGE_TRIGGER_MS = 2_000;
-/** Maximum simultaneous streams in one hedged race (primary + 1 hedge) */
-export const INTAB_HEDGE_MAX_STREAMS = 2;
-/**
- * Static InTab pool used before/without the live catalog. Kept in
- * preference order — fast general models first, larger ones after.
- * The live catalog replaces this wholesale when it loads (see
- * buildInTabPool), so stale entries here degrade gracefully: the
- * runner failover skips ids OpenRouter rejects with 404.
- *
- * Every entry MUST carry isFree: true — buildInTabPool filters the
- * fallback through the same isFree/≥32k gate as the live catalog.
- * (The pre-refresh list omitted it and produced an EMPTY cold-start
- * pool — the "does not even respond" bug on first run.)
- */
-export const INTAB_FALLBACK_POOL: ModelInfo[] = [
-  {
-    id: "dots-studio/dots-3-note-preview:free",
-    name: "Dots3-Note Preview (free)",
-    contextLength: 262144,
-    isFree: true,
-  },
-  {
-    id: "nex-agi/nex-n2.5-pro:free",
-    name: "Nex-N2.5 Pro (free)",
-    contextLength: 262144,
-    isFree: true,
-  },
-  {
-    id: "inclusionai/ling-3.0-flash:free",
-    name: "Ling 3.0 Flash (free)",
-    contextLength: 262144,
-    isFree: true,
-  },
-  {
-    id: "openai/gpt-oss-120b:free",
-    name: "GPT-OSS 120B (free)",
-    contextLength: 131072,
-    isFree: true,
-  },
-  {
-    id: "openai/gpt-oss-20b:free",
-    name: "GPT-OSS 20B (free)",
-    contextLength: 131072,
-    isFree: true,
-  },
-  {
-    id: "google/gemma-4-31b:free",
-    name: "Gemma 4 31B (free)",
-    contextLength: 262144,
-    isFree: true,
-  },
+export const LEGACY_INTAB_MODEL_IDS: readonly string[] = [
+  "intab/intab-llm",
+  "intab/intab-llm-light",
+  "intab/intab-llm-max",
 ];
+
+/** True when a stored model id came from the retired InTab router */
+export function isLegacyIntabModelId(modelId: string | undefined): boolean {
+  return Boolean(modelId && LEGACY_INTAB_MODEL_IDS.includes(modelId));
+}
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_CONSOLE_URL = "https://openrouter.ai/settings/keys";
@@ -276,8 +112,6 @@ export const STREAM_STALL_TIMEOUT_MS = 60_000;
 export const HOST_PROTOCOL_VERSION = 1;
 /** Pages must re-attach within this window or the orphan turn aborts */
 export const HOST_ORPHAN_GRACE_MS = 45_000;
-/** Default hedge delay inside the host (client passes its own per turn) */
-export const HOST_HEDGE_TRIGGER_MS = 3_000;
 /** Pages heartbeat the host at this cadence to prove liveness */
 export const HOST_HEARTBEAT_MS = 15_000;
 /** In-memory cap on buffered content replayable to late attachers */
@@ -307,7 +141,9 @@ export const TOOL_RESULT_DIGEST_MAX_CHARS = 240;
 export const TOOL_EXECUTION_CONCURRENCY = 3;
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
-  defaultModel: INTAB_MODEL_ID,
+  defaultModel: DEFAULT_CHAT_MODEL,
+  defaultReasoningEffort: DEFAULT_REASONING_EFFORT,
+  defaultMode: DEFAULT_CHAT_MODE,
   apiKey: "",
   temperature: 0.7,
   systemPrompt:
@@ -402,6 +238,81 @@ export const BUILTIN_SKILLS: ChatSkill[] = [
     content:
       "When asked to write tests: cover the happy path first, then boundary values, then error paths and edge cases (empty, null, huge, unicode, concurrent). Use descriptive test names that state the expected behavior. Prefer table-driven tests for similar cases. Mock only external boundaries — never the unit under test.",
   },
+
+  // ── Task-shaped skills ─────────────────────────────────────
+  // The skills above are shaped like languages (SQL, regex); these are
+  // shaped like JOBS. A coding agent is asked to do jobs, so the jobs
+  // are where the harness discipline belongs — and because they are
+  // listed in the standing skill index with triggers, the model can
+  // load the right one on demand instead of paying for every skill on
+  // every turn.
+  {
+    id: "builtin-fix-failing-build",
+    name: "Fix Failing Build",
+    description: "Reproduce, fix, and re-verify a broken build",
+    enabled: false,
+    builtin: true,
+    triggers: [
+      "failing build",
+      "build fails",
+      "build error",
+      "does not compile",
+      "type error",
+      "tsc",
+      "cannot find module",
+      "broken build",
+    ],
+    content:
+      "A broken build is fixed by evidence, not by guessing. Work in this order and do not skip a step:\n1. REPRODUCE: read the actual error text (get_preview_feedback for build errors). Never start from a plausible-looking cause — start from the error you can see.\n2. LOCATE: read the exact file and line the error names, plus the immediate surroundings. If the error is a type mismatch, find the type's definition before editing the usage.\n3. FIX THE CAUSE: make the smallest change that removes the error. Do not disable checks, loosen types to `any`, or delete the failing code to make the error disappear.\n4. RE-VERIFY: call get_preview_feedback again and confirm the same error is gone and no new one appeared. A fix that was never re-checked is a guess.\n5. If a second attempt fails, change strategy: read wider (the caller, the type, the config), state what you now believe, and say so explicitly rather than retrying the same edit.",
+  },
+  {
+    id: "builtin-verify-before-push",
+    name: "Verify Before Push",
+    description: "Definition of done before shipping a change set",
+    enabled: false,
+    builtin: true,
+    triggers: ["push", "ship", "open a pr", "pull request", "commit", "done"] ,
+    content:
+      "Before calling push_changes, satisfy this definition of done and report it:\n1. REVIEW THE WHOLE CHANGE SET with get_workspace_diff and confirm every file in it was intended. Unrelated edits are bugs in the change set.\n2. VERIFY RUNTIME BEHAVIOUR where the workspace allows it: get_preview_feedback for build/console errors, and run_in_preview or query_preview_dom to confirm the changed behaviour actually happens.\n3. SAY WHAT YOU COULD NOT CHECK. Some checks need a shell (test suites, linters, type-checkers). You cannot run them here. State plainly which ones you did NOT run instead of implying they passed — an unverified claim that reaches a reviewer costs more than an honest gap.\n4. NAME THE EVIDENCE: for each change, the file and the reason. If you cannot point at a tool result that justifies a change, do not claim it works.\n5. Write a conventional commit message and a PR body that explains WHY. Reviewers approve intent, not diffs.",
+  },
+  {
+    id: "builtin-add-tests-for-change",
+    name: "Add Tests For Change",
+    description: "Tests that pin the change you just made",
+    enabled: false,
+    builtin: true,
+    triggers: ["add tests", "write tests", "unit test", "coverage", "regression test", "spec"],
+    content:
+      "When adding tests for an existing change:\n1. Read the file you changed and the tests that already cover it — match the existing framework, file location, and naming conventions. Do not introduce a second test style.\n2. Write the test that would have FAILED before your change. That is the only test that proves the change did something.\n3. Add one boundary case (empty, null, zero, maximum) and one error-path case.\n4. Keep tests deterministic: no real network, no real clock, no ordering dependence. Inject or freeze what varies.\n5. State clearly that you could not run the suite (there is no shell here) — the user must run it. Do not report a green suite you never executed.",
+  },
+  {
+    id: "builtin-review-this-diff",
+    name: "Review This Diff",
+    description: "Adversarial review of a pending change set",
+    enabled: false,
+    builtin: true,
+    triggers: ["review the diff", "review this change", "audit", "what's wrong", "code review"],
+    content:
+      "Review adversarially — your job is to find what is WRONG, not to confirm the change is fine.\n1. Call get_workspace_diff and read the whole change set before commenting on any part of it.\n2. For each hunk ask: what input breaks this? What did the author assume that may not hold? What existing behaviour could this change silently? Was something removed that callers still depend on?\n3. Check that the change is actually complete: every new function is called, every removed symbol has no remaining references (search_workspace), every new file is reachable.\n4. Report findings by severity — [BLOCKER] correctness/security, [MAJOR] design/performance, [MINOR] style — quoting the exact line. Lead with the most severe finding; never bury it under praise.\n5. If the change set is small, read the surrounding file anyway: most regressions live in the code just outside the diff.",
+  },
+  {
+    id: "builtin-explore-unknown-repo",
+    name: "Explore Unknown Repo",
+    description: "Map an unfamiliar codebase before touching it",
+    enabled: false,
+    builtin: true,
+    triggers: [
+      "how does",
+      "where is",
+      "where does",
+      "understand the codebase",
+      "architecture",
+      "explore",
+      "onboard",
+    ],
+    content:
+      "Mapping an unfamiliar repository:\n1. START BROAD: get_repo_overview for structure and the README's opening, then list_repo_files on the subtrees that matter. Do not read files at random — navigate.\n2. FIND THE ENTRY POINTS: the app entry, the route/command table, the main config. Entry points explain the shape of everything else.\n3. BATCH YOUR READS: one run_tool_program with several read_file steps beats six separate calls — cheaper, faster, and it keeps related facts in one context block.\n4. ANSWER WITH PATHS: every claim cites a file you actually read. Say explicitly when you are inferring rather than reporting.\n5. BUILD THE MODEL IN ORDER: what it does → how it is wired → where a change of the requested kind would go. Finish by naming the files a change would touch, so the next step is obvious.",
+  },
 ];
 
 /**
@@ -448,7 +359,7 @@ export const CURATED_FALLBACK_MODELS: ModelInfo[] = [
 ];
 
 export const PINNED_MODEL_IDS = [
-  INTAB_MODEL_ID,
+  DEFAULT_CHAT_MODEL,
   "openai/gpt-4o-mini",
   "openai/gpt-4o",
   "anthropic/claude-3.5-sonnet",

@@ -106,7 +106,6 @@ function payload(turnId: string): HostStartTurnPayload {
     temperature: 0.7,
     messages: [{ role: "user", content: "hi" }],
     candidates: [{ modelId: "model-a" }],
-    turnKind: "analysis",
   };
 }
 

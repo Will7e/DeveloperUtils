@@ -53,19 +53,16 @@ export const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
           ? null
           : icon
         : (variantIcons[variant] ?? null);
-    const hasTitle = Boolean(title);
 
     return (
       <div
         ref={ref}
-        role="status"
-        aria-live="polite"
         data-toast-state={leaving ? "leaving" : "entered"}
+        data-toast-variant={variant}
         className={cn(
-          "group pointer-events-auto relative flex items-center gap-3 w-full sm:w-[380px] min-h-[48px] px-4 py-3.5 rounded-lg select-none",
-          "bg-[var(--ds-background-100)] text-[var(--ds-gray-1000)]",
-          "border border-[var(--ds-gray-alpha-400)]",
-          "geist-toast-shadow",
+          // Layout only — background, padding, radius and elevation come from
+          // styles/toast.css so they can't be stripped by a CSS reset.
+          "group pointer-events-auto relative flex items-center gap-3 w-full sm:w-[380px] select-none",
           "animate-toast-in text-[13px] leading-5",
           className
         )}

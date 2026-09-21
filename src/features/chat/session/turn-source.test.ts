@@ -3,7 +3,7 @@
 // ============================================================
 // The page-local source is the fallback for Safari (no SharedWorker)
 // and for host refusal/death, so it must behave exactly like the
-// worker-backed one: same events, same fan-out, same abort/reroute
+// worker-backed one: same events, same fan-out, same abort
 // semantics — just without surviving the page.
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -19,7 +19,6 @@ const basePayload: HostStartTurnPayload = {
   temperature: 0.7,
   messages: [{ role: "user", content: "hi" }],
   candidates: [{ modelId: "model-a" }, { modelId: "model-b" }],
-  turnKind: "analysis",
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -93,12 +92,10 @@ describe("LocalTurnSource", () => {
     expect(end.payload.reason).toBe("aborted");
   });
 
-  it("answers a reroute with fresh candidates and finishes on them", async () => {
+  it("walks the candidate list and reports exhausted when all of it fails", async () => {
+    const seen: string[] = [];
     const source = new LocalTurnSource(async (params) => {
-      if (params.model === "model-c") {
-        params.onChunk("third time lucky");
-        return;
-      }
+      seen.push(params.model);
       throw new TypeError("network down");
     });
 
@@ -106,18 +103,11 @@ describe("LocalTurnSource", () => {
     source.subscribe((e) => events.push(e));
     await source.startTurn({ ...basePayload });
 
-    const reroute = await waitFor(events, (e) => e.type === "REROUTE_NEEDED");
-    expect(reroute).not.toBeNull();
-    if (reroute?.type !== "REROUTE_NEEDED") throw new Error("unreachable");
-    expect(reroute.excluded).toContain("model-a");
-
-    source.sendReroute("turn_local", [{ modelId: "model-c" }]);
-
     const end = await waitFor(events, (e) => e.type === "END");
     expect(end).not.toBeNull();
     if (end?.type !== "END") throw new Error("unreachable");
-    expect(end.payload.reason).toBe("done");
-    expect(end.payload.modelId).toBe("model-c");
+    expect(end.payload.reason).toBe("exhausted");
+    expect(seen).toEqual(["model-a", "model-b"]);
   });
 
   it("gives every subscriber the same event stream", async () => {

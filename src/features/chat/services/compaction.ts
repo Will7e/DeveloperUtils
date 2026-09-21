@@ -12,12 +12,6 @@ import { useChatStore } from "@/stores/chat.store";
 import { completeChat, OpenRouterError } from "../lib/openrouter-client";
 import { resolveModelInfo } from "../lib/model-catalog";
 import {
-  isIntabModel,
-  pickInTabModel,
-  recordModelFailure,
-  recordModelSuccess,
-} from "../lib/intab-llm";
-import {
   COMPACTION_MAX_RETRIES,
   COMPACTION_TARGET,
   SUMMARY_MAX_TOKENS,
@@ -51,8 +45,6 @@ export interface EnsureCompactionOptions {
   /** Compact even when little history exists (explicit user request) */
   force?: boolean;
   signal?: AbortSignal;
-  /** Pool models to skip (InTab conversations; copied, never mutated) */
-  exclude?: Set<string>;
 }
 
 /**
@@ -90,31 +82,11 @@ async function performCompaction(
     return { mode: "noop", foldedCount: 0, freedTokens: 0 };
   }
 
-  // ── Resolve the summarizer model. InTab conversations summarize
-  // through the same free-model pool (any text model works — image
-  // attachments are summarized by name, never re-sent). One
-  // cross-model retry on transient failure; then truncation fallback.
-  // The exclude set is always local to this run — callers may pass
-  // their own, but the cross-model switch below needs a mutable set.
-  const exclude = new Set(options.exclude ?? []);
-  const requestedModel = conversation.model ?? store.settings.defaultModel;
-  const intab = isIntabModel(requestedModel);
-  let modelId = requestedModel;
-  if (intab) {
-    // Summaries ride any capable pool model — purpose="summary"
-    // keeps this pick out of the last-turn routing record. The
-    // conversation's tier id selects the pool (High by default).
-    const pick = pickInTabModel({
-      conversationId,
-      exclude,
-      purpose: "summary",
-      tierModelId: requestedModel,
-    });
-    if (pick) modelId = pick.modelId;
-  }
-  // Used for the budget below. On summarizer failover the retry loop
-  // switches `modelId` only — the budget stays computed from the
-  // originally-picked model.
+  // ── Resolve the summarizer model. The conversation's own model
+  // summarizes its history (any text model works — image attachments
+  // are summarized by name, never re-sent). Retries with backoff on
+  // transient failure; then the truncation fallback below.
+  const modelId = conversation.model ?? store.settings.defaultModel;
   const modelInfo = resolveModelInfo(modelId);
 
   // Budget for the kept tail: window minus output reserve minus the
@@ -171,7 +143,6 @@ async function performCompaction(
         throw new OpenRouterError("The summarizer returned an empty summary.", 200);
       }
 
-      if (intab) recordModelSuccess(modelId);
       useChatStore.getState().applyCompaction(conversationId, {
         text,
         coversCount: foldCount,
@@ -186,21 +157,6 @@ async function performCompaction(
         return { mode: "noop", foldedCount: 0, freedTokens: 0 };
       }
       lastError = err;
-      // InTab: cooldown the failed pool model and try a different one
-      // on the next attempt (pickInTabModel skips the excluded id).
-      if (intab && isRetryableError(err)) {
-        recordModelFailure(modelId, "hard");
-        if (attempt === 0) {
-          const pick = pickInTabModel({ conversationId, exclude, tierModelId: requestedModel });
-          if (pick && pick.modelId !== modelId) {
-            exclude.add(modelId);
-            modelId = pick.modelId;
-            // modelInfo intentionally NOT reassigned: the budget was
-            // already computed from the original model; the new model
-            // only affects subsequent completeChat calls via modelId.
-          }
-        }
-      }
       if (!isRetryableError(err) || attempt === COMPACTION_MAX_RETRIES) break;
       // 1.2s then 3.6s — clears short rate-limit windows
       await sleep(1200 * 3 ** attempt);

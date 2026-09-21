@@ -2,7 +2,7 @@ import { TabState, HistoryItem, ImportedCollection, Environment, KeyValueField, 
 import type { LibraryPreset } from "@/features/api-tester/data/preset-library.data";
 import { encrypt, decrypt, isCipherEnvelope, type CipherEnvelope } from "@/services/crypto.service";
 import { getPassphrase } from "@/services/vault.service";
-import { readValue, writeValue } from "@/services/idb-storage.service";
+import { readValue, writeValue, writeValueToIdb } from "@/services/idb-storage.service";
 
 export interface StorageAdapter {
   getTabs(): Promise<{ tabs: TabState[]; activeTabId: string } | null>;
@@ -56,10 +56,107 @@ async function decryptString(value: unknown, passphrase: string): Promise<string
     try {
       return await decrypt(value, passphrase);
     } catch {
-      return ""; // Decryption failed — return empty
+      // Decryption failed. Remember WHICH envelope failed so a later save can
+      // refuse to overwrite it with a blank (see writePreservingSecrets) —
+      // otherwise the next save silently destroyed the credential.
+      noteUnreadableEnvelope(value);
+      return "";
     }
   }
   return typeof value === "string" ? value : "";
+}
+
+// ── Unreadable-envelope preservation ────────────────────────
+//
+// A decrypt failure (rotated device key, restored backup, storage split) used
+// to surface as an empty string, and the next save re-encrypted that empty
+// string over the still-valid envelope — irreversibly destroying the secret.
+// Envelopes that failed to decrypt are tracked by ciphertext, and a save will
+// keep those exact envelopes rather than blank them. An intentional clear is
+// unaffected: the field the user cleared decrypted fine, so its ciphertext is
+// not in the set.
+
+const unreadableCiphertexts = new Set<string>();
+const UNREADABLE_CIPHERTEXT_MAX = 512;
+
+function noteUnreadableEnvelope(envelope: CipherEnvelope): void {
+  // Bounded: the set only ever holds one entry per distinct unreadable secret.
+  if (unreadableCiphertexts.size >= UNREADABLE_CIPHERTEXT_MAX) return;
+  unreadableCiphertexts.add(envelope.ct);
+}
+
+function isBlankValue(value: unknown): boolean {
+  return value === "" || value === null || value === undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Recursively keeps previously stored envelopes that `next` would blank out. */
+function mergePreservingEnvelopes(previous: unknown, next: unknown): unknown {
+  if (isCipherEnvelope(previous) && isBlankValue(next) && unreadableCiphertexts.has(previous.ct)) {
+    return previous;
+  }
+  if (Array.isArray(previous) && Array.isArray(next)) {
+    // Only align positionally when the shapes still match; any structural edit
+    // means we cannot know which previous row a value belonged to.
+    if (previous.length !== next.length) return next;
+    return next.map((item, i) => mergePreservingEnvelopes(previous[i], item));
+  }
+  if (isPlainObject(previous) && isPlainObject(next)) {
+    const merged: Record<string, unknown> = { ...next };
+    for (const key of Object.keys(next)) {
+      merged[key] = mergePreservingEnvelopes(previous[key], next[key]);
+    }
+    return merged;
+  }
+  return next;
+}
+
+/**
+ * Persists a value while rescuing any envelope the write would blank out.
+ * Reads the currently stored copy first so the previous envelopes are known.
+ */
+async function writePreservingSecrets(
+  storageKey: string,
+  legacyKey: string,
+  value: unknown
+): Promise<void> {
+  let toWrite = value;
+  if (unreadableCiphertexts.size > 0) {
+    try {
+      const previousRaw = await getStoredItemAsync(storageKey, legacyKey);
+      if (previousRaw) {
+        toWrite = mergePreservingEnvelopes(JSON.parse(previousRaw), value);
+      }
+    } catch {
+      // Unreadable/absent previous copy — write the new value as-is.
+    }
+  }
+  await writeValue(storageKey, JSON.stringify(toWrite));
+}
+
+/**
+ * Persists a migrated (now encrypted) payload and drops the plaintext legacy
+ * copies. Writing through the IDB-aware path matters: these keys moved to
+ * IndexedDB, so the previous localStorage-only write was shadowed by the
+ * still-plaintext IDB copy — the migration reported success and encrypted
+ * nothing. The plaintext copies are only removed once the encrypted copy is
+ * actually stored (in IDB, or in localStorage when IDB is unavailable).
+ */
+async function persistMigrated(key: string, legacyKey: string, value: string): Promise<void> {
+  const landedInIdb = await writeValueToIdb(key, value);
+  if (!landedInIdb) {
+    await writeValue(key, value);
+    return;
+  }
+  try {
+    localStorage.removeItem(key);
+    localStorage.removeItem(legacyKey);
+  } catch {
+    /* plaintext copy is unreachable — the encrypted copy is already stored */
+  }
 }
 
 async function encryptAuthConfig(
@@ -389,7 +486,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      await writeValue(STORAGE_KEYS.TABS, JSON.stringify({ tabs: encrypted, activeTabId }));
+      await writePreservingSecrets(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS, { tabs: encrypted, activeTabId });
     } catch (e) {
       console.error("Failed to save encrypted tabs", e);
     }
@@ -420,6 +517,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
             try {
               decrypted.bodyValue = await decrypt(item.bodyValue, passphrase);
             } catch {
+              noteUnreadableEnvelope(item.bodyValue);
               decrypted.bodyValue = "";
             }
           }
@@ -430,6 +528,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
                   try {
                     return { ...f, value: await decrypt(f.value, passphrase) };
                   } catch {
+                    noteUnreadableEnvelope(f.value);
                     return { ...f, value: "" };
                   }
                 }
@@ -508,7 +607,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     }));
     // Encrypted fields are CipherEnvelopes at rest; writeValue only
     // serializes, so the envelope-vs-string variance is erased on write.
-    await writeValue(STORAGE_KEYS.HISTORY, JSON.stringify(sanitized as unknown as HistoryItem[]));
+    await writePreservingSecrets(STORAGE_KEYS.HISTORY, LEGACY_STORAGE_KEYS.HISTORY, sanitized);
   }
 
   // ── Collections ─────────────────────────────────────────
@@ -559,7 +658,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           ),
         }))
       );
-      await writeValue(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encrypted));
+      await writePreservingSecrets(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS, encrypted);
     } catch (e) {
       console.error("Failed to save encrypted collections", e);
     }
@@ -590,7 +689,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
 
     try {
       const encrypted = await encryptKeyValueFields(vars, passphrase);
-      await writeValue(STORAGE_KEYS.ENV_VARS, JSON.stringify(encrypted));
+      await writePreservingSecrets(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS, encrypted);
     } catch (e) {
       console.error("Failed to save encrypted env vars", e);
     }
@@ -632,7 +731,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           variables: await encryptKeyValueFields(env.variables, passphrase),
         }))
       );
-      await writeValue(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encrypted));
+      await writePreservingSecrets(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS, encrypted);
     } catch (e) {
       console.error("Failed to save encrypted environments", e);
     }
@@ -701,7 +800,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           return preset;
         })
       );
-      await writeValue(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encrypted));
+      await writePreservingSecrets(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS, encrypted);
     } catch (e) {
       console.error("Failed to save encrypted custom presets", e);
     }
@@ -734,7 +833,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 1. intab_api_tabs
   try {
-    const rawTabs = localStorage.getItem(STORAGE_KEYS.TABS) || localStorage.getItem(LEGACY_STORAGE_KEYS.TABS);
+    const rawTabs = await getStoredItemAsync(STORAGE_KEYS.TABS, LEGACY_STORAGE_KEYS.TABS);
     if (rawTabs) {
       const parsed = JSON.parse(rawTabs);
       if (parsed && Array.isArray(parsed.tabs)) {
@@ -777,8 +876,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...t, authConfig: newAuthConfig, headers: newHeaders };
           })
         );
-        if (changed || !localStorage.getItem(STORAGE_KEYS.TABS)) {
-          localStorage.setItem(STORAGE_KEYS.TABS, JSON.stringify({ ...parsed, tabs: migratedTabs }));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.TABS,
+            LEGACY_STORAGE_KEYS.TABS,
+            JSON.stringify({ ...parsed, tabs: migratedTabs })
+          );
           migratedKeys.push(STORAGE_KEYS.TABS);
         }
       }
@@ -789,7 +892,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 2. intab_api_history (strip authConfig & sanitize sensitive headers)
   try {
-    const rawHist = localStorage.getItem(STORAGE_KEYS.HISTORY) || localStorage.getItem(LEGACY_STORAGE_KEYS.HISTORY);
+    const rawHist = await getStoredItemAsync(STORAGE_KEYS.HISTORY, LEGACY_STORAGE_KEYS.HISTORY);
     if (rawHist) {
       const parsed = JSON.parse(rawHist);
       if (Array.isArray(parsed)) {
@@ -815,8 +918,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             headers,
           };
         });
-        if (changed || !localStorage.getItem(STORAGE_KEYS.HISTORY)) {
-          localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(sanitized));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.HISTORY,
+            LEGACY_STORAGE_KEYS.HISTORY,
+            JSON.stringify(sanitized)
+          );
           migratedKeys.push(STORAGE_KEYS.HISTORY);
         }
       }
@@ -827,7 +934,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 3. intab_api_env_vars
   try {
-    const rawVars = localStorage.getItem(STORAGE_KEYS.ENV_VARS) || localStorage.getItem(LEGACY_STORAGE_KEYS.ENV_VARS);
+    const rawVars = await getStoredItemAsync(STORAGE_KEYS.ENV_VARS, LEGACY_STORAGE_KEYS.ENV_VARS);
     if (rawVars) {
       const parsed = JSON.parse(rawVars);
       if (Array.isArray(parsed)) {
@@ -843,8 +950,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return v;
           })
         );
-        if (changed || !localStorage.getItem(STORAGE_KEYS.ENV_VARS)) {
-          localStorage.setItem(STORAGE_KEYS.ENV_VARS, JSON.stringify(encVars));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.ENV_VARS,
+            LEGACY_STORAGE_KEYS.ENV_VARS,
+            JSON.stringify(encVars)
+          );
           migratedKeys.push(STORAGE_KEYS.ENV_VARS);
         }
       }
@@ -855,7 +966,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 4. intab_api_environments
   try {
-    const rawEnvs = localStorage.getItem(STORAGE_KEYS.ENVIRONMENTS) || localStorage.getItem(LEGACY_STORAGE_KEYS.ENVIRONMENTS);
+    const rawEnvs = await getStoredItemAsync(STORAGE_KEYS.ENVIRONMENTS, LEGACY_STORAGE_KEYS.ENVIRONMENTS);
     if (rawEnvs) {
       const parsed = JSON.parse(rawEnvs);
       if (Array.isArray(parsed)) {
@@ -883,8 +994,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...env, variables: newVars };
           })
         );
-        if (changed || !localStorage.getItem(STORAGE_KEYS.ENVIRONMENTS)) {
-          localStorage.setItem(STORAGE_KEYS.ENVIRONMENTS, JSON.stringify(encEnvs));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.ENVIRONMENTS,
+            LEGACY_STORAGE_KEYS.ENVIRONMENTS,
+            JSON.stringify(encEnvs)
+          );
           migratedKeys.push(STORAGE_KEYS.ENVIRONMENTS);
         }
       }
@@ -895,7 +1010,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 5. intab_api_collections
   try {
-    const rawCols = localStorage.getItem(STORAGE_KEYS.COLLECTIONS) || localStorage.getItem(LEGACY_STORAGE_KEYS.COLLECTIONS);
+    const rawCols = await getStoredItemAsync(STORAGE_KEYS.COLLECTIONS, LEGACY_STORAGE_KEYS.COLLECTIONS);
     if (rawCols) {
       const parsed = JSON.parse(rawCols);
       if (Array.isArray(parsed)) {
@@ -934,8 +1049,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return { ...col, requests: newRequests };
           })
         );
-        if (changed || !localStorage.getItem(STORAGE_KEYS.COLLECTIONS)) {
-          localStorage.setItem(STORAGE_KEYS.COLLECTIONS, JSON.stringify(encCols));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.COLLECTIONS,
+            LEGACY_STORAGE_KEYS.COLLECTIONS,
+            JSON.stringify(encCols)
+          );
           migratedKeys.push(STORAGE_KEYS.COLLECTIONS);
         }
       }
@@ -946,7 +1065,7 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
 
   // 6. intab_api_custom_presets
   try {
-    const rawPresets = localStorage.getItem(STORAGE_KEYS.CUSTOM_PRESETS) || localStorage.getItem(LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
+    const rawPresets = await getStoredItemAsync(STORAGE_KEYS.CUSTOM_PRESETS, LEGACY_STORAGE_KEYS.CUSTOM_PRESETS);
     if (rawPresets) {
       const parsed = JSON.parse(rawPresets);
       if (Array.isArray(parsed)) {
@@ -973,8 +1092,12 @@ export async function migratePlaintextStorage(passphrase: string): Promise<strin
             return preset;
           })
         );
-        if (changed || !localStorage.getItem(STORAGE_KEYS.CUSTOM_PRESETS)) {
-          localStorage.setItem(STORAGE_KEYS.CUSTOM_PRESETS, JSON.stringify(encPresets));
+        if (changed) {
+          await persistMigrated(
+            STORAGE_KEYS.CUSTOM_PRESETS,
+            LEGACY_STORAGE_KEYS.CUSTOM_PRESETS,
+            JSON.stringify(encPresets)
+          );
           migratedKeys.push(STORAGE_KEYS.CUSTOM_PRESETS);
         }
       }

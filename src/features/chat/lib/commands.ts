@@ -25,6 +25,7 @@ import {
   CircleStop,
   Eraser,
   Gauge,
+  Hammer,
   LifeBuoy,
   ListTree,
   MessageSquarePlus,
@@ -40,24 +41,20 @@ import {
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
-import {
-  INTAB_MODEL_ID,
-  INTAB_MODEL_TIERS,
-  CURATED_FALLBACK_MODELS,
-} from "../constants";
+import { CURATED_FALLBACK_MODELS } from "../constants";
+import { REASONING_EFFORT_META } from "./model-state";
 import { downloadConversation } from "../services/export-conversation";
 import { runCompactCommand } from "../services/compaction";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { canUndo } from "../workspace/undo";
 import { TOOL_REGISTRY } from "./tool-registry";
-import { getCachedModelCatalog } from "./model-catalog";
 import { getConversationContext, composeSystemPrompt } from "../context/engine";
 import { buildEffectiveSystemPrompt } from "./skills";
 import { isTurnRunning, stopTurn } from "../session/turn-engine";
 import { getTurnLog, formatTurnLog } from "../session/turn-log";
 import { sessionHost } from "../session/session-client";
 import { rankCommandSpecs } from "./slash";
-import type { ModelInfo } from "../types";
+import type { ChatMode, ModelInfo, ReasoningEffort } from "../types";
 
 function toast(message: string, type: "success" | "error" | "info" = "info"): void {
   useAppStore.getState().addToast({ message, type, duration: 5000 });
@@ -143,24 +140,42 @@ function activeConversation(conversationId: string) {
   return useChatStore.getState().conversations.find((c) => c.id === conversationId);
 }
 
-/** InTab tier ids in display order, with the aliases users actually type */
-const TIER_ALIASES: Record<string, string> = {
-  light: "intab/intab-llm-light",
-  fast: "intab/intab-llm-light",
-  quick: "intab/intab-llm-light",
-  high: INTAB_MODEL_ID,
-  default: INTAB_MODEL_ID,
-  balanced: INTAB_MODEL_ID,
-  max: "intab/intab-llm-max",
-  deep: "intab/intab-llm-max",
-  smart: "intab/intab-llm-max",
+/** Reasoning-effort aliases users actually type */
+const EFFORT_ALIASES: Record<string, ReasoningEffort> = {
+  low: "low",
+  light: "low",
+  fast: "low",
+  quick: "low",
+  medium: "medium",
+  med: "medium",
+  balanced: "medium",
+  default: "medium",
+  high: "high",
+  deep: "high",
+  smart: "high",
+  max: "max",
+  xhigh: "max",
 };
 
-function currentTierId(): string | undefined {
+/** Agent-mode aliases */
+const MODE_ALIASES: Record<string, ChatMode> = {
+  build: "build",
+  edit: "build",
+  agent: "build",
+  plan: "plan",
+  read: "plan",
+  readonly: "plan",
+};
+
+/** Effective model state for the active conversation */
+function currentModelState(): { model: string; effort: ReasoningEffort; mode: ChatMode } {
   const store = useChatStore.getState();
   const conv = activeConversation(store.activeConversationId ?? "");
-  const model = conv?.model ?? store.settings.defaultModel;
-  return INTAB_MODEL_TIERS.some((t) => t.id === model) ? model : undefined;
+  return {
+    model: conv?.model ?? store.settings.defaultModel,
+    effort: conv?.reasoningEffort ?? store.settings.defaultReasoningEffort,
+    mode: conv?.mode ?? store.settings.defaultMode,
+  };
 }
 
 // ── Registry ────────────────────────────────────────────────
@@ -306,8 +321,7 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     run: ({ conversationId }) => {
       const store = useChatStore.getState();
       const conv = activeConversation(conversationId);
-      const modelId = conv?.model ?? store.settings.defaultModel;
-      const tier = currentTierId();
+      const { model: modelId, effort, mode } = currentModelState();
       const info = getConversationContext({
         conversation: conv ?? {
           id: conversationId,
@@ -319,9 +333,10 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
         effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
         modelId,
       });
-      const tierMeta = INTAB_MODEL_TIERS.find((t) => t.id === tier);
       const parts = [
-        tierMeta ? tierMeta.name : modelId,
+        modelId,
+        `effort: ${REASONING_EFFORT_META[effort].label.toLowerCase()}`,
+        `mode: ${mode}`,
         `transport: ${sessionHost.available ? "session host" : "page-local"}`,
         `streaming: ${store.isStreaming ? "yes" : "no"}${isTurnRunning() ? " (turn running)" : ""}`,
         `context: ${info.percentageUsed}%`,
@@ -373,33 +388,62 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     },
   },
   {
-    id: "tier",
-    description: "Switch InTab Flash tier (light · high · max)",
+    id: "effort",
+    description: "Set how hard the model thinks (low · medium · high · max)",
     icon: ListTree,
     group: "Model",
-    keywords: ["flash", "free", "effort"],
-    argsHint: "light · high · max",
+    keywords: ["reasoning", "thinking", "level", "tier"],
+    argsHint: "low · medium · high · max",
     run: ({ conversationId, arg }) => {
       const store = useChatStore.getState();
       const requested = arg.trim().toLowerCase();
       if (!requested) {
-        const current = currentTierId();
-        const currentName = INTAB_MODEL_TIERS.find((t) => t.id === current)?.name;
+        const { effort } = currentModelState();
         toast(
-          `Tier: ${currentName ?? "not on the InTab router"} — use /tier light, /tier high or /tier max.`,
+          `Reasoning effort: ${REASONING_EFFORT_META[effort].label} — use /effort low, /effort medium, /effort high or /effort max.`,
           "info"
         );
         return;
       }
-      const tierId = TIER_ALIASES[requested];
-      const tier = INTAB_MODEL_TIERS.find((t) => t.id === tierId);
-      if (!tier) {
-        toast(`Unknown tier “${requested}” — try light, high or max.`, "error");
-        return { draft: "/tier " };
+      const next = EFFORT_ALIASES[requested];
+      if (!next) {
+        toast(`Unknown effort “${requested}” — try low, medium, high or max.`, "error");
+        return { draft: "/effort " };
       }
-      store.setConversationModel(conversationId, tier.id);
-      store.updateSettings({ defaultModel: tier.id });
-      toast(`Tier switched to ${tier.name} — ${tier.tagline}.`, "success");
+      store.setConversationEffort(conversationId, next);
+      toast(
+        `Reasoning effort: ${REASONING_EFFORT_META[next].label} — ${REASONING_EFFORT_META[next].tagline}.`,
+        "success"
+      );
+    },
+  },
+  {
+    id: "mode",
+    description: "Switch agent mode (build edits code · plan is read-only)",
+    icon: Hammer,
+    group: "Agent",
+    keywords: ["plan", "build", "readonly", "agent"],
+    argsHint: "build · plan",
+    run: ({ conversationId, arg }) => {
+      const store = useChatStore.getState();
+      const requested = arg.trim().toLowerCase();
+      if (!requested) {
+        const { mode } = currentModelState();
+        toast(`Agent mode: ${mode} — use /mode build or /mode plan.`, "info");
+        return;
+      }
+      const next = MODE_ALIASES[requested];
+      if (!next) {
+        toast(`Unknown mode “${requested}” — try build or plan.`, "error");
+        return { draft: "/mode " };
+      }
+      store.setConversationMode(conversationId, next);
+      toast(
+        next === "plan"
+          ? "Plan mode — the agent investigates read-only and proposes changes; edit tools are disabled."
+          : "Build mode — the agent can edit the workspace and ship through the push gate.",
+        "success"
+      );
     },
   },
 

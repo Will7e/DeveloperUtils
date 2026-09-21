@@ -158,10 +158,6 @@ ctx.onconnect = (event: MessageEvent) => {
         if (meta) meta.lastSeen = Date.now();
         break;
       }
-      case "REROUTE_REPLY": {
-        controller.addCandidates(data.turnId, data.candidates);
-        break;
-      }
       case "STATUS": {
         reply(port, {
           type: "STATUS",

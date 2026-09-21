@@ -12,6 +12,22 @@ export interface UsageInfo {
 }
 
 /**
+ * How much the model may think before answering — the per-conversation
+ * "model state". Four rungs map onto OpenRouter's effort vocabulary
+ * (low → medium → high → max/xhigh); each is snapped to the levels the
+ * selected model actually declares in its catalog `reasoning` block.
+ */
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
+
+/**
+ * Agent operating mode. `build` is the normal coding agent (edits the
+ * workspace, can ship via the push gate). `plan` is read-only: the
+ * model may explore and propose a plan, but every mutating tool is
+ * withheld from the request and refused by the executor.
+ */
+export type ChatMode = "build" | "plan";
+
+/**
  * A file attached to a user message. Images carry a data URL so they
  * can be sent multimodally and re-rendered from history; text files
  * are inlined into the message content instead (no dataUrl).
@@ -38,20 +54,26 @@ export interface RepoContext {
   attachedAt: number;
 }
 
-/** Name of a tool the agent can call (see lib/tools.ts) */
+/** Name of a tool the agent can call (see lib/tool-registry.ts) */
 export type ToolName =
   | "list_repo_files"
   | "read_file"
   | "search_code"
+  | "search_workspace"
   | "get_repo_overview"
   | "write_file"
+  | "edit_file"
   | "delete_file"
+  | "get_workspace_diff"
   | "create_working_branch"
   | "push_changes"
   | "get_preview_feedback"
   | "run_in_preview"
   | "query_preview_dom"
-  | "run_tool_program";
+  | "run_tool_program"
+  | "read_skill"
+  | "remember"
+  | "delegate";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -125,14 +147,15 @@ export interface ChatMessage {
   /** Time spent emitting reasoning tokens, when reported (assistant) */
   reasoningMs?: number;
   /** Number of earlier messages hidden by compaction (marker message) */
-  compactedFrom?: number;  /**
-   * Message produced through the InTab virtual router — the UI
-   * displays "InTab Flash" instead of the underlying free model in
-   * `model` (which keeps the real id for exports and debugging).
+  compactedFrom?: number;
+  /**
+   * Reasoning-effort rung the turn was sent with (assistant messages).
+   * Stored so the transcript stays reconstructable: the same prompt
+   * with a different state is a genuinely different request.
    */
-  viaInTab?: boolean;
-  /** Task kind the router classified this turn as (InTab messages) */
-  turnKind?: "quick" | "code" | "analysis" | "vision" | "agent";
+  effort?: ReasoningEffort;
+  /** Agent mode the turn ran under (assistant messages) */
+  mode?: ChatMode;
   /** Present on agent-activity messages: tool calls the model requested */
   toolCalls?: AssistantToolCallsMessage;
   /** Present on agent-activity messages: one tool result (role is "user") */
@@ -174,6 +197,10 @@ export interface ChatConversation {
   updatedAt: number;
   /** Model override for this conversation; falls back to settings default */
   model?: string;
+  /** Model-state override; falls back to the settings default */
+  reasoningEffort?: ReasoningEffort;
+  /** Agent mode override; falls back to the settings default ("build") */
+  mode?: ChatMode;
   systemPrompt?: string;
   pinned?: boolean;
   /** Rolling LLM summary of the oldest folded messages (compact mode) */
@@ -280,6 +307,32 @@ export interface PendingPush {
   prBody?: string;
   changes: WorkspaceChange[];
   stats: { files: number; additions: number; deletions: number };
+  /**
+   * Preflight findings shown as warnings in the approval UI: the base
+   * branch moved, a touched file changed upstream, or the token looks
+   * read-only. Advisory only — the user still decides.
+   */
+  warnings?: PushWarning[];
+}
+
+export interface PushWarning {
+  kind:
+    | "base-moved"
+    | "upstream-changed"
+    | "read-only-token"
+    /** Automated push policy: protected paths, oversized change set */
+    | "policy"
+    /** The agent's summary claims something the turn's evidence does not support */
+    | "evidence";
+  message: string;
+}
+
+/** The user's decision at the push gate */
+export interface PushDecision {
+  approved: boolean;
+  note?: string;
+  /** Whether to open a pull request after the push (default true) */
+  openPr?: boolean;
 }
 
 /** Result of the approved GitHub push chain */
@@ -304,6 +357,17 @@ export interface ChatSkill {
   /** Builtins reappear after deletion (with updated=true when edited) */
   builtin?: boolean;
   updated?: boolean;
+  /**
+   * Lowercase keywords indicating the skill applies to a task. Triggers
+   * are ADVERTISED in the standing skill index (name + description +
+   * triggers) so the model can load the body itself via `read_skill`.
+   * They deliberately do NOT change the system prompt per turn: the
+   * prompt prefix must stay byte-stable or provider-side prompt caching
+   * misses on every turn, which costs real money on long conversations.
+   */
+  triggers?: string[];
+  /** Repo path globs the skill applies to (advertised like triggers) */
+  globs?: string[];
 }
 
 /** How the user connected GitHub */
@@ -331,6 +395,10 @@ export type GitHubConnectionState =
 
 export interface ChatSettings {
   defaultModel: string;
+  /** Model state applied to new chats (each chat remembers its own) */
+  defaultReasoningEffort: ReasoningEffort;
+  /** Agent mode applied to new chats ("build" unless changed) */
+  defaultMode: ChatMode;
   apiKey: string;
   temperature: number;
   systemPrompt: string;
@@ -399,11 +467,6 @@ export interface ToolDefinition {
 }
 
 export type ContextHealth = "optimal" | "moderate" | "near-limit" | "exceeded";
-
-/** Task-kind routing metadata attached to InTab messages */
-export interface TurnRoutingMeta {
-  turnKind: "quick" | "code" | "analysis" | "vision" | "agent";
-}
 
 export interface ContextBreakdown {
   /** Tokens of the full stored conversation (estimates + exacts where known) */

@@ -21,6 +21,8 @@ import {
   readValue,
   writeValue,
   removeIdbKeys,
+  removeIdbKeysByPrefix,
+  resetIdbFallbackMarkers,
 } from "./idb-storage.service";
 
 // ── Constants ───────────────────────────────────────────────
@@ -30,6 +32,13 @@ const LEGACY_VAULT_META_KEY = "devutils_vault_meta";
 const DEVICE_SALT_KEY = "intab_device_id";
 const LEGACY_DEVICE_SALT_KEY = "devutils_device_id";
 const CANARY_PLAINTEXT = "intab-vault-canary-v2";
+
+// Keys of the encrypted zustand stores and the agent workspace family. Kept
+// here (not imported) because the vault is the lowest layer and must not
+// depend on the stores it protects.
+const APP_STATE_KEY = "intab-app-state";
+const CHAT_STATE_KEY = "intab_chat_state";
+const WORKSPACE_IDB_KEY_PREFIX = "intab_workspace_";
 
 interface VaultMeta {
   canary: CipherEnvelope;
@@ -198,7 +207,12 @@ export const useVaultStore = create<VaultState>((set) => ({
   },
 
   resetVault: async () => {
-    // Clear all encrypted API tester data
+    // Rotating the device key invalidates EVERY envelope it produced, so the
+    // wipe has to cover every vault-scoped store — not just the API tester.
+    // Anything left behind stays on disk as undecryptable ciphertext that
+    // still looks intact (and, in the zustand stores' case, used to be
+    // rehydrated as garbage). State still held in memory is re-encrypted with
+    // the fresh key on the next write, so nothing live is lost here.
     const apiKeys = [
       "intab_api_tabs",
       "intab_api_history",
@@ -218,6 +232,15 @@ export const useVaultStore = create<VaultState>((set) => ({
       "devutils_api_custom_presets",
       "devutils_api_added_preset_ids",
       "devutils_api_custom_proxy",
+      // Encrypted zustand stores (editor/app state + AI chat)
+      APP_STATE_KEY,
+      "devutils-app-state",
+      CHAT_STATE_KEY,
+      "devutils_chat_state",
+      // Sync-side state keyed off the same device key
+      "intab_cloud_manifest_cache",
+      "intab_cloud_last_synced_sig",
+      "intab_cloudsync_presence",
       VAULT_META_KEY,
       LEGACY_VAULT_META_KEY,
       DEVICE_SALT_KEY,
@@ -225,14 +248,22 @@ export const useVaultStore = create<VaultState>((set) => ({
     ];
     apiKeys.forEach((key) => localStorage.removeItem(key));
 
-    // Wipe orphaned OAuth flow artifacts + sync-side state the reset above
-    // doesn't cover (vault reset revokes the device key that encrypted them).
+    // Prefix sweep: OAuth handoffs, vault-encrypted OAuth tokens, their etag
+    // cache, and per-conversation agent workspaces. All of these were sealed
+    // with the key we are discarding.
     try {
-      const oauthPrefixes = ["intab_oauth_handoff_", "intab_oauth_result_", "intab_cloud_etag_"];
+      const doomedPrefixes = [
+        "intab_oauth_handoff_",
+        "intab_oauth_result_",
+        "intab_cloud_tokens_",
+        "devutils_cloud_tokens_",
+        "intab_cloud_etag_",
+        WORKSPACE_IDB_KEY_PREFIX,
+      ];
       const doomed: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && oauthPrefixes.some((p) => k.startsWith(p))) doomed.push(k);
+        if (k && doomedPrefixes.some((p) => k.startsWith(p))) doomed.push(k);
       }
       doomed.forEach((k) => localStorage.removeItem(k));
     } catch {
@@ -253,7 +284,13 @@ export const useVaultStore = create<VaultState>((set) => ({
       "intab_api_custom_presets",
       "intab_api_added_preset_ids",
       "intab_api_custom_proxy",
+      APP_STATE_KEY,
+      CHAT_STATE_KEY,
+      "intab_cloud_manifest_cache",
+      "intab_cloud_last_synced_sig",
     ]);
+    await removeIdbKeysByPrefix([WORKSPACE_IDB_KEY_PREFIX]);
+    resetIdbFallbackMarkers();
 
     // Generate fresh device ID
     deviceIdPromise = null;

@@ -10,12 +10,7 @@
 
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
-import {
-  AGENT_ITERATIONS_MAX,
-  AGENT_MAX_ITERATIONS,
-  DEFAULT_CHAT_SETTINGS,
-} from "../constants";
-import { displayNameFor, isIntabModel, recordRegenerateFeedback } from "../lib/intab-llm";
+import { AGENT_ITERATIONS_MAX, AGENT_MAX_ITERATIONS } from "../constants";
 import { visibleMessages } from "../types";
 import type { ChatMessage } from "../types";
 import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID } from "../lib/commands";
@@ -35,11 +30,11 @@ import { planResume, danglingToolRange } from "../session/resume-plan";
 // Model metadata resolution lives in a leaf module so the compaction
 // service can use it without an import cycle. Re-exported here for
 // existing UI imports.
-import { resolveModelInfo, ensureModelCatalog } from "../lib/model-catalog";
+import { resolveModelInfo, ensureModelCatalog, modelDisplayName } from "../lib/model-catalog";
 export { resolveModelInfo, ensureModelCatalog };
 
-/** UI-facing model display name (masks InTab-routed models) */
-export { displayNameFor };
+/** UI-facing model name (no masking) — defined in the leaf catalog module */
+export { modelDisplayName };
 
 /**
  * True when the resolved model advertises image input. Unknown when
@@ -161,11 +156,6 @@ export async function regenerateLastResponse(conversationId: string): Promise<vo
   const visible = visibleMessages(conv.messages);
   const last = visible[visible.length - 1];
   if (!last || last.role !== "assistant") return;
-
-  // Negative signal for the model that produced this reply
-  if (last.viaInTab || isIntabModel(last.model)) {
-    recordRegenerateFeedback(conversationId);
-  }
 
   const lastIdx = conv.messages.findIndex((m) => m.id === last.id);
   const priorUser = [...conv.messages.slice(0, lastIdx)]

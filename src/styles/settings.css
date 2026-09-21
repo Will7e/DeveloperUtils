@@ -405,27 +405,23 @@ html.light .settings-textarea:hover {
 
 .settings-security-card {
   padding: 14px 16px;
-  background: rgba(16, 185, 129, 0.07);
-  border: 1px solid rgba(16, 185, 129, 0.25);
-  border-radius: 12px;
+  background: var(--green-dim);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-html.light .settings-security-card {
-  background: rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.3);
-}
 .settings-security-badge-group {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 .settings-security-card-icon-wrap {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--green-dim);
   border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
   display: flex;
@@ -433,16 +429,11 @@ html.light .settings-security-card {
   justify-content: center;
   color: var(--green);
   flex-shrink: 0;
-  margin-top: 1px;
 }
 .settings-security-card-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-0);
-}
-
-html.light .settings-security-card-title {
-  color: #064e3b;
 }
 .settings-security-card-desc {
   font-size: 12px;
@@ -451,36 +442,27 @@ html.light .settings-security-card-title {
   margin-top: 2px;
 }
 
-html.light .settings-security-card-desc {
-  color: #065f46;
-}
-
 /* ── Generic Info Card (for Skills, Modules, Prompts) ── */
 .settings-info-card {
   padding: 14px 16px;
   background: var(--bg-2);
   border: 1px solid var(--border-1);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-html.light .settings-info-card {
-  background: var(--bg-2);
-  border-color: var(--border-2);
-}
-
 .settings-info-badge-group {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 
 .settings-info-card-icon-wrap {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--accent-glow);
   border: 1px solid var(--border-accent);
   display: flex;
@@ -488,7 +470,6 @@ html.light .settings-info-card {
   justify-content: center;
   color: var(--accent);
   flex-shrink: 0;
-  margin-top: 1px;
 }
 
 .settings-info-card-title {

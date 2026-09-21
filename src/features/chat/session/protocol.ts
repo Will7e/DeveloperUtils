@@ -23,9 +23,9 @@ export interface HostCandidate {
   /** Context length for max_tokens resolution (0 when unknown) */
   contextLength?: number;
   /**
-   * Per-model request state (reasoning effort etc.), snapped by the
-   * page to this model's declared OpenRouter capabilities. Survives
-   * reroutes because the reply re-resolves candidates page-side.
+   * Per-request state (reasoning effort etc.), snapped by the page to
+   * this model's declared OpenRouter capabilities and merged into the
+   * request body verbatim. Empty/absent means "send no state keys".
    */
   requestState?: Record<string, unknown>;
 }
@@ -43,23 +43,12 @@ export interface HostStartTurnPayload {
   /** OpenAI tool definitions (agent mode) */
   tools?: unknown[];
   /**
-   * Ranked model attempts. The host walks the list on retryable
-   * failures exactly like the in-page InTab loop; when the list is
-   * exhausted it asks the page for a fresh one (REROUTE_NEEDED).
+   * Model attempts, in priority order. The page sends one entry per
+   * turn (the model the user selected); the host walks the list on
+   * retryable failures and surfaces the last error when it runs dry.
+   * Nothing here swaps models silently.
    */
   candidates: HostCandidate[];
-  /** Hedge delay override (tests); defaults to host constant */
-  hedgeTriggerMs?: number;
-  /** Task-kind classification (echoed in telemetry for the learning router) */
-  turnKind?: string;
-  /**
-   * Per-candidate request state (reasoning effort etc.), snapped by
-   * the page to each model's declared OpenRouter capabilities.
-   * The host merges `requestStateByModel[candidateId]` into that
-   * candidate's request body. Additive optional field —
-   * structured-clone-safe, no protocol bump needed.
-   */
-  requestStateByModel?: Record<string, Record<string, unknown>>;
 }
 
 export type HostRequest =
@@ -69,12 +58,11 @@ export type HostRequest =
   | { type: "START_TURN"; payload: HostStartTurnPayload }
   | { type: "ABORT_TURN"; turnId: string }
   | { type: "HEARTBEAT" }
-  | { type: "REROUTE_REPLY"; turnId: string; candidates: HostCandidate[] }
   | { type: "STATUS" };
 
 // ── Events: host → page ─────────────────────────────────────
 
-export type HostTurnStatus = "starting" | "streaming" | "reroute" | "ended";
+export type HostTurnStatus = "starting" | "streaming" | "ended";
 
 /** Streaming delta; content and reasoning may both be non-empty */
 export interface HostDelta {
@@ -102,8 +90,7 @@ export type HostEndReason =
   | "tool-calls"
   | "aborted"
   | "failed"
-  | "exhausted"
-  | "reroute-needed";
+  | "exhausted";
 
 export interface HostEndPayload {
   turnId: string;
@@ -135,21 +122,6 @@ export interface HostSnapshot {
   seq: number;
 }
 
-/** Learning-router event the host observed; the page persists it */
-export interface HostTelemetryEvent {
-  turnId: string;
-  /** Task-kind the turn was classified as (learning-router key) */
-  turnKind: string;
-  kind:
-    | { type: "modelSuccess"; modelId: string }
-    | { type: "modelFailure"; modelId: string; reason: "rate" | "hard" | "daily" | "slow"; headers?: Record<string, string> }
-    | { type: "dailyRequest"; modelId: string }
-    | { type: "turnSuccess"; modelId: string }
-    | { type: "turnEmpty"; modelId: string }
-    | { type: "turnAbort"; modelId: string }
-    | { type: "turnFailover"; modelId: string };
-}
-
 export type HostEvent =
   | { type: "HELLO_ACK"; protocolVersion: number; workerId: string }
   | { type: "PROTOCOL_MISMATCH"; hostVersion: number }
@@ -164,8 +136,6 @@ export type HostEvent =
   | { type: "USAGE"; turnId: string; modelId: string; usage: HostUsage }
   | { type: "STATUS"; turnStatus: HostTurnStatus; turnId: string | null }
   | { type: "END"; payload: HostEndPayload }
-  | { type: "REROUTE_NEEDED"; turnId: string; excluded: string[] }
-  | { type: "TELEMETRY"; event: HostTelemetryEvent }
   /**
    * The host's own turn-log entry, mirrored to the page so one
    * console handle shows the WHOLE turn — including the work that
@@ -189,7 +159,6 @@ export function isHostRequest(data: unknown): data is HostRequest {
       "START_TURN",
       "ABORT_TURN",
       "HEARTBEAT",
-      "REROUTE_REPLY",
       "STATUS",
     ].includes((data as { type: string }).type)
   );

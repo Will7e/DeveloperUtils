@@ -146,14 +146,142 @@ export async function removeIdbKeys(keys: string[]): Promise<void> {
   }
 }
 
+// ── Torn-key healing (cross-session split-brain guard) ─────
+//
+// The session-sticky "broken" flag keeps a single session consistent, but it
+// resets on reload. Without a durable record of which keys fell back to
+// localStorage, the next session would prefer IDB and serve the OLDER value
+// for that key (readValue only falls back on a miss, never on stale data),
+// permanently hiding the newer write.
+
+const TORN_KEYS_MARKER = "intab_idb_torn_keys";
+
+function readTornKeys(): string[] {
+  try {
+    const raw = localStorage.getItem(TORN_KEYS_MARKER);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed.filter((k) => typeof k === "string") as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTornKeys(keys: string[]): void {
+  try {
+    if (keys.length === 0) localStorage.removeItem(TORN_KEYS_MARKER);
+    else localStorage.setItem(TORN_KEYS_MARKER, JSON.stringify(keys));
+  } catch {
+    /* marker is best-effort metadata */
+  }
+}
+
+/** Records that `key`'s newest value currently lives only in localStorage. */
+function markTornKey(key: string): void {
+  const keys = readTornKeys();
+  if (!keys.includes(key)) writeTornKeys([...keys, key]);
+}
+
+/** Forgets the torn marker for a key (IDB is authoritative again). */
+function clearTornKey(key: string): void {
+  const keys = readTornKeys();
+  if (keys.includes(key)) writeTornKeys(keys.filter((k) => k !== key));
+}
+
+/** Drops every fallback marker (vault reset wipes the data they point at). */
+export function resetIdbFallbackMarkers(): void {
+  writeTornKeys([]);
+}
+
+function readFallbackCopy(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+let healPromise: Promise<void> | null = null;
+
+/**
+ * Copies fallback-only values back into IndexedDB once per session so IDB is
+ * authoritative again. Without this, a write that fell back during a previous
+ * session is invisible forever.
+ */
+function healTornKeys(): Promise<void> {
+  if (!healPromise) {
+    healPromise = (async () => {
+      if (!isIdbAvailable()) return;
+      const torn = readTornKeys();
+      if (torn.length === 0) return;
+      const remaining: string[] = [];
+      for (const key of torn) {
+        const fallback = readFallbackCopy(key);
+        if (fallback === null) {
+          // No fallback copy: the IDB value is the only survivor (the fallback
+          // was cleared deliberately). Drop the marker, keep the data.
+          continue;
+        }
+        try {
+          await putRaw(key, fallback);
+          try {
+            localStorage.removeItem(key);
+          } catch {
+            /* ignore */
+          }
+        } catch {
+          remaining.push(key);
+        }
+      }
+      writeTornKeys(remaining);
+    })().catch(() => undefined);
+  }
+  return healPromise;
+}
+
+/**
+ * Removes every IDB key matching a prefix (vault reset uses this so wiping a
+ * whole key family — workspaces, say — cannot leave orphaned ciphertext).
+ */
+export async function removeIdbKeysByPrefix(prefixes: string[]): Promise<void> {
+  if (!isIdbAvailable() || prefixes.length === 0) return;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      // Collect first, delete after the cursor is exhausted: mutating the store
+      // mid-iteration is legal but easy to get subtly wrong.
+      const doomed: IDBValidKey[] = [];
+      const cursorReq = store.openKeyCursor();
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (!cursor) {
+          doomed.forEach((k) => store.delete(k));
+          return;
+        }
+        if (prefixes.some((p) => String(cursor.key).startsWith(p))) doomed.push(cursor.key);
+        cursor.continue();
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error ?? new Error("prefix removal aborted"));
+    });
+  } catch (err) {
+    console.warn("IndexedDB prefix removal failed:", err);
+  }
+}
+
 // ── Read/write with localStorage fallback (split-brain guard) ──
 
 /**
  * Reads a value: IndexedDB first; on miss or IDB failure, checks
- * localStorage before returning null so stale-but-newer fallback
- * data is never silently hidden.
+ * localStorage before returning null so stale-but-newer fallback data is
+ * never silently hidden. Keys whose newest value fell back to localStorage in
+ * an earlier session are re-synced into IDB first (see healTornKeys), so IDB
+ * cannot shadow a newer write across reloads.
  */
 export async function readValue(key: string): Promise<string | null> {
+  await healTornKeys();
   if (isIdbAvailable()) {
     try {
       const value = await getRaw(key);
@@ -174,15 +302,44 @@ export async function readValue(key: string): Promise<string | null> {
  * failure. localStorage errors (quota) propagate to the caller.
  */
 export async function writeValue(key: string, value: string | null): Promise<void> {
+  await healTornKeys();
   if (isIdbAvailable()) {
     try {
       if (value === null) await removeRaw(key);
       else await putRaw(key, value);
+      // IDB holds the newest copy again — nothing left to reconcile.
+      clearTornKey(key);
       return;
     } catch (err) {
       markIdbBroken(err);
     }
   }
-  if (value === null) localStorage.removeItem(key);
-  else localStorage.setItem(key, value);
+  // Fallback path: the localStorage copy is now the newest, so record that IDB
+  // may still hold an older value for this key (see healTornKeys).
+  if (value === null) {
+    localStorage.removeItem(key);
+    clearTornKey(key);
+  } else {
+    localStorage.setItem(key, value);
+    markTornKey(key);
+  }
+}
+
+/**
+ * Writes straight to IndexedDB and reports whether it landed there (no
+ * localStorage fallback). Callers that intend to delete a legacy plaintext
+ * copy need to know the new copy is safely stored somewhere first.
+ */
+export async function writeValueToIdb(key: string, value: string | null): Promise<boolean> {
+  await healTornKeys();
+  if (!isIdbAvailable()) return false;
+  try {
+    if (value === null) await removeRaw(key);
+    else await putRaw(key, value);
+    clearTornKey(key);
+    return true;
+  } catch (err) {
+    markIdbBroken(err);
+    return false;
+  }
 }

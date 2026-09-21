@@ -20,7 +20,7 @@
 //
 // UI-free and side-effect-free.
 
-import type { RepoContext, ToolDefinition, ToolName } from "../types";
+import type { ChatMode, RepoContext, ToolDefinition, ToolName } from "../types";
 
 // ── Mini JSON-Schema subset (model argument validation) ──────
 
@@ -153,6 +153,14 @@ export interface AgentToolMeta {
   /** JSON-Schema for the arguments object (validated + sent on the wire) */
   parameters: ArgSchema;
   kind: ToolKind;
+  /**
+   * Allowed in Plan mode: the tool cannot change the workspace, the
+   * preview bundle, or GitHub. Mutating tools (write/edit/delete, the
+   * branch + push gate) are withheld from the request AND refused by
+   * the executor, so a plan-mode turn cannot ship code even if the
+   * model emits a call for a tool it never received.
+   */
+  planSafe: boolean;
   /** Read results may live in the session LRU (tool-cache.ts) */
   cacheable: boolean;
   /** Allowed as a step inside run_tool_program programs */
@@ -182,6 +190,7 @@ const REPO_PATH_PARAM: ArgSchema = {
 export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   {
     name: "list_repo_files",
+    planSafe: true,
     description:
       "List files and directories in the attached GitHub repository. Returns a tree of paths; use this first to discover the project structure, then read specific files.",
     parameters: { type: "object", properties: { subtree: SUBTREE_PARAM } },
@@ -193,20 +202,75 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "read_file",
+    planSafe: true,
     description:
-      "Read the full text content of one file from the repository. Prefer reading only files relevant to the question. Very large files are tail-truncated.",
+      "Read the text content of one file. Returns the working copy from the agent workspace when the file has been edited. Prefer reading only files relevant to the question. Very large files are tail-truncated — use startLine/endLine to read a window of one instead of rewriting it wholesale.",
     parameters: {
       type: "object",
-      properties: { path: REPO_PATH_PARAM },
+      properties: {
+        path: REPO_PATH_PARAM,
+        startLine: {
+          type: "number",
+          description: "Optional 1-based first line to return (windows a large file).",
+        },
+        endLine: {
+          type: "number",
+          description: "Optional 1-based last line to return, inclusive.",
+        },
+      },
       required: ["path"],
     },
     kind: "read",
     cacheable: true,
     programmable: true,
-    summarize: (args) => (typeof args.path === "string" ? args.path : "(unknown path)"),
+    summarize: (args) => {
+      const path = typeof args.path === "string" ? args.path : "(unknown path)";
+      const from = typeof args.startLine === "number" ? args.startLine : undefined;
+      const to = typeof args.endLine === "number" ? args.endLine : undefined;
+      return from !== undefined || to !== undefined
+        ? `${path}:${from ?? 1}-${to ?? "end"}`
+        : path;
+    },
+  },
+  {
+    name: "search_workspace",
+    planSafe: true,
+    description:
+      "Search the agent's working copy with a plain substring or regex — the local counterpart to search_code. It sees files the agent has edited (which GitHub search cannot), works on any branch, and is not rate-limited. Cheaper and more up-to-date than search_code for questions about code you just wrote; use search_code to explore the untouched repository.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          minLength: 1,
+          maxLength: 256,
+          description: "Text to find. Case-insensitive; treated as a regex when mode is 'regex'.",
+        },
+        pathPrefix: {
+          type: "string",
+          maxLength: 256,
+          description: "Optional directory prefix to search within (e.g. 'src/features').",
+        },
+        mode: {
+          type: "string",
+          enum: ["text", "regex"],
+          description: "Match mode: 'text' (default) or 'regex' (JavaScript syntax).",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum matches to return, 1-50 (default 20).",
+        },
+      },
+      required: ["query"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.query === "string" ? `"${args.query}"` : "(no query)"),
   },
   {
     name: "search_code",
+    planSafe: true,
     description:
       "Full-text code search inside the repository (GitHub code search). Returns matching file paths with fragments. Use for finding symbols, strings, or usages without knowing the file.",
     parameters: {
@@ -230,6 +294,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "get_repo_overview",
+    planSafe: true,
     description:
       "Get a summary of the repository: top-level structure, the README's opening section, and the largest/dominant directories. Useful as the very first call when exploring an unknown repo.",
     parameters: { type: "object", properties: {} },
@@ -239,9 +304,70 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     summarize: (_args, ok) => (ok ? "repository overview" : "overview failed"),
   },
   {
-    name: "write_file",
+    name: "read_skill",
+    planSafe: true,
     description:
-      "Create or overwrite a file in the local agent workspace (NOT on GitHub). Reads the current version from the repo automatically if needed. Always read_file before substantially rewriting an existing file. Changes become visible in the live preview and are pushed only via push_changes after user approval.",
+      "Load the full instructions of one available skill by name (see the Available Skills index in your instructions). Skills are loaded on demand rather than shipped in every prompt, so call this before starting work a skill's triggers match — it is cheap and makes the rest of the turn more accurate.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          minLength: 1,
+          maxLength: 80,
+          description: "Skill name or id exactly as listed in the Available Skills index.",
+        },
+        query: {
+          type: "string",
+          maxLength: 200,
+          description:
+            "Optional: omit `name` and describe the task instead to see which skills apply.",
+        },
+      },
+    },
+    kind: "read",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.name === "string" && args.name
+        ? args.name
+        : typeof args.query === "string"
+          ? `"${args.query.slice(0, 40)}"`
+          : "skill index",
+  },
+  {
+    name: "delegate",
+    planSafe: true,
+    description:
+      "Hand a RESEARCH task to a helper agent that runs in its own context and returns only a report. Use it to explore a large area (find how X works, locate every usage of Y, map a subsystem) when the searching itself would flood your context with file contents you do not need. The helper is read-only — it can read and search but NEVER edit, push, or run anything. Say exactly what you want back. Anything the helper finds must still be verified by you before you act on it.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2_000,
+          description:
+            "What to find out, stated as a question with a concrete deliverable (files, symbols, line ranges).",
+        },
+        maxIterations: {
+          type: "number",
+          description: "Helper tool-call rounds, 1-8 (default 4).",
+        },
+      },
+      required: ["task"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.task === "string" ? args.task.slice(0, 60) : "research task",
+  },
+  {
+    name: "write_file",
+    planSafe: false,
+    description:
+      "Create a new file, or overwrite one you have read in its entirety, in the local agent workspace (NOT on GitHub). Content must be the COMPLETE file text — anything omitted is deleted. To change part of an existing file, use edit_file instead: it is safer and far cheaper. Changes are visible in the live preview and reach GitHub only via push_changes after user approval.",
     parameters: {
       type: "object",
       properties: {
@@ -265,7 +391,40 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     summarize: (args) => (typeof args.path === "string" ? args.path : "(unknown path)"),
   },
   {
+    name: "edit_file",
+    planSafe: false,
+    description:
+      "Edit one region of an existing workspace file by exact string replacement — the preferred way to change code you have read, because it never touches the rest of the file. oldString must match the file byte-for-byte (including indentation) and must be unique unless replaceAll is true; a failed match returns the closest candidates. Use write_file only for new files or full rewrites.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: REPO_PATH_PARAM,
+        oldString: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200_000,
+          description: "Exact existing text to replace (include surrounding lines for uniqueness).",
+        },
+        newString: {
+          type: "string",
+          maxLength: 200_000,
+          description: "Replacement text. Use an empty string to delete the matched region.",
+        },
+        replaceAll: {
+          type: "boolean",
+          description: "Replace every occurrence instead of requiring a unique match.",
+        },
+      },
+      required: ["path", "oldString", "newString"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.path === "string" ? args.path : "(unknown path)"),
+  },
+  {
     name: "delete_file",
+    planSafe: false,
     description:
       "Delete a file in the local agent workspace (NOT on GitHub). The deletion lands on GitHub only via push_changes.",
     parameters: {
@@ -279,7 +438,57 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     summarize: (args) => (typeof args.path === "string" ? args.path : "(unknown path)"),
   },
   {
+    name: "remember",
+    planSafe: false,
+    description:
+      "Record a durable fact about THIS repository into .intab/memory.md in the workspace, so later conversations start from what you already learned instead of rediscovering it. Use it for stable, project-specific knowledge: build/test commands, environment and tooling quirks, conventions, architectural decisions, gotchas. Do NOT use it for task progress, user preferences, or secrets. Written memories reach GitHub only through push_changes (so the user reviews them like any other change), and a memory you record should be one line of fact, not a narrative.",
+    parameters: {
+      type: "object",
+      properties: {
+        fact: {
+          type: "string",
+          minLength: 1,
+          maxLength: 400,
+          description:
+            "One sentence of durable, repo-specific fact (e.g. 'Tests run with `npm test` (vitest); there is no shell here, so the user must run them.').",
+        },
+      },
+      required: ["fact"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.fact === "string" ? args.fact.slice(0, 60) : "project memory",
+  },
+  {
+    name: "get_workspace_diff",
+    planSafe: true,
+    description:
+      "Read the diff of everything changed in the workspace since the base commit (optionally one file). Use it to review your own change set before pushing — after compaction this is the only reliable record of what you have edited.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          maxLength: 512,
+          description: "Optional single file to diff instead of the whole change set.",
+        },
+        maxPatchChars: {
+          type: "number",
+          description: "Per-file patch budget in characters (default 4000, max 12000).",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.path === "string" && args.path ? args.path : "all changes",
+  },
+  {
     name: "create_working_branch",
+    planSafe: false,
     description:
       "Create a remote agent working branch (agent/...) from the attached branch. Optional — push_changes creates one automatically when needed. Use it to name the branch yourself before pushing.",
     parameters: {
@@ -300,6 +509,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "push_changes",
+    planSafe: false,
     description:
       "Ship all workspace changes to GitHub as ONE commit on the agent working branch and (by default) open a pull request. The user must approve the diff in a review dialog first — this call pauses until they decide. If the user rejects, their note arrives in the result; refine the changes and call push_changes again.",
     parameters: {
@@ -329,17 +539,10 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "get_preview_feedback",
+    planSafe: true,
     description:
       "Fetch build errors and runtime console output from the live preview of the workspace. Call after writing files to verify your changes compile and run; fix the reported issues and check again.",
-    parameters: {
-      type: "object",
-      properties: {
-        screenshot: {
-          type: "boolean",
-          description: "Set true to note that a visual check of the preview pane is recommended.",
-        },
-      },
-    },
+    parameters: { type: "object", properties: {} },
     kind: "bridge",
     cacheable: false,
     programmable: false,
@@ -347,6 +550,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "run_in_preview",
+    planSafe: true,
     description:
       "Execute a JavaScript expression or snippet INSIDE the live preview iframe (the built workspace app) and return the JSON-serialized result. Use it to verify behavior after edits: read runtime state, call exported functions, or compute assertions (throw on failure to report a failed check). Runs against the CURRENT build — write files first, then call this.",
     parameters: {
@@ -369,6 +573,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "query_preview_dom",
+    planSafe: true,
     description:
       "Query the live preview's rendered DOM with a CSS selector. Returns the match count plus outerHTML/text snippets (size-capped). Use it to verify that UI changes actually rendered: check elements, text content, classes, or computed structure after edits.",
     parameters: {
@@ -395,6 +600,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
   },
   {
     name: "run_tool_program",
+    planSafe: true,
     description:
       "Batch up to 8 of the read-only calls above into ONE call (e.g. read three files, or search then read the hits). One program = one transcript round trip instead of one per tool call — much faster and cheaper. Later steps can reference earlier results via $variable.path strings.",
     parameters: {
@@ -449,6 +655,28 @@ export function isValidToolName(name: string): name is ToolName {
 
 export function isAgentBridgeTool(name: ToolName): boolean {
   return BY_NAME.get(name)?.kind === "bridge";
+}
+
+/** True when a tool may run in Plan mode (never mutates anything) */
+export function isPlanSafeTool(name: ToolName): boolean {
+  return BY_NAME.get(name)?.planSafe === true;
+}
+
+/** Wire definitions allowed in Plan mode (the read-only subset) */
+export const PLAN_MODE_TOOLS: ToolDefinition[] = TOOL_REGISTRY.filter(
+  (t) => t.planSafe
+).map((t) => ({
+  type: "function" as const,
+  function: {
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters as unknown as Record<string, unknown>,
+  },
+}));
+
+/** Tool definitions to send for an agent mode */
+export function toolsForMode(mode: ChatMode): ToolDefinition[] {
+  return mode === "plan" ? PLAN_MODE_TOOLS : AGENT_TOOLS;
 }
 
 export function isToolCacheable(name: ToolName): boolean {

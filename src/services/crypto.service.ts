@@ -50,11 +50,34 @@ export function generateRandomBytes(length: number): Uint8Array {
 /**
  * Derived-key cache. PBKDF2 at 600k iterations costs ~150ms+ of main-thread
  * time; without caching every single field decrypt re-ran the full KDF.
- * Keys are non-extractable CryptoKeys, so caching them is safe — the cache
- * never holds passphrase material.
+ *
+ * Cache keys are SHA-256 digests of the (domain, passphrase, salt) tuple —
+ * never the passphrase itself. A raw passphrase in a Map key would sit in a
+ * plain string for the whole session; the digest keeps the cache free of
+ * recoverable passphrase material.
  */
 const derivedKeyCache = new Map<string, Promise<CryptoKey>>();
 const DERIVED_KEY_CACHE_MAX = 32;
+const CACHE_KEY_DOMAIN = "intab-crypto-cache-key-v1";
+
+/**
+ * Domain-separated SHA-256 of the passphrase, used as the in-memory cache
+ * key so the raw passphrase is never retained by the cache.
+ */
+async function passphraseCacheKey(domain: string, passphrase: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${CACHE_KEY_DOMAIN}:${domain}:${passphrase}`)
+  );
+  return bufferToBase64(digest);
+}
+
+/** Evicts the oldest cached entry once the cache exceeds its bound. */
+function evictOldest(cache: Map<string, unknown>): void {
+  if (cache.size <= DERIVED_KEY_CACHE_MAX) return;
+  const oldest = cache.keys().next().value;
+  if (oldest !== undefined) cache.delete(oldest);
+}
 
 /**
  * Derive an AES-256 key from a passphrase using PBKDF2 (cached).
@@ -64,7 +87,8 @@ export async function deriveKey(
   passphrase: string,
   salt: Uint8Array
 ): Promise<CryptoKey> {
-  const cacheKey = `${passphrase}::${bufferToBase64(salt.buffer as ArrayBuffer)}`;
+  const digest = await passphraseCacheKey("derived-key", passphrase);
+  const cacheKey = `${digest}::${bufferToBase64(salt.buffer as ArrayBuffer)}`;
   const cached = derivedKeyCache.get(cacheKey);
   if (cached) return cached;
 
@@ -92,12 +116,10 @@ export async function deriveKey(
     );
   })();
 
+  // Set synchronously before the next `await` so concurrent callers for the
+  // same (passphrase, salt) share one derivation instead of racing.
   derivedKeyCache.set(cacheKey, derivation);
-  if (derivedKeyCache.size > DERIVED_KEY_CACHE_MAX) {
-    // Evict the oldest entry (insertion order)
-    const oldest = derivedKeyCache.keys().next().value;
-    if (oldest !== undefined) derivedKeyCache.delete(oldest);
-  }
+  evictOldest(derivedKeyCache);
   return derivation;
 }
 
@@ -112,12 +134,15 @@ const DETERMINISTIC_SALT_DOMAIN = "intab-envelope-salt-v1::";
 const deterministicSaltCache = new Map<string, Promise<Uint8Array>>();
 
 async function deterministicSalt(passphrase: string): Promise<Uint8Array> {
-  let saltPromise = deterministicSaltCache.get(passphrase);
+  // Cache under a digest of the passphrase, not the passphrase itself.
+  const cacheKey = await passphraseCacheKey("envelope-salt", passphrase);
+  let saltPromise = deterministicSaltCache.get(cacheKey);
   if (!saltPromise) {
     saltPromise = crypto.subtle
       .digest("SHA-256", new TextEncoder().encode(DETERMINISTIC_SALT_DOMAIN + passphrase))
       .then((digest) => new Uint8Array(digest.slice(0, SALT_LENGTH)));
-    deterministicSaltCache.set(passphrase, saltPromise);
+    deterministicSaltCache.set(cacheKey, saltPromise);
+    evictOldest(deterministicSaltCache);
   }
   return saltPromise;
 }

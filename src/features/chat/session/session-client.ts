@@ -2,11 +2,9 @@
 // Session Client — Page-Side Bridge to the Session Host
 // ============================================================
 // Feature-detects SharedWorker. When available, the page becomes a
-// thin renderer: it prepares the request (context engine, InTab
-// routing, skills) and sends START_TURN; the host owns the actual
-// HTTP stream, so it survives page reloads and SPA navigation.
-// Telemetry (model success/failure, daily caps) flows back as events
-// and is persisted into the page-side learning router.
+// thin renderer: it prepares the request (context engine, model
+// state, skills) and sends START_TURN; the host owns the actual HTTP
+// stream, so it survives page reloads and SPA navigation.
 //
 // Without SharedWorker (or on host failure), callers transparently
 // fall back to the classic in-page streaming loop.
@@ -169,11 +167,6 @@ export class SessionHostClient {
 
   abortTurn(turnId: string): void {
     this.post({ type: "ABORT_TURN", turnId });
-  }
-
-  /** Replies to a REROUTE_NEEDED with fresh candidates */
-  sendReroute(turnId: string, candidates: HostStartTurnPayload["candidates"]): void {
-    this.post({ type: "REROUTE_REPLY", turnId, candidates });
   }
 
   /**

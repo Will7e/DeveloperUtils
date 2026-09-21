@@ -13,8 +13,6 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { ProviderLogo } from "./ProviderLogo";
-import { InTabLogo } from "@/components/ui/intab-logo";
-import { INTAB_MODEL_NAME } from "../constants";
 import type { ChatMessage } from "../types";
 
 function formatTime(ts: number): string {
@@ -116,19 +114,12 @@ export const MessageItem = React.memo(function MessageItem({
         <span className="chat-msg-role">{isUser ? "You" : "Assistant"}</span>
         {message.model && !isUser && (
           <span className="chat-msg-model">
-            {message.viaInTab ? (
-              // InTab-routed message — display only the product model
-              // ("InTab Flash 5.5"), never the underlying free-model
-              // id or the tier state chosen beside the selector.
-              <>
-                <InTabLogo size={14} variant="glyph" className="chat-msg-model-logo" />
-                {INTAB_MODEL_NAME}
-              </>
-            ) : (
-              <>
-                <ProviderLogo modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />
-                {message.model}
-              </>
+            <ProviderLogo modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />
+            {message.model}
+            {message.effort && (
+              <span className="chat-msg-model-state" title="Reasoning effort">
+                {message.effort}
+              </span>
             )}
           </span>
         )}
@@ -209,7 +200,7 @@ export const MessageItem = React.memo(function MessageItem({
         )}
         {message.error ? (
           <div className="chat-msg-error-content">
-            <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0 chat-msg-error-icon" />
             <span>{message.content}</span>
           </div>
         ) : content ? (

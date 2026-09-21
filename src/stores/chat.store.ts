@@ -13,10 +13,13 @@ import { generateId } from "@/lib/utils";
 import type {
   ChatConversation,
   ChatMessage,
+  ChatMode,
   ChatSettings,
   ChatSkill,
   ConversationSummary,
   PendingPush,
+  PushDecision,
+  ReasoningEffort,
   RepoContext,
   ToolCallRequest,
   ToolCallResult,
@@ -29,7 +32,12 @@ import {
   flushWorkspaceSave,
   deleteWorkspace as deleteWorkspaceFromIdb,
 } from "@/features/chat/workspace/workspace";
-import { DEFAULT_CHAT_SETTINGS, BUILTIN_SKILLS, INTAB_MODEL_ID } from "@/features/chat/constants";
+import {
+  DEFAULT_CHAT_SETTINGS,
+  DEFAULT_CHAT_MODEL,
+  BUILTIN_SKILLS,
+  isLegacyIntabModelId,
+} from "@/features/chat/constants";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
 import { PENDING_TURN_MAX_AGE_MS } from "@/features/chat/session/resume-plan";
 
@@ -60,7 +68,7 @@ export interface ChatStoreState {
   pendingPush: PendingPush | null;
   /** Resolve callbacks for the push approval gate */
   pushGate: {
-    resolve: (approved: boolean, note?: string) => void;
+    resolve: (decision: PushDecision) => void;
     conversationId: string;
   } | null;
 
@@ -71,8 +79,8 @@ export interface ChatStoreState {
   ensureWorkspace: (conversationId: string) => Promise<WorkspaceState | null>;
   removeWorkspace: (conversationId: string) => void;
   /** Opens the approval gate; resolves when the user decides */
-  requestPushApproval: (pending: PendingPush) => Promise<{ approved: boolean; note?: string }>;
-  resolvePushApproval: (approved: boolean, note?: string) => void;
+  requestPushApproval: (pending: PendingPush) => Promise<PushDecision>;
+  resolvePushApproval: (approved: boolean, note?: string, openPr?: boolean) => void;
   clearPendingPush: () => void;
 
   // ── Conversation actions ──
@@ -83,6 +91,10 @@ export interface ChatStoreState {
   duplicateConversation: (id: string) => string | null;
   togglePinConversation: (id: string) => void;
   setConversationModel: (id: string, model: string | undefined) => void;
+  /** Sets this conversation's reasoning-effort rung */
+  setConversationEffort: (id: string, effort: ReasoningEffort | undefined) => void;
+  /** Sets this conversation's agent mode (build/plan) */
+  setConversationMode: (id: string, mode: ChatMode | undefined) => void;
   setConversationSystemPrompt: (id: string, prompt: string | undefined) => void;
   /** Attaches/detaches the GitHub repo this conversation works against */
   setConversationRepo: (id: string, repo: RepoContext | undefined) => void;
@@ -124,10 +136,10 @@ export interface ChatStoreState {
     usage?: UsageInfo;
     reasoning?: string;
     reasoningMs?: number;
-    /** Message routed through the InTab LLM virtual model (UI mask) */
-    viaInTab?: boolean;
-    /** Task kind the router classified this turn as (InTab messages) */
-    turnKind?: "quick" | "code" | "analysis" | "vision" | "agent";
+    /** Reasoning rung the turn was sent with */
+    effort?: ReasoningEffort;
+    /** Agent mode the turn ran under */
+    mode?: ChatMode;
   }) => string | null;
   /** Commits an in-flight assistant tool-calls message (agent mode) */
   commitToolCallsMessage: (
@@ -282,15 +294,15 @@ export const useChatStore = create<ChatStoreState>()(
             pendingPush: pending,
             pushGate: {
               conversationId: pending.conversationId,
-              resolve: (approved, note) => resolve({ approved, note }),
+              resolve: (decision) => resolve(decision),
             },
           });
         }),
 
-      resolvePushApproval: (approved, note) =>
+      resolvePushApproval: (approved, note, openPr) =>
         set((s) => {
           const gate = s.pushGate;
-          if (gate) gate.resolve(approved, note);
+          if (gate) gate.resolve({ approved, note, openPr });
           return { pushGate: null, pendingPush: approved ? null : s.pendingPush };
         }),
 
@@ -300,7 +312,7 @@ export const useChatStore = create<ChatStoreState>()(
           // unmounted without deciding, or a caller cleared before
           // resolving), reject it so the awaiting tool executor never
           // hangs on an unresolved promise.
-          if (s.pushGate) s.pushGate.resolve(false);
+          if (s.pushGate) s.pushGate.resolve({ approved: false });
           return { pendingPush: null, pushGate: null };
         }),
       createConversation: (model) => {
@@ -372,6 +384,20 @@ export const useChatStore = create<ChatStoreState>()(
         set((s) => ({
           conversations: mapConversation(s.conversations, id, (c) =>
             touchConversation({ ...c, model })
+          ),
+        })),
+
+      setConversationEffort: (id, effort) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, id, (c) =>
+            touchConversation({ ...c, reasoningEffort: effort })
+          ),
+        })),
+
+      setConversationMode: (id, mode) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, id, (c) =>
+            touchConversation({ ...c, mode })
           ),
         })),
 
@@ -737,20 +763,22 @@ export const useChatStore = create<ChatStoreState>()(
           settings: {
             ...DEFAULT_CHAT_SETTINGS,
             ...settings,
-            // Versioned default: existing installs move to InTab LLM
-            // when it shipped. Conversations with an explicit model
-            // choice are untouched; legacy unset chats resolve to it
-            // via the `?? settings.defaultModel` fallback at send time.
-            defaultModel:
-              settings?.defaultModel === "openai/gpt-4o-mini"
-                ? INTAB_MODEL_ID
-                : (settings?.defaultModel ?? DEFAULT_CHAT_SETTINGS.defaultModel),
+            // Retired InTab virtual-model ids migrate onto a real model;
+            // every other choice is left exactly as the user set it.
+            defaultModel: isLegacyIntabModelId(settings?.defaultModel)
+              ? DEFAULT_CHAT_MODEL
+              : (settings?.defaultModel ?? DEFAULT_CHAT_SETTINGS.defaultModel),
             github: {
               ...DEFAULT_CHAT_SETTINGS.github,
               ...settings?.github,
             },
             skills: reconciled ?? skills,
           },
+          // Same migration for per-conversation overrides: a stored
+          // "intab/intab-llm*" id would otherwise 404 on the next send.
+          conversations: (p.conversations ?? current.conversations).map((c) =>
+            isLegacyIntabModelId(c.model) ? { ...c, model: DEFAULT_CHAT_MODEL } : c
+          ),
           isStreaming: false,
           streamingConversationId: null,
           streamingContent: "",

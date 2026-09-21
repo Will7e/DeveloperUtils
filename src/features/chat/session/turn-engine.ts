@@ -14,9 +14,8 @@
 //  - the fallback rule: if the survivable transport refuses or dies
 //    before anything was committed, retry the round once on the
 //    page-local transport. Never duplicate already-committed output.
-//  - commit semantics per end reason, telemetry → learning router,
-//    token calibration, and clearing the pending-turn marker on
-//    every exit path.
+//  - commit semantics per end reason, token calibration, and clearing
+//    the pending-turn marker on every exit path.
 //
 // State lives in ONE explicit session object (no ambient module
 // flags), and a turn is single-flight: a second run while running is
@@ -26,39 +25,48 @@ import { useChatStore } from "@/stores/chat.store";
 import { usePreviewStore } from "../preview/preview.store";
 import {
   prepareTurn,
-  resolveCandidates,
+  resolveModelState,
   type PreparedTurn,
   type TurnPreparation,
 } from "../services/turn-prep";
 import { executeToolCall, serializeToolResult, parseToolArguments } from "../lib/tools";
 import { lookupToolCache, storeToolCache, toolCacheKey } from "../lib/tool-cache";
-import { validateToolCall, getToolMeta } from "../lib/tool-registry";
+import { validateToolCall, getToolMeta, isPlanSafeTool, isValidToolName } from "../lib/tool-registry";
 import {
-  displayNameFor,
-  isIntabModel,
-  recordDailyRequest,
-  recordModelFailure,
-  recordModelSuccess,
-} from "../lib/intab-llm";
-import { recordFeedback } from "../lib/intab-learn";
+  callSignature,
+  extractTextToolCalls,
+  noToolCallNudge,
+  recoveredToolCalls,
+  refuseResultText,
+  repairToolArguments,
+  repeatDecision,
+  reuseResultText,
+  type CallLedgerEntry,
+} from "../lib/tool-repair";
+import { modelDisplayName } from "../lib/model-catalog";
 import { recordUsageCalibration } from "../context/tokenizer-calibration";
 import { estimateTokens } from "../context/tokenizer";
 import {
   AGENT_MAX_ITERATIONS,
   AGENT_ITERATIONS_MAX,
-  INTAB_MODEL_ID,
-  INTAB_MODEL_NAME,
+  DEFAULT_CHAT_MODE,
+  DEFAULT_REASONING_EFFORT,
   TOOL_EXECUTION_CONCURRENCY,
   TURN_INACTIVITY_TIMEOUT_MS,
 } from "../constants";
 import {
   resetPreviewExecCounter,
   runCreateWorkingBranch,
+  runDelegate,
   runDeleteFile,
+  runEditFile,
   runInPreview,
   runPreviewFeedback,
   runPushChanges,
   runQueryPreviewDom,
+  runRemember,
+  runSearchWorkspace,
+  runWorkspaceDiff,
   runWriteFile,
 } from "../services/agent-actions";
 import { sessionHost } from "./session-client";
@@ -69,11 +77,11 @@ import type {
   HostEvent,
   HostSnapshot,
   HostStartTurnPayload,
-  HostTelemetryEvent,
   HostUsage,
 } from "./protocol";
-import type { TurnKind } from "../lib/intab-classify";
 import type {
+  ChatMode,
+  ReasoningEffort,
   ToolCallRequest,
   ToolCallResult,
   ToolName,
@@ -95,6 +103,21 @@ export interface TurnSessionState {
   toolCalls: ToolCallRequest[];
   /** True while page-side tool execution is in flight */
   inToolPhase: boolean;
+  /**
+   * Per-turn execution ledger: call signature → how often it ran and
+   * whether it worked. This is what makes the loop self-correcting —
+   * a third identical successful call is answered from the ledger
+   * instead of re-running, and a third identical FAILING call is
+   * refused with a demand to change approach.
+   */
+  callLedger: Map<string, CallLedgerEntry>;
+  /** True once text-emitted tool calls have been recovered this turn */
+  recoveredTextCalls: boolean;
+  /** Harness note to attach to the recovered calls' transcript row */
+  recoveredNote: string | null;
+  /** Model state the current round was prepared with (message metadata) */
+  effort: ReasoningEffort;
+  mode: ChatMode;
 }
 
 const session: TurnSessionState = {
@@ -105,7 +128,17 @@ const session: TurnSessionState = {
   abort: null,
   toolCalls: [],
   inToolPhase: false,
+  callLedger: new Map(),
+  recoveredTextCalls: false,
+  recoveredNote: null,
+  effort: DEFAULT_REASONING_EFFORT,
+  mode: DEFAULT_CHAT_MODE,
 };
+
+/** Identical executions allowed before the ledger takes over */
+const REPEAT_MAX_EXECUTIONS = 2;
+/** Serialized result kept in the ledger for a reuse (bounded) */
+const LEDGER_RESULT_MAX_CHARS = 4_000;
 
 export function getSessionState(): Readonly<TurnSessionState> {
   return session;
@@ -177,47 +210,9 @@ function isEventForTurn(event: HostEvent, turnId: string): boolean {
       return event.turnId === turnId;
     case "END":
       return event.payload.turnId === turnId;
-    case "REROUTE_NEEDED":
-      return event.turnId === turnId;
-    case "TELEMETRY":
-      return event.event.turnId === turnId;
     default:
       return false;
   }
-}
-
-/** Mirrors transport-observed model outcomes into the learning router */
-function recordTelemetry(event: HostTelemetryEvent): void {
-  const turnKind = (event.turnKind as TurnKind) ?? "analysis";
-  switch (event.kind.type) {
-    case "modelSuccess":
-      recordModelSuccess(event.kind.modelId);
-      break;
-    case "modelFailure":
-      recordModelFailure(event.kind.modelId, event.kind.reason, event.kind.headers);
-      break;
-    case "dailyRequest":
-      recordDailyRequest(event.kind.modelId);
-      break;
-    case "turnSuccess":
-      recordFeedback(event.kind.modelId, turnKind, "success");
-      break;
-    case "turnEmpty":
-      recordFeedback(event.kind.modelId, turnKind, "empty");
-      break;
-    case "turnAbort":
-      recordFeedback(event.kind.modelId, turnKind, "abort");
-      break;
-    case "turnFailover":
-      recordFeedback(event.kind.modelId, turnKind, "failover");
-      break;
-  }
-}
-
-function isInTabConversation(conversationId: string): boolean {
-  const state = useChatStore.getState();
-  const conv = state.conversations.find((c) => c.id === conversationId);
-  return isIntabModel(conv?.model ?? state.settings.defaultModel);
 }
 
 function maxIterations(): number {
@@ -237,13 +232,25 @@ function toolPhaseMeta(conversationId: string): {
   const conv = useChatStore
     .getState()
     .conversations.find((c) => c.id === conversationId);
-  const intab = conv
-    ? isIntabModel(conv.model ?? useChatStore.getState().settings.defaultModel)
-    : false;
   const last = conv && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : undefined;
-  const wireModel =
-    last?.viaInTab || isIntabModel(last?.model) ? INTAB_MODEL_ID : (last?.model ?? "");
-  return { content: "", reasoning: "", model: intab ? INTAB_MODEL_ID : wireModel };
+  return { content: "", reasoning: "", model: last?.model ?? "" };
+}
+
+/**
+ * Attaches the once-per-turn "you wrote calls as text" note to the
+ * tool-calls transcript row, so the harness correction is visible to
+ * the user AND to the model on its next round. Consumes the note, so a
+ * later tool phase in the same turn is not annotated twice.
+ */
+function withRecoveryNote(meta: { content: string; reasoning: string; model: string }): {
+  content: string;
+  reasoning: string;
+  model: string;
+} {
+  const note = session.recoveredNote;
+  session.recoveredNote = null;
+  if (!note) return meta;
+  return { ...meta, content: [meta.content, note].filter(Boolean).join("\n\n") };
 }
 
 /** Runs tasks with bounded concurrency; results drain in submit order */
@@ -375,34 +382,6 @@ async function renderTurn(
           modelId = event.modelId;
           break;
         }
-        case "TELEMETRY": {
-          recordTelemetry(event.event);
-          break;
-        }
-        case "REROUTE_NEEDED": {
-          if (event.turnId !== turnId) return;
-          const conv = useChatStore
-            .getState()
-            .conversations.find((c) => c.id === conversationId);
-          if (!conv) return;
-          const requested = conv.model ?? useChatStore.getState().settings.defaultModel;
-          const fresh = resolveCandidates({
-            conversation: conv,
-            requestedModel: requested,
-            exclude: new Set(event.excluded),
-          });
-          const candidates = fresh.candidates.filter(
-            (c) => !event.excluded.includes(c.modelId)
-          );
-          logTurnEvent({
-            turnId,
-            conversationId,
-            phase: "reroute",
-            detail: `${candidates.length} fresh candidates`,
-          });
-          source.sendReroute(turnId, candidates);
-          break;
-        }
         case "END": {
           if (event.payload.turnId !== turnId) return;
           endReason = event.payload.reason;
@@ -453,11 +432,10 @@ function commitRender(
   const api = useChatStore.getState();
   const streamed = api.streamingContent;
   const streamedReasoning = api.streamingReasoning;
-  const intab = isInTabConversation(conversationId);
-  const model = intab
-    ? INTAB_MODEL_ID
-    : (outcome.modelId ?? fallbackModelId ?? undefined);
+  // The model id IS the wire model now — no virtual-model masking.
+  const model = outcome.modelId ?? fallbackModelId ?? undefined;
   const reasoning = (streamedReasoning || outcome.reasoning) || undefined;
+  const meta = { effort: session.effort, mode: session.mode };
 
   if (outcome.kind === "lost") {
     api.discardStreaming();
@@ -466,7 +444,7 @@ function commitRender(
         content: `${streamed}\n\n— _the response engine stopped responding; partial reply kept._`,
         reasoning,
         model,
-        viaInTab: intab || undefined,
+        ...meta,
       });
     }
     return api.commitDirectAssistantMessage(conversationId, {
@@ -483,7 +461,7 @@ function commitRender(
         content: streamed || outcome.content,
         reasoning,
         model,
-        viaInTab: intab || undefined,
+        ...meta,
         usage: outcome.usage,
       });
     }
@@ -492,7 +470,7 @@ function commitRender(
         content: streamed || outcome.content,
         reasoning,
         model,
-        viaInTab: intab || undefined,
+        ...meta,
         usage: outcome.usage,
         error: !(streamed || outcome.content).trim() ? true : undefined,
       });
@@ -506,16 +484,16 @@ function commitRender(
           content: `${text}\n\n— _${outcome.error ?? "the response could not be completed."}_`,
           reasoning,
           model,
-          viaInTab: intab || undefined,
+          ...meta,
           usage: outcome.usage,
         });
       }
       return api.commitDirectAssistantMessage(conversationId, {
         content:
           outcome.error ??
-          `${displayNameFor(model, [])} could not complete this response. Try again shortly.`,
+          `${model ? modelDisplayName(model) : "The model"} could not complete this response. Try again shortly.`,
         model,
-        viaInTab: intab || undefined,
+        ...meta,
         error: true,
       });
     }
@@ -530,11 +508,44 @@ async function runBridgeTool(
   name: ToolName,
   args: Record<string, unknown>
 ): Promise<ToolCallResult> {
+  // Plan-mode hard guard. Plan mode never RECEIVES the mutating tool
+  // definitions, so a call for one is either a hallucination or a
+  // stale transcript echoing an old Build turn — refuse it here as
+  // well, because the model visibly trying to edit is exactly the
+  // failure mode Plan mode exists to prevent.
+  const conversation = useChatStore
+    .getState()
+    .conversations.find((c) => c.id === conversationId);
+  if (resolveModelState(conversation).mode === "plan" && !isPlanSafeTool(name)) {
+    return {
+      callId: "",
+      name,
+      ok: false,
+      data: {
+        error:
+          `Tool "${name}" is unavailable in Plan mode. Analyze and propose a plan instead; ` +
+          `the user must switch to Build mode before any file can be changed.`,
+      },
+      durationMs: 0,
+      summary: "blocked in plan mode",
+    };
+  }
+
   switch (name) {
     case "write_file":
       return runWriteFile(conversationId, args);
+    case "edit_file":
+      return runEditFile(conversationId, args);
     case "delete_file":
       return runDeleteFile(conversationId, args);
+    case "search_workspace":
+      return runSearchWorkspace(conversationId, args);
+    case "get_workspace_diff":
+      return runWorkspaceDiff(conversationId, args);
+    case "remember":
+      return runRemember(conversationId, args);
+    case "delegate":
+      return runDelegate(conversationId, args);
     case "create_working_branch":
       return runCreateWorkingBranch(conversationId, args);
     case "push_changes":
@@ -604,52 +615,128 @@ async function executeToolPhase(
 
   interface PendingTool {
     idx: number;
+    /** The call as it will EXECUTE (arguments possibly repaired) */
     call: ToolCallRequest;
     cacheKey: string | null;
   }
+
+  /**
+   * Records one execution outcome against the turn ledger. Every path
+   * that produces a result reports here — including cached hits and
+   * argument failures — so the repetition policy sees the whole truth
+   * rather than only the calls that reached the network.
+   */
+  const record = (call: ToolCallRequest, result: ToolCallResult): void => {
+    const signature = callSignature(call.name, call.arguments);
+    const prior = session.callLedger.get(signature);
+    session.callLedger.set(signature, {
+      count: (prior?.count ?? 0) + 1,
+      ok: result.ok,
+      digest: result.summary ?? (result.ok ? "ok" : "failed"),
+      resultText: serializeToolResult(result).slice(0, LEDGER_RESULT_MAX_CHARS),
+    });
+  };
+
   const pending: PendingTool[] = [];
   calls.forEach((call, idx) => {
-    const validation = validateToolCall(call.name, call.arguments);
-    if (!validation.ok) {
+    // ── Repetition policy (loop breaking) ──
+    // Runs BEFORE anything else: a repeated call must not be
+    // re-validated, re-cached or re-sent to the network.
+    const signature = callSignature(call.name, call.arguments);
+    const decision = repeatDecision(session.callLedger.get(signature), REPEAT_MAX_EXECUTIONS);
+    if (decision.action !== "execute") {
+      const reuse = decision.action === "reuse";
       results.set(idx, {
+        callId: call.id,
+        name: call.name,
+        ok: reuse,
+        data: {
+          note: reuse ? "identical call already ran this turn" : "repeated failing call refused",
+          message: reuse
+            ? reuseResultText(decision.entry)
+            : refuseResultText(decision.entry, call.name),
+        },
+        durationMs: 0,
+        summary: reuse ? "reused earlier result" : "repeated failing call refused",
+      });
+      logTurnEvent({
+        turnId: session.turnId,
+        conversationId,
+        phase: "tool-phase",
+        detail: `${call.name}: ${reuse ? "reused from ledger" : "refused (repeated failure)"}`,
+      });
+      return;
+    }
+
+    // ── Argument repair ──
+    // Repair first, validate second: a fence or a trailing comma should
+    // cost this turn nothing, and the repaired text is what executes.
+    const repaired = repairToolArguments(call.arguments);
+    const argsText = repaired.args ? JSON.stringify(repaired.args) : call.arguments;
+    if (repaired.repaired) {
+      logTurnEvent({
+        turnId: session.turnId,
+        conversationId,
+        phase: "tool-phase",
+        detail: `${call.name}: arguments repaired (${repaired.note ?? "normalized"})`,
+      });
+    }
+    const normalized: ToolCallRequest = argsText === call.arguments ? call : { ...call, arguments: argsText };
+
+    const validation = validateToolCall(normalized.name, normalized.arguments);
+    if (!validation.ok) {
+      const failure: ToolCallResult = {
         callId: call.id,
         name: call.name,
         ok: false,
         data: { error: validation.error },
         durationMs: 0,
         summary: "invalid arguments",
-      });
+      };
+      record(normalized, failure);
+      results.set(idx, failure);
       return;
     }
-    const cacheKey = repoContext ? toolCacheKey(call, repoContext) : null;
+    const cacheKey = repoContext ? toolCacheKey(normalized, repoContext) : null;
     const hit = lookupToolCache(cacheKey);
     if (hit) {
-      results.set(idx, { ...hit, callId: call.id, durationMs: 0 });
+      const cached: ToolCallResult = { ...hit, callId: call.id, durationMs: 0 };
+      record(normalized, cached);
+      results.set(idx, cached);
     } else {
-      pending.push({ idx, call, cacheKey });
+      pending.push({ idx, call: normalized, cacheKey });
     }
   });
   drainOrdered();
 
   if (pending.length > 0 && repoContext) {
-    await runOrderedPool(
-      pending.map((p) => {
-        const kind = getToolMeta(p.call.name)?.kind;
-        if (kind === "bridge") {
-          const args = parseToolArguments(p.call.arguments);
-          return {
-            run: () =>
-              runBridgeTool(conversationId, p.call.name, args).then((result) => ({
-                ...result,
-                callId: p.call.id,
-              })),
-            onSettled: (result: ToolCallResult) => {
-              results.set(p.idx, result);
-              drainOrdered();
-            },
-          };
-        }
-        return {
+    const isBridge = (p: PendingTool) => getToolMeta(p.call.name)?.kind === "bridge";
+    const settle = (p: PendingTool) => (result: ToolCallResult) => {
+      record(p.call, result);
+      results.set(p.idx, result);
+      drainOrdered();
+    };
+
+    // Writes first, one at a time, in submission order. Every bridge
+    // tool is a read-modify-write on the same workspace snapshot, so
+    // running them concurrently made the last write win and silently
+    // discard its siblings' files. Sequential execution also makes
+    // `push_changes` and `run_in_preview` observe the edits that
+    // preceded them in the same model turn.
+    const bridgeTools = pending.filter(isBridge);
+    for (const p of bridgeTools) {
+      if (session.abort?.signal.aborted) return;
+      const args = parseToolArguments(p.call.arguments);
+      const result = await runBridgeTool(conversationId, p.call.name, args);
+      settle(p)({ ...result, callId: p.call.id });
+    }
+
+    // Reads (and batched read programs) then fan out — they are
+    // independent and hit the network.
+    const readTools = pending.filter((p) => !isBridge(p));
+    if (readTools.length > 0) {
+      await runOrderedPool(
+        readTools.map((p) => ({
           run: () =>
             executeToolCall(p.call, {
               token: settings.github.token,
@@ -660,15 +747,12 @@ async function executeToolPhase(
               storeToolCache(p.cacheKey, result);
               return result;
             }),
-          onSettled: (result: ToolCallResult) => {
-            results.set(p.idx, result);
-            drainOrdered();
-          },
-        };
-      }),
-      TOOL_EXECUTION_CONCURRENCY,
-      () => session.abort?.signal.aborted ?? false
-    );
+          onSettled: settle(p),
+        })),
+        TOOL_EXECUTION_CONCURRENCY,
+        () => session.abort?.signal.aborted ?? false
+      );
+    }
   }
 }
 
@@ -689,11 +773,14 @@ async function runRound(
 ): Promise<RoundResult> {
   const prepared = await deps.prepare(conversationId);
   if (prepared === null) return { kind: "done", committed: false };
-  if (prepared === "exhausted") return { kind: "exhausted", committed: false };
 
-  const turn = prepared as PreparedTurn;
+  const turn: PreparedTurn = prepared;
   const turnId = createTurnId();
   session.turnId = turnId;
+  // Recorded on every committed message so the transcript shows the
+  // state a reply was produced under.
+  session.effort = turn.effort;
+  session.mode = turn.mode;
 
   const payload: HostStartTurnPayload = {
     turnId,
@@ -703,15 +790,14 @@ async function runRound(
     temperature: turn.temperature,
     messages: turn.messages,
     tools: turn.tools,
-    candidates: turn.ranked,
-    turnKind: turn.turnKind,
+    candidates: turn.candidates,
   };
 
   logTurnEvent({
     turnId,
     conversationId,
     phase: "turn-start",
-    detail: `${source.label} transport · ${turn.ranked.length} candidates`,
+    detail: `${source.label} transport · ${turn.modelId} · ${turn.mode} · effort=${turn.effort}`,
   });
 
   // Subscribe BEFORE starting: the first deltas can race the start
@@ -740,6 +826,42 @@ async function runRound(
     deps.inactivityTimeoutMs,
     prebuffer
   );
+
+  // ── Text-emitted tool calls (weak-model recovery) ──────────
+  // The most expensive failure a cheap model makes is describing a call
+  // in prose instead of emitting one: the turn ends looking finished
+  // while nothing happened. Recover the calls from its own text ONCE
+  // per turn and run them exactly like real ones. Guarded three ways:
+  // the model must have been sent tools at all, every recovered name
+  // must be a real registry tool, and the recovery happens once.
+  if (
+    outcome.kind === "end" &&
+    outcome.reason === "done" &&
+    !session.recoveredTextCalls &&
+    Array.isArray(turn.tools) &&
+    turn.tools.length > 0
+  ) {
+    const known = new Set(
+      turn.tools
+        .map((t) => (t as { function?: { name?: unknown } }).function?.name)
+        .filter((n): n is string => typeof n === "string")
+    );
+    const found = extractTextToolCalls(outcome.content || outcome.reasoning, known).filter((c) =>
+      isValidToolName(c.name)
+    );
+    if (found.length > 0) {
+      session.recoveredTextCalls = true;
+      session.toolCalls = recoveredToolCalls(found);
+      session.recoveredNote = noToolCallNudge(found.map((c) => c.name));
+      outcome.reason = "tool-calls";
+      logTurnEvent({
+        turnId,
+        conversationId,
+        phase: "tool-phase",
+        detail: `recovered ${found.length} tool call(s) written as text: ${found.map((c) => c.name).join(", ")}`,
+      });
+    }
+  }
 
   // Token calibration for the exact payload we sent
   if (outcome.usage?.promptTokens != null) {
@@ -852,7 +974,7 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
       detail: `${calls.length} calls`,
     });
     try {
-      await executeToolPhase(conversationId, calls, toolPhaseMeta(conversationId));
+      await executeToolPhase(conversationId, calls, withRecoveryNote(toolPhaseMeta(conversationId)));
     } finally {
       session.inToolPhase = false;
     }
@@ -889,6 +1011,9 @@ export async function runTurn(
   session.abort = new AbortController();
   session.toolCalls = [];
   session.inToolPhase = false;
+  session.callLedger = new Map();
+  session.recoveredTextCalls = false;
+  session.recoveredNote = null;
   resetPreviewExecCounter(conversationId);
 
   try {
@@ -925,6 +1050,9 @@ export async function runTurn(
     session.abort = null;
     session.toolCalls = [];
     session.inToolPhase = false;
+    session.callLedger = new Map();
+    session.recoveredTextCalls = false;
+    session.recoveredNote = null;
     useChatStore.getState().clearPendingTurn(conversationId);
   }
 }
@@ -973,6 +1101,9 @@ export async function adoptTurn(
   session.abort = new AbortController();
   session.toolCalls = [];
   session.inToolPhase = false;
+  session.callLedger = new Map();
+  session.recoveredTextCalls = false;
+  session.recoveredNote = null;
 
   logTurnEvent({
     turnId: snapshot.turnId,
@@ -1019,7 +1150,7 @@ export async function adoptTurn(
       session.toolCalls = [];
       session.inToolPhase = true;
       try {
-        await executeToolPhase(conversationId, calls, toolPhaseMeta(conversationId));
+        await executeToolPhase(conversationId, calls, withRecoveryNote(toolPhaseMeta(conversationId)));
       } finally {
         session.inToolPhase = false;
       }
@@ -1046,6 +1177,9 @@ export async function adoptTurn(
     session.abort = null;
     session.toolCalls = [];
     session.inToolPhase = false;
+    session.callLedger = new Map();
+    session.recoveredTextCalls = false;
+    session.recoveredNote = null;
     if (adopted) useChatStore.getState().clearPendingTurn(conversationId);
   }
 }

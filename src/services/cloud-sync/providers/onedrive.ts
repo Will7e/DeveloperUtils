@@ -6,7 +6,7 @@
 // users cannot see or accidentally delete. Zero Microsoft verification
 // is required for consumer accounts.
 
-import type { CloudProvider, OAuthTokens, WriteResult } from "../types";
+import type { CloudProvider, FileReadResult, OAuthTokens, WriteResult } from "../types";
 import { OAuthError } from "../oauth-error";
 import {
   buildAuthorizeUrl,
@@ -116,11 +116,25 @@ export const oneDriveProvider: CloudProvider = {
     void tokens;
   },
 
-  async readFile(tokens: OAuthTokens, path: string): Promise<string | null> {
-    const res = await graphFetch(tokens, `/me/drive/special/approot:/${encodeURIComponent(path)}:/content`);
-    if (res.status === 404) return null;
+  async readFile(tokens: OAuthTokens, path: string): Promise<FileReadResult> {
+    const encoded = encodeURIComponent(path);
+    const res = await graphFetch(tokens, `/me/drive/special/approot:/${encoded}:/content`);
+    if (res.status === 404) return { content: null, etag: null };
     if (!res.ok) throw new Error(`OneDrive read failed (${res.status})`);
-    return res.text();
+    const content = await res.text();
+
+    // The download response does not always carry an ETag. Without one the next
+    // write would skip optimistic concurrency and blind-overwrite a change made
+    // on another device, so fall back to the item's metadata.
+    let etag = res.headers.get("ETag");
+    if (!etag) {
+      const meta = await graphFetch(tokens, `/me/drive/special/approot:/${encoded}`);
+      if (meta.ok) {
+        const json = (await meta.json()) as { eTag?: string; etag?: string };
+        etag = json.eTag ?? json.etag ?? null;
+      }
+    }
+    return { content, etag };
   },
 
   async writeFile(tokens: OAuthTokens, path: string, content: string, etag: string | null): Promise<WriteResult> {

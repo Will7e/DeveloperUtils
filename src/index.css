@@ -704,11 +704,7 @@ html.light .palette-item-active .palette-item-shortcut {
   background: var(--ds-gray-300);
 }
 
-/* ---- Light: Toasts ---- */
-html.light [data-toast-state] {
-  background: var(--ds-background-100);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.06);
-}
+/* Toasts: chrome (incl. the light variant) lives in styles/toast.css */
 
 /* ---- Light: Tooltips ---- */
 html.light .intab-tooltip {
@@ -1129,25 +1125,19 @@ html.light .lib-toc-item-match {
    END LIGHT MODE
    ============================================================ */
 
-/* ---- Reset ---- */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
+/* ---- Reset ----
+   NOTE: do NOT reintroduce a bare `* { margin: 0; padding: 0 }` reset here.
+   Tailwind's preflight already zeroes box-sizing/border/margin/padding on
+   every element inside `@layer base`. An *unlayered* reset is stronger than
+   every layered rule, so it silently killed every spacing utility in the app
+   (`p-*`, `px-*`, `py-*`, `m-*`, `space-y-*` — e.g. the toast, buttons, badges
+   and the search input all rendered with zero padding). */
 html,
 body,
 #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-}
-
-/* Keep the Geist SearchInput text clear of its prefix icon: the unlayered
-   global reset below strips Tailwind's px-1 utility from this input. */
-[data-geist-input] {
-  padding-inline: 4px;
 }
 
 body {

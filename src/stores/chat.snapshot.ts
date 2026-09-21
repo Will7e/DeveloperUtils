@@ -11,7 +11,7 @@
 // Payloads are encrypted by the sync engine (license-derived or
 // pepper+account key) before leaving the device.
 
-import { createEncryptedStorage } from "@/services/encrypted-storage.service";
+import { readEncryptedValue } from "@/services/encrypted-storage.service";
 import { useChatStore } from "./chat.store";
 
 const CHAT_STORAGE_NAME = "intab_chat_state";
@@ -67,11 +67,16 @@ function stubImageAttachments(conversations: unknown): unknown {
   });
 }
 
-/** Reads the persisted chat state, decrypting the storage envelope. */
+/**
+ * Reads the persisted chat state, decrypting the storage envelope.
+ *
+ * Uses the read-only accessor rather than constructing a storage adapter:
+ * building one per call registered a fresh pair of unload listeners on every
+ * sync pull.
+ */
 export async function getChatSnapshot(): Promise<ChatPersistedState | null> {
   try {
-    const adapter = createEncryptedStorage();
-    const raw = await adapter.getItem(CHAT_STORAGE_NAME);
+    const raw = await readEncryptedValue(CHAT_STORAGE_NAME);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { state?: Partial<ChatPersistedState> };
     const state = parsed.state;

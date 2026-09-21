@@ -95,6 +95,24 @@ function AppContent() {
     };
   }, [addToast]);
 
+  // A write is dropped when it cannot be encrypted (rather than being stored in
+  // the clear), so tell the user their changes are not being saved instead of
+  // letting them find out after a reload.
+  useEffect(() => {
+    const handleWriteFailed = () => {
+      addToast({
+        message:
+          "Changes could not be encrypted, so this save was skipped. Make sure the app is served over HTTPS and that browser storage is available.",
+        type: "error",
+        duration: 8000,
+      });
+    };
+    window.addEventListener("intab:storage-write-failed", handleWriteFailed);
+    return () => {
+      window.removeEventListener("intab:storage-write-failed", handleWriteFailed);
+    };
+  }, [addToast]);
+
   // Request durable storage once at boot: opts this origin out of
   // eviction under disk pressure (best-effort; the browser may still
   // deny it, in which case behavior is unchanged).

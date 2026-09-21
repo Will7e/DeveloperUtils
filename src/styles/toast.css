@@ -1,28 +1,26 @@
 /* ============================================================
-   TOAST NOTIFICATIONS
+   TOAST NOTIFICATIONS (Geist)
    ============================================================ */
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+/* The toast box is styled here, not with spacing utilities: an unlayered
+   `* { padding: 0 }` reset (removed from index.css) used to wipe the
+   component's `px-4 py-3.5`, leaving the icon flush against the border.
+   Chrome = this file; layout (flex, gap, width) = the component. */
+[data-toast-state] {
+  padding: 12px 14px;
+  min-height: 48px;
+  border-radius: var(--radius-lg);
   background: var(--ds-background-100);
-  border: 1px solid var(--ds-gray-400);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
-  font-size: 13px;
-  font-family: var(--font-sans);
   color: var(--ds-gray-1000);
-  animation: toast-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s;
-  max-width: 380px;
-  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 20px;
+  /* Hairline alpha ring + soft depth, in one shadow — no second border */
+  box-shadow: 0 0 0 1px var(--ds-gray-alpha-400), 0 10px 30px -5px rgba(0, 0, 0, 0.5);
 }
-.toast:hover {
-  opacity: 0.95;
-  transform: translateY(-1px);
+
+html.light [data-toast-state] {
+  background: var(--ds-background-100);
+  box-shadow: 0 0 0 1px var(--ds-gray-alpha-400), 0 10px 30px -5px rgba(0, 0, 0, 0.08);
 }
 
 /* Entrance animation used by components/ui/toast.tsx via class name */
@@ -33,15 +31,6 @@
 /* Exit animation used by features/toast/ToastContainer.tsx */
 .animate-toast-out {
   animation: toast-out 0.15s ease-in forwards;
-}
-
-/* Geist toast elevation: hairline alpha ring + soft depth */
-.geist-toast-shadow {
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--ds-gray-alpha-400);
-}
-
-html.light .geist-toast-shadow {
-  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--ds-gray-alpha-400);
 }
 
 @keyframes toast-out {

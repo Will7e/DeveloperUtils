@@ -18,7 +18,7 @@
 import React from "react";
 import { Bot, Check, CornerDownLeft } from "lucide-react";
 import { formatContext, formatPrice } from "./ModelPicker";
-import { CURATED_FALLBACK_MODELS, intabTierById } from "../constants";
+import { CURATED_FALLBACK_MODELS } from "../constants";
 import type { ModelInfo } from "../types";
 import type { ChatCommand } from "../lib/commands";
 
@@ -53,16 +53,14 @@ interface CommandMenuProps {
 
 /** Per-model row metadata (badges + free flag for the submenu) */
 function toRowMeta(m: ModelInfo): { name: string; id: string; badges: string[]; free: boolean } {
-  const tier = intabTierById(m.id);
   return {
     name: m.name,
-    // InTab tier rows: tagline instead of the slug — no hints at routing.
-    id: tier ? tier.tagline : m.id,
+    id: m.id,
     badges: [
       m.contextLength !== undefined ? formatContext(m.contextLength) : "",
       m.promptPrice !== undefined ? `${formatPrice(m.promptPrice)}/M in` : "",
     ].filter(Boolean),
-    free: Boolean(m.isFree) && !tier,
+    free: Boolean(m.isFree),
   };
 }
 

@@ -14,17 +14,31 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
 import { ModelPicker } from "./ModelPicker";
-import { TierPicker } from "./TierPicker";
+import { EffortPicker } from "./EffortPicker";
+import { ModeToggle } from "./ModeToggle";
 import { ContextMeter } from "./ContextMeter";
-import { isIntabModel } from "../lib/intab-llm";
 import { RepoPicker, type RepoSelection } from "./RepoPicker";
-import type { ContextBreakdown, ModelInfo, RepoContext } from "../types";
+import type {
+  ChatMode,
+  ContextBreakdown,
+  ModelInfo,
+  ReasoningEffort,
+  RepoContext,
+} from "../types";
 
 interface ChatHeaderProps {
   model: string;
   models: ModelInfo[];
   modelsLoading: boolean;
   onModelChange: (modelId: string) => void;
+  /** Model state: the reasoning rung the conversation is set to */
+  effort: ReasoningEffort;
+  /** Rungs the current model can express (empty hides the control) */
+  efforts: ReasoningEffort[];
+  onEffortChange: (effort: ReasoningEffort) => void;
+  /** Agent mode for this conversation */
+  mode: ChatMode;
+  onModeChange: (mode: ChatMode) => void;
   context: ContextBreakdown;
   onOpenSettings: () => void;
   onExport: () => void;
@@ -50,6 +64,11 @@ export function ChatHeader({
   models,
   modelsLoading,
   onModelChange,
+  effort,
+  efforts,
+  onEffortChange,
+  mode,
+  onModeChange,
   context,
   onOpenSettings,
   onExport,
@@ -102,10 +121,16 @@ export function ChatHeader({
           isLoading={modelsLoading}
           onChange={onModelChange}
         />
-        {/* InTab Flash state (Light/High/Max) — only exists while
-            InTab Flash is the model; applied in the background on
-            every send via the tier's request state. */}
-        {isIntabModel(model) && <TierPicker model={model} onChange={onModelChange} />}
+        {/* Model state (reasoning effort) — applied to every send and
+            snapped to what this model declares it accepts. Hidden for
+            models with no reasoning support. */}
+        <EffortPicker value={effort} efforts={efforts} onChange={onEffortChange} />
+        {/* Build/Plan — enforced by the tool list and the executor */}
+        <ModeToggle
+          value={mode}
+          onChange={onModeChange}
+          disabled={!repoContext}
+        />
         <ContextMeter context={context} />
         <RepoPicker
           repoContext={repoContext}

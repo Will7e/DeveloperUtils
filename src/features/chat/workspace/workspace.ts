@@ -157,32 +157,11 @@ export async function readFile(
 
   try {
     const file = await readFileContent(token, ws.owner, ws.repo, path, ws.branch);
-    if (file.isBinary || file.text === null) {
-      return { ws, content: null, error: `File '${path}' is binary or too large to read.` };
+    const merged = mergeFetchedFile(ws, path, file);
+    if (!merged.ok) {
+      return { ws, content: null, error: merged.error ?? `Could not load '${path}'.` };
     }
-    const text = file.text;
-    if (text.length > WORKSPACE_MAX_FILE_BYTES) {
-      return {
-        ws,
-        content: null,
-        error: `File '${path}' exceeds the workspace size cap (${Math.round(WORKSPACE_MAX_FILE_BYTES / 1024)} KB).`,
-      };
-    }
-    const wf: WorkspaceFile = {
-      path,
-      content: text,
-      baseContent: text,
-      baseSha: file.sha || null,
-      status: "unchanged",
-      updatedAt: Date.now(),
-    };
-    const next: WorkspaceState = {
-      ...ws,
-      files: { ...ws.files, [path]: wf },
-      updatedAt: Date.now(),
-    };
-    scheduleSave(ws.conversationId, next);
-    return { ws: next, content: text };
+    return { ws: merged.ws, content: merged.ws.files[path]?.content ?? "" };
   } catch (err) {
     return {
       ws,
@@ -190,6 +169,48 @@ export async function readFile(
       error: err instanceof Error ? err.message : "Failed to read the file from GitHub.",
     };
   }
+}
+
+/**
+ * Folds already-fetched file text into the workspace. Pure: no
+ * network, no store. Callers that fetch many files at once (the
+ * preview preloader) fetch in parallel but must MERGE sequentially —
+ * a workspace is a read-modify-write value, so concurrent merges on
+ * one snapshot would silently drop all but the last file.
+ */
+export function mergeFetchedFile(
+  ws: WorkspaceState,
+  path: string,
+  fetched: { text: string | null; sha: string | null; isBinary?: boolean }
+): { ws: WorkspaceState; ok: boolean; error?: string } {
+  // Already loaded (or tombstoned) — nothing to fold in.
+  if (ws.files[path]) return { ws, ok: true };
+  if (fetched.isBinary || fetched.text === null) {
+    return { ws, ok: false, error: `File '${path}' is binary or too large to read.` };
+  }
+  const text = fetched.text;
+  if (text.length > WORKSPACE_MAX_FILE_BYTES) {
+    return {
+      ws,
+      ok: false,
+      error: `File '${path}' exceeds the workspace size cap (${Math.round(WORKSPACE_MAX_FILE_BYTES / 1024)} KB).`,
+    };
+  }
+  const wf: WorkspaceFile = {
+    path,
+    content: text,
+    baseContent: text,
+    baseSha: fetched.sha || null,
+    status: "unchanged",
+    updatedAt: Date.now(),
+  };
+  const next: WorkspaceState = {
+    ...ws,
+    files: { ...ws.files, [path]: wf },
+    updatedAt: Date.now(),
+  };
+  scheduleSave(ws.conversationId, next);
+  return { ws: next, ok: true };
 }
 
 /** True when the file has been loaded locally (no network read needed) */

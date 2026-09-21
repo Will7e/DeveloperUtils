@@ -13,17 +13,12 @@
 //    dies with the page, which is exactly what resume covers.
 //
 // Both drive the SAME HostTurnController state machine and emit the
-// SAME HostEvent stream, so the renderer, tool loop, telemetry, and
-// commit rules are written once.
+// SAME HostEvent stream, so the renderer, tool loop, and commit rules
+// are written once.
 
 import { HostTurnController } from "./host-controller";
 import type { SessionHostClient, StartOutcome } from "./session-client";
-import type {
-  HostCandidate,
-  HostEvent,
-  HostSnapshot,
-  HostStartTurnPayload,
-} from "./protocol";
+import type { HostEvent, HostSnapshot, HostStartTurnPayload } from "./protocol";
 
 export type { StartOutcome };
 
@@ -36,7 +31,6 @@ export interface TurnSource {
   readonly label: "host" | "local";
   startTurn(payload: HostStartTurnPayload): Promise<StartOutcome>;
   subscribe(listener: (event: HostEvent) => void): () => void;
-  sendReroute(turnId: string, candidates: HostCandidate[]): void;
   abortTurn(turnId: string): void;
 }
 
@@ -53,10 +47,6 @@ export class HostTurnSource implements TurnSource {
 
   subscribe(listener: (event: HostEvent) => void): () => void {
     return this.client.subscribe(listener);
-  }
-
-  sendReroute(turnId: string, candidates: HostCandidate[]): void {
-    this.client.sendReroute(turnId, candidates);
   }
 
   abortTurn(turnId: string): void {
@@ -113,10 +103,6 @@ export class LocalTurnSource implements TurnSource {
     return () => {
       this.listeners.delete(listener);
     };
-  }
-
-  sendReroute(turnId: string, candidates: HostCandidate[]): void {
-    this.controller.addCandidates(turnId, candidates);
   }
 
   abortTurn(turnId: string): void {
