@@ -1,13 +1,28 @@
 // ============================================================
-// Chat Sidebar — Conversation List with Search & Management
+// Chat Sidebar — Conversations, Filed Under Their Repository
 // ============================================================
-// Doubles as an off-canvas drawer below 860px (open state is
-// controlled by the page via `open`/`onClose`).
+// Doubles as an off-canvas drawer below 860px (open state is controlled by the
+// page via `open`/`onClose`).
+//
+// The list is grouped by repository because that is what a thread belongs to:
+// the workspace model makes a chat a session on a repo, and a flat list says
+// the opposite. Repeating `acme/web` down eight rows spends the scarce width
+// on the same word, mixes two projects into one recency order, and cannot
+// answer the two questions the user actually has — "what am I working on in
+// this repo?" and "how much of it is not pushed yet?". Both of those are
+// properties of the GROUP, so they live on its header.
+//
+// The rules with a right answer (ordering, the changed-file sum, what search
+// matches) are in ../lib/conversation-groups.ts, where they are tested.
+// ============================================================
 
 import React from "react";
 import {
+  ChevronRight,
   Check,
   Copy,
+  GitBranch,
+  GitFork,
   MessageSquareText,
   Pencil,
   Pin,
@@ -20,7 +35,20 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import type { ChatConversation } from "../types";
+import {
+  conversationMatchesQuery,
+  groupConversationsByRepository,
+  type ConversationGroup,
+  type RepoIdentity,
+} from "../lib/conversation-groups";
+import { formatRelativeTime } from "../lib/relative-time";
+
+/** Where a group header's "new chat here" attaches the new thread */
+export interface RepoSelectionSeed extends RepoIdentity {
+  branch: string;
+}
 
 interface ChatSidebarProps {
   conversations: ChatConversation[];
@@ -31,23 +59,20 @@ interface ChatSidebarProps {
   onClose: () => void;
   onSelect: (id: string) => void;
   onNew: () => void;
+  /**
+   * Start a chat ON this repository, without going through attach-then-switch.
+   *
+   * The whole reason to group by repo is that "another thread about this
+   * project" is the common case. Making the user create a chat and then
+   * re-attach the repo they are already looking at is the friction the
+   * grouping is supposed to remove.
+   */
+  onNewInRepo?: (repo: RepoSelectionSeed) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
   onOpenSettings?: () => void;
-}
-
-function formatRelative(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export function ChatSidebar({
@@ -57,6 +82,7 @@ export function ChatSidebar({
   onClose,
   onSelect,
   onNew,
+  onNewInRepo,
   onRename,
   onDelete,
   onDuplicate,
@@ -67,6 +93,12 @@ export function ChatSidebar({
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
+  /** Collapsed group keys, remembered across reloads — folding a repo away is
+      a statement about how you work, not about this session. */
+  const [collapsedKeys, setCollapsedKeys] = useLocalStorageState<string[]>(
+    "intab_chat_collapsed_repos",
+    []
+  );
 
   // Disarm a pending delete when the pointer leaves that row or the
   // target changes, so the armed state never goes stale.
@@ -76,21 +108,38 @@ export function ChatSidebar({
     return () => window.clearTimeout(t);
   }, [confirmDeleteId]);
 
-  const filtered = React.useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = q
-      ? conversations.filter(
-          (c) =>
-            c.title.toLowerCase().includes(q) ||
-            c.messages.some((m) => m.content.toLowerCase().includes(q))
-        )
+  /**
+   * What a new chat will start from.
+   *
+   * The store hands a new chat the active chat's repository, so the button
+   * that creates one says so. An inherited context that nothing announces is
+   * indistinguishable from a bug when it is wrong, and from nothing at all
+   * when it is right.
+   */
+  const inheritedRepo = React.useMemo(
+    () => conversations.find((c) => c.id === activeId)?.repoContext,
+    [conversations, activeId]
+  );
+
+  const searching = query.trim().length > 0;
+
+  const groups = React.useMemo(() => {
+    const list = searching
+      ? conversations.filter((c) => conversationMatchesQuery(c, query))
       : conversations;
-    // Pinned first, then by recency
-    return [...list].sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return b.updatedAt - a.updatedAt;
-    });
-  }, [conversations, query]);
+    return groupConversationsByRepository(list);
+  }, [conversations, query, searching]);
+
+  const matchedCount = React.useMemo(
+    () => groups.reduce((sum, group) => sum + group.conversations.length, 0),
+    [groups]
+  );
+
+  const toggleGroup = (key: string) => {
+    setCollapsedKeys((keys) =>
+      keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]
+    );
+  };
 
   const startRename = (conv: ChatConversation) => {
     setRenamingId(conv.id);
@@ -114,6 +163,174 @@ export function ChatSidebar({
     }
   };
 
+  const renderRow = (conv: ChatConversation, group: ConversationGroup) => {
+    const isActive = conv.id === activeId;
+    const isRenaming = conv.id === renamingId;
+    const isConfirmingDelete = conv.id === confirmDeleteId;
+    const lastMessage = conv.messages[conv.messages.length - 1];
+    const preview =
+      lastMessage && lastMessage.compactedFrom === undefined
+        ? lastMessage.content.slice(0, 60)
+        : "";
+    // Inside a repo group the repo name is on the header, so the row spends
+    // its width on the branch instead — and only when this repo's threads are
+    // not all on the same one, which is the case where the branch tells you
+    // something.
+    const showBranch = group.branches.length > 1 && conv.repoContext?.branch;
+
+    return (
+      <div
+        key={conv.id}
+        className={cn("chat-conv-item", isActive && "chat-conv-item-active")}
+        onClick={() => !isRenaming && onSelect(conv.id)}
+        role="button"
+        tabIndex={0}
+        aria-current={isActive ? "true" : undefined}
+        onKeyDown={(e) => {
+          if (isRenaming) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect(conv.id);
+          }
+        }}
+      >
+        {isRenaming ? (
+          <div className="chat-conv-rename">
+            <input
+              type="text"
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setRenamingId(null);
+              }}
+              onBlur={commitRename}
+              className="chat-conv-rename-input"
+              aria-label="Conversation name"
+            />
+            <button
+              type="button"
+              className="chat-conv-action"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                commitRename();
+              }}
+              aria-label="Confirm rename"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="chat-conv-item-content">
+              <div className="chat-conv-item-top">
+                <span className="chat-conv-item-title">{conv.title}</span>
+                <span className="chat-conv-item-time">
+                  {formatRelativeTime(conv.updatedAt)}
+                </span>
+              </div>
+              {(showBranch || conv.pendingChanges) && (
+                <div className="chat-conv-item-repo">
+                  {showBranch && (
+                    <span className="chat-conv-item-repo-chip">
+                      <GitBranch className="h-3 w-3" aria-hidden="true" />
+                      <span className="chat-conv-item-repo-name">
+                        {conv.repoContext!.branch}
+                      </span>
+                    </span>
+                  )}
+                  {/* Which of the group's threads is holding the unreleased
+                      work. The header totals it; this says where it is. */}
+                  {conv.pendingChanges ? (
+                    <span
+                      className="chat-conv-item-changes"
+                      title={`${conv.pendingChanges} file${conv.pendingChanges === 1 ? "" : "s"} changed in this chat's workspace, not yet pushed`}
+                    >
+                      {conv.pendingChanges} changed
+                    </span>
+                  ) : null}
+                </div>
+              )}
+              {preview && <div className="chat-conv-item-preview">{preview}</div>}
+            </div>
+            <div className="chat-conv-item-actions">
+              <SimpleTooltip content={conv.pinned ? "Unpin" : "Pin"} side="top">
+                <button
+                  type="button"
+                  className="chat-conv-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePin(conv.id);
+                  }}
+                  aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
+                >
+                  {conv.pinned ? (
+                    <PinOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Pin className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip content="Rename" side="top">
+                <button
+                  type="button"
+                  className="chat-conv-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startRename(conv);
+                  }}
+                  aria-label="Rename conversation"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip content="Duplicate" side="top">
+                <button
+                  type="button"
+                  className="chat-conv-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDuplicate(conv.id);
+                  }}
+                  aria-label="Duplicate conversation"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip
+                content={isConfirmingDelete ? "Click again to delete" : "Delete"}
+                side="top"
+              >
+                <button
+                  type="button"
+                  className={cn(
+                    "chat-conv-action chat-conv-action-danger",
+                    isConfirmingDelete && "chat-conv-action-confirm"
+                  )}
+                  onMouseLeave={() => setConfirmDeleteId((id) => (id === conv.id ? null : id))}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(conv.id);
+                  }}
+                  aria-label={
+                    isConfirmingDelete
+                      ? "Click again to confirm delete"
+                      : "Delete conversation"
+                  }
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </SimpleTooltip>
+            </div>
+            {conv.pinned && <div className="chat-conv-pin-dot" />}
+          </>
+        )}
+      </div>
+    );
+  };
+
   return (
     <>
       {/* Scrim only exists under 860px (display: none above) */}
@@ -132,7 +349,15 @@ export function ChatSidebar({
             <MessageSquareText className="h-4 w-4" />
             <span>Chats</span>
           </div>
-          <SimpleTooltip content="New chat" shortcut="⌘⇧N" side="bottom">
+          <SimpleTooltip
+            content={
+              inheritedRepo
+                ? `New chat in ${inheritedRepo.owner}/${inheritedRepo.repo}`
+                : "New chat"
+            }
+            shortcut="⌘⇧N"
+            side="bottom"
+          >
             <button
               type="button"
               className="chat-sidebar-new-btn"
@@ -150,8 +375,9 @@ export function ChatSidebar({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search chats…"
+            placeholder="Search chats, repos, branches…"
             className="chat-sidebar-search-input"
+            aria-label="Search chats by title, message, repository or branch"
           />
           {query && (
             <button
@@ -166,11 +392,12 @@ export function ChatSidebar({
         </div>
 
         <div className="chat-sidebar-list">
-          {filtered.length === 0 && (
+          {matchedCount === 0 && (
             <div className="chat-sidebar-empty">
-              {query ? (
+              {searching ? (
                 <>
-                  No chats match <strong>“{query}”</strong>.
+                  Nothing matches <strong>“{query}”</strong> — not a chat title, a
+                  message, a repository or a branch.
                 </>
               ) : (
                 "No chats yet — start one!"
@@ -178,148 +405,120 @@ export function ChatSidebar({
             </div>
           )}
 
-          {filtered.map((conv) => {
-            const isActive = conv.id === activeId;
-            const isRenaming = conv.id === renamingId;
-            const isConfirmingDelete = conv.id === confirmDeleteId;
-            const lastMessage = conv.messages[conv.messages.length - 1];
-            const preview =
-              lastMessage && lastMessage.compactedFrom === undefined
-                ? lastMessage.content.slice(0, 60)
-                : "";
+          {groups.map((group) => {
+            // A fold folds. The group holding the active thread is NOT exempt:
+            // clicking a header and having nothing happen is worse than the
+            // outcome it was guarding against (the thread is still on screen
+            // to the right), and rule-excepted controls are how a UI stops
+            // being predictable. A search hit is the one thing that must never
+            // hide behind a fold.
+            const collapsed = !searching && collapsedKeys.includes(group.key);
 
             return (
-              <div
-                key={conv.id}
-                className={cn("chat-conv-item", isActive && "chat-conv-item-active")}
-                onClick={() => !isRenaming && onSelect(conv.id)}
-                role="button"
-                tabIndex={0}
-                aria-current={isActive ? "true" : undefined}
-                onKeyDown={(e) => {
-                  if (isRenaming) return;
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelect(conv.id);
-                  }
-                }}
+              <section
+                key={group.key}
+                className="chat-repo-group"
+                aria-label={group.label}
               >
-                {isRenaming ? (
-                  <div className="chat-conv-rename">
-                    <input
-                      type="text"
-                      autoFocus
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitRename();
-                        if (e.key === "Escape") setRenamingId(null);
-                      }}
-                      onBlur={commitRename}
-                      className="chat-conv-rename-input"
-                      aria-label="Conversation name"
-                    />
-                    <button
-                      type="button"
-                      className="chat-conv-action"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        commitRename();
-                      }}
-                      aria-label="Confirm rename"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="chat-conv-item-content">
-                      <div className="chat-conv-item-top">
-                        <span className="chat-conv-item-title">{conv.title}</span>
-                        <span className="chat-conv-item-time">
-                          {formatRelative(conv.updatedAt)}
-                        </span>
-                      </div>
-                      {preview && (
-                        <div className="chat-conv-item-preview">{preview}</div>
+                <div className="chat-repo-group-header">
+                  <button
+                    type="button"
+                    className="chat-repo-group-toggle"
+                    onClick={() => toggleGroup(group.key)}
+                    aria-expanded={!collapsed}
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-3 w-3 chat-repo-group-chevron",
+                        !collapsed && "chat-repo-group-chevron-open"
                       )}
-                    </div>
-                    <div className="chat-conv-item-actions">
-                      <SimpleTooltip content={conv.pinned ? "Unpin" : "Pin"} side="top">
-                        <button
-                          type="button"
-                          className="chat-conv-action"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTogglePin(conv.id);
-                          }}
-                          aria-label={conv.pinned ? "Unpin conversation" : "Pin conversation"}
-                        >
-                          {conv.pinned ? (
-                            <PinOff className="h-3.5 w-3.5" />
-                          ) : (
-                            <Pin className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </SimpleTooltip>
-                      <SimpleTooltip content="Rename" side="top">
-                        <button
-                          type="button"
-                          className="chat-conv-action"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startRename(conv);
-                          }}
-                          aria-label="Rename conversation"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                      </SimpleTooltip>
-                      <SimpleTooltip content="Duplicate" side="top">
-                        <button
-                          type="button"
-                          className="chat-conv-action"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDuplicate(conv.id);
-                          }}
-                          aria-label="Duplicate conversation"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </button>
-                      </SimpleTooltip>
-                      <SimpleTooltip
-                        content={isConfirmingDelete ? "Click again to delete" : "Delete"}
-                        side="top"
+                      aria-hidden="true"
+                    />
+                    {group.repo ? (
+                      <GitFork className="h-3.5 w-3.5 chat-repo-group-icon" aria-hidden="true" />
+                    ) : (
+                      <MessageSquareText
+                        className="h-3.5 w-3.5 chat-repo-group-icon"
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span
+                      className={cn(
+                        "chat-repo-group-name",
+                        !group.repo && "chat-repo-group-name-muted"
+                      )}
+                      // The branches live here rather than as their own chip.
+                      // A sidebar is ~265px wide: one branch chip plus the
+                      // changed pill left room for `acme…`, and the repository
+                      // NAME is what this header is for. Rows still carry the
+                      // branch, but only when there is more than one to tell
+                      // apart — which is the case where it says anything.
+                      title={
+                        group.repo
+                          ? `${group.label}${
+                              group.branches.length === 1
+                                ? ` @ ${group.branches[0]}`
+                                : group.branches.length > 1
+                                  ? ` — threads on ${group.branches.join(", ")}`
+                                  : ""
+                            }`
+                          : "Chats with no repository attached"
+                      }
+                    >
+                      {group.label}
+                    </span>
+                    {/* The repo's work in flight, across every thread on it,
+                        which is the number a per-repo header exists to show.
+                        Spelled the way the rows spell it — a bare `5` in this
+                        position reads as a count of something, and the number
+                        of what is the only thing that makes it useful. */}
+                    {group.pendingChanges > 0 && (
+                      <span
+                        className="chat-repo-group-changes"
+                        title={`${group.pendingChanges} changed file${
+                          group.pendingChanges === 1 ? "" : "s"
+                        } across ${group.conversations.length} chat${
+                          group.conversations.length === 1 ? "" : "s"
+                        } on ${group.label}, not yet pushed`}
                       >
-                        <button
-                          type="button"
-                          className={cn(
-                            "chat-conv-action chat-conv-action-danger",
-                            isConfirmingDelete && "chat-conv-action-confirm"
-                          )}
-                          onMouseLeave={() =>
-                            setConfirmDeleteId((id) => (id === conv.id ? null : id))
-                          }
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(conv.id);
-                          }}
-                          aria-label={
-                            isConfirmingDelete
-                              ? "Click again to confirm delete"
-                              : "Delete conversation"
-                          }
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </SimpleTooltip>
-                    </div>
-                    {conv.pinned && <div className="chat-conv-pin-dot" />}
-                  </>
+                        {group.pendingChanges} changed
+                      </span>
+                    )}
+                    {/* How many threads are inside — but only while the group
+                        is folded. Expanded, the rows below say it. */}
+                    {collapsed && (
+                      <span className="chat-repo-group-count">
+                        {group.conversations.length} chat
+                        {group.conversations.length === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </button>
+                  {group.repo && onNewInRepo && (
+                    <SimpleTooltip content={`New chat in ${group.label}`} side="left">
+                      <button
+                        type="button"
+                        className="chat-repo-group-new"
+                        onClick={() =>
+                          onNewInRepo({
+                            owner: group.repo!.owner,
+                            repo: group.repo!.repo,
+                            branch: group.branches[0] ?? "main",
+                          })
+                        }
+                        aria-label={`New chat in ${group.label}`}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </SimpleTooltip>
+                  )}
+                </div>
+
+                {!collapsed && (
+                  <div className="chat-repo-group-body">
+                    {group.conversations.map((conv) => renderRow(conv, group))}
+                  </div>
                 )}
-              </div>
+              </section>
             );
           })}
         </div>

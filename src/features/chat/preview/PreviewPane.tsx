@@ -29,7 +29,7 @@ import { useChatStore } from "@/stores/chat.store";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { runPreviewBuild } from "./preview-runtime";
 import { setPreviewCss } from "./preview-bridge";
-import { isHostedPreviewUrl, releaseLivePreview } from "./host/preview-host-client";
+import { isHostedPreviewUrl } from "./host/preview-host-client";
 
 interface PreviewPaneProps {
   onClose: () => void;
@@ -76,6 +76,8 @@ export const PreviewPane = React.memo(function PreviewPane({
   const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
   const [frameKey, setFrameKey] = React.useState(0);
   const mountedJsHash = React.useRef<string | null>(null);
+  /** The conversation the FRAME currently shows (see the remount rule) */
+  const mountedFor = React.useRef<string | null>(null);
 
   // Effect-log undo: enabled while the active conversation's
   // workspace has at least one restorable agent mutation.
@@ -125,6 +127,19 @@ export const PreviewPane = React.memo(function PreviewPane({
     const hostedUrl = isHostedPreviewUrl(url) ? url : null;
 
     const mounted = mountedJsHash.current;
+    // A DIFFERENT CONVERSATION is a different document, even when the JS
+    // hash matches — two chats can be on the same app. Comparing only the
+    // hash meant that switching threads left the previous thread's app
+    // mounted, which with a per-thread cache is now the common case rather
+    // than an edge one.
+    if (mountedFor.current !== conversationId) {
+      mountedFor.current = conversationId;
+      mountedJsHash.current = jsHash;
+      setFrameDoc(html);
+      setFrameUrl(hostedUrl);
+      setFrameKey((k) => k + 1);
+      return;
+    }
     if (mounted === null) {
       mountedJsHash.current = jsHash;
       setFrameDoc(html);
@@ -141,11 +156,15 @@ export const PreviewPane = React.memo(function PreviewPane({
     }
     // Same JS: a stylesheet-only change. Swap it into the live document.
     void setPreviewCss(css);
-  }, [status, html, jsHash, css, autoUpdate, url]);
+  }, [status, html, jsHash, css, autoUpdate, url, conversationId]);
 
-  // Closing the pane drops the published document: it is a readable copy of
-  // the user's source, and it should not outlive the thing that asked for it.
-  React.useEffect(() => () => releaseLivePreview(), []);
+  // Closing the pane no longer releases the published document, and that is
+  // deliberate: builds are cached PER CONVERSATION now, so reopening the pane
+  // reuses the build it already has — releasing on unmount would leave that
+  // cached URL pointing at a document the host had thrown away, and the frame
+  // would come back as a 404. Each thread's rebuild releases its own
+  // predecessor, and the host evicts the oldest previews past its limit, so
+  // nothing accumulates.
 
   const consoleErrors = consoleEntries.filter((e) => e.level === "error").length;
   const shouldAutoOpen = status === "error" && diagnostics.length > 0;

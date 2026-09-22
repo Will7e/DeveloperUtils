@@ -38,6 +38,9 @@ export async function ensureWorkspaceReady(conversationId: string): Promise<void
   if (isPreviewSupported() && detectEntry(ws)) {
     void runPreviewBuild(ws);
   } else if (!detectEntry(ws)) {
-    preview.setStatus("idle");
+    // Owned, like every other preview result: a repo with no UI (an API, a
+    // backend) says "idle" for ITS thread, and does not blank the badge of a
+    // thread that has a perfectly good app on screen.
+    preview.setStatus("idle", conversationId);
   }
 }

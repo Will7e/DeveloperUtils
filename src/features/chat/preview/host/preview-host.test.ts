@@ -26,6 +26,8 @@ import {
   isAllowedPublisher,
   newPreviewId,
   previewDocumentPolicy,
+  previewIdFromHostHeader,
+  previewOrigin,
   previewPath,
 } from "./preview-host";
 import type { PreviewHost, PreviewHostRequest } from "./preview-host";
@@ -306,6 +308,96 @@ describe("preview host — the served document", () => {
   });
 });
 
+describe("preview host — one origin per preview", () => {
+  // The reported problem: two chats, two repositories, one pane each — and
+  // both showed the same app, because every preview was served from the
+  // host's root and the newest build answered every frame.
+  it("routes by the Host header, so two previews are two apps", () => {
+    const host = createPreviewHost();
+    const first = JSON.parse(publishTo(host, "<html>first</html>").body) as { id: string };
+    const second = JSON.parse(publishTo(host, "<html>second</html>").body) as { id: string };
+    const at = (id: string) => ({ host: `${id}.localhost:5174` });
+
+    expect(handlePreviewRequest(request({ path: "/", headers: at(first.id) }), host).body).toBe(
+      "<html>first</html>"
+    );
+    expect(handlePreviewRequest(request({ path: "/", headers: at(second.id) }), host).body).toBe(
+      "<html>second</html>"
+    );
+    // A client route is the app's own route on ITS origin, and a path naming
+    // a file is still an honest 404 rather than HTML.
+    expect(
+      handlePreviewRequest(request({ path: "/lunch", headers: at(first.id) }), host).body
+    ).toBe("<html>first</html>");
+    expect(
+      handlePreviewRequest(request({ path: "/logo.png", headers: at(first.id) }), host).status
+    ).toBe(404);
+  });
+
+  it("keeps the control endpoints off a preview's own origin", () => {
+    // The preview is the user's own code. The surface that accepts writes is
+    // not something it should be able to reach at all.
+    const host = createPreviewHost();
+    const id = publishAndReadId(host);
+    const response = handlePreviewRequest(
+      request({
+        method: "POST",
+        path: "/publish",
+        headers: { host: `${id}.localhost:5174`, origin: APP_ORIGIN },
+        body: DOCUMENT,
+      }),
+      host
+    );
+    expect(response.status).toBe(405);
+    expect(host.previews.size).toBe(1);
+  });
+
+  it("names a preview it no longer holds, rather than serving another one", () => {
+    // A frame left pointing at an evicted build must not silently receive
+    // somebody else's document — that is how a preview reads as "showing the
+    // wrong app" instead of "rebuild me".
+    const host = createPreviewHost({ maxPreviews: 1 });
+    const evicted = publishAndReadId(host);
+    publishAndReadId(host);
+    const response = handlePreviewRequest(
+      request({ path: "/", headers: { host: `${evicted}.localhost:5174` } }),
+      host
+    );
+    expect(response.status).toBe(404);
+    expect(response.body).toContain("rebuild from the preview pane");
+  });
+});
+
+describe("preview origins", () => {
+  it("is a subdomain, on a name the resolver already treats as loopback", () => {
+    const id = "a".repeat(32);
+    // `127.0.0.1` cannot have subdomains — only the NAME `localhost` is
+    // special-cased, by the resolver and by the browser's secure-context
+    // rules — so the label is rewritten rather than reused. `<id>.127.0.0.1`
+    // does not resolve at all.
+    expect(previewOrigin("http://127.0.0.1:5174", id)).toBe(`http://${id}.localhost:5174`);
+    expect(previewOrigin("http://localhost:5174", id)).toBe(`http://${id}.localhost:5174`);
+    // A deployed host needs wildcard DNS and a wildcard certificate for this.
+    expect(previewOrigin("https://preview.example.dev", id)).toBe(
+      `https://${id}.preview.example.dev`
+    );
+    // A label that is not an id is never pasted into a hostname.
+    expect(previewOrigin("http://127.0.0.1:5174", "not-an-id")).toBe("http://127.0.0.1:5174");
+  });
+
+  it("reads the preview id out of a Host header, and only an id", () => {
+    const id = "b".repeat(32);
+    expect(previewIdFromHostHeader(`${id}.localhost:5174`)).toBe(id);
+    expect(previewIdFromHostHeader(`${id}.localhost`)).toBe(id);
+    // The host's own origin carries no id, which is what keeps the control
+    // endpoints reachable there and nowhere else.
+    expect(previewIdFromHostHeader("127.0.0.1:5174")).toBeNull();
+    expect(previewIdFromHostHeader("localhost:5174")).toBeNull();
+    expect(previewIdFromHostHeader("[::1]:5174")).toBeNull();
+    expect(previewIdFromHostHeader(undefined)).toBeNull();
+  });
+});
+
 describe("preview ids", () => {
   it("are 128 bits of hex and do not repeat", () => {
     const ids = new Set(Array.from({ length: 64 }, () => newPreviewId()));
@@ -448,10 +540,11 @@ describe("preview host client — publishing a build", () => {
     const outcome = await publishPreviewDocument(DOCUMENT, { fetchImpl });
     expect(outcome.hosted).toEqual({
       id: "b".repeat(32),
-      // The root, because that is the URL a router-based app needs (see the
-      // host's root-serving comment).
-      url: "http://127.0.0.1:5174/",
-      origin: "http://127.0.0.1:5174",
+      // The preview's OWN origin, at its root: a router-based app needs the
+      // root (see previewOrigin), and an origin no other preview shares is
+      // what lets two chats show two apps at once.
+      url: `http://${"b".repeat(32)}.localhost:5174/`,
+      origin: `http://${"b".repeat(32)}.localhost:5174`,
     });
     expect(outcome.notice).toContain("its own origin");
     expect(isHostedPreviewUrl(outcome.hosted?.url)).toBe(true);
@@ -479,6 +572,30 @@ describe("preview host client — publishing a build", () => {
     const deleted = calls.filter((c) => c.init.method === "DELETE");
     expect(deleted).toHaveLength(1);
     expect(deleted[0]!.url).toContain(`/p/${String(0).padStart(32, "0")}`);
+  });
+
+  it("gives each chat its own preview origin, and releases only its own", async () => {
+    vi.stubEnv("VITE_PREVIEW_ORIGIN", "http://127.0.0.1:5174");
+    let next = 0;
+    const { calls, fetchImpl } = recorder((url) => {
+      if (url.endsWith("/health")) return responding(200, { ok: true });
+      const id = String(next++).padStart(32, "0");
+      return responding(200, { ok: true, id, path: previewPath(id) });
+    });
+
+    const a = await publishPreviewDocument(DOCUMENT, { fetchImpl, key: "chat-a" });
+    const b = await publishPreviewDocument(DOCUMENT, { fetchImpl, key: "chat-b" });
+    expect(a.hosted?.url).toBe(`http://${"0".repeat(32)}.localhost:5174/`);
+    expect(b.hosted?.url).toBe(`http://${String(1).padStart(32, "0")}.localhost:5174/`);
+
+    // Rebuilding chat A releases A's previous document and nothing else:
+    // chat B is still framed and still on screen.
+    await publishPreviewDocument("<html>a2</html>", { fetchImpl, key: "chat-a" });
+    const deleted = calls.filter((c) => c.init.method === "DELETE").map((c) => c.url);
+    expect(deleted).toHaveLength(1);
+    // …and the DELETE is addressed to the HOST, not to the preview's origin,
+    // which answers GET only.
+    expect(deleted[0]).toBe(`http://127.0.0.1:5174/p/${"0".repeat(32)}`);
   });
 
   it("falls back to the inline document with a reason, never silently", async () => {
@@ -556,9 +673,11 @@ describe("preview host client — finding the host the dev server started", () =
     });
 
     const outcome = await publishPreviewDocument(DOCUMENT, { fetchImpl });
+    const id = "c".repeat(32);
     expect(calls[0]!.url).toBe(PREVIEW_HOST_DISCOVERY_PATH);
-    expect(outcome.hosted?.origin).toBe("http://127.0.0.1:5177");
-    expect(outcome.hosted?.url).toBe("http://127.0.0.1:5177/");
+    // The discovered host's own port is what the preview's origin carries.
+    expect(outcome.hosted?.origin).toBe(`http://${id}.localhost:5177`);
+    expect(outcome.hosted?.url).toBe(`http://${id}.localhost:5177/`);
   });
 
   it("keeps the discovered port for the session, so it costs one request", async () => {
@@ -599,8 +718,11 @@ describe("preview host client — finding the host the dev server started", () =
 
     resetPreviewHostClient();
     const outcome = await publishPreviewDocument(DOCUMENT, { fetchImpl });
-    expect(outcome.hosted?.origin).toBe(DEFAULT_PREVIEW_HOST_ORIGIN);
+    // The host is talked to at its own origin, and framed at the preview's.
     expect(calls.some((c) => c.url === `${DEFAULT_PREVIEW_HOST_ORIGIN}/health`)).toBe(true);
+    expect(outcome.hosted?.origin).toBe(
+      `http://${"f".repeat(32)}.localhost:5174`
+    );
   });
 
   it("passes on the dev server's own reason when its host could not start", async () => {

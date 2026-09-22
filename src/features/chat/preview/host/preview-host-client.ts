@@ -31,7 +31,7 @@
 // ============================================================
 
 /** Where a locally-run host listens unless told otherwise */
-import { PREVIEW_HOST_DISCOVERY_PATH } from "./preview-host";
+import { PREVIEW_HOST_DISCOVERY_PATH, previewOrigin } from "./preview-host";
 
 /** Where a locally-run host listens unless told otherwise */
 export const DEFAULT_PREVIEW_HOST_ORIGIN = "http://127.0.0.1:5174";
@@ -82,6 +82,16 @@ export interface PreviewHostDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   now?: () => number;
+  /**
+   * Who this publish belongs to — a conversation id.
+   *
+   * Previews are per-thread, so releasing is per-thread: publishing thread
+   * B's build used to drop the id of thread A's, which is still framed and
+   * still being looked at, leaving it a 404 in a pane that reported a
+   * successful build. The same singleton mistake as the store's build slot,
+   * one layer down.
+   */
+  key?: string;
 }
 
 /**
@@ -147,7 +157,20 @@ const probeResults = new Map<string, { ok: boolean; at: number }>();
 const discoveryResults = new Map<string, { value: PreviewHostDiscovery; at: number }>();
 /** Probes in flight, so concurrent rebuilds share one attempt */
 const probeInFlight = new Map<string, Promise<boolean>>();
-let livePreview: { origin: string; id: string } | null = null;
+/**
+ * The preview each publisher currently has live, by key.
+ *
+ * A map, not a slot. One slot meant the second preview published erased the
+ * first one's record — and, far worse, rebuilding thread B deleted thread A's
+ * document from the host while thread A's frame was still showing it. The
+ * same singleton the store's build slot had, one layer down.
+ *
+ * `host` is the origin to talk to (its `/publish`, `/p/<id>` endpoints);
+ * `url` is the preview's own origin, which is where the frame points. They
+ * are different origins on purpose, and conflating them would send a DELETE
+ * to the preview instead of the host.
+ */
+const livePreviews = new Map<string, { host: string; id: string; url: string }>();
 /** The last notice handed to the caller, so the console is not spammed */
 let lastNotice: string | null = null;
 
@@ -156,7 +179,7 @@ export function resetPreviewHostClient(): void {
   probeResults.clear();
   probeInFlight.clear();
   discoveryResults.clear();
-  livePreview = null;
+  livePreviews.clear();
   lastNotice = null;
 }
 
@@ -357,20 +380,24 @@ export async function publishPreviewDocument(
     return { hosted: null, notice: `${origin} returned no preview id — serving this build inline instead.` };
   }
 
-  const previous = livePreview;
-  livePreview = { origin, id: payload.id };
-  if (previous && previous.id !== payload.id) void releasePreview(previous.origin, previous.id, deps);
+  // The preview's OWN origin, at its root: `<id>.localhost:<port>/`. A
+  // router-based app reads `location.pathname`, so the document has to be
+  // served as the app's own home page (serving it at `/p/<id>/` failed every
+  // route any app has), and it has to be an origin no other preview shares
+  // (serving every preview at the host's root meant the newest build answered
+  // every frame, so two chats showed the same app).
+  const previewUrl = `${previewOrigin(origin, payload.id)}/`;
+  const key = deps.key ?? "default";
+  const previous = livePreviews.get(key);
+  livePreviews.set(key, { host: origin, id: payload.id, url: previewUrl });
+  if (previous && previous.id !== payload.id) void releasePreview(previous.host, previous.id, deps);
 
   return {
-    // The ORIGIN ROOT, not `/p/<id>/`. A router-based app reads
-    // `location.pathname`, so the document has to be served as the app's own
-    // home page — any other path fails every route it has (and in the srcdoc
-    // fallback the path is literally "srcdoc"). The host answers the root and
-    // any client route with the newest build, exactly like a dev server.
-    hosted: { id: payload.id, url: `${origin}/`, origin },
+    hosted: { id: payload.id, url: previewUrl, origin: new URL(previewUrl).origin },
     notice:
-      `Serving this preview from ${origin} — its own origin, so localStorage, cookies, ` +
-      "IndexedDB and Web Locks work natively and the app's storage is out of reach.",
+      `Serving this preview from its own origin on ${origin} — so localStorage, cookies, ` +
+      "IndexedDB and Web Locks work natively, the app's storage is out of reach, and " +
+      "another chat's preview cannot displace this one.",
   };
 }
 
@@ -391,15 +418,28 @@ export async function releasePreview(
   } catch {
     // A host that has gone away has already released it.
   }
-  if (livePreview?.id === id) livePreview = null;
+  for (const [key, live] of livePreviews) {
+    if (live.id === id) livePreviews.delete(key);
+  }
 }
 
-/** Releases whatever this session last published (pane unmount) */
+/**
+ * Releases the live preview of one publisher, or all of them.
+ *
+ * Prefer a key: previews are cached per thread and the pane can be unmounted
+ * while another thread's build is on screen, so "release everything" is only
+ * right when the whole app is going away.
+ */
 export function releaseLivePreview(deps: PreviewHostDeps = {}): void {
-  if (!livePreview) return;
-  const current = livePreview;
-  livePreview = null;
-  void releasePreview(current.origin, current.id, deps);
+  const key = deps.key;
+  const entries = key
+    ? ([[key, livePreviews.get(key)]] as const)
+    : ([...livePreviews.entries()] as const);
+  for (const [k, live] of entries) {
+    if (!live) continue;
+    livePreviews.delete(k);
+    void releasePreview(live.host, live.id, deps);
+  }
 }
 
 /**

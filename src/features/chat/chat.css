@@ -188,6 +188,140 @@
   line-height: 1.5;
 }
 
+/* ── Repository groups ───────────────────────────────────────
+   The list is filed by repository, because that is what a thread belongs to.
+   The header carries what belongs to the REPO rather than to any one chat:
+   how many threads, which branches, and how many changed files are in flight
+   across all of them. Repeating the repo name on every row spent the width on
+   the same word eight times and still could not answer any of that. */
+.chat-repo-group {
+  margin-bottom: 2px;
+}
+
+.chat-repo-group-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.chat-repo-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 6px 6px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-repo-group-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-2);
+}
+
+.chat-repo-group-chevron {
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+
+.chat-repo-group-chevron-open {
+  transform: rotate(90deg);
+}
+
+.chat-repo-group-icon {
+  flex-shrink: 0;
+  color: var(--blue);
+}
+
+.chat-repo-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.chat-repo-group-name-muted {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.chat-repo-group-branch {
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+/* The repo's work in flight. Blue and numeric, like the per-row pill, so the
+   header total and the row counts read as the same measurement. */
+.chat-repo-group-changes {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  color: var(--blue);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-repo-group-count {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.chat-repo-group-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+/* Revealed on hover or focus, so the header stays a label until you want it to
+   be a control — and stays reachable by keyboard, not just by mouse. */
+.chat-repo-group-header:hover .chat-repo-group-new,
+.chat-repo-group-new:focus-visible {
+  opacity: 1;
+}
+
+.chat-repo-group-new:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.chat-repo-group-body {
+  padding-left: 6px;
+  border-left: 1px solid var(--border-1);
+  margin-left: 9px;
+}
+
 .chat-conv-item {
   position: relative;
   display: flex;
@@ -248,6 +382,43 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Which repository this chat works on, and how much is unreleased there.
+   A workspace belongs to a chat AND a repo, so a list without this cannot
+   distinguish two threads on two projects — or remind anyone that one of
+   them has unsaved work in it. */
+.chat-conv-item-repo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  min-width: 0;
+}
+
+.chat-conv-item-repo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.chat-conv-item-repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-conv-item-changes {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  color: var(--blue);
+  font-family: var(--font-mono);
 }
 
 .chat-conv-item-actions {
@@ -3176,9 +3347,33 @@ html body .intab-tooltip.chat-ctx-card > span {
   flex-shrink: 0;
 }
 
-.chat-repo-item-check {
+/* Where the keyboard cursor is. A listbox the user can arrow through has to
+   show the cursor, or the arrow keys read as broken. */
+.chat-repo-item-active {
+  background: var(--bg-3);
+}
+
+/* The row for the repository this chat is already on — which is now also the
+   row you click to LEAVE, because the chip's name opens this menu. */
+.chat-repo-item-attached .chat-repo-item-name {
+  font-weight: 600;
+}
+
+.chat-repo-item-attached-tag {
+  display: inline-flex;
+  align-items: center;
   color: var(--blue);
   flex-shrink: 0;
+}
+
+/* How stale the repo is. The list arrives sorted by last push, and a sort
+   order nobody can see is indistinguishable from no order at all. */
+.chat-repo-item-when {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-repo-empty {
@@ -3186,6 +3381,40 @@ html body .intab-tooltip.chat-ctx-card > span {
   font-size: 12px;
   color: var(--text-3);
   text-align: center;
+}
+
+/* A failed load says so where the list would be, instead of claiming to still
+   be loading forever. */
+.chat-repo-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--red);
+}
+
+.chat-repo-retry {
+  padding: 4px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.chat-repo-retry:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+/* Why the list is shorter than the account says it is. */
+.chat-repo-footer {
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-1);
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--bg-2);
 }
 
 /* ── Attached-repo chip ── */
@@ -3214,6 +3443,33 @@ html body .intab-tooltip.chat-ctx-card > span {
   font-weight: 600;
 }
 
+/* The chip's name is the trigger that SWITCHES repositories.
+   It used to be inert text, so changing repo meant detach and then attach:
+   two decisions, and a detach notice about work you were not trying to drop. */
+.chat-repo-chip-name-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 2px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-repo-chip-name-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+
+.chat-repo-picker-attached {
+  max-width: 100%;
+}
+
 .chat-repo-chip-btn {
   display: inline-flex;
   align-items: center;
@@ -3231,6 +3487,20 @@ html body .intab-tooltip.chat-ctx-card > span {
 .chat-repo-chip-btn:hover {
   background: var(--bg-3);
   color: var(--text-1);
+}
+
+/* The workspace's own summary, in the header chip where the repo is changed.
+   The picker can swap a repository without a dialog precisely because nothing
+   is lost — and this is the number that says what there is to lose. */
+.chat-repo-chip-changes {
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  color: var(--blue);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 /* ── Tool activity block (transcript) ── */

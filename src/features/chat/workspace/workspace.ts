@@ -16,7 +16,13 @@ import {
   WORKSPACE_SAVE_DEBOUNCE_MS,
 } from "../constants";
 import { recordDelete, recordWrite } from "./undo";
-import { getRepoTree, readFileContent } from "../lib/github-client";
+import { readFileContent } from "../lib/github-client";
+import {
+  getRepoBaseFile,
+  getRepoBaseTree,
+  rememberRepoBaseFile,
+  type RepoIdentity,
+} from "./repo-base";
 import type {
   WorkspaceFile,
   WorkspaceFileStatus,
@@ -26,6 +32,24 @@ import type {
 import { readValue, writeValue } from "@/services/idb-storage.service";
 
 const IDB_KEY_PREFIX = "intab_workspace_";
+const IDB_INDEX_PREFIX = "intab_workspace_index_";
+
+/**
+ * The key a workspace is PERSISTED under.
+ *
+ * `(conversation, repo@branch)`, not `conversation` alone. The key used to be
+ * the conversation id, so attaching a second repository to a chat wrote over
+ * the first one's record on the next save — silently discarding whatever was
+ * uncommitted there. The workspace is the working copy OF A REPO, so the repo
+ * belongs in its identity; with it, going back to the earlier repo restores
+ * that work instead of losing it.
+ */
+export function workspaceRecordKey(
+  conversationId: string,
+  repo: { owner: string; repo: string; branch: string }
+): string {
+  return `${IDB_KEY_PREFIX}${conversationId}__${repo.owner}__${repo.repo}__${repo.branch}`;
+}
 
 // ── Creation & hydration ─────────────────────────────────────
 
@@ -50,32 +74,69 @@ export function createWorkspace(
   };
 }
 
-/** Loads the repo tree into the workspace (structure only) */
+/**
+ * Loads the repo tree into the workspace (structure only).
+ *
+ * Through the shared repo base (see ./repo-base): the tree is a fact about
+ * the REPOSITORY, identical for every chat on it, so the second chat pays
+ * nothing for it. A miss falls through to GitHub exactly as before.
+ */
 export async function hydrateTree(
   ws: WorkspaceState,
   token: string
 ): Promise<WorkspaceState> {
   if (ws.tree.length > 0) return ws;
-  const entries = await getRepoTree(token, ws.owner, ws.repo, ws.branch);
-  const tree: WorkspaceTreeEntry[] = entries.map((e) => ({
-    path: e.path,
-    type: e.type,
-    ...(e.type === "blob" && typeof e.size === "number" ? { size: e.size } : {}),
-  }));
+  const { tree } = await getRepoBaseTree(identityOf(ws), token, ws.baseCommitSha);
   return { ...ws, tree, updatedAt: Date.now() };
+}
+
+/** The repository a workspace is a working copy of */
+function identityOf(ws: WorkspaceState): RepoIdentity {
+  return { owner: ws.owner, repo: ws.repo, branch: ws.branch };
 }
 
 // ── Persistence (IDB, debounced per conversation) ────────────
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function scheduleSave(conversationId: string, state: WorkspaceState): void {
-  const existing = saveTimers.get(conversationId);
+/** Debounce key: one pending save per persisted workspace, not per chat */
+function saveSlot(ws: WorkspaceState): string {
+  return workspaceRecordKey(ws.conversationId, ws);
+}
+
+/**
+ * Every record written for a conversation, so deleting the chat can delete
+ * all of its workspaces rather than the one that happened to be active.
+ *
+ * A tiny index record instead of a field on the conversation: the chat list
+ * is persisted and synced elsewhere, and the set of repos a chat has touched
+ * is storage bookkeeping, not part of what a conversation IS.
+ */
+async function rememberRecord(conversationId: string, key: string): Promise<void> {
+  try {
+    const raw = await readValue(IDB_INDEX_PREFIX + conversationId);
+    const known = raw ? (JSON.parse(raw) as string[]) : [];
+    if (known.includes(key)) return;
+    await writeValue(IDB_INDEX_PREFIX + conversationId, JSON.stringify([...known, key]));
+  } catch {
+    /* best-effort: a missing index only costs a stale record */
+  }
+}
+
+/**
+ * Debounced save. The debounce slot is the WORKSPACE (chat + repo), so a
+ * burst of edits in one chat cannot postpone the save of another chat's
+ * workspace — and the conversation argument the internal callers pass is
+ * already carried by `state`.
+ */
+function scheduleSave(_conversationId: string, state: WorkspaceState): void {
+  const slot = saveSlot(state);
+  const existing = saveTimers.get(slot);
   if (existing) clearTimeout(existing);
   saveTimers.set(
-    conversationId,
+    slot,
     setTimeout(() => {
-      saveTimers.delete(conversationId);
+      saveTimers.delete(slot);
       void persistWorkspace(state);
     }, WORKSPACE_SAVE_DEBOUNCE_MS)
   );
@@ -84,46 +145,75 @@ function scheduleSave(conversationId: string, state: WorkspaceState): void {
 /** Immediate IDB write (used on flush and before pushes) */
 export async function persistWorkspace(ws: WorkspaceState): Promise<void> {
   try {
-    await writeValue(IDB_KEY_PREFIX + ws.conversationId, JSON.stringify(ws));
+    const key = saveSlot(ws);
+    await writeValue(key, JSON.stringify(ws));
+    await rememberRecord(ws.conversationId, key);
   } catch (err) {
     console.warn("Workspace persistence failed:", err);
   }
 }
 
-/** Loads a persisted workspace, or null when none exists */
-export async function loadWorkspace(conversationId: string): Promise<WorkspaceState | null> {
+/**
+ * Loads the persisted workspace for a conversation's repo and branch, or null
+ * when that pair has no record yet.
+ *
+ * The repo is part of the lookup, which is what makes re-attaching a first
+ * repo come back to the work that was left there — and what stops a second
+ * repo's workspace from overwriting the first.
+ */
+export async function loadWorkspace(
+  conversationId: string,
+  repo: { owner: string; repo: string; branch: string }
+): Promise<WorkspaceState | null> {
   try {
-    const raw = await readValue(IDB_KEY_PREFIX + conversationId);
+    const raw = await readValue(workspaceRecordKey(conversationId, repo));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as WorkspaceState;
-    if (parsed && typeof parsed === "object" && parsed.conversationId === conversationId) {
-      return parsed;
-    }
-    return null;
+    if (!parsed || typeof parsed !== "object") return null;
+    // The record names its own repo: a key that disagrees with its contents
+    // is a record this code cannot trust.
+    const matches =
+      parsed.conversationId === conversationId &&
+      parsed.owner === repo.owner &&
+      parsed.repo === repo.repo &&
+      parsed.branch === repo.branch;
+    return matches ? parsed : null;
   } catch {
     return null;
   }
 }
 
-/** Flushes any pending debounced save for the conversation */
-export async function flushWorkspaceSave(conversationId: string, ws: WorkspaceState): Promise<void> {
-  const timer = saveTimers.get(conversationId);
+/**
+ * Flushes any pending debounced save for this workspace.
+ *
+ * The conversation argument stays in the signature because the callers pass
+ * it (ChatPage, the agent tools, the mention context) and it must equal
+ * `ws.conversationId` — the workspace is authoritative for its own identity.
+ */
+export async function flushWorkspaceSave(_conversationId: string, ws: WorkspaceState): Promise<void> {
+  const slot = saveSlot(ws);
+  const timer = saveTimers.get(slot);
   if (timer) {
     clearTimeout(timer);
-    saveTimers.delete(conversationId);
+    saveTimers.delete(slot);
   }
   await persistWorkspace(ws);
 }
 
-/** Removes the persisted workspace (conversation deleted / repo detached) */
+/** Removes every persisted workspace for a conversation */
 export async function deleteWorkspace(conversationId: string): Promise<void> {
-  const timer = saveTimers.get(conversationId);
-  if (timer) {
-    clearTimeout(timer);
-    saveTimers.delete(conversationId);
-  }
   try {
-    await writeValue(IDB_KEY_PREFIX + conversationId, null);
+    const raw = await readValue(IDB_INDEX_PREFIX + conversationId);
+    const keys = raw ? (JSON.parse(raw) as string[]) : [];
+    for (const key of keys) {
+      const timer = saveTimers.get(key);
+      if (timer) {
+        clearTimeout(timer);
+        saveTimers.delete(key);
+      }
+      await writeValue(key, null);
+    }
+    await writeValue(IDB_INDEX_PREFIX + conversationId, null);
   } catch {
     /* best-effort */
   }
@@ -155,8 +245,28 @@ export async function readFile(
     return { ws, content: null, error: `File '${path}' not found in the repository tree.` };
   }
 
+  // Contents another chat on this repo already read: at the same base commit
+  // the bytes are the same, so this is a hit rather than a second download.
+  const identity = identityOf(ws);
+  const known = await getRepoBaseFile(identity, path, ws.baseCommitSha);
+  if (known) {
+    const merged = mergeFetchedFile(ws, path, { text: known.content, sha: known.sha });
+    if (!merged.ok) {
+      return { ws, content: null, error: merged.error ?? `Could not load '${path}'.` };
+    }
+    return { ws: merged.ws, content: merged.ws.files[path]?.content ?? "" };
+  }
+
   try {
     const file = await readFileContent(token, ws.owner, ws.repo, path, ws.branch);
+    if (!file.isBinary && file.text !== null) {
+      // Fire-and-forget: the shared cache is an optimisation, and the read
+      // must not wait on it (or fail with it).
+      void rememberRepoBaseFile(identity, path, ws.baseCommitSha, {
+        content: file.text,
+        sha: file.sha ?? null,
+      });
+    }
     const merged = mergeFetchedFile(ws, path, file);
     if (!merged.ok) {
       return { ws, content: null, error: merged.error ?? `Could not load '${path}'.` };
@@ -433,6 +543,37 @@ export function collectChanges(ws: WorkspaceState): PushFile[] {
     });
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Whether a workspace is a working copy of THAT repository and branch.
+ *
+ * Its own function because the check was missing twice: the in-memory guard
+ * in `ensureWorkspace` returned whatever workspace the chat had, so attaching
+ * a second repository kept reading the first one's files — with the evidence
+ * (a tree, a base commit, edits) all naming the other repo. A workspace is
+ * identified by its repo and branch, and anything that reuses one has to say
+ * so out loud.
+ */
+export function workspaceMatchesRepo(
+  ws: WorkspaceState | undefined | null,
+  repo: { owner: string; repo: string; branch: string }
+): boolean {
+  return Boolean(
+    ws && ws.owner === repo.owner && ws.repo === repo.repo && ws.branch === repo.branch
+  );
+}
+
+/**
+ * How many files a workspace has changed, or 0 when there is none.
+ *
+ * The chat list's summary of a thread's work. It is derived, never stored on
+ * the workspace: the workspace IS the count's source of truth, and a second
+ * copy inside it is a number that can disagree with the files.
+ */
+export function pendingChangeCount(ws: WorkspaceState | undefined | null): number {
+  if (!ws) return 0;
+  return Object.values(ws.files).filter((f) => f.status !== "unchanged").length;
 }
 
 /** Paths of loaded files (for the preview bundler's virtual FS) */

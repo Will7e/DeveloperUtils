@@ -162,8 +162,17 @@ describe("preview CSP contract", () => {
     for (const [source, policy] of policies) {
       const frameSrc = [...policy.matchAll(/frame-src ([^;"\n]*)/g)].map((m) => m[1]!)[0];
       expect(frameSrc, `${source} must declare frame-src`).toBeTruthy();
+      // The preview's origin is `<id>.localhost:<port>` — a SUBDOMAIN of
+      // localhost, which `http://localhost:*` does not match. A CSP host
+      // source without a wildcard label matches that host exactly, so the
+      // pattern that "looks right" blocks every preview: an empty pane, and
+      // a console naming only a directive.
       expect(
-        frameSrc!.includes("http://127.0.0.1:*") || frameSrc!.includes("http://localhost:*"),
+        frameSrc!.includes("http://*.localhost:*"),
+        `${source} frame-src must allow a preview's own subdomain origin`
+      ).toBe(true);
+      expect(
+        frameSrc!.includes("http://127.0.0.1:*"),
         `${source} frame-src must allow a locally hosted preview`
       ).toBe(true);
     }

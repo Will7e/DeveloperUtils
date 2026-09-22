@@ -158,6 +158,57 @@ export function previewPath(id: string): string {
   return `/p/${id}/`;
 }
 
+/**
+ * The origin one published preview is served from: its OWN host label.
+ *
+ * The alternative was one root for every preview, and it does not survive a
+ * second preview existing. Each build answered `${host}/` with whichever
+ * document was published last, so two chats on two repositories — or the
+ * same repository on two branches — both framed the SAME app: the one that
+ * had not rebuilt appeared to have forgotten its own code, and nothing in
+ * the pane could say why. A preview is a whole application, and an
+ * application needs an origin of its own, not a share of one.
+ *
+ * This also makes isolation stronger than the root ever was: two previews
+ * are two origins, so one cannot read the other's storage even if both are
+ * the user's own builds.
+ *
+ * The `localhost` rewrite is not cosmetic. Only the NAME `localhost` is
+ * special-cased — by the resolver and by the browser's secure-context rules
+ * — so `<id>.localhost` reaches the host and `<id>.127.0.0.1` does not
+ * resolve at all. A deployed host needs the same shape: wildcard DNS and a
+ * wildcard certificate for `<id>.preview.example.com`.
+ */
+export function previewOrigin(baseOrigin: string, id: string): string {
+  try {
+    const url = new URL(baseOrigin);
+    if (!ID_PATTERN.test(id)) return baseOrigin.replace(/\/+$/, "");
+    const hostname = LOOPBACK_HOSTNAMES.has(url.hostname) ? "localhost" : url.hostname;
+    const port = url.port ? `:${url.port}` : "";
+    return `${url.protocol}//${id}.${hostname}${port}`;
+  } catch {
+    return baseOrigin.replace(/\/+$/, "");
+  }
+}
+
+/**
+ * The preview id a request is addressed to, taken from its `Host` header.
+ *
+ * `<id>.localhost:5174` is the address of that one preview. Anything else —
+ * the host's own origin, an IPv6 literal, a bare IP — carries no id and is
+ * routed as a normal request, which is what keeps the control endpoints off
+ * the preview origins.
+ */
+export function previewIdFromHostHeader(host: string | null | undefined): string | null {
+  if (!host) return null;
+  // Strip the port. An IPv6 literal arrives bracketed (`[::1]:5174`) and its
+  // first dot-separated label can never be a 16+ hex id, so this is safe for
+  // every shape the adapter can hand us.
+  const withoutPort = host.split(":")[0] ?? "";
+  const label = withoutPort.split(".")[0] ?? "";
+  return ID_PATTERN.test(label) ? label : null;
+}
+
 // ── The serving contract ─────────────────────────────────────
 //
 // This is the load-bearing header. `sandbox` restricts the document,
@@ -261,6 +312,36 @@ export function handlePreviewRequest(
   const allowed = options.allowedOrigins;
   const path = request.path.split("?")[0] ?? request.path;
 
+  // ── A preview's own origin ───────────────────────────────────
+  //
+  // Checked FIRST, so a preview origin can only ever serve its own document
+  // and never the host's control endpoints (`/publish`, `/health`): the
+  // preview is the user's own code, and the surface that accepts writes is
+  // not something it should be able to reach at all.
+  const addressedPreview = previewIdFromHostHeader(request.headers.host);
+  if (addressedPreview) {
+    if (method !== "GET" && method !== "HEAD") {
+      return json(405, { ok: false, error: "A preview origin answers GET only." });
+    }
+    // A path with a file extension is a file, not a client route. Answering
+    // it with HTML would surface a missing image as a syntax error instead
+    // of an honest 404.
+    if (/\.[a-z0-9]{1,8}$/i.test(path)) {
+      return json(404, { ok: false, error: `No route for ${method} ${path}.` });
+    }
+    const preview = host.previews.get(addressedPreview);
+    if (!preview) {
+      // Named, not silent: this is what a frame left pointing at an evicted
+      // build gets, and it has to say so rather than render blank.
+      return json(404, {
+        ok: false,
+        error:
+          "No preview with that id. The host was restarted, or this build was replaced — rebuild from the preview pane.",
+      });
+    }
+    return documentResponse(preview);
+  }
+
   // Preflight: the app posts a document across origins, so the browser asks
   // first. Answering only for allowed origins keeps this from becoming an
   // open endpoint that any page can write to.
@@ -354,20 +435,14 @@ export function handlePreviewRequest(
     return documentResponse(preview);
   }
 
-  // ── The application's own routes ─────────────────────────────
+  // ── The host's own root ─────────────────────────────
   //
-  // A router-based app reads `location.pathname`. The document used to be
-  // served at `/p/<id>/`, which no route in any app matches
-  // (`No routes matched location "/p/abc123/"`), and in the srcdoc fallback
-  // it is worse: that document's location is `about:srcdoc`, so the path
-  // react-router tries to match is literally "srcdoc" — the reported black
-  // frame, from an app that is perfectly fine.
-  //
-  // So the newest build is served at the ORIGIN ROOT, and every path that is
-  // not one of this host's own endpoints falls back to it. That is exactly
-  // what a dev server does for a single-page app, and matching a dev server
-  // is the whole fidelity target: `/` and any client route the app pushes
-  // both match now.
+  // A router-based app reads `location.pathname`, so a preview's document is
+  // served at the ROOT of its own origin (see previewOrigin) — every path
+  // that is not a file is a client route, exactly like a dev server. This
+  // root is the host's, not a preview's, and it answers with the newest
+  // build so that opening the host in a tab shows the most recent one
+  // instead of a directory listing. A frame never depends on it.
   if (method === "GET" || method === "HEAD") {
     const looksLikeAsset = /\.[a-z0-9]{1,8}$/i.test(path);
     // A path with a file extension is not a route. Serving HTML for it would

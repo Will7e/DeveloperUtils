@@ -12,6 +12,7 @@ import { createEncryptedStorage } from "@/services/encrypted-storage.service";
 import { generateId } from "@/lib/utils";
 import type {
   AgentPlan,
+  ChatAttachment,
   ChatConversation,
   ChatMessage,
   ChatMode,
@@ -31,6 +32,8 @@ import {
   hydrateTree,
   loadWorkspace,
   flushWorkspaceSave,
+  pendingChangeCount,
+  workspaceMatchesRepo,
   deleteWorkspace as deleteWorkspaceFromIdb,
 } from "@/features/chat/workspace/workspace";
 import {
@@ -41,6 +44,36 @@ import {
 } from "@/features/chat/constants";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
 import { PENDING_TURN_MAX_AGE_MS } from "@/features/chat/session/resume-plan";
+
+/**
+ * What a new chat starts from.
+ *
+ * Omitted → inherit the active chat's repository and mode. `repo: null` asks
+ * for a chat with no repository; `repo: {...}` names a different one.
+ */
+export interface ConversationSeed {
+  repo?: RepoContext | null;
+  mode?: ChatMode;
+}
+
+/**
+ * What one thread's composer holds: text typed but not sent, and the files
+ * attached to it.
+ *
+ * A draft belongs to the chat it was typed in, which is why this is keyed by
+ * conversation and lives here rather than in the page's own state: a single
+ * shared draft carried the text (and the images) into the wrong thread on a
+ * switch, where Enter would send it.
+ */
+export interface ComposerDraft {
+  draft: string;
+  images: ChatAttachment[];
+}
+
+/** A new draft string, or a function of the previous one */
+export type ComposerDraftUpdate = string | ((previous: string) => string);
+
+const EMPTY_COMPOSER_DRAFT: ComposerDraft = { draft: "", images: [] };
 
 export interface ChatStoreState {
   conversations: ChatConversation[];
@@ -61,6 +94,12 @@ export interface ChatStoreState {
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
   settingsTab: "connection" | "chat" | "skills" | "github" | null;
+
+  // ── Composer (transient, per thread) ──
+  /** conversationId → what is typed and attached, not yet sent */
+  composerDrafts: Record<string, ComposerDraft>;
+  setComposerDraft: (conversationId: string, update: ComposerDraftUpdate) => void;
+  setComposerImages: (conversationId: string, images: ChatAttachment[]) => void;
 
   // ── Agent workspace (transient; hydrated from IndexedDB) ──
   /** conversationId → workspace */
@@ -90,7 +129,12 @@ export interface ChatStoreState {
   clearPendingPush: () => void;
 
   // ── Conversation actions ──
-  createConversation: (model?: string) => string;
+  /**
+   * Starts a new chat. Inherits the active chat's repository and mode unless
+   * `seed` says otherwise — see the implementation for why that is the
+   * default rather than an empty chat.
+   */
+  createConversation: (model?: string, seed?: ConversationSeed) => string;
   selectConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
   deleteConversation: (id: string) => void;
@@ -229,38 +273,88 @@ export const useChatStore = create<ChatStoreState>()(
       settingsOpen: false,
       settingsTab: null,
 
+      composerDrafts: {},
       workspaces: {},
       pendingPush: null,
       pushGate: null,
 
+      // ── Composer ──
+      // Write-through, in the same store as the threads themselves: reading
+      // a draft is then a lookup by conversation with no reconciliation step,
+      // and there is no window where the box shows one chat's text while
+      // another chat is active. Functional updates are supported because the
+      // composer appends imported files to whatever is already typed.
+      setComposerDraft: (conversationId, update) =>
+        set((s) => {
+          if (!conversationId) return s;
+          const previous = s.composerDrafts[conversationId] ?? EMPTY_COMPOSER_DRAFT;
+          const draft = typeof update === "function" ? update(previous.draft) : update;
+          return {
+            composerDrafts: { ...s.composerDrafts, [conversationId]: { ...previous, draft } },
+          };
+        }),
+
+      setComposerImages: (conversationId, images) =>
+        set((s) => {
+          if (!conversationId) return s;
+          const previous = s.composerDrafts[conversationId] ?? EMPTY_COMPOSER_DRAFT;
+          return {
+            composerDrafts: { ...s.composerDrafts, [conversationId]: { ...previous, images } },
+          };
+        }),
+
       // ── Workspace ──
+      // The two workspace setters are the choke point where a workspace
+      // change becomes visible outside the open conversation: the list row
+      // needs to say which thread has work in progress, and the workspace
+      // itself is only in memory for the chat that is open. The count is
+      // derived here and never written anywhere else.
       setWorkspace: (conversationId, ws) =>
-        set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: ws } })),
+        set((s) => ({
+          workspaces: { ...s.workspaces, [conversationId]: ws },
+          conversations: mapConversation(s.conversations, conversationId, (c) => ({
+            ...c,
+            pendingChanges: pendingChangeCount(ws),
+          })),
+        })),
 
       patchWorkspace: (conversationId, ws) =>
-        set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: ws } })),
+        set((s) => ({
+          workspaces: { ...s.workspaces, [conversationId]: ws },
+          conversations: mapConversation(s.conversations, conversationId, (c) => ({
+            ...c,
+            pendingChanges: pendingChangeCount(ws),
+          })),
+        })),
 
       ensureWorkspace: async (conversationId) => {
         const state = get();
-        const existing = state.workspaces[conversationId];
-        if (existing) return existing;
         const conv = state.conversations.find((c) => c.id === conversationId);
         const repo = conv?.repoContext;
         const token = state.settings.github.token;
         if (!repo || !token) return null;
 
+        // The in-memory workspace counts only when it is a working copy of
+        // THIS repository. Returning it unconditionally is how a chat that
+        // changed repos kept editing the old one's files, in memory, while
+        // every record on disk said otherwise.
+        const existing = state.workspaces[conversationId];
+        if (workspaceMatchesRepo(existing, repo)) return existing!;
+
         // Rehydrate from IDB or create fresh; pin the base commit.
-        // Branch must match too: re-attaching the repo on a different
-        // branch invalidates the persisted tree, base commit, and
-        // pending diffs, so those start fresh rather than pushing
-        // from a stale base.
-        const persisted = await loadWorkspace(conversationId);
-        if (
-          persisted &&
-          persisted.owner === repo.owner &&
-          persisted.repo === repo.repo &&
-          persisted.branch === repo.branch
-        ) {
+        //
+        // The lookup is by (conversation, repo, branch), which is the whole
+        // point: a chat that moved from one repository to another, and back,
+        // finds the work it left in the first one instead of the record
+        // having been overwritten. A different branch is a different base
+        // commit and therefore a different working copy, so it starts fresh
+        // rather than pushing from a stale base.
+        const persisted = await loadWorkspace(conversationId, {
+          owner: repo.owner,
+          repo: repo.repo,
+          branch: repo.branch,
+        });
+        if (persisted) {
           set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: persisted } }));
           return persisted;
         }
@@ -329,8 +423,25 @@ export const useChatStore = create<ChatStoreState>()(
           if (s.pushGate) s.pushGate.resolve({ approved: false });
           return { pendingPush: null, pushGate: null };
         }),
-      createConversation: (model) => {
+      createConversation: (model, seed) => {
         const id = generateId();
+        const state = get();
+        const active = state.conversations.find((c) => c.id === state.activeConversationId);
+
+        // A new chat INHERITS the active chat's workspace context: the same
+        // repository, and the same agent mode.
+        //
+        // The repository is the expensive part — a tree, the files the agent
+        // reads, a preview build — and it used to be re-attached by hand for
+        // every new chat, which made "new chat" a project reset instead of a
+        // new conversation about the same project. Nothing else is inherited:
+        // the new thread starts from the repository's base commit, not from
+        // the other thread's uncommitted edits (that is a deliberate choice a
+        // caller can make with an explicit seed).
+        //
+        // `seed.repo = null` asks for a chat with no repository at all.
+        const repo = seed && "repo" in seed ? (seed.repo ?? undefined) : active?.repoContext;
+        const mode = seed?.mode ?? active?.mode;
         const conv: ChatConversation = {
           id,
           title: "New Chat",
@@ -338,6 +449,8 @@ export const useChatStore = create<ChatStoreState>()(
           createdAt: Date.now(),
           updatedAt: Date.now(),
           model,
+          ...(repo ? { repoContext: repo } : {}),
+          ...(mode ? { mode } : {}),
         };
         set((s) => ({
           conversations: [conv, ...s.conversations],
@@ -362,7 +475,22 @@ export const useChatStore = create<ChatStoreState>()(
             s.activeConversationId === id
               ? remaining[0]?.id ?? null
               : s.activeConversationId;
-          return { conversations: remaining, activeConversationId: active };
+          // The chat's working copies go with it: one record per repo it was
+          // attached to, plus the in-memory copy. Leaving them behind would
+          // keep the user's un-pushed code on disk for a chat they deleted.
+          const workspaces = { ...s.workspaces };
+          delete workspaces[id];
+          void deleteWorkspaceFromIdb(id);
+          // Its composer goes too. This one holds base64 attachments, so
+          // leaving it behind is memory held for a chat that is gone.
+          const composerDrafts = { ...s.composerDrafts };
+          delete composerDrafts[id];
+          return {
+            conversations: remaining,
+            activeConversationId: active,
+            workspaces,
+            composerDrafts,
+          };
         }),
 
       duplicateConversation: (id) => {

@@ -258,6 +258,18 @@ export interface ChatConversation {
    * long agent runs feel like a black box.
    */
   plan?: AgentPlan;
+  /**
+   * How many files this conversation's workspace has changed, for the
+   * conversation list.
+   *
+   * A SUMMARY of the workspace, kept here because the workspace itself is
+   * only in memory for the conversation that is open: without this the chat
+   * list cannot say which thread has work in progress, and a list of
+   * identical-looking rows is how uncommitted work gets forgotten. Derived at
+   * the one choke point that owns workspaces (`setWorkspace`), never edited
+   * by hand.
+   */
+  pendingChanges?: number;
 }
 
 /** One step of the agent's plan */

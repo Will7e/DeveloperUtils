@@ -5,10 +5,11 @@
 // The context engine keeps requests within the model's window and
 // the meter reflects live usage.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileDiff } from "lucide-react";
 import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
+import type { ConversationSeed } from "@/stores/chat.store";
 import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
 import { flushWorkspaceSave } from "./workspace/workspace";
 import {
@@ -19,7 +20,6 @@ import {
   stopChatStream,
   ensureModelCatalog,
   resumeInterruptedTurn,
-  resumeUserTurn,
   commitPartialReply,
 } from "./services/chat-runner";
 import { getConversationContext, composeSystemPrompt } from "./context/engine";
@@ -78,33 +78,29 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // ── Per-conversation composer state ──
-  // A draft belongs to the chat it was typed in. Keeping one shared
-  // draft meant switching chats carried the text (and the attached
-  // images) into the wrong thread — where Enter would send it. Drafts
-  // are stashed per conversation and restored when you come back.
-  const [draft, setDraft] = useState("");
-  const [pendingImages, setPendingImages] = useState<ChatAttachment[]>([]);
-  const composerByConversation = useRef(
-    new Map<string, { draft: string; images: ChatAttachment[] }>()
+  // A draft belongs to the chat it was typed in, so it is keyed by
+  // conversation IN THE STORE rather than stashed and reconciled here. One
+  // shared draft carried the text (and the attached images) into the wrong
+  // thread on a switch — where Enter would send it — and reconciliation in
+  // the page needed a ref read during render to beat the switch. Write-through
+  // has no window to lose a keystroke in, and the box is always showing the
+  // active thread's own draft by construction.
+  const composerDrafts = useChatStore((s) => s.composerDrafts);
+  const setComposerDraft = useChatStore((s) => s.setComposerDraft);
+  const setComposerImages = useChatStore((s) => s.setComposerImages);
+  const composerId = activeConversationId ?? "";
+  const draft = composerDrafts[composerId]?.draft ?? "";
+  const pendingImages = composerDrafts[composerId]?.images ?? [];
+  // The composer's own call sites keep React's setter shape (a value, or a
+  // function of the previous text for appended file imports).
+  const setDraft = React.useCallback(
+    (update: React.SetStateAction<string>) => setComposerDraft(composerId, update),
+    [composerId, setComposerDraft]
   );
-  const draftOwnerRef = useRef<string | null>(activeConversationId);
-
-  // Render-time reconciliation: when the active conversation changes,
-  // stash what was typed and restore the new chat's own draft. (No
-  // effect: this must land in the same commit as the switch, or a
-  // keystroke could be attributed to the previous chat.)
-  if (draftOwnerRef.current !== activeConversationId) {
-    const previous = draftOwnerRef.current;
-    if (previous) {
-      composerByConversation.current.set(previous, { draft, images: pendingImages });
-    }
-    const restored = activeConversationId
-      ? composerByConversation.current.get(activeConversationId)
-      : undefined;
-    draftOwnerRef.current = activeConversationId;
-    setDraft(restored?.draft ?? "");
-    setPendingImages(restored?.images ?? []);
-  }
+  const setPendingImages = React.useCallback(
+    (images: ChatAttachment[]) => setComposerImages(composerId, images),
+    [composerId, setComposerImages]
+  );
 
   // Agent workspace: ensures the workspace exists on repo attach and
   // exposes the attachment state for the preview toggle.
@@ -346,7 +342,7 @@ export function ChatPage() {
         setDraft(result && typeof result === "object" ? result.draft ?? "" : "");
       });
     },
-    [activeConversationId, models, isStreamingHere]
+    [activeConversationId, models, isStreamingHere, setDraft]
   );
 
   /**
@@ -427,8 +423,17 @@ export function ChatPage() {
     stopChatStream();
   };
 
-  const handleNewChat = () => {
-    useChatStore.getState().createConversation(settings.defaultModel);
+  /**
+   * Starts a chat, optionally seeded.
+   *
+   * A seed = a chat that begins somewhere specific: the sidebar's per-repo
+   * "new chat here" hands it a repository, so creating a second thread on a
+   * project is one click instead of create-then-reattach. The store stamps
+   * `attachedAt` on the repo context when it commits, exactly as attaching by
+   * hand does.
+   */
+  const handleNewChat = (seed?: ConversationSeed) => {
+    useChatStore.getState().createConversation(settings.defaultModel, seed);
     setSidebarOpen(false);
   };
 
@@ -494,6 +499,7 @@ export function ChatPage() {
         onClose={() => setSidebarOpen(false)}
         onSelect={(id) => useChatStore.getState().selectConversation(id)}
         onNew={handleNewChat}
+        onNewInRepo={(repo) => handleNewChat({ repo: { ...repo, attachedAt: Date.now() } })}
         onRename={(id, title) => useChatStore.getState().renameConversation(id, title)}
         onDelete={handleDeleteConversation}
         onDuplicate={(id) => useChatStore.getState().duplicateConversation(id)}

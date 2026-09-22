@@ -27,6 +27,7 @@ import { PREVIEW_REBUILD_DEBOUNCE_MS } from "../constants";
 import { usePreviewStore, type PreviewDiagnostic } from "./preview.store";
 import { createWorkspaceVfs, type VFS } from "./vfs";
 import { base64ToBytes, inlineReference } from "./assets";
+import { getCachedModule, rememberModule } from "./module-cache";
 import {
   publishPreviewDocument,
   previewHostNotice,
@@ -106,18 +107,20 @@ interface AssetInliner {
  */
 function createGraphPorts(ws: WorkspaceState): GraphPorts {
   const token = useChatStore.getState().settings.github.token;
-  const modules = new Map<string, FetchedModule>();
   const assets = new Map<string, string | null>();
 
   return {
     async fetchModule(url) {
-      const cached = modules.get(url);
+      // Package sources are shared across builds and conversations (see
+      // ./module-cache): the second chat on an app pays for its own files,
+      // not for React again. A miss falls through to the network.
+      const cached = getCachedModule(url);
       if (cached) return cached;
 
       const res = await fetch(url);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`.trim());
       const fetched: FetchedModule = { source: await res.text(), finalUrl: res.url || url };
-      modules.set(url, fetched);
+      rememberModule(url, fetched);
       return fetched;
     },
 
@@ -195,11 +198,13 @@ export interface BuildOutcome {
  * Delivers a built document to the frame. One document, two paths:
  *
  *   • a preview host is listening → the document is PUBLISHED and the frame
- *     navigates to `http://127.0.0.1:<port>/p/<id>/`. That URL is a
- *     distinct origin from the app, so the preview cannot touch the app's
- *     storage — and it is a real secure origin, so localStorage, cookies,
- *     IndexedDB and Web Locks are granted by the browser instead of being
- *     emulated in memory by the document's own prelude.
+ *     navigates to that preview's OWN origin, `http://<id>.localhost:<port>/`.
+ *     That URL is a distinct origin from the app, so the preview cannot touch
+ *     the app's storage — and it is a real secure origin, so localStorage,
+ *     cookies, IndexedDB and Web Locks are granted by the browser instead of
+ *     being emulated in memory by the document's own prelude. It is also an
+ *     origin no other preview shares, which is what lets two chats show two
+ *     different apps at once.
  *   • no host → the inline sandboxed document, fed to the frame through
  *     `srcdoc`, which is what the runtime has always done.
  *
@@ -210,13 +215,18 @@ export interface BuildOutcome {
  * sandbox is the safer of the two, so the fallback keeps the sandbox and
  * drops the link rather than the other way round.
  */
-async function toDocument(html: string): Promise<{
+async function toDocument(
+  html: string,
+  // The publishing thread. It keys the host's release bookkeeping, so a
+  // rebuild here cannot drop the document another chat is currently showing.
+  conversationId: string
+): Promise<{
   html: string;
   url: string | null;
   delivery: PreviewDelivery;
   deliveryNotice: string | null;
 }> {
-  const outcome = await publishPreviewDocument(html);
+  const outcome = await publishPreviewDocument(html, { key: conversationId });
   const notice = previewHostNotice(outcome);
   if (notice) usePreviewStore.getState().addConsole([{ level: "system", text: notice }]);
   return {
@@ -242,13 +252,56 @@ function hashText(text: string): string {
   return (hash >>> 0).toString(36);
 }
 
-let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
-let lastBuildWs: WorkspaceState | null = null;
-let lastBuildResult: BuildOutcome | null = null;
-let inFlight = false;
-let pendingAfterCurrent = false;
-/** Fingerprint of the inputs the last SUCCESSFUL build used */
-let lastBuildInputHash: string | null = null;
+/**
+ * The runtime state of ONE thread's preview.
+ *
+ * These were module-level singletons, which made the preview a single global
+ * job rather than one per conversation. `inFlight` is the clearest case: a
+ * build for thread B, arriving while thread A's build was running, was
+ * answered with THREAD A'S RESULT (`return lastBuildResult`), so B rendered
+ * A's app. The debounce timer had the same shape — a write in one chat
+ * cancelled a pending rebuild in another.
+ *
+ * A preview belongs to a conversation, so its run state does too. This is the
+ * same ownership rule the store now applies to build output, one layer down:
+ * the store decides what may be SHOWN, this decides what may run.
+ */
+interface BuildSession {
+  inFlight: boolean;
+  /** A rebuild was asked for while one was already running */
+  pending: boolean;
+  lastResult: BuildOutcome | null;
+  /** Fingerprint of the inputs the last SUCCESSFUL build used */
+  lastInputHash: string | null;
+  /** The newest workspace snapshot for this thread, for a queued rerun */
+  lastWs: WorkspaceState | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const sessions = new Map<string, BuildSession>();
+
+function sessionFor(conversationId: string): BuildSession {
+  const existing = sessions.get(conversationId);
+  if (existing) return existing;
+  const created: BuildSession = {
+    inFlight: false,
+    pending: false,
+    lastResult: null,
+    lastInputHash: null,
+    lastWs: null,
+    timer: null,
+  };
+  sessions.set(conversationId, created);
+  return created;
+}
+
+/** Test seam, and teardown when a conversation is deleted */
+export function resetPreviewBuildSessions(): void {
+  for (const session of sessions.values()) {
+    if (session.timer) clearTimeout(session.timer);
+  }
+  sessions.clear();
+}
 
 /**
  * Fingerprints everything a build reads, so a workspace change that does
@@ -269,12 +322,19 @@ function buildInputHash(ws: WorkspaceState): string {
   return hashText(`${ws.branch}\u0001${ws.baseCommitSha}\u0001${parts.join("\u0001")}`);
 }
 
-/** Debounced rebuild entry point (called on workspace mutations) */
+/**
+ * Debounced rebuild entry point (called on workspace mutations).
+ *
+ * The debounce is PER CONVERSATION. One timer for the whole app meant an
+ * edit in a background chat could cancel the rebuild the visible one was
+ * waiting for — a preview that simply never updated, with no error.
+ */
 export function schedulePreviewBuild(ws: WorkspaceState): void {
-  lastBuildWs = ws;
-  if (rebuildTimer) clearTimeout(rebuildTimer);
-  rebuildTimer = setTimeout(() => {
-    rebuildTimer = null;
+  const session = sessionFor(ws.conversationId);
+  session.lastWs = ws;
+  if (session.timer) clearTimeout(session.timer);
+  session.timer = setTimeout(() => {
+    session.timer = null;
     void runPreviewBuild(ws);
   }, PREVIEW_REBUILD_DEBOUNCE_MS);
 }
@@ -283,10 +343,10 @@ export function schedulePreviewBuild(ws: WorkspaceState): void {
  * True when this workspace snapshot would produce the build that is
  * already on screen, so the caller can skip the rebuild entirely.
  */
-function inputsUnchanged(ws: WorkspaceState): boolean {
-  if (lastBuildInputHash === null) return false;
-  if (lastBuildResult?.status !== "ready") return false;
-  return buildInputHash(ws) === lastBuildInputHash;
+function inputsUnchanged(session: BuildSession, ws: WorkspaceState): boolean {
+  if (session.lastInputHash === null) return false;
+  if (session.lastResult?.status !== "ready") return false;
+  return buildInputHash(ws) === session.lastInputHash;
 }
 
 /**
@@ -358,26 +418,38 @@ export async function runPreviewBuild(
   ws: WorkspaceState,
   options: { force?: boolean } = {}
 ): Promise<BuildOutcome> {
+  // Every result this run produces is filed under the thread that asked for
+  // it. That is the whole ownership rule, and it is why a build for a
+  // background chat can no longer land in the pane the user is reading.
+  const conversationId = ws.conversationId;
+  const session = sessionFor(conversationId);
   const store = usePreviewStore.getState();
-  if (inFlight) {
-    pendingAfterCurrent = true;
-    return lastBuildResult ?? { status: "error", html: null, url: null, entry: null, diagnostics: [] };
+  if (session.inFlight) {
+    session.pending = true;
+    return (
+      session.lastResult ?? { status: "error", html: null, url: null, entry: null, diagnostics: [] }
+    );
   }
-  if (!options.force && inputsUnchanged(ws)) {
+  if (!options.force && inputsUnchanged(session, ws)) {
     // Nothing a build reads has changed — do not tear down a running app.
-    return lastBuildResult!;
+    return session.lastResult!;
   }
 
-  inFlight = true;
-  store.setStatus("building");
+  session.inFlight = true;
+  session.lastWs = ws;
+  store.setStatus("building", conversationId);
 
   try {
     await ensureEsbuild();
     const loaded = await preloadForBuild(ws);
+    // The preload publishes the files it fetched, so the snapshot to build
+    // from (and to rerun from) is the loaded one, not the argument.
+    session.lastWs = loaded;
     const outcome = await buildWorkspace(loaded);
-    lastBuildResult = outcome;
-    if (outcome.status === "ready") lastBuildInputHash = buildInputHash(loaded);
+    session.lastResult = outcome;
+    if (outcome.status === "ready") session.lastInputHash = buildInputHash(loaded);
     usePreviewStore.getState().setBuild({
+      conversationId,
       html: outcome.html,
       url: outcome.url,
       entry: outcome.entry,
@@ -396,16 +468,16 @@ export async function runPreviewBuild(
         severity: "error",
       },
     ];
-    lastBuildResult = { status: "error", html: null, url: null, entry: null, diagnostics };
+    session.lastResult = { status: "error", html: null, url: null, entry: null, diagnostics };
     usePreviewStore
       .getState()
-      .setBuild({ html: null, url: null, entry: null, diagnostics, status: "error" });
-    return lastBuildResult;
+      .setBuild({ conversationId, html: null, url: null, entry: null, diagnostics, status: "error" });
+    return session.lastResult;
   } finally {
-    inFlight = false;
-    if (pendingAfterCurrent && lastBuildWs) {
-      pendingAfterCurrent = false;
-      void runPreviewBuild(lastBuildWs);
+    session.inFlight = false;
+    if (session.pending && session.lastWs) {
+      session.pending = false;
+      void runPreviewBuild(session.lastWs);
     }
   }
 }
@@ -622,7 +694,8 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
       bridge: bridgeTag(),
       staticHtml: entryHtml,
       replacedScriptSrc: entry.kind === "html" ? (entry.scriptSrc ?? null) : null,
-    })
+    }),
+    ws.conversationId
   );
   return {
     status: "ready",
@@ -689,7 +762,8 @@ async function buildStaticHtml(
       bridge: bridgeTag(),
       staticHtml: rewritten,
       replacedScriptSrc: null,
-    })
+    }),
+    ws.conversationId
   );
   return {
     status: "ready",
