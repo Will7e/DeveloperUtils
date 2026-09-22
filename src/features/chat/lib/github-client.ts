@@ -172,6 +172,16 @@ export interface GitHubFileContent {
   encoding: "base64" | "none";
   truncated: boolean;
   isBinary: boolean;
+  /**
+   * The payload exactly as the API sent it (base64, whitespace removed),
+   * or null when it sent none — files over its 1 MB limit.
+   *
+   * Kept because a caller may want a file's BYTES while never wanting its
+   * text: the preview inlines images, fonts and media from here, and a
+   * lossy text decode of an image is the bug that produced `Expected ";"
+   * but found "\x14"`.
+   */
+  base64: string | null;
 }
 
 export interface GitHubUserInfo {
@@ -308,6 +318,9 @@ export async function readFileContent(
   const size = json.size ?? 0;
   const sha = json.sha ?? "";
   const raw = json.content ?? "";
+  // The API wraps base64 at 60 chars; the payload is the same string with
+  // the newlines gone, and that is the form a base64 decoder wants.
+  const payload = raw.replace(/\s+/g, "");
   const isBinaryHint = json.encoding !== "base64" || raw === "";
 
   // The Contents API returns content:null for files >1MB — flag it.
@@ -320,6 +333,7 @@ export async function readFileContent(
       encoding: "none",
       truncated: true,
       isBinary: false,
+      base64: null,
     };
   }
 
@@ -332,13 +346,16 @@ export async function readFileContent(
       encoding: "none",
       truncated: false,
       isBinary: true,
+      base64: null,
     };
   }
 
   let decoded: string;
   try {
-    decoded = decodeBase64Utf8(raw.replace(/\n/g, ""));
+    decoded = decodeBase64Utf8(payload);
   } catch {
+    // Not UTF-8. There is no text, but there ARE bytes — which is what a
+    // caller that wants to inline an image, a font or a clip needs.
     return {
       path: json.path ?? path,
       text: null,
@@ -347,6 +364,7 @@ export async function readFileContent(
       encoding: "none",
       truncated: false,
       isBinary: true,
+      base64: payload,
     };
   }
 
@@ -358,6 +376,7 @@ export async function readFileContent(
     encoding: "base64",
     truncated: false,
     isBinary: false,
+    base64: payload,
   };
 }
 
@@ -395,11 +414,23 @@ export async function searchCodeInRepo(
 // ── Helpers ──────────────────────────────────────────────────
 
 /** Base64 → UTF-8 using TextDecoder (no atob unicode pitfalls) */
+/**
+ * Decodes base64 UTF-8 text, THROWING when the bytes are not UTF-8.
+ *
+ * Strict on purpose — this is what makes `isBinary` mean something. The
+ * lenient decoder it replaces never threw, so a committed `.webp` was
+ * returned as "text": the agent's read_file showed it mojibake, and the
+ * preview bundler parsed the image's bytes as JavaScript
+ * (`Expected ";" but found "\x14"`). A NUL byte is treated as binary too:
+ * it is valid UTF-8, and no source file has one.
+ */
 function decodeBase64Utf8(b64: string): string {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (text.includes("\u0000")) throw new Error("Binary content is not readable as text.");
+  return text;
 }
 
 /** Invalidate the repo list (e.g. after connecting a new account) */

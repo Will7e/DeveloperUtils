@@ -26,26 +26,33 @@ import type { WorkspaceState } from "../types";
 import { PREVIEW_REBUILD_DEBOUNCE_MS } from "../constants";
 import { usePreviewStore, type PreviewDiagnostic } from "./preview.store";
 import { createWorkspaceVfs, type VFS } from "./vfs";
-import { configSeedPaths, preloadForPreview, preloadSeeds } from "./preload";
-import { detectEntry, unsupportedProjectReason } from "./entry";
+import { base64ToBytes, inlineReference } from "./assets";
 import {
-  buildPreviewImportMap,
-  isCoveredByImportMap,
+  publishPreviewDocument,
+  previewHostNotice,
+} from "./host/preview-host-client";
+import type { PreviewDelivery } from "./preview.store";
+import { readFileContent } from "../lib/github-client";
+import { configSeedPaths, preloadForPreview, preloadSeeds } from "./preload";
+import { composeEntryHtml } from "./document";
+import { detectEntry, resolveEntryScriptPath, unsupportedProjectReason } from "./entry";
+import {
+  collectDeclaredVersions,
+  normalizeVersion,
   parseLockfileVersions,
   parsePackageJson,
   pickLockfilePath,
-  splitBareSpecifier,
-  type PreviewImportMap,
 } from "./module-resolution";
+import { bundleWorkspace } from "./bundle";
+import type { FetchedModule, GraphPorts, PackageVersions } from "./graph";
 import {
   readAliasConfig,
-  resolveAlias,
   TSCONFIG_CANDIDATES,
   VITE_CONFIG_CANDIDATES,
   type AliasConfig,
 } from "./aliases";
 import { buildDefineMap, buildPreviewEnv, describeEnv } from "./env";
-import { detectCssToolchain, planCss, stripVendorCss, type CssPlan } from "./css-pipeline";
+import { detectCssToolchain, planCss, type CssPlan } from "./css-pipeline";
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
@@ -76,111 +83,76 @@ export type { DetectedEntry, EntryKind } from "./entry";
 // ── Virtual FS plugin ────────────────────────────────────────
 // Path resolution lives in ./vfs (shared with the preloader).
 
-const VFS_PLUGIN_NAME = "intab-workspace-vfs";
-
-/**
- * What a build learned about specifiers it could not resolve inside the
- * workspace. Collected during the build (rather than predicted from a
- * pre-scan) so the report describes what esbuild ACTUALLY emitted.
- */
-interface ResolutionReport {
-  /** Bare specifiers left for the import map */
-  external: Set<string>;
-  /** Relative/absolute specifiers that are not files in the workspace */
-  missingLocal: Set<string>;
-  /** Specifiers whose Vite query suffix was stripped to keep them runnable */
-  queryStripped: Set<string>;
+/** Asset bytes for the static-HTML path, which inlines files itself */
+interface AssetInliner {
+  bytes(path: string): Promise<Uint8Array<ArrayBuffer> | null>;
+  /** Assets carried as a placeholder instead of their real bytes */
+  unavailable(): string[];
 }
 
-function vfsPlugin(
-  vfs: VFS,
-  context: {
-    aliases: AliasConfig;
-    report: ResolutionReport;
-    cssPlan: CssPlan;
-    /** Names of vendor directives removed, for the build's report */
-    strippedCss: string[];
-  }
-): esbuild.Plugin {
-  const { aliases, report } = context;
+/**
+ * The network a build may use, in one place.
+ *
+ * Two different things are fetched, from two different places: package
+ * SOURCE from the module host, and asset BYTES from the attached
+ * repository. Both are memoized, so a module or an image referenced from
+ * twenty places is fetched once.
+ *
+ * `res.url` is deliberately the module's identity. esm.sh answers a
+ * package URL by redirecting to its built path, and that path is the only
+ * base its own relative imports mean anything against — and, because the
+ * graph keys modules by it, the reason a redirect cannot produce two
+ * copies of one package.
+ */
+function createGraphPorts(ws: WorkspaceState): GraphPorts {
+  const token = useChatStore.getState().settings.github.token;
+  const modules = new Map<string, FetchedModule>();
+  const assets = new Map<string, string | null>();
+
   return {
-    name: VFS_PLUGIN_NAME,
-    setup(build) {
-      // Resolve relative + absolute paths against the workspace
-      build.onResolve({ filter: /^[./]/ }, (args) => {
-        const resolved = vfs.resolveRel(args.importer ?? "", args.path);
-        if (resolved) return { path: resolved, namespace: "vfs" };
-        // Not a file we have. This used to be externalized in silence, so
-        // a typo or an unloaded file reached the browser as an import of
-        // "/src/typo.ts" and 404ed with nothing in the pane. Record it.
-        report.missingLocal.add(args.path);
-        return { path: args.path, external: true };
-      });
+    async fetchModule(url) {
+      const cached = modules.get(url);
+      if (cached) return cached;
 
-      // Aliases BEFORE packages. This ordering is the fix for `@/lib/utils`:
-      // it is not a package, and treating it as one aborted the module graph.
-      build.onResolve({ filter: /^[^./]/ }, (args) => {
-        // Entry points are bare paths like src/main.tsx and must always
-        // resolve into the workspace.
-        if (args.kind === "entry-point" || vfs.exists(args.path)) {
-          return { path: args.path, namespace: "vfs" };
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`.trim());
+      const fetched: FetchedModule = { source: await res.text(), finalUrl: res.url || url };
+      modules.set(url, fetched);
+      return fetched;
+    },
+
+    async assetBase64(path) {
+      const cached = assets.get(path);
+      if (cached !== undefined) return cached;
+      let base64: string | null = null;
+      if (token) {
+        try {
+          const file = await readFileContent(token, ws.owner, ws.repo, path, ws.branch);
+          // null for files over the Contents API's 1 MB limit: the bytes
+          // exist on GitHub, but not in this response.
+          base64 = file.base64;
+        } catch {
+          base64 = null;
         }
+      }
+      assets.set(path, base64);
+      return base64;
+    },
+  };
+}
 
-        const aliased = resolveAlias(args.path, aliases, (p) => vfs.exists(p));
-        if (aliased) return { path: aliased, namespace: "vfs" };
-
-        // A Vite query suffix (?raw, ?url, ?worker) names behaviour the
-        // browser has no equivalent for. Emitting the bare specifier would
-        // fail to match an import-map key and blank the frame, so the
-        // suffix is dropped to keep the module loading — and reported,
-        // because the semantics are now approximate.
-        const queryMatch = /^(.*?)\?(.+)$/.exec(args.path);
-        if (queryMatch) {
-          const base = queryMatch[1] as string;
-          report.queryStripped.add(args.path);
-          if (vfs.exists(base)) return { path: base, namespace: "vfs" };
-          report.external.add(base);
-          return { path: base, external: true };
-        }
-
-        // A real package: the browser resolves it through the import map.
-        const split = splitBareSpecifier(args.path);
-        if (split) report.external.add(args.path);
-        return { path: args.path, external: true };
-      });
-
-      build.onLoad({ filter: /.*/, namespace: "vfs" }, (args) => {
-        const content = vfs.read(args.path);
-        if (content === null) {
-          return {
-            errors: [{ text: `File not loaded in the workspace: ${args.path}` }],
-          };
-        }
-        const ext = args.path.split(".").pop()?.toLowerCase() ?? "";
-        const loader: esbuild.Loader =
-          ext === "tsx"
-            ? "tsx"
-            : ext === "ts"
-              ? "ts"
-              : ext === "jsx"
-                ? "jsx"
-                : ext === "css"
-                  ? "css"
-                  : ext === "json"
-                    ? "json"
-                    : "js";
-        // Vendor CSS directives are removed HERE, where a stylesheet is
-        // actually read: `@import "tailwindcss"` is a package import to
-        // esbuild and a directive the browser cannot execute, so leaving it
-        // in either fails the build or produces an unstyled page.
-        let contents = content;
-        if (loader === "css") {
-          const stripped = stripVendorCss(content, context.cssPlan);
-          contents = stripped.css;
-          context.strippedCss.push(...stripped.stripped);
-        }
-        return { contents, loader, resolveDir: args.path.split("/").slice(0, -1).join("/") || "." };
-      });
+function createAssetInliner(ws: WorkspaceState): AssetInliner {
+  const ports = createGraphPorts(ws);
+  const unavailable = new Set<string>();
+  return {
+    unavailable: () => [...unavailable],
+    async bytes(path) {
+      const base64 = await ports.assetBase64(path);
+      if (base64 === null) {
+        unavailable.add(path);
+        return null;
+      }
+      return base64ToBytes(base64);
     },
   };
 }
@@ -197,7 +169,11 @@ export interface BuildOutcome {
    * in place, so the document is always the thing on screen.
    */
   html: string | null;
-  /** Blob URL of the same document, for "open in new tab" */
+  /**
+   * Hosted URL of the same document when a preview host served it — set
+   * only for an origin the preview genuinely owns. Null means the inline
+   * path, where there is nothing safe to open in a tab (see toDocument).
+   */
   url: string | null;
   entry: string | null;
   diagnostics: PreviewDiagnostic[];
@@ -210,11 +186,46 @@ export interface BuildOutcome {
   jsHash?: string;
   /** The bundle's CSS, kept so it can be hot-swapped without a reload */
   css?: string;
+  /** Which delivery path the build took, and why (see ./host/preview-host-client) */
+  delivery?: PreviewDelivery;
+  deliveryNotice?: string | null;
 }
 
-/** Wraps a document in the store's build payload (srcdoc + blob link) */
-function toDocument(html: string): { html: string; url: string } {
-  return { html, url: URL.createObjectURL(new Blob([html], { type: "text/html" })) };
+/**
+ * Delivers a built document to the frame. One document, two paths:
+ *
+ *   • a preview host is listening → the document is PUBLISHED and the frame
+ *     navigates to `http://127.0.0.1:<port>/p/<id>/`. That URL is a
+ *     distinct origin from the app, so the preview cannot touch the app's
+ *     storage — and it is a real secure origin, so localStorage, cookies,
+ *     IndexedDB and Web Locks are granted by the browser instead of being
+ *     emulated in memory by the document's own prelude.
+ *   • no host → the inline sandboxed document, fed to the frame through
+ *     `srcdoc`, which is what the runtime has always done.
+ *
+ * In the second case there is deliberately NO blob URL. A blob document
+ * inherits the APP's origin, so the "open in new tab" link was handing the
+ * previewed code — including whatever npm packages it imports — a
+ * top-level page with full access to the app's localStorage. An opaque
+ * sandbox is the safer of the two, so the fallback keeps the sandbox and
+ * drops the link rather than the other way round.
+ */
+async function toDocument(html: string): Promise<{
+  html: string;
+  url: string | null;
+  delivery: PreviewDelivery;
+  deliveryNotice: string | null;
+}> {
+  const outcome = await publishPreviewDocument(html);
+  const notice = previewHostNotice(outcome);
+  if (notice) usePreviewStore.getState().addConsole([{ level: "system", text: notice }]);
+  return {
+    html,
+    url: outcome.hosted ? outcome.hosted.url : null,
+    delivery: outcome.hosted ? "hosted" : "inline",
+    // The console says it once; the pane's badge carries the current reason.
+    deliveryNotice: outcome.notice,
+  };
 }
 
 /**
@@ -333,14 +344,26 @@ function readAliasConfigFor(ws: WorkspaceState): AliasConfig {
   return readAliasConfig({ configs, treePaths: ws.tree.map((e) => e.path) });
 }
 
-/** Immediate build (used on pane open) */
-export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome> {
+/**
+ * Immediate build (used on pane open, and by the explicit rebuild button).
+ *
+ * `force` exists because the unchanged-inputs shortcut is for SCHEDULED
+ * rebuilds, which fire on every workspace write. An explicit rebuild must
+ * always build: a frame can be black while the last build reported `ready`
+ * (a document that rendered nothing, a runtime error that only appears on
+ * screen), and answering that click with a cached result makes the button
+ * look broken — which is exactly how it was reported.
+ */
+export async function runPreviewBuild(
+  ws: WorkspaceState,
+  options: { force?: boolean } = {}
+): Promise<BuildOutcome> {
   const store = usePreviewStore.getState();
   if (inFlight) {
     pendingAfterCurrent = true;
     return lastBuildResult ?? { status: "error", html: null, url: null, entry: null, diagnostics: [] };
   }
-  if (inputsUnchanged(ws)) {
+  if (!options.force && inputsUnchanged(ws)) {
     // Nothing a build reads has changed — do not tear down a running app.
     return lastBuildResult!;
   }
@@ -362,6 +385,8 @@ export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome>
       status: outcome.status,
       jsHash: outcome.jsHash,
       css: outcome.css,
+      delivery: outcome.delivery,
+      deliveryNotice: outcome.deliveryNotice,
     });
     return outcome;
   } catch (err) {
@@ -393,7 +418,8 @@ export function isPreviewSupported(): boolean {
 /** Reads the project configuration a build needs out of the workspace */
 interface ProjectConfig {
   manifest: ReturnType<typeof parsePackageJson>;
-  importMap: PreviewImportMap;
+  /** Every declared dependency's pinned version — what the graph fetches */
+  versions: PackageVersions;
   aliases: AliasConfig;
   cssPlan: CssPlan;
   define: Record<string, string>;
@@ -412,7 +438,14 @@ function readProjectConfig(ws: WorkspaceState, vfs: VFS): ProjectConfig {
   const lockfileVersions = lockfilePath
     ? parseLockfileVersions(content(lockfilePath))
     : {};
-  const importMap = buildPreviewImportMap({ manifest, lockfileVersions });
+  // Every declared dependency, pinned to one concrete version. This table
+  // is the ONLY thing that decides what the bundler fetches, so a package
+  // declared here is exactly what a bare import resolves to.
+  const declaredVersions = collectDeclaredVersions(manifest, lockfileVersions);
+  const versions: PackageVersions = {};
+  for (const [pkg, range] of Object.entries(declaredVersions)) {
+    versions[pkg] = normalizeVersion(range);
+  }
 
   const dependencyCount = Object.keys(manifest.dependencies).length;
   if (dependencyCount === 0 && ws.tree.some((e) => e.path === "package.json")) {
@@ -472,7 +505,7 @@ function readProjectConfig(ws: WorkspaceState, vfs: VFS): ProjectConfig {
 
   return {
     manifest,
-    importMap,
+    versions,
     aliases,
     cssPlan,
     define: buildDefineMap(env),
@@ -511,107 +544,84 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
   }
 
   // ── Bundled path: HTML+script or standalone JS/TS entry ──
-  const jsEntry = entry.kind === "js" ? entry.path : (entry.scriptSrc ?? "src/main.tsx");
-  const report: ResolutionReport = {
-    external: new Set(),
-    missingLocal: new Set(),
-    queryStripped: new Set(),
-  };
-
-  // Vendor CSS directives are stripped inside the VFS loader; the names
-  // removed are collected here so the build can report them.
-  const strippedCss: string[] = [];
-
-  let result: esbuild.BuildResult;
-  try {
-    result = await esbuild.build({
-      entryPoints: [jsEntry],
-      bundle: true,
-      write: false,
-      format: "esm",
-      target: "es2020",
-      jsx: "automatic",
-      jsxImportSource: "react",
-      outdir: "/out",
-      loader: { ".png": "dataurl", ".jpg": "dataurl", ".jpeg": "dataurl", ".gif": "dataurl", ".svg": "dataurl", ".webp": "dataurl" },
-      // import.meta.env + NODE_ENV come from the repository's own .env files.
-      define: config.define,
-      plugins: [
-        vfsPlugin(vfs, {
-          aliases: config.aliases,
-          report,
-          cssPlan: config.cssPlan,
-          strippedCss,
-        }),
+  //
+  // An HTML entry names its script as a URL (`/src/main.jsx`), which is not
+  // a path until it is resolved against the document. Passing the raw
+  // attribute through is how a build failed on its OWN entry point —
+  // "`/src/main.jsx` is in the repository but its contents were not loaded"
+  // — while the preloader had already fetched `src/main.jsx`.
+  const jsEntry =
+    entry.kind === "js"
+      ? entry.path
+      : resolveEntryScriptPath({
+          htmlPath: entry.path,
+          scriptSrc: entry.scriptSrc,
+          exists: (path) => vfs.exists(path),
+          resolveRel: (from, rel) => vfs.resolveRel(from, rel),
+        });
+  if (!jsEntry) {
+    return {
+      status: "error",
+      html: null,
+      url: null,
+      entry: entry.scriptSrc ?? entry.path,
+      diagnostics: [
+        {
+          message:
+            `${entry.path} loads \`${entry.scriptSrc}\`, which is not a file in this repository, so there is nothing to bundle. ` +
+            "A script src is resolved from the repository root first, then from the document's own directory. " +
+            "Check the path — and note that a binary file, or one over GitHub's 1 MB limit, has no contents to bundle.",
+          severity: "error",
+        },
+        ...config.notes,
       ],
-      logLevel: "silent",
-    });
-  } catch (err) {
-    const diagnostics = [...esbuildErrorsToDiagnostics(err), ...config.notes];
-    return { status: "error", html: null, url: null, entry: jsEntry, diagnostics };
+    };
   }
+  // The bundler resolves and FETCHES everything itself (see ./graph). A
+  // specifier it cannot satisfy fails the build, naming the file and the
+  // reason — instead of being left in the bundle for a browser to reject at
+  // runtime, which is how an unresolvable import became a blank frame with
+  // no diagnostic attached to it.
+  const bundled = await bundleWorkspace({
+    entry: jsEntry,
+    vfs,
+    aliases: config.aliases,
+    versions: config.versions,
+    define: config.define,
+    cssPlan: config.cssPlan,
+    ports: createGraphPorts(ws),
+  });
 
-  const errors = (result.errors ?? []).map((e) => esbuildMessage(e));
-  if (errors.length > 0) {
-    return { status: "error", html: null, url: null, entry: jsEntry, diagnostics: [...errors, ...config.notes] };
+  if (bundled.status === "error") {
+    return {
+      status: "error",
+      html: null,
+      url: null,
+      entry: jsEntry,
+      diagnostics: [...bundled.diagnostics, ...config.notes],
+    };
   }
+  const { js, css } = bundled;
 
-  // Collect the JS bundle + any CSS output
-  let js = "";
-  const cssParts: string[] = [];
-  for (const file of result.outputFiles ?? []) {
-    if (file.path.endsWith(".js")) js += file.text;
-    if (file.path.endsWith(".css")) cssParts.push(file.text);
-  }
-  const css = cssParts.join("\n\n");
+  // The bundler already reported what it had to work around, by name:
+  // unresolved imports, missing local files, dropped query suffixes,
+  // stripped vendor CSS, and assets it could only placeholder.
+  const diagnostics: PreviewDiagnostic[] = [...config.notes, ...bundled.diagnostics];
 
-  // ── What the build could not resolve, named ──
-  // This is the report that did not exist before: an external specifier
-  // with no import-map entry used to reach the browser and abort the whole
-  // module graph with nothing on screen.
-  const diagnostics: PreviewDiagnostic[] = [...config.notes];
-  const unmapped: string[] = [];
-  for (const specifier of report.external) {
-    if (isCoveredByImportMap(specifier, config.importMap.imports)) continue;
-    const split = splitBareSpecifier(specifier);
-    const declared = split ? config.importMap.resolved[split.pkg] : undefined;
-    unmapped.push(
-      declared
-        ? `${specifier} (\`${split?.pkg}\` is declared as "${declared}", which names no publishable version)`
-        : `${specifier} (not in package.json)`
-    );
-  }
-  if (unmapped.length > 0) {
-    diagnostics.push({
-      message:
-        `These imports cannot be resolved in the browser, so the app will not start: ${unmapped.sort().join(", ")}. ` +
-        "Add the package to package.json (it is served from esm.sh), or vendor it into the repository.",
-      severity: "error",
-    });
-  }
-  if (report.missingLocal.size > 0) {
-    diagnostics.push({
-      message: `These local imports do not exist in the workspace, so they were left to fail at runtime: ${[...report.missingLocal].sort().join(", ")}.`,
-      severity: "warning",
-    });
-  }
-  if (report.queryStripped.size > 0) {
-    diagnostics.push({
-      message: `Vite query imports were loaded without their suffix (the browser has no equivalent): ${[...report.queryStripped].sort().join(", ")}.`,
-      severity: "warning",
-    });
-  }
-  if (strippedCss.length > 0) {
-    diagnostics.push({
-      message: `Removed ${strippedCss.length} vendor CSS import(s) the browser cannot fetch: ${[...new Set(strippedCss)].sort().join(", ")}. See the CSS notes above for what this costs.`,
-      severity: "warning",
-    });
-  }
-
-  const document = toDocument(
-    composeEntryHtml(js, css, {
-      importMap: config.importMap.imports,
+  // An HTML entry contributes its OWN document, because the app's markup is
+  // the app: it holds the mount point the bundle looks for, the body classes
+  // its styles depend on, and the meta viewport. Rendering into a generated
+  // stub discarded all of that and produced a build that succeeded while
+  // showing nothing (see ./document).
+  const entryHtml = entry.kind === "html" ? ws.files[entry.path]?.content : undefined;
+  const document = await toDocument(
+    composeEntryHtml({
+      js,
+      css,
       scripts: config.cssPlan.scripts,
+      bridge: bridgeTag(),
+      staticHtml: entryHtml,
+      replacedScriptSrc: entry.kind === "html" ? (entry.scriptSrc ?? null) : null,
     })
   );
   return {
@@ -634,33 +644,58 @@ async function buildStaticHtml(
 ): Promise<BuildOutcome> {
   const raw = ws.files[htmlPath]?.content ?? "";
   const vfs = createWorkspaceVfs(ws);
-  const blobUrls = new Map<string, string>();
+  const assets = createAssetInliner(ws);
+  const inlined = new Map<string, string>();
 
-  // Inline local scripts + stylesheets as blobs
+  // EVERY reference the document makes is inlined as a data URL.
+  //
+  // It used to be a `blob:` URL per asset, created here in the APP's origin.
+  // That works in a `srcdoc` frame only by accident, and it is plainly wrong
+  // for a served preview: a blob URL belongs to the origin that created it,
+  // so a document served from the preview's own origin CANNOT load
+  // `blob:http://localhost:5173/…`. Every image, stylesheet and script in a
+  // static site came back as a broken subresource — "it does not render all
+  // the components of a website" — while the build reported success.
+  //
+  // A data URL belongs to the document that carries it, so it works on both
+  // delivery paths, and the document stays self-contained.
   const rewritten = await rewriteAssets(raw, htmlPath, async (ref) => {
-    if (blobUrls.has(ref)) return blobUrls.get(ref)!;
+    const cached = inlined.get(ref);
+    if (cached !== undefined) return cached;
     const resolved = vfs.resolveRel(htmlPath, ref);
     if (!resolved) return null;
-    const content = vfs.read(resolved);
-    if (content === null) return null;
-    const type = ref.endsWith(".css") ? "text/css" : "text/javascript";
-    const url = URL.createObjectURL(new Blob([content], { type }));
-    blobUrls.set(ref, url);
+    const url = await inlineReference(resolved, {
+      bytes: (path) => assets.bytes(path),
+      text: (path) => vfs.read(path),
+    });
+    if (url) inlined.set(ref, url);
     return url;
   });
 
-  const document = toDocument(
-    composeEntryHtml("", "", {
-      importMap: config.importMap.imports,
+  const diagnostics = [...config.notes];
+  const unavailableAssets = assets.unavailable();
+  if (unavailableAssets.length > 0) {
+    diagnostics.push({
+      message: `These assets could not be inlined, so they are missing from the preview: ${unavailableAssets.sort().join(", ")}.`,
+      severity: "warning",
+    });
+  }
+
+  const document = await toDocument(
+    composeEntryHtml({
+      js: "",
+      css: "",
       scripts: config.cssPlan.scripts,
+      bridge: bridgeTag(),
       staticHtml: rewritten,
+      replacedScriptSrc: null,
     })
   );
   return {
     status: "ready",
     ...document,
     entry: htmlPath,
-    diagnostics: config.notes,
+    diagnostics,
     jsHash: hashText(rewritten),
     css: "",
   };
@@ -706,49 +741,9 @@ async function rewriteAssets(
  * there is blocked and the bundle's first import never resolves — the
  * black-frame failure the CSP contract test exists to prevent.
  */
-function composeEntryHtml(
-  js: string,
-  css: string,
-  options: {
-    importMap: Record<string, string>;
-    scripts: string[];
-    staticHtml?: string;
-  }
-): string {
-  const { importMap, scripts, staticHtml } = options;
-  // An import map must be inline: the spec removed `src` support, so this
-  // one script cannot be externalized the way the bundle could be.
-  const importMapTag = `<script type="importmap">${JSON.stringify({ imports: importMap })}</script>`;
-  // Runtime stylesheets (Tailwind's browser build) are separate scripts so
-  // a failure in one cannot silently swallow the bundle.
-  const runtimeTags = scripts
-    .map((url) => `<script type="module" src="${url}"></script>`)
-    .join("\n");
-  const bridge = `<script>(${bridgeSource.toString()})();</script>`;
-
-  if (staticHtml !== undefined) {
-    // Inject bridge + import map + runtime scripts into the static document
-    const head = `<head>${importMapTag}${runtimeTags}${bridge}`;
-    const withHead = staticHtml.includes("<head>")
-      ? staticHtml.replace("<head>", head)
-      : `${head}</head>${staticHtml}`;
-    return withHead;
-  }
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-${importMapTag}
-<style id="intab-app-css">${css}</style>
-${runtimeTags}
-${bridge}
-</head>
-<body>
-<div id="root"></div>
-<script type="module">${js}</script>
-</body>
-</html>`;
+/** The bridge + capability prelude, serialized into every preview document */
+function bridgeTag(): string {
+  return `<script>(${bridgeSource.toString()})();</script>`;
 }
 
 /** Console/error capture + execution bridge — serialized into the iframe doc */
@@ -833,14 +828,19 @@ function bridgeSource(): void {
     } as unknown as Storage;
   };
 
-  const shimStorage = (prop: "localStorage" | "sessionStorage") => {
+  /** True when reading `probe` throws (the opaque-origin signature) */
+  const isBlocked = (probe: () => unknown): boolean => {
     try {
-      // The ACCESS itself is what throws in a sandboxed document.
-      void (window as unknown as Record<string, unknown>)[prop];
-      return;
+      void probe();
+      return false;
     } catch {
-      /* blocked — replace it below */
+      return true;
     }
+  };
+
+  const shimStorage = (prop: "localStorage" | "sessionStorage"): boolean => {
+    // The ACCESS itself is what throws in a sandboxed document.
+    if (!isBlocked(() => (window as unknown as Record<string, unknown>)[prop])) return false;
     try {
       Object.defineProperty(window, prop, {
         value: memoryStorage(),
@@ -851,9 +851,14 @@ function bridgeSource(): void {
     } catch {
       /* could not shim; the app keeps seeing the original SecurityError */
     }
+    return true;
   };
-  shimStorage("localStorage");
-  shimStorage("sessionStorage");
+  // Storage is the cheapest reliable probe for an opaque origin, and the
+  // answer decides how the OTHER capability gaps are handled. Sans this, the
+  // gaps get discovered one crash report at a time.
+  const localBlocked = shimStorage("localStorage");
+  const sessionBlocked = shimStorage("sessionStorage");
+  const opaqueOrigin = localBlocked || sessionBlocked;
 
   // An opaque origin is not a secure context, so randomUUID (and subtle) are
   // absent instead of throwing. getRandomValues still works, which is enough
@@ -902,6 +907,52 @@ function bridgeSource(): void {
       post("system", "document.cookie is blocked in the preview sandbox — in-memory cookie jar in use.");
     } catch {
       /* could not shim */
+    }
+  }
+
+  // Web Locks exists in an opaque origin but DENIES every request, which is
+  // worse than not having it: libraries feature-detect `navigator.locks`,
+  // await `request`, and take the rejection as an unhandled one. Supabase's
+  // auth-js locks while it initializes, so a previewed app with Supabase in
+  // it reports "Access to the Locks API is denied in this context" and never
+  // finishes starting. A preview is one document in one frame, so there is
+  // no second tab to exclude: running the callback inline IS the correct
+  // serialization here, not an approximation of one.
+  if (opaqueOrigin) {
+    try {
+      Object.defineProperty(navigator, "locks", {
+        configurable: true,
+        value: {
+          request: async (
+            name: string,
+            options: unknown,
+            callback?: (lock: { name: string; mode: string }) => unknown
+          ) => {
+            const run =
+              typeof callback === "function"
+                ? callback
+                : typeof options === "function"
+                  ? (options as (lock: { name: string; mode: string }) => unknown)
+                  : null;
+            if (!run) throw new TypeError(`LockManager.request: no callback (${name})`);
+            // The callback is handed a LOCK, not nothing. A library that checks
+            // it treats a missing lock as "this browser does not follow the
+            // spec" and says so on EVERY call: supabase's auth-js logged seven
+            // identical warnings per build while the lock was working exactly
+            // as intended. The name and mode are the whole of the interface
+            // the callback can observe.
+            const mode = (options as { mode?: string } | null)?.mode ?? "exclusive";
+            return await run({ name, mode });
+          },
+          query: async () => ({ held: [], pending: [] }),
+        },
+      });
+      post(
+        "system",
+        "navigator.locks is denied in the preview sandbox — lock callbacks run inline (a single-frame preview needs no cross-tab exclusion)."
+      );
+    } catch {
+      /* navigator is not configurable here; the app keeps seeing the SecurityError */
     }
   }
 
@@ -1293,7 +1344,7 @@ function bridgeSource(): void {
       post(
         "error",
         `The bundle loaded but rendered nothing (${phase}): every root element is empty. ` +
-          "Usual causes: a module specifier the browser could not resolve (check the pane's import-map report), " +
+          "Usual causes: a module the frame could not instantiate, " +
           "an error thrown while the entry module initialised, or an entry file that mounts nothing."
       );
     } catch {
@@ -1306,20 +1357,4 @@ function bridgeSource(): void {
   post("system", "preview-ready");
 }
 
-/** Normalizes esbuild failure objects into diagnostics */
-function esbuildErrorsToDiagnostics(err: unknown): PreviewDiagnostic[] {
-  const anyErr = err as { errors?: esbuild.Message[]; message?: string };
-  if (anyErr?.errors?.length) {
-    return anyErr.errors.map(esbuildMessage);
-  }
-  return [{ message: anyErr?.message ?? "Bundle failed.", severity: "error" }];
-}
 
-function esbuildMessage(m: esbuild.Message): PreviewDiagnostic {
-  return {
-    file: m.location?.file,
-    line: m.location?.line,
-    message: [m.text, ...(m.notes ?? []).map((n) => n.text)].filter(Boolean).join("\n"),
-    severity: "error",
-  };
-}

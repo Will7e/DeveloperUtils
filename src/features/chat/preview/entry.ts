@@ -180,3 +180,60 @@ function entryScriptOf(ws: WorkspaceState, htmlPath: string): string | undefined
   const moduleScript = scripts.find((s) => s.isModule);
   return (moduleScript ?? scripts[0])?.src;
 }
+
+/**
+ * A script src read as a workspace path, or null when it is not one.
+ *
+ * `src="/src/main.jsx"` is the standard Vite entry, and its leading slash
+ * is a URL fact rather than a path fact: it means "from the project root".
+ * Handing that string to the bundler unchanged is how a build came to fail
+ * on its OWN entry point — "`/src/main.jsx` is in the repository but its
+ * contents were not loaded" — because the preloader had already stripped the
+ * slash when it fetched the file. Two callers, two readings of one attribute.
+ *
+ * A query or hash is dropped for the same reason: `?v=2` names a cache key,
+ * not a file.
+ */
+export function workspaceEntryPath(scriptSrc: string | undefined): string | null {
+  if (!scriptSrc) return null;
+  const raw = scriptSrc.trim().split(/[?#]/)[0] ?? "";
+  if (!raw || /^(https?:|data:|blob:|mailto:|\/\/)/i.test(raw)) return null;
+  const stripped = raw.replace(/^\.?\/+/, "");
+  return stripped.length > 0 ? stripped : null;
+}
+
+/**
+ * The workspace file an HTML entry's script actually is.
+ *
+ * Two shapes have to resolve, and both are ordinary:
+ *
+ *   • `index.html` with `src="/src/main.tsx"` — root-relative, the Vite
+ *     convention, and root-relative to the REPOSITORY here because a build's
+ *     root is the repository unless a vite config says otherwise;
+ *   • `apps/web/index.html` with the same `src` — a monorepo, where that URL
+ *     means `apps/web/src/main.jsx` on disk.
+ *
+ * So the repository-root reading is tried first, then the document-relative
+ * one, and only then is the file reported missing. Extension candidates come
+ * from the VFS (so `/src/main` finds `src/main.jsx`): an HTML attribute is
+ * allowed to omit the extension.
+ */
+export function resolveEntryScriptPath(params: {
+  htmlPath: string;
+  scriptSrc: string | undefined;
+  exists: (path: string) => boolean;
+  resolveRel: (from: string, rel: string) => string | null;
+}): string | null {
+  const { htmlPath, scriptSrc, exists, resolveRel } = params;
+  const stripped = workspaceEntryPath(scriptSrc);
+  if (!stripped) return null;
+
+  // 1. From the repository root — what a leading slash means in HTML.
+  const fromRoot = resolveRel(htmlPath, `/${stripped}`);
+  if (fromRoot) return fromRoot;
+  if (exists(stripped)) return stripped;
+
+  // 2. From the document's own directory — a monorepo, or a relative src
+  //    (`./main.jsx`, `../shared/app.js`).
+  return resolveRel(htmlPath, `./${stripped}`);
+}

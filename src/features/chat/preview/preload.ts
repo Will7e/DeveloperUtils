@@ -15,6 +15,7 @@
 import { readFileContent } from "../lib/github-client";
 import { mergeFetchedFile } from "../workspace/workspace";
 import type { WorkspaceState } from "../types";
+import { workspaceEntryPath } from "./entry";
 import { createWorkspaceVfs, localImportSpecifiers } from "./vfs";
 
 /** Files one preload pass may fetch */
@@ -165,7 +166,18 @@ export function configSeedPaths(treePaths: Iterable<string>): string[] {
   return matches.slice(0, PREVIEW_CONFIG_SEED_MAX);
 }
 
-/** Entry point seeds for a build: the entry file plus its script src */
+/**
+ * Entry point seeds for a build: the entry document plus every reading of
+ * its script src.
+ *
+ * Both readings are offered on purpose. A script src is a URL — rooted at
+ * the project ("from the repository root" here) or relative to its own
+ * document if it starts with `.` — and the walk skips any seed that is not
+ * in the tree, so offering both costs one string comparison and removes a
+ * whole class of "contents were not loaded" failures (the file was fetched
+ * under one path and looked up under another). Which reading is correct is
+ * decided in exactly one place: entry.ts's resolveEntryScriptPath.
+ */
 export function preloadSeeds(entry: {
   kind: "html" | "js";
   path: string;
@@ -174,7 +186,10 @@ export function preloadSeeds(entry: {
   if (!entry) return [];
   if (entry.kind === "js") return [entry.path];
   const seeds = [entry.path];
-  const script = entry.scriptSrc?.replace(/^\.?\//, "");
-  if (script && !/^(https?:|data:|blob:|\/\/)/i.test(script)) seeds.push(script);
+  const script = workspaceEntryPath(entry.scriptSrc);
+  if (!script) return seeds;
+  seeds.push(script);
+  const dir = entry.path.split("/").slice(0, -1).join("/");
+  if (dir) seeds.push(`${dir}/${script}`);
   return seeds;
 }

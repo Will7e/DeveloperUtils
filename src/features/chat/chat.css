@@ -3784,6 +3784,28 @@ html body .intab-tooltip.chat-ctx-card > span {
 .chat-preview-badge-error { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
 .chat-preview-badge-building { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, transparent); }
 
+/* The sandboxed fallback, stated in the pane rather than the console. It is
+   the difference between a preview that works and one that cannot, and it is
+   not something the user's code can cause or fix. */
+.chat-preview-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  flex-shrink: 0;
+}
+.chat-preview-warn strong { color: #fcd34d; font-weight: 600; }
+.chat-preview-warn svg { flex-shrink: 0; margin-top: 2px; }
+.chat-preview-warn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-preview-err-icon { color: #f87171; }
 
 .chat-preview-actions {

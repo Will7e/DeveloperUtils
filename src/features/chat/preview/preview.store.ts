@@ -25,6 +25,18 @@ export interface PreviewConsoleEntry {
   at: number;
 }
 
+/**
+ * How a build reached the frame.
+ *
+ * `hosted` means a preview host served it from its own origin, so storage,
+ * cookies, Web Locks and — the one that matters most — the app's ROUTER all
+ * work. `inline` is the fallback: a sandboxed `srcdoc` document, isolated but
+ * capability-starved and unable to match a single route (its URL path is
+ * literally "srcdoc"). Which one you are looking at is the difference
+ * between a working preview and a black frame, so the pane says it out loud.
+ */
+export type PreviewDelivery = "hosted" | "inline";
+
 export interface PreviewState {
   conversationId: string | null;
   status: PreviewBuildStatus;
@@ -63,6 +75,10 @@ export interface PreviewState {
   jsHash: string;
   /** The bundle's CSS, kept for that hot swap */
   css: string;
+  /** The delivery path the current build took */
+  delivery: PreviewDelivery;
+  /** One sentence explaining that path, for the pane's tooltip */
+  deliveryNotice: string | null;
 
   setConversation: (id: string | null) => void;
   setStatus: (status: PreviewBuildStatus) => void;
@@ -74,6 +90,8 @@ export interface PreviewState {
     status: PreviewBuildStatus;
     jsHash?: string;
     css?: string;
+    delivery?: PreviewDelivery;
+    deliveryNotice?: string | null;
   }) => void;
   addConsole: (entries: Array<{ level: PreviewConsoleEntry["level"]; text: string }>) => void;
   clearConsole: () => void;
@@ -100,6 +118,8 @@ export const usePreviewStore = create<PreviewState>((set) => ({
   builtAt: 0,
   jsHash: "",
   css: "",
+  delivery: "inline",
+  deliveryNotice: null,
 
   setConversation: (id) =>
     set({
@@ -114,11 +134,13 @@ export const usePreviewStore = create<PreviewState>((set) => ({
       screenshot: null,
       jsHash: "",
       css: "",
+      delivery: "inline",
+      deliveryNotice: null,
     }),
 
   setStatus: (status) => set({ status }),
 
-  setBuild: ({ html, url, entry, diagnostics, status, jsHash, css }) =>
+  setBuild: ({ html, url, entry, diagnostics, status, jsHash, css, delivery, deliveryNotice }) =>
     set((s) => ({
       html,
       url,
@@ -129,6 +151,10 @@ export const usePreviewStore = create<PreviewState>((set) => ({
       screenshot: null,
       jsHash: jsHash ?? s.jsHash,
       css: css ?? s.css,
+      delivery: delivery ?? s.delivery,
+      // Always the CURRENT build's reason, never a stale one: the console
+      // dedupes repeats, the tooltip must not.
+      deliveryNotice: deliveryNotice ?? null,
       buildId: s.buildId + 1,
       builtAt: Date.now(),
     })),

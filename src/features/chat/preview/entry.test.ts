@@ -7,7 +7,13 @@
 // ============================================================
 
 import { describe, it, expect } from "vitest";
-import { detectEntry, unsupportedProjectReason } from "./entry";
+import {
+  detectEntry,
+  resolveEntryScriptPath,
+  unsupportedProjectReason,
+  workspaceEntryPath,
+} from "./entry";
+import { createWorkspaceVfs } from "./vfs";
 import type { WorkspaceState } from "../types";
 
 /** Minimal workspace fixture: paths in the tree, contents in `files` */
@@ -36,6 +42,72 @@ function workspace(paths: string[], files: Record<string, string> = {}): Workspa
     updatedAt: 0,
   };
 }
+
+// ── The entry script's path ──────────────────────────────────
+//
+// The failure this guards, reported from a real repo: the build named its
+// OWN entry point as a file whose contents were never loaded. The preloader
+// had fetched `src/main.jsx`; the bundler looked up `/src/main.jsx`, because
+// an HTML script src is a URL and both callers were reading it differently.
+
+describe("resolveEntryScriptPath", () => {
+  /** A workspace whose tree and contents the real VFS resolves through */
+  function vfsFor(paths: string[], files: Record<string, string> = {}) {
+    return createWorkspaceVfs(workspace(paths, files));
+  }
+
+  function resolveIn(vfs: ReturnType<typeof vfsFor>, htmlPath: string, scriptSrc: string) {
+    return resolveEntryScriptPath({
+      htmlPath,
+      scriptSrc,
+      exists: (path) => vfs.exists(path),
+      resolveRel: (from, rel) => vfs.resolveRel(from, rel),
+    });
+  }
+
+  it("resolves the Vite convention — root-relative — to a file it can read", () => {
+    const vfs = vfsFor(["index.html", "src/main.jsx"], { "src/main.jsx": "console.log(1)" });
+    const resolved = resolveIn(vfs, "index.html", "/src/main.jsx");
+    expect(resolved).toBe("src/main.jsx");
+    // The whole point: the bundler reads the same file the preloader fetched.
+    expect(vfs.read(resolved!)).toBe("console.log(1)");
+  });
+
+  it("resolves a monorepo, where the same URL means the document's own directory", () => {
+    const vfs = vfsFor(["apps/web/index.html", "apps/web/src/main.jsx"], {
+      "apps/web/src/main.jsx": "app",
+    });
+    const resolved = resolveIn(vfs, "apps/web/index.html", "/src/main.jsx");
+    expect(resolved).toBe("apps/web/src/main.jsx");
+    expect(vfs.read(resolved!)).toBe("app");
+  });
+
+  it("handles a relative src, an omitted extension and a query suffix", () => {
+    const vfs = vfsFor(["src/index.html", "src/main.tsx"], { "src/main.tsx": "ok" });
+    expect(resolveIn(vfs, "src/index.html", "./main.tsx")).toBe("src/main.tsx");
+    // An HTML attribute may omit the extension; the VFS supplies candidates.
+    expect(resolveIn(vfs, "src/index.html", "./main")).toBe("src/main.tsx");
+    // `?v=2` names a cache key, not a file.
+    expect(resolveIn(vfs, "src/index.html", "/src/main.tsx?v=2")).toBe("src/main.tsx");
+  });
+
+  it("refuses a src that is not a workspace file instead of guessing", () => {
+    const vfs = vfsFor(["src/index.html"]);
+    for (const src of [
+      "https://cdn.example/app.js",
+      "//cdn.example/app.js",
+      "data:text/javascript,1",
+      "/src/gone.jsx",
+      "./gone.jsx",
+      "",
+    ]) {
+      expect(resolveIn(vfs, "src/index.html", src), src).toBeNull();
+    }
+    // …and the shared reading of a src is what both callers agree on.
+    expect(workspaceEntryPath("/src/main.jsx")).toBe("src/main.jsx");
+    expect(workspaceEntryPath(undefined)).toBeNull();
+  });
+});
 
 describe("detectEntry", () => {
   it("finds a Vite project's index.html and its module script", () => {

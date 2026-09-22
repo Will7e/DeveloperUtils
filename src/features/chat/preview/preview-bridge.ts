@@ -15,6 +15,8 @@
 import React from "react";
 import { usePreviewStore } from "./preview.store";
 import type { PreviewConsoleEntry } from "./preview.store";
+import { explainConsoleEntry } from "./console-explain";
+import { isHostedPreviewUrl } from "./host/preview-host-client";
 
 const BRIDGE_SOURCE = "intab-preview";
 const KNOWN_LEVELS: PreviewConsoleEntry["level"][] = ["log", "info", "warn", "error", "system"];
@@ -29,6 +31,8 @@ interface PendingRequest {
 }
 const pendingRequests = new Map<number, PendingRequest>();
 let nextRequestId = 1;
+/** One harness explanation per build, not one per console line */
+let explainedHarnessWarning = false;
 
 /** Posts one request into the live preview iframe and awaits its response */
 function postPreviewRequest(
@@ -161,7 +165,19 @@ export function usePreviewBridge(): void {
         usePreviewStore.getState().setRuntimeReady(true);
         return;
       }
-      usePreviewStore.getState().addConsole([{ level, text: data.text ?? "" }]);
+      const text = data.text ?? "";
+      usePreviewStore.getState().addConsole([{ level, text }]);
+
+      // Some warnings are about the preview rather than the app. The one that
+      // matters names the fix instead of leaving the reader to guess (see
+      // ./console-explain) — said once, because it repeats on every load.
+      const hint = explainConsoleEntry(text, {
+        hosted: isHostedPreviewUrl(usePreviewStore.getState().url),
+      });
+      if (hint && !explainedHarnessWarning) {
+        explainedHarnessWarning = true;
+        usePreviewStore.getState().addConsole([{ level: "system", text: hint }]);
+      }
     };
     window.addEventListener("message", onMessage);
     return () => {
@@ -175,6 +191,9 @@ export function usePreviewBridge(): void {
   React.useEffect(() => {
     const unsub = usePreviewStore.subscribe((state, prev) => {
       if (state.buildId !== prev.buildId) {
+        // A new build can take a different delivery path, so the warning is
+        // worth explaining again if it comes back.
+        explainedHarnessWarning = false;
         failAllPending("The preview was rebuilt while the request was in flight — retry against the new build.");
       }
     });

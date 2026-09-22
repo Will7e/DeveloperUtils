@@ -9,6 +9,7 @@
 import React from "react";
 import {
   AlertCircle,
+  AlertTriangle,
   ChevronDown,
   Eraser,
   ExternalLink,
@@ -28,6 +29,7 @@ import { useChatStore } from "@/stores/chat.store";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { runPreviewBuild } from "./preview-runtime";
 import { setPreviewCss } from "./preview-bridge";
+import { isHostedPreviewUrl, releaseLivePreview } from "./host/preview-host-client";
 
 interface PreviewPaneProps {
   onClose: () => void;
@@ -47,6 +49,8 @@ export const PreviewPane = React.memo(function PreviewPane({
   const consoleEntries = usePreviewStore((s) => s.console);
   const jsHash = usePreviewStore((s) => s.jsHash);
   const css = usePreviewStore((s) => s.css);
+  const delivery = usePreviewStore((s) => s.delivery);
+  const deliveryNotice = usePreviewStore((s) => s.deliveryNotice);
   const setRuntimeReady = usePreviewStore((s) => s.setRuntimeReady);
   // `buildId` is deliberately no longer the frame's key: it bumps on every
   // build, including CSS-only ones that must NOT reload the app.
@@ -62,12 +66,14 @@ export const PreviewPane = React.memo(function PreviewPane({
   /**
    * The document the FRAME was mounted with, and the JS it was built from.
    *
-   * The iframe is driven by `srcDoc`, so writing a new document to that
-   * attribute reloads the frame. Holding the document in state and only
-   * replacing it on an intentional remount is what lets a CSS-only rebuild
-   * reach a running app without restarting it.
+   * The iframe is driven by `srcDoc` (or by `src` when the build was
+   * published to a preview host), so replacing either reloads the frame.
+   * Holding the document in state and only replacing it on an intentional
+   * remount is what lets a CSS-only rebuild reach a running app without
+   * restarting it.
    */
   const [frameDoc, setFrameDoc] = React.useState<string | null>(null);
+  const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
   const [frameKey, setFrameKey] = React.useState(0);
   const mountedJsHash = React.useRef<string | null>(null);
 
@@ -112,22 +118,34 @@ export const PreviewPane = React.memo(function PreviewPane({
     if (status !== "ready" || !html) return;
     if (!autoUpdate) return;
 
+    // The URL decides HOW the document reaches the frame: a published build
+    // navigates to its own origin, a fallback build is parsed in place. It
+    // is read from the store per build, so starting the host mid-session is
+    // picked up by the next rebuild instead of needing a page reload.
+    const hostedUrl = isHostedPreviewUrl(url) ? url : null;
+
     const mounted = mountedJsHash.current;
     if (mounted === null) {
       mountedJsHash.current = jsHash;
       setFrameDoc(html);
+      setFrameUrl(hostedUrl);
       setFrameKey((k) => k + 1);
       return;
     }
     if (mounted !== jsHash) {
       mountedJsHash.current = jsHash;
       setFrameDoc(html);
+      setFrameUrl(hostedUrl);
       setFrameKey((k) => k + 1);
       return;
     }
     // Same JS: a stylesheet-only change. Swap it into the live document.
     void setPreviewCss(css);
-  }, [status, html, jsHash, css, autoUpdate]);
+  }, [status, html, jsHash, css, autoUpdate, url]);
+
+  // Closing the pane drops the published document: it is a readable copy of
+  // the user's source, and it should not outlive the thing that asked for it.
+  React.useEffect(() => () => releaseLivePreview(), []);
 
   const consoleErrors = consoleEntries.filter((e) => e.level === "error").length;
   const shouldAutoOpen = status === "error" && diagnostics.length > 0;
@@ -147,6 +165,26 @@ export const PreviewPane = React.memo(function PreviewPane({
         {entry && <span className="chat-preview-entry" title={entry}>{entry}</span>}
         <span className={`chat-preview-badge chat-preview-badge-${status}`}>
           {status === "building" ? "Building" : status === "ready" ? "Ready" : status === "error" ? "Error" : status}
+        </span>
+        {/*
+          * Which delivery path this build took, in the header rather than
+          * buried in the console. It is the difference that matters: a SERVED
+          * build is on its own origin, so storage, cookies and the app's
+          * router work; a SANDBOXED one is the isolated fallback, where a
+          * router has no path to match and state resets on every rebuild.
+          * Reading "Sandboxed" here is a complete explanation of most
+          * "the preview is broken" reports.
+          */}
+        <span
+          className={`chat-preview-badge chat-preview-badge-${delivery === "hosted" ? "ready" : "idle"}`}
+          title={
+            deliveryNotice ??
+            (delivery === "hosted"
+              ? "Served from its own origin — storage, cookies, Web Locks and routing work."
+              : "Runs as an inline sandboxed document.")
+          }
+        >
+          {delivery === "hosted" ? "Served" : "Sandboxed"}
         </span>
         <div className="chat-preview-actions">
           <button
@@ -171,10 +209,12 @@ export const PreviewPane = React.memo(function PreviewPane({
             type="button"
             className="toolbar-icon-btn"
             onClick={() => {
-              if (workspace) void runPreviewBuild(workspace);
+              // Forced: this button exists to be pressed when the frame is
+              // wrong, and "wrong" includes a build that reported success.
+              if (workspace) void runPreviewBuild(workspace, { force: true });
             }}
             disabled={!workspace || status === "building"}
-            title="Rebuild the preview now"
+            title="Rebuild now (always runs, even if nothing changed)"
             aria-label="Rebuild the preview now"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${status === "building" ? "spin" : ""}`} />
@@ -214,13 +254,44 @@ export const PreviewPane = React.memo(function PreviewPane({
         </div>
       </div>
 
+      {/*
+        * The fallback path, said out loud.
+        *
+        * A sandboxed preview is not "a broken app" — it is a document with
+        * no origin, so the app's router has no path to match, storage resets
+        * on every rebuild, and nothing the agent writes can change either.
+        * A badge alone let that land as "the preview is broken", which is how
+        * it was reported for three rounds while the pane reported success.
+        */}
+      {status === "ready" && delivery === "inline" && (
+        <div className="chat-preview-warn" role="status">
+          <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>
+            <strong>Sandboxed preview.</strong> This build has no origin of its own, so
+            in-app navigation and storage will not work.{" "}
+            {deliveryNotice}
+          </span>
+        </div>
+      )}
+
       <div className={`chat-preview-body ${viewMode === "mobile" ? "chat-preview-body-mobile" : ""}`}>
         {status === "ready" && (frameDoc ?? html) ? (
           <iframe
             key={frameKey}
             className="chat-preview-frame"
-            sandbox="allow-scripts allow-modals allow-forms allow-popups"
-            srcDoc={frameDoc ?? html ?? ""}
+            // A HOSTED frame deliberately gets no `sandbox` attribute. Its
+            // own origin is what makes storage, cookies and locks work, and
+            // a parent `sandbox` without `allow-same-origin` strips that
+            // origin away — recreating the exact problem the host exists to
+            // solve. The host's own policy carries
+            // `sandbox allow-same-origin`, so the preview keeps its origin
+            // while top-level navigation stays denied.
+            {...(frameUrl
+              ? { src: frameUrl, allow: "geolocation; camera; microphone" }
+              : {
+                  sandbox: "allow-scripts allow-modals allow-forms allow-popups",
+                  srcDoc: frameDoc ?? html ?? "",
+                })}
             title="Live preview"
             onLoad={() => setRuntimeReady(true)}
           />

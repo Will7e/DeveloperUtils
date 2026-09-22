@@ -177,6 +177,13 @@ export function buildDefineMap(env: PreviewEnv): Record<string, string> {
     "import.meta.env": JSON.stringify(env.exposed),
     // HMR cannot work in a static preview bundle; guarding code checks it.
     "import.meta.hot": "undefined",
+    // Vite's glob import IS supported — ./glob rewrites the static patterns
+    // while building. This points whatever the rewrite could not resolve (a
+    // computed pattern, an unsupported option, or a call inside a fetched
+    // package) at a function that explains itself, because the alternative is
+    // `TypeError: (intermediate value).glob is not a function`.
+    "import.meta.glob": "__intabGlobUnavailable",
+    "import.meta.globEager": "__intabGlobUnavailable",
     "process.env.NODE_ENV": JSON.stringify(env.exposed.PROD ? "production" : "development"),
   };
 }

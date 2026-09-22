@@ -270,18 +270,62 @@ export function collectDeclaredVersions(
 }
 
 /**
- * The module URL for one package. `external=react,react-dom` makes esm.sh
- * leave the shared instances to the map instead of bundling a second
- * copy — the difference between a working React app and "Invalid hook
- * call" with no clue why.
+ * The module URL for one package, optionally one of its subpaths.
+ * `external=react` makes esm.sh leave the shared React instance to the
+ * import map instead of bundling a second copy — the difference between a
+ * working React app and "Invalid hook call" with no clue why.
+ *
+ * The subpath goes BEFORE the query, and that ordering is load-bearing.
+ * A trailing-slash import-map entry is only usable when the value it maps
+ * to is a code-unit prefix of the URL the lookup produces:
+ *
+ *   base      https://esm.sh/react-dom@19.2.5/?external=react
+ *   subpath   https://esm.sh/react-dom@19.2.5/client      <- query dropped
+ *   prefix of base? NO
+ *
+ * The platform refuses that lookup outright — `Failed to resolve module
+ * specifier "react-dom/client" ... blocked due to backtracking` — and the
+ * app never starts. Building the subpath URL directly avoids the question.
  */
-export function packageModuleUrl(pkg: string, version: string | null): string {
+export function packageModuleUrl(pkg: string, version: string | null, subpath = ""): string {
   const specifier = version ? `${pkg}@${version}` : pkg;
-  const url = `${PREVIEW_CDN}/${specifier}`;
-  if (SHARED_INSTANCE_PACKAGES.includes(pkg) && pkg === "react-dom") {
-    return `${url}?external=react`;
-  }
-  return url;
+  const suffix = subpath.replace(/^\/+|\/+$/g, "");
+  const url = suffix ? `${PREVIEW_CDN}/${specifier}/${suffix}` : `${PREVIEW_CDN}/${specifier}`;
+  return `${url}${externalizeQuery(pkg)}`;
+}
+
+/**
+ * The `external=` query a package's module URL needs.
+ *
+ * EVERY mapped package is told to leave the shared instances to the import
+ * map, not just react-dom. esm.sh bundles a private copy of a dependency
+ * into each package that imports it, so a single `?external=react` on
+ * react-dom is not enough: `lucide-react`, `@radix-ui/*`, `react-router-dom`
+ * and anything else that imports React arrives holding its OWN React, whose
+ * shared internals are a different object from the one react-dom/client
+ * renders with. The symptom names nothing useful — the thrown TypeError is
+ * `Cannot read properties of null (reading 'useRef')` from inside react.mjs,
+ * followed by a blank frame. esm.sh ignores an external a package never
+ * imports, so applying it broadly costs nothing.
+ *
+ * react itself IS the shared instance: it externalizes nothing.
+ */
+function externalizeQuery(pkg: string): string {
+  if (pkg === "react") return "";
+  const external = SHARED_INSTANCE_PACKAGES.filter((p) => p !== pkg);
+  return external.length > 0 ? `?external=${external.join(",")}` : "";
+}
+
+/**
+ * The value for a package's trailing-slash entry: a PREFIX, and therefore
+ * query-free with a path ending in "/". Anything else — notably the
+ * `?external=react` a shared-instance package carries — makes the entry
+ * unusable for every subpath, because the query would have to sit between
+ * the prefix and the subpath.
+ */
+function packagePrefixUrl(pkg: string, version: string | null): string {
+  const specifier = version ? `${pkg}@${version}` : pkg;
+  return `${PREVIEW_CDN}/${specifier}/`;
 }
 
 /**
@@ -301,6 +345,8 @@ export function buildPreviewImportMap(params: {
   const imports: Record<string, string> = {};
   const resolved: Record<string, string> = {};
   const known = new Set<string>();
+  /** The version each mapped package resolved to (null → not publishable) */
+  const moduleVersions: Record<string, string | null> = {};
 
   for (const [pkg, range] of Object.entries(declared)) {
     const version = normalizeVersion(range);
@@ -313,8 +359,26 @@ export function buildPreviewImportMap(params: {
       // map so it is reported as a specific failure below.
       continue;
     }
+    moduleVersions[pkg] = version ?? null;
     imports[pkg] = packageModuleUrl(pkg, version ?? null);
-    imports[`${pkg}/`] = `${packageModuleUrl(pkg, version ?? null)}/`;
+    imports[`${pkg}/`] = packagePrefixUrl(pkg, version ?? null);
+  }
+
+  // Subpaths get their own EXACT entry when the workspace actually imports
+  // them. Relying on the trailing-slash entry alone works for a plain
+  // package, but not for a shared-instance one: its subpath URL must carry
+  // `?external=react`, which no prefix mapping can reach (see
+  // packageModuleUrl). `react-dom/client` is how every React app mounts, so
+  // this is the difference between a rendered preview and a blank frame.
+  for (const specifier of params.specifiers ?? []) {
+    if (Object.prototype.hasOwnProperty.call(imports, specifier)) continue;
+    const split = splitBareSpecifier(specifier);
+    if (!split?.subpath) continue;
+    const version = moduleVersions[split.pkg];
+    // Undeclared packages are reported as unmapped instead; a declared but
+    // unpublishable one has no URL to build.
+    if (version === undefined || version === null) continue;
+    imports[specifier] = packageModuleUrl(split.pkg, version, split.subpath);
   }
 
   // jsx-runtime is imported by esbuild's automatic JSX transform for every
@@ -322,7 +386,11 @@ export function buildPreviewImportMap(params: {
   // already covers, but being explicit keeps the failure mode obvious if
   // react is missing entirely.
   if (imports["react"] && !imports["react/jsx-runtime"]) {
-    imports["react/jsx-runtime"] = `${imports["react"]}/jsx-runtime`;
+    imports["react/jsx-runtime"] = packageModuleUrl(
+      "react",
+      moduleVersions["react"] ?? null,
+      "jsx-runtime"
+    );
   }
 
   const unmapped: UnmappedSpecifier[] = [];

@@ -180,8 +180,22 @@ describe("packageModuleUrl", () => {
     );
   });
 
+  it("asks every other package to leave the shared instances alone", () => {
+    // A package that quietly bundles its own React is the blank-frame bug
+    // with no message pointing at it, so the request is made of everything
+    // rather than guessed per package.
+    expect(packageModuleUrl("lucide-react", "1.11.0")).toBe(
+      "https://esm.sh/lucide-react@1.11.0?external=react,react-dom"
+    );
+    expect(packageModuleUrl("swiper", "11.0.0", "css")).toBe(
+      "https://esm.sh/swiper@11.0.0/css?external=react,react-dom"
+    );
+  });
+
   it("omits the version when there is none", () => {
-    expect(packageModuleUrl("left-pad", null)).toBe("https://esm.sh/left-pad");
+    expect(packageModuleUrl("left-pad", null)).toBe(
+      "https://esm.sh/left-pad?external=react,react-dom"
+    );
   });
 });
 
@@ -289,13 +303,31 @@ describe("buildPreviewImportMap — every external import has a destination", ()
       lockfileVersions: { react: "19.2.5", zustand: "5.0.13" },
     });
     expect(map.imports.react).toBe("https://esm.sh/react@19.2.5");
-    expect(map.imports.zustand).toBe("https://esm.sh/zustand@5.0.13");
+    expect(map.imports.zustand).toBe(
+      "https://esm.sh/zustand@5.0.13?external=react,react-dom"
+    );
   });
 
   it("does not leave the React instance duplicated", () => {
+    // Mapping react-dom alone was not enough: lucide-react, @radix-ui/* and
+    // react-router-dom each arrived holding their OWN React, whose shared
+    // internals are not the ones react-dom/client renders with. The thrown
+    // error names nothing useful — `Cannot read properties of null (reading
+    // 'useRef')` from inside react.mjs — and the frame stays blank.
     const map = buildPreviewImportMap({ manifest: parsePackageJson(repo["package.json"]) });
-    expect(map.imports["react-dom"]).toContain("external=react");
+
+    // react IS the instance, so it externalizes nothing at all.
     expect(map.imports["react"]).not.toContain("external=");
+    expect(map.imports["react/jsx-runtime"]).not.toContain("external=");
+
+    for (const [key, value] of Object.entries(map.imports)) {
+      if (key === "react" || key.startsWith("react/")) continue;
+      // Exact entries carry the query; trailing-slash entries cannot, which
+      // is precisely why a subpath the workspace imports gets one of its own.
+      if (key.endsWith("/")) continue;
+      expect(value, `${key} would bundle its own React`).toContain("external=react");
+    }
+    expect(map.imports["react-dom"]).toContain("external=react");
   });
 
   it("covers subpath imports through the trailing-slash entry", () => {
@@ -303,6 +335,52 @@ describe("buildPreviewImportMap — every external import has a destination", ()
     expect(isCoveredByImportMap("swiper/css", map.imports)).toBe(true);
     expect(isCoveredByImportMap("react-dom/client", map.imports)).toBe(true);
     expect(isCoveredByImportMap("react/jsx-runtime", map.imports)).toBe(true);
+  });
+
+  it("keeps every trailing-slash entry usable as a prefix", () => {
+    // The platform rejects a prefix mapping whose value is not a code-unit
+    // prefix of the URL the lookup produces — `Failed to resolve module
+    // specifier "react-dom/client" ... blocked due to backtracking`. The
+    // cause was appending "/" to a value that already carried a query, so
+    // the slash landed INSIDE the query and the path did not end in one.
+    const map = buildPreviewImportMap({
+      manifest: parsePackageJson(repo["package.json"]),
+      specifiers: collectBareSpecifiers(
+        Object.entries(repo).map(([path, content]) => ({ path, content }))
+      ),
+    });
+
+    const prefixes = Object.entries(map.imports).filter(([key]) => key.endsWith("/"));
+    expect(prefixes.length).toBeGreaterThan(0);
+    for (const [key, value] of prefixes) {
+      expect(value.endsWith("/"), `${key} → ${value} must end in a slash`).toBe(true);
+      expect(value).not.toContain("?");
+      // The browser's own check, applied to the URL it would build.
+      const resolved = new URL("some-subpath.js", value).href;
+      expect(resolved.startsWith(value), `${key} backtracks above its prefix`).toBe(true);
+    }
+  });
+
+  it("gives an imported subpath of a shared-instance package its own entry", () => {
+    // react-dom is the one package whose URL carries `?external=react`, so
+    // its subpaths cannot ride the trailing-slash entry: the subpath URL
+    // drops the query and esm.sh then bundles a SECOND React.
+    const map = buildPreviewImportMap({
+      manifest: parsePackageJson(repo["package.json"]),
+      lockfileVersions: { "react-dom": "19.2.5" },
+      specifiers: ["react-dom/client", "react/jsx-runtime", "swiper/css"],
+    });
+
+    expect(map.imports["react-dom/client"]).toBe(
+      "https://esm.sh/react-dom@19.2.5/client?external=react"
+    );
+    // react has no lockfile pin here, so its declared range decides.
+    expect(map.imports["react/jsx-runtime"]).toBe("https://esm.sh/react@19.2.0/jsx-runtime");
+    expect(map.imports["swiper/css"]).toBe(
+      "https://esm.sh/swiper@11.0.0/css?external=react,react-dom"
+    );
+    // An undeclared package is still reported rather than invented.
+    expect(map.imports["not-declared/sub"]).toBeUndefined();
   });
 
   it("names WHY an import is unmapped instead of failing silently", () => {

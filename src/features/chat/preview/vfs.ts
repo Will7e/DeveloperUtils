@@ -16,6 +16,8 @@ export interface VFS {
   read(path: string): string | null;
   exists(path: string): boolean;
   resolveRel(from: string, rel: string): string | null;
+  /** Every file path in the workspace — what a glob pattern matches against */
+  paths(): string[];
 }
 
 /** Builds a virtual FS over a workspace snapshot */
@@ -59,6 +61,7 @@ export function createWorkspaceVfs(ws: WorkspaceState): VFS {
   return {
     read,
     exists: hasAny,
+    paths: () => [...allPaths],
     resolveRel: (from, rel) => {
       if (rel.startsWith("/")) {
         const p = rel.slice(1);
