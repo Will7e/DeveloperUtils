@@ -7,7 +7,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import { MonitorPlay } from "lucide-react";
+import { FileDiff } from "lucide-react";
 import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
 import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
 import { flushWorkspaceSave } from "./workspace/workspace";
@@ -33,8 +33,13 @@ import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
+import { resolveMentionContext } from "./services/mention-context";
+import { PlanStrip } from "./components/PlanStrip";
 import { PreviewPane } from "./preview/PreviewPane";
 import { usePreviewBridge } from "./preview/preview-bridge";
+import { isAgentPanelVisible } from "./preview/preview.store";
+import { ChangesPane } from "./components/ChangesPane";
+import { collectChangeSet } from "./lib/change-set";
 import { modelSupportsImages } from "./services/chat-runner";
 import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
@@ -71,7 +76,6 @@ export function ChatPage() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
 
   // ── Per-conversation composer state ──
   // A draft belongs to the chat it was typed in. Keeping one shared
@@ -107,13 +111,24 @@ export function ChatPage() {
   const { repoAttached } = useWorkspaceStoreSlice();
   usePreviewBridge();
 
-  // Auto-open the preview on attach: derive from the repo context so
+  // Auto-open the agent panel on attach: derive from the repo context so
   // no effect-based setState is needed. Once closed manually it stays
-  // closed for this attachment (tracked by attachedAt).
+  // closed for this attachment (tracked by attachedAt) and the floating
+  // button brings it back.
   const attachedAt = activeConversation?.repoContext?.attachedAt ?? 0;
   const [closedForAttachment, setClosedForAttachment] = useState<number | null>(null);
-  const shouldShowPreview = repoAttached && closedForAttachment !== attachedAt;
-  const previewVisible = previewOpen && shouldShowPreview;
+  const panelVisible = isAgentPanelVisible({ repoAttached, attachedAt, closedForAttachment });
+
+  // The panel opens on the DIFF, not the rendered page: what an agent did
+  // (which files moved, and how) is the question you have to answer before
+  // trusting a change set, and it is the one a preview cannot answer. The
+  // live preview stays one click away for when the question is "what does
+  // it look like".
+  const [panelTab, setPanelTab] = useState<"changes" | "preview">("changes");
+  const activeWorkspace = useChatStore((s) =>
+    activeConversationId ? s.workspaces[activeConversationId] : undefined
+  );
+  const changeSet = useMemo(() => collectChangeSet(activeWorkspace), [activeWorkspace]);
 
   // Fetch the live model catalog whenever an API key becomes
   // available. Keying on the hydrated key value (not just mount)
@@ -334,8 +349,30 @@ export function ChatPage() {
     [activeConversationId, models, isStreamingHere]
   );
 
+  /**
+   * The conversation a send belongs to, creating one if the page has none.
+   *
+   * The composer is live while the page has no active conversation — typing
+   * works and Send looks ready — so returning early here made the primary
+   * action a silent no-op: the click did nothing and nothing explained it.
+   * The page is supposed to guarantee a conversation (see the hydration
+   * effect above), but that guarantee is one tick of timing away from being
+   * wrong, so the send path does not depend on it.
+   */
+  const resolveTargetConversation = (): string => {
+    const state = useChatStore.getState();
+    if (state.activeConversationId) return state.activeConversationId;
+    return state.createConversation(state.settings.defaultModel);
+  };
+
+  // Repository paths for the "@" picker. Memoised on the tree reference so
+  // typing in the composer never re-walks it.
+  const mentionPaths = useMemo(
+    () => (activeWorkspace?.tree ?? []).filter((e) => e.type === "blob").map((e) => e.path),
+    [activeWorkspace?.tree]
+  );
+
   const handleSend = () => {
-    if (!activeConversationId) return;
     if (!draft.trim() && pendingImages.length === 0) return;
     const text = draft;
     const images = pendingImages;
@@ -361,17 +398,29 @@ export function ChatPage() {
 
     setDraft("");
     setPendingImages([]);
-    sendUserMessage(
-      activeConversationId,
-      text,
-      images.length > 0 ? images : undefined
-    );
+    const target = resolveTargetConversation();
+    // "@file" in the draft becomes FILE CONTENTS on the message. The read is
+    // async, so the send waits for it — sending first and attaching later
+    // would let the model answer before the context it was told it had.
+    if (text.includes("@")) {
+      void resolveMentionContext(target, text).then((resolved) => {
+        for (const failure of resolved.failures) {
+          useAppStore.getState().addToast({
+            message: `Could not attach @${failure.path} — ${failure.reason}`,
+            type: "error",
+            duration: 4500,
+          });
+        }
+        sendUserMessage(target, resolved.text, images.length > 0 ? images : undefined);
+      });
+      return;
+    }
+    sendUserMessage(target, text, images.length > 0 ? images : undefined);
   };
 
   const handleSuggestion = (text: string) => {
-    if (!activeConversationId) return;
     setDraft("");
-    sendUserMessage(activeConversationId, text);
+    sendUserMessage(resolveTargetConversation(), text);
   };
 
   const handleStop = () => {
@@ -481,7 +530,7 @@ export function ChatPage() {
           isSidebarOpen={sidebarOpen}
         />
 
-        {previewVisible ? (
+        {panelVisible ? (
           <div className="chat-agent-layout">
             <Group orientation="horizontal">
               <Panel defaultSize={55} minSize={30}>
@@ -524,12 +573,45 @@ export function ChatPage() {
               </Panel>
               <Separator className="chat-agent-resize-handle" />
               <Panel defaultSize={45} minSize={25}>
-                <PreviewPane
-                  onClose={() => {
-                    setPreviewOpen(false);
-                    if (attachedAt) setClosedForAttachment(attachedAt);
-                  }}
-                />
+                <div className="chat-agent-panel">
+                  <div className="chat-panel-tabs" role="tablist" aria-label="Agent panel">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={panelTab === "changes"}
+                      className={`chat-panel-tab ${panelTab === "changes" ? "chat-panel-tab-active" : ""}`}
+                      onClick={() => setPanelTab("changes")}
+                    >
+                      Changes
+                      {!changeSet.empty && (
+                        <span className="chat-panel-tab-count">{changeSet.fileCount}</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={panelTab === "preview"}
+                      className={`chat-panel-tab ${panelTab === "preview" ? "chat-panel-tab-active" : ""}`}
+                      onClick={() => setPanelTab("preview")}
+                    >
+                      Preview
+                    </button>
+                  </div>
+                  {panelTab === "changes" ? (
+                    <ChangesPane
+                      conversationId={activeConversationId}
+                      onClose={() => {
+                        if (attachedAt) setClosedForAttachment(attachedAt);
+                      }}
+                    />
+                  ) : (
+                    <PreviewPane
+                      onClose={() => {
+                        if (attachedAt) setClosedForAttachment(attachedAt);
+                      }}
+                    />
+                  )}
+                </div>
               </Panel>
             </Group>
           </div>
@@ -547,6 +629,8 @@ export function ChatPage() {
               }
               onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
             />
+
+            <PlanStrip conversationId={activeConversationId} />
 
             <Composer
               value={draft}
@@ -569,16 +653,25 @@ export function ChatPage() {
               activeModelId={modelId}
               onRunCommand={handleRunCommand}
               onModelChange={handleModelChange}
+              mentionPaths={mentionPaths}
             />
-            {repoAttached && !previewVisible && (
+            {repoAttached && !panelVisible && (
               <button
                 type="button"
                 className="chat-preview-open-fab"
-                onClick={() => setPreviewOpen(true)}
-                title="Show live preview"
+                onClick={() => {
+                  setPanelTab(changeSet.empty ? "preview" : "changes");
+                  setClosedForAttachment(null);
+                }}
+                title={
+                  changeSet.empty
+                    ? "Show live preview"
+                    : `Show ${changeSet.fileCount} changed file${changeSet.fileCount === 1 ? "" : "s"}`
+                }
               >
-                <MonitorPlay className="h-4 w-4" />
-                Preview
+                <FileDiff className="h-4 w-4" />
+                {changeSet.empty ? "Preview" : "Changes"}
+                {!changeSet.empty && <span className="chat-preview-open-count">{changeSet.fileCount}</span>}
               </button>
             )}
           </>

@@ -11,14 +11,18 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { router, calls } = vi.hoisted(() => ({
+const { router, raw, calls } = vi.hoisted(() => ({
   router: new Map<string, () => unknown | Promise<unknown>>(),
+  /** Canned error responses, for exercising the failure text */
+  raw: new Map<string, unknown>(),
   calls: [] as string[],
 }));
 
 vi.mock("./github-client", () => ({
   githubFetch: vi.fn(async (path: string) => {
     calls.push(path);
+    const canned = raw.get(path);
+    if (canned) return canned as Response;
     const handler = router.get(path);
     if (!handler) {
       return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
@@ -27,7 +31,13 @@ vi.mock("./github-client", () => ({
   }),
 }));
 
-import { inspectPushPreconditions } from "./github-write";
+import {
+  inspectPushPreconditions,
+  pushAccessBlocker,
+  createBlob,
+  updateRef,
+  type PushPreflight,
+} from "./github-write";
 
 const BASE = {
   owner: "acme",
@@ -60,8 +70,13 @@ function repoPermissions(push: boolean | undefined) {
 
 beforeEach(() => {
   router.clear();
+  raw.clear();
   calls.length = 0;
 });
+
+function preflight(over: Partial<PushPreflight> = {}): PushPreflight {
+  return { currentHeadSha: "head-old", baseMoved: false, upstreamChanged: [], canPush: null, ...over };
+}
 
 describe("inspectPushPreconditions", () => {
   it("reports a clean base as not moved", async () => {
@@ -146,5 +161,54 @@ describe("inspectPushPreconditions", () => {
     const result = await inspectPushPreconditions("token", { ...BASE, baseCommitSha: "" });
     expect(result.baseMoved).toBe(false);
     expect(calls.some((c) => c.includes("/git/trees/"))).toBe(false);
+  });
+});
+
+describe("pushAccessBlocker", () => {
+  const target = { owner: "acme", repo: "demo" };
+
+  it("refuses a token GitHub reported as read-only, and names the fix", () => {
+    const message = pushAccessBlocker(preflight({ canPush: false }), target);
+    expect(message).toBeTruthy();
+    expect(message).toMatch(/READ-ONLY/);
+    expect(message).toContain("acme/demo");
+    // The user has to be told what to DO, not just that it failed.
+    expect(message).toMatch(/write/i);
+    expect(message).toMatch(/Contents/);
+  });
+
+  it("lets a writable token through", () => {
+    expect(pushAccessBlocker(preflight({ canPush: true }), target)).toBeNull();
+  });
+
+  it("never blocks on an UNKNOWN capability — an unanswered probe is not a refusal", () => {
+    expect(pushAccessBlocker(preflight({ canPush: null }), target)).toBeNull();
+  });
+});
+
+describe("write failures carry GitHub's own reason", () => {
+  it("explains a missing workflow scope instead of a generic blob failure", async () => {
+    raw.set("/repos/acme/demo/git/blobs", {
+      ok: false,
+      status: 403,
+      json: async () => ({
+        message:
+          "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
+      }),
+    });
+
+    await expect(createBlob("token", "acme", "demo", "x")).rejects.toThrow(/workflow` scope/);
+  });
+
+  it("explains a 403 on a ref update as an access problem, not a conflict", async () => {
+    raw.set("/repos/acme/demo/git/refs/heads/agent/main-1", {
+      ok: false,
+      status: 403,
+      json: async () => ({ message: "Resource not accessible by personal access token" }),
+    });
+
+    await expect(updateRef("token", "acme", "demo", "agent/main-1", "sha-1")).rejects.toThrow(
+      /read-only for this repository|SSO|organization/i
+    );
   });
 });

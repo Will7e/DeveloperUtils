@@ -154,6 +154,18 @@ export async function prepareTurn(
   const settings = store.settings;
   const apiKey = settings.apiKey?.trim();
   if (!apiKey) {
+    // A send that never ran still has to leave a trace. The toast is gone
+    // in four seconds and the modal can be dismissed, and then the
+    // transcript shows an unanswered user message that is indistinguishable
+    // from the agent ignoring you. The row is what the conversation keeps;
+    // the toast and the modal are just the way to act on it.
+    store.addMessage(conversationId, {
+      role: "assistant",
+      content:
+        "No OpenRouter API key is configured, so this message was not sent. " +
+        "Add a key in Chat settings, then send it again.",
+      error: true,
+    });
     useAppStore.getState().addToast({
       message: "Add your OpenRouter API key in Chat Settings to start chatting.",
       type: "error",
@@ -310,11 +322,12 @@ export function composeRepoPrompt(repo: RepoContext): string {
     `- write_file: create a new file, or fully rewrite one you have read in its entirety`,
     `- delete_file: remove a file`,
     `- get_workspace_diff: the diff of everything you have changed so far (your record of the change set)`,
+    `- update_plan: publish your step checklist (the complete list each time, one step "active") — the user watches it while you work`,
     `- run_in_preview: execute JavaScript inside the built preview app to verify runtime behavior`,
     `- query_preview_dom: query the preview's rendered DOM with a CSS selector to verify UI output`,
     `- get_preview_feedback: read build errors + console output from the preview`,
     `- get_preview_layout: read a geometry map of the running preview (boxes, overflow, off-screen elements) — the way to verify VISUAL results that query_preview_dom cannot see`,
-    `- run_checks: read this repository's declared verification checks (test/lint/typecheck/build) and what of them could actually run — call it before summarising a change set`,
+    `- verify_behavior: run declarative BEHAVIOUR PROBES in the preview (click/type/press steps, then assertions) to prove a flow actually works — a failed probe is surfaced to the human approver, and a passing run is attached to the pull request`,
     `- create_working_branch / push_changes: ship the workspace diff to GitHub as one commit (+ optional PR) after user approval`,
     `- remember: record one durable, repo-specific fact in ${MEMORY_PATH} so later sessions stop rediscovering it`,
     `- read_skill: load the full instructions of an available skill by name (see the skill index above)`,
@@ -328,6 +341,7 @@ export function composeRepoPrompt(repo: RepoContext): string {
     `- To change an existing file: read the region first, then use edit_file with the exact text and enough surrounding context to be unique. Never rewrite a file wholesale from a truncated or partially-read view — you would destroy everything you did not see.`,
     `- write_file and edit_file run one at a time, so each sees the previous write's result.`,
     `- After edits, close the loop: edit → (preview rebuilds) → run_in_preview or query_preview_dom to verify, and get_preview_feedback for build/console errors. Fix and re-verify before pushing.`,
+    `- For work with more than two or three steps, publish a plan with update_plan and advance it as you go — a turn with no visible plan reads as a hung turn.`,
     `- Before push_changes, call get_workspace_diff to review the complete change set.`,
     `- Cite file paths when referencing code.`,
     `- Answer from the repository, not from assumptions about similar projects.`,

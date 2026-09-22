@@ -645,17 +645,98 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     summarize: (args) => (typeof args.selector === "string" ? args.selector : "(no selector)"),
   },
   {
+    name: "update_plan",
+    planSafe: true,
+    description:
+      "Publish or advance your plan for this conversation. The user watches this checklist while you work, so use it for any task that takes more than a couple of steps: send the WHOLE plan each time (it replaces the previous one), with finished steps marked \"done\" and exactly one step marked \"active\". Keep it short and about outcomes, not tool calls — and never mark a step done before that work is actually in the workspace and verified. In Plan mode this is how you present the plan you are proposing.",
+    parameters: {
+      type: "object",
+      properties: {
+        steps: {
+          type: "array",
+          maxItems: 12,
+          description:
+            'The complete plan, in order. Each entry: { text: string (imperative, outcome-shaped), status?: "pending" | "active" | "done" }. Send [] to clear the plan.',
+          items: {
+            type: "object",
+            properties: {
+              text: { type: "string", description: "What the step accomplishes, e.g. \"add the route and its guard\"." },
+              status: {
+                type: "string",
+                enum: ["pending", "active", "done"],
+                description: 'Exactly one step may be "active"; omit for pending.',
+              },
+            },
+            required: ["text"],
+          },
+        },
+      },
+      required: ["steps"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      Array.isArray(args.steps) ? `plan: ${args.steps.length} step(s)` : "plan",
+  },
+  {
+    name: "verify_behavior",
+    planSafe: true,
+    description:
+      "Run declarative BEHAVIOUR PROBES inside the live preview: perform UI steps (click, type, press, wait, eval) and then assert facts about the result (exists, text, count, value, attr, eval, no-error). Use this to prove a flow actually WORKS after you change it — that a button increments the counter, that submitting clears the form, that the list re-renders — instead of asserting it in prose. Results are pass/fail per probe and are recorded as evidence: a failed probe is reported to the reviewer at the push gate, and a passing run is attached to the pull request. Write files first (the preview rebuilds automatically), then probe the CURRENT build. Assertions that cannot run FAIL rather than passing silently.",
+    parameters: {
+      type: "object",
+      properties: {
+        probes: {
+          type: "array",
+          maxItems: 8,
+          description: "Up to 8 independent probes, each a short flow plus its expectations.",
+          items: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: 'What this probe proves, e.g. "adding an item updates the total".',
+              },
+              steps: {
+                type: "array",
+                maxItems: 12,
+                description:
+                  'Actions run in order. {action:"click",selector}, {action:"type",selector,text,submit?}, {action:"press",key,selector?}, {action:"wait",ms}, {action:"eval",code}.',
+                items: { type: "object" },
+              },
+              expect: {
+                type: "array",
+                maxItems: 12,
+                description:
+                  'Assertions checked after the steps. {assert:"exists"|"not-exists",selector}, {assert:"text",selector,equals?|contains?}, {assert:"count",selector,equals?|atLeast?|atMost?}, {assert:"value",selector,equals?|contains?}, {assert:"attr",selector,name,equals?}, {assert:"eval",code,equals?}, {assert:"no-error"}.',
+                items: { type: "object" },
+              },
+            },
+            required: ["name", "expect"],
+          },
+        },
+      },
+      required: ["probes"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      Array.isArray(args.probes) ? `${args.probes.length} probe(s)` : "behaviour probes",
+  },
+  {
     name: "run_checks",
     planSafe: true,
     description:
-      "Report what this repository declares must be verified (test / lint / typecheck / build scripts, or an .intab/verify.json manifest) and what of it could actually be executed. There is no shell in this workspace, so by default NOTHING runs: the result names each declared check, the exact command, and states plainly that none ran. Use it before you summarise a change set, so your report names the checks you did not run instead of implying they passed. When the user has configured a checks runner, the declared commands are executed there and real results come back.",
+      "Report what this repository declares must be verified (test / lint / typecheck / build scripts, or an .intab/verify.json manifest), and run the one of them that CAN run here. TYPE CHECKING RUNS BY DEFAULT in the browser, over the workspace's own sources, and the result includes its diagnostics — so call this after editing TypeScript/JavaScript and fix what it reports. It is a type check only: third-party types are erased to `any`, so mistakes inside dependency APIs are not reported. Tests, lint and build still need a configured runner (or the user's own terminal); their commands are named so you can hand them over, and their outcome must be reported as unverified until they run. Call it before you summarise a change set.",
     parameters: {
       type: "object",
       properties: {
         run: {
           type: "boolean",
           description:
-            "Set true to also execute the declared checks on the configured runner (no-op with an explanation when none is configured). Default false = report only.",
+            "Set true to also execute the declared checks on the configured runner (no-op with an explanation when none is configured). Type checking runs in the browser either way.",
         },
       },
     },

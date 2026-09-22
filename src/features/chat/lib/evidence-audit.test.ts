@@ -171,6 +171,73 @@ describe("auditClaims — visual claims", () => {
   });
 });
 
+describe("claims weighed against real verification", () => {
+  const failedProbes = {
+    status: "fresh-fail" as const,
+    summary: "1/3 probes passed",
+    details: ['counter increments: text of "#n" is "0" but expected "1"'],
+  };
+
+  it("flags a summary that contradicts failing probes, quoting them", () => {
+    const findings = auditClaims({
+      claim: "Added the increment button in src/App.tsx and the counter works now.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "verify_behavior"],
+      probes: failedProbes,
+    });
+    const contradicted = findings.filter((f) => f.code === "contradicted-claim");
+    expect(contradicted).toHaveLength(1);
+    expect(contradicted[0]!.message).toMatch(/FAILED/);
+    expect(contradicted[0]!.message).toContain('expected "1"');
+  });
+
+  it("is quiet when nothing asserts an outcome, even if probes failed", () => {
+    const findings = auditClaims({
+      claim: "Updated src/App.tsx to use the new hook.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "verify_behavior"],
+      probes: failedProbes,
+    });
+    expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
+  });
+
+  it("does not contradict a claim with a failed type check the model already owned", () => {
+    const findings = auditClaims({
+      claim: "The type check reports 2 errors in src/App.tsx that I did not fix.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "run_checks"],
+      typecheck: { status: "fresh-fail", summary: "2 error(s)", details: ["TS2322"] },
+    });
+    // "did not fix" is not an outcome assertion, so nothing is added.
+    expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
+  });
+
+  it("calls out leaning on a pass that predates the last edit", () => {
+    const findings = auditClaims({
+      claim: "The login flow works now — src/App.tsx handles the redirect.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "verify_behavior"],
+      probes: { status: "stale", summary: "4/4 probes passed" },
+    });
+    expect(findings.map((f) => f.code)).toContain("unverified-claim");
+    expect(findings.some((f) => /describes older code/.test(f.message))).toBe(true);
+  });
+
+  it("accepts a fresh passing probe run as backing for an outcome claim", () => {
+    const findings = auditClaims({
+      claim: "The counter works now — src/App.tsx increments on click.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "verify_behavior"],
+      probes: { status: "fresh-pass", summary: "3/3 probes passed" },
+    });
+    expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
+  });
+
+  it("counts verify_behavior as verification", () => {
+    expect(ranVerification(["verify_behavior"])).toBe(true);
+  });
+});
+
 describe("evidenceWarnings", () => {
   it("produces approval-gate warnings", () => {
     const warnings = evidenceWarnings(

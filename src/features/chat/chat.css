@@ -28,15 +28,15 @@
 }
 
 .chat-resume-banner {
-  color: var(--ds-accent, #4f8cff);
-  background: color-mix(in srgb, var(--ds-accent, #4f8cff) 8%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--ds-accent, #4f8cff) 18%, transparent);
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--blue) 18%, transparent);
   cursor: pointer;
   text-align: left;
 }
 
 .chat-resume-banner:hover {
-  background: color-mix(in srgb, var(--ds-accent, #4f8cff) 14%, transparent);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
 }
 
 .chat-reconnect-banner svg,
@@ -606,9 +606,19 @@
   border-color: var(--border-2);
 }
 
-.chat-model-btn-icon {
-  color: var(--blue);
+/* Icon ladder for the agent surface. Lucide's `size` prop and a Tailwind
+   class paint the same glyph, but only the class is greppable, so the
+   whole feature uses classes:
+     12px  h-3         inline chrome — badges, meta rows, list actions
+     13px  h-[13px]    dense rows (a settings skill row)
+     14px  h-3.5       standalone buttons and toolbar controls
+     18px  h-[18px]    section headers and nav items */
+
+/* Stands in for a brand mark the catalog has no logo for, so the slot
+   stays occupied and the label beside it never shifts left. */
+.chat-provider-mark {
   flex-shrink: 0;
+  color: var(--text-3);
 }
 
 .chat-model-btn-logo,
@@ -967,6 +977,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  /* Never squashed: the bar and its number are the whole control */
+  flex-shrink: 0;
   cursor: default;
   padding: 2px 5px;
   margin: -2px -5px;
@@ -984,16 +996,25 @@
 .chat-ctx-meter-track {
   display: flex;
   width: 78px;
+  /* A floor, not a preference: under pressure the header used to squeeze
+     this to a ~20px sliver, which reads as a rendering glitch — and at
+     0% the track is the only thing on screen. */
+  min-width: 46px;
+  flex-shrink: 0;
   height: 5px;
   background: var(--ds-gray-alpha-200);
   border-radius: 999px;
   overflow: hidden;
   /* Hairline gaps make each category legible at 5px tall */
   gap: 1px;
+  /* An empty track must still look like a track */
+  box-shadow: inset 0 0 0 1px var(--ds-gray-alpha-300);
 }
 
 .chat-ctx-meter-track-warn {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--yellow) 45%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--ds-gray-alpha-300),
+    0 0 0 1px color-mix(in srgb, var(--yellow) 45%, transparent);
 }
 
 .chat-ctx-seg {
@@ -1270,7 +1291,8 @@ html body .intab-tooltip.chat-ctx-card > span {
 .chat-ctx-spend-bar {
   position: absolute;
   inset: 0 auto 0 0;
-  background: var(--accent-soft, rgba(120, 150, 255, 0.22));
+  /* Tinted rather than solid: the row's text sits on top of it */
+  background: color-mix(in srgb, var(--blue) 22%, transparent);
   pointer-events: none;
 }
 
@@ -1688,20 +1710,6 @@ html body .intab-tooltip.chat-ctx-card > span {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-reasoning-streaming .chat-reasoning-label {
-    animation: none;
-  }
-
-  .chat-thinking-dot {
-    animation: none;
-    opacity: 0.7;
-  }
-
-  .chat-streaming-caret {
-    animation: none;
-  }
-}
 
 /* ============================================================
    EMPTY STATE
@@ -2376,6 +2384,17 @@ html body .intab-tooltip.chat-ctx-card > span {
   font-size: 13.5px;
 }
 
+/* The renderer emits all six markdown heading levels; without these two
+   the deepest ones fell back to body size and flattened the hierarchy. */
+.chat-md-h5 {
+  font-size: 13px;
+}
+
+.chat-md-h6 {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
 .chat-md-ul,
 .chat-md-ol {
   margin: 0 0 10px;
@@ -2570,8 +2589,7 @@ html body .intab-tooltip.chat-ctx-card > span {
   gap: 2px;
 }
 
-.chat-key-action-btn,
-.chat-key-toggle {
+.chat-key-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2585,31 +2603,13 @@ html body .intab-tooltip.chat-ctx-card > span {
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 
-.chat-key-action-btn:hover,
-.chat-key-toggle:hover {
+.chat-key-action-btn:hover {
   color: var(--text-1);
   background: var(--bg-hover);
 }
 
 .chat-key-action-btn.active {
   color: var(--emerald, #10b981);
-}
-
-/* Ghost buttons that carry destructive intent (Geist: red-900 text) */
-.chat-danger-ghost {
-  color: var(--red);
-}
-
-.chat-danger-ghost:hover:not(:disabled) {
-  color: var(--red);
-  background: var(--red-dim);
-}
-
-/* Two-step delete: armed state */
-.chat-danger-confirm,
-.chat-danger-confirm:hover:not(:disabled) {
-  color: var(--red);
-  background: var(--red-dim);
 }
 
 /* Tabs bar wrapper inside the settings panel */
@@ -2700,10 +2700,6 @@ html body .intab-tooltip.chat-ctx-card > span {
   gap: 6px;
   white-space: nowrap;
   flex-shrink: 0;
-}
-
-.chat-model-input {
-  width: 210px;
 }
 
 .chat-prompt-textarea {
@@ -3012,7 +3008,6 @@ html body .intab-tooltip.chat-ctx-card > span {
 .chat-composer-stop:focus-visible,
 .chat-empty-suggestion:focus-visible,
 .chat-code-block-copy:focus-visible,
-.chat-key-toggle:focus-visible,
 .chat-sidebar-footer-btn:focus-visible {
   outline: none;
   box-shadow: var(--ds-focus-ring);
@@ -3182,7 +3177,7 @@ html body .intab-tooltip.chat-ctx-card > span {
 }
 
 .chat-repo-item-check {
-  color: var(--ds-accent-blue, #3b82f6);
+  color: var(--blue);
   flex-shrink: 0;
 }
 
@@ -3208,7 +3203,7 @@ html body .intab-tooltip.chat-ctx-card > span {
 }
 
 .chat-repo-chip-icon {
-  color: var(--ds-accent-blue, #3b82f6);
+  color: var(--blue);
   flex-shrink: 0;
 }
 
@@ -3257,12 +3252,55 @@ html body .intab-tooltip.chat-ctx-card > span {
   gap: 6px;
 }
 
+/* The model's own line about what it is about to do, above the steps */
+.chat-tool-narration {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  padding-bottom: 2px;
+}
+
+.chat-tool-narration .chat-md-p {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+}
+
+.chat-tool-narration .chat-md-h {
+  font-size: 12.5px;
+  margin: 4px 0;
+}
+
 .chat-tool-block-title {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--text-3);
+}
+
+.chat-tool-block-totals {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-tool-block-failed {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+.chat-tool-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .chat-tool-row {
@@ -3290,18 +3328,27 @@ html body .intab-tooltip.chat-ctx-card > span {
   background: var(--bg-2);
 }
 
+.chat-tool-step-index {
+  flex-shrink: 0;
+  min-width: 13px;
+  text-align: right;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
 .chat-tool-icon {
   flex-shrink: 0;
   color: var(--text-3);
 }
 
 .chat-tool-pending {
-  color: var(--ds-accent-blue, #3b82f6);
+  color: var(--blue);
   animation: spin 1s linear infinite;
 }
 
 .chat-tool-error {
-  color: var(--ds-accent-red, #ef4444);
+  color: var(--red);
 }
 
 .chat-tool-name {
@@ -3317,6 +3364,39 @@ html body .intab-tooltip.chat-ctx-card > span {
   color: var(--text-3);
   min-width: 0;
   flex: 1;
+}
+
+.chat-tool-detail {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.chat-tool-detail-error {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--red);
+}
+
+.chat-tool-stat-add {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: #34d399;
+}
+
+.chat-tool-stat-del {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: #f87171;
 }
 
 .chat-tool-duration {
@@ -3357,6 +3437,58 @@ html body .intab-tooltip.chat-ctx-card > span {
   font-size: 11.5px;
   color: var(--text-3);
   font-style: italic;
+}
+
+/* ── A step opened into the diff it produced ── */
+.chat-tool-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.chat-tool-diff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+}
+
+.chat-tool-diff-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chat-tool-diff {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+  font-size: 11px;
+}
+
+.chat-tool-raw {
+  margin-top: 6px;
+}
+
+.chat-tool-raw > summary {
+  cursor: pointer;
+  font-size: 10.5px;
+  color: var(--text-3);
+  list-style: none;
+}
+
+.chat-tool-raw > summary:hover {
+  color: var(--text-1);
+}
+
+.chat-tool-raw[open] > summary {
+  margin-bottom: 6px;
 }
 
 /* ── Connected account (settings) ── */
@@ -3407,8 +3539,199 @@ html body .intab-tooltip.chat-ctx-card > span {
 }
 .chat-agent-resize-handle:hover,
 .chat-agent-resize-handle[data-resize-handle-state="drag"] {
-  background: var(--ds-accent, #3b82f6);
+  background: var(--accent);
   opacity: 0.4;
+}
+
+/* ── Agent panel (changes / preview) ── */
+.chat-agent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--ds-background-100, #0a0a0a);
+  border-left: 1px solid var(--border-1);
+}
+
+.chat-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.chat-panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-3, #a1a1a1);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.chat-panel-tab:hover { background: var(--bg-hover); color: var(--text-1, #ededed); }
+.chat-panel-tab-active {
+  background: var(--bg-3);
+  color: var(--text-1, #ededed);
+  box-shadow: inset 0 0 0 1px var(--border-1);
+}
+.chat-panel-tab:focus-visible { box-shadow: var(--ds-focus-ring); outline: none; }
+
+.chat-panel-tab-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ds-gray-alpha-200, rgba(255, 255, 255, 0.08));
+  color: var(--text-2, #c9c9c9);
+}
+
+/* ── Changes pane (the agent's diff) ── */
+.chat-changes {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-changes-stats {
+  font-size: 11px;
+  color: var(--text-3, #a1a1a1);
+  font-variant-numeric: tabular-nums;
+}
+.chat-changes-add { color: #34d399; }
+.chat-changes-del { color: #f87171; }
+
+.chat-changes-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.chat-changes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-3, #a1a1a1);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.chat-changes-empty p { margin: 0; max-width: 34ch; }
+
+.chat-changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-changes-row {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1, #111111);
+  overflow: hidden;
+}
+
+.chat-changes-row-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-2, #c9c9c9);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-changes-row-header:hover { background: var(--bg-2); }
+.chat-changes-row-header:focus-visible { box-shadow: var(--ds-focus-ring); outline: none; }
+
+.chat-changes-icon-added { color: #34d399; flex-shrink: 0; }
+.chat-changes-icon-deleted { color: #f87171; flex-shrink: 0; }
+.chat-changes-icon-modified { color: var(--blue); flex-shrink: 0; }
+
+.chat-changes-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-1, #ededed);
+}
+
+.chat-changes-row-stats {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.chat-changes-chevron {
+  color: var(--text-3, #a1a1a1);
+  flex-shrink: 0;
+  transition: transform 150ms ease;
+}
+.chat-changes-row-open .chat-changes-chevron { transform: rotate(180deg); }
+.chat-changes-chevron-open { transform: rotate(180deg); }
+
+.chat-changes-patch {
+  margin: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-0, #0a0a0a);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.chat-diff-line {
+  padding: 0 10px;
+  white-space: pre;
+  color: var(--text-2, #c9c9c9);
+}
+.chat-diff-line-add {
+  color: #7ee2b8;
+  background: color-mix(in srgb, #34d399 12%, transparent);
+}
+.chat-diff-line-del {
+  color: #fca5a5;
+  background: color-mix(in srgb, #f87171 12%, transparent);
+}
+.chat-diff-line-hunk { color: var(--blue); }
+.chat-diff-line-meta { color: var(--text-3, #a1a1a1); }
+.chat-diff-line-gap { color: var(--text-3, #a1a1a1); opacity: 0.7; }
+
+.chat-changes-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-1);
+  padding: 6px 12px;
+}
+.chat-changes-note {
+  font-size: 11px;
+  color: var(--text-3, #a1a1a1);
 }
 
 /* ── Preview pane ── */
@@ -3459,7 +3782,7 @@ html body .intab-tooltip.chat-ctx-card > span {
 }
 .chat-preview-badge-ready { color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
 .chat-preview-badge-error { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
-.chat-preview-badge-building { color: var(--ds-accent, #3b82f6); border-color: rgba(59, 130, 246, 0.35); }
+.chat-preview-badge-building { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, transparent); }
 
 .chat-preview-err-icon { color: #f87171; }
 
@@ -3599,7 +3922,7 @@ html body .intab-tooltip.chat-ctx-card > span {
 }
 .chat-preview-line-error pre { color: #fca5a5; }
 .chat-preview-line-warn pre { color: #fcd34d; }
-.chat-preview-line-system pre { color: var(--ds-accent, #3b82f6); }
+.chat-preview-line-system pre { color: var(--blue); }
 
 .spin { animation: chat-preview-spin 1s linear infinite; }
 @keyframes chat-preview-spin { to { transform: rotate(360deg); } }
@@ -3622,7 +3945,14 @@ html body .intab-tooltip.chat-ctx-card > span {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 20;
 }
-.chat-preview-open-fab:hover { border-color: var(--ds-accent, #3b82f6); }
+.chat-preview-open-fab:hover { border-color: var(--accent); }
+.chat-preview-open-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ds-gray-alpha-200, rgba(255, 255, 255, 0.08));
+}
 
 /* ── Push approval modal ── */
 .chat-modal-overlay {
@@ -3716,23 +4046,246 @@ html body .intab-tooltip.chat-ctx-card > span {
 .chat-approval-file { border-bottom: 1px solid var(--border-1); }
 .chat-approval-file:last-child { border-bottom: 0; }
 
+/* Selection bar above the file list: the reviewer's running total. */
+.chat-approval-files-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-approval-files-actions { display: flex; gap: 6px; }
+.chat-approval-mini-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-2, #c7c7c7);
+  background: transparent;
+  border: 1px solid var(--border-1);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chat-approval-mini-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.chat-approval-mini-btn:disabled { opacity: 0.4; cursor: default; }
+
 .chat-approval-file-header {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   padding: 8px 12px;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
   text-align: left;
   color: var(--text-2, #c7c7c7);
   font-size: 12px;
 }
-.chat-approval-file-header:hover { background: rgba(255, 255, 255, 0.03); }
+.chat-approval-file-header:hover { background: var(--bg-hover); }
+
+.chat-approval-file-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+/* The row body is the disclosure control; the checkbox stays an input. */
+.chat-approval-file-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+/* Held back ≠ rejected: the diff is still here, it just will not ship. */
+.chat-approval-file-held .chat-approval-file-path {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+.chat-approval-file-held .chat-approval-file-stats { opacity: 0.55; }
+
+/* ── Mention menu: the "@file" picker ── */
+.chat-mention-path {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* The directory yields, the filename never does: the name is what the
+   user is looking for, so it stays legible when the path is too long. */
+.chat-mention-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-mention-name {
+  flex: none;
+  color: var(--text-1, #ededed);
+}
+.chat-mention-icon { flex: none; color: var(--text-3, #8b8b8b); }
+
+/* ── Plan strip: the agent's checklist, beside the composer ── */
+.chat-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 auto 4px;
+  width: 100%;
+  max-width: 820px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  background: var(--bg-1, transparent);
+}
+.chat-plan-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-2, #c7c7c7);
+  font-size: 11px;
+  text-align: left;
+}
+.chat-plan-title {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-plan-progress {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.chat-plan-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-plan-steps {
+  margin: 2px 0 0;
+  padding: 0 0 0 2px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+.chat-plan-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2, #c7c7c7);
+}
+.chat-plan-step svg { flex: none; margin-top: 3px; }
+.chat-plan-icon-done { color: #34d399; }
+.chat-plan-icon-active { color: var(--accent); }
+.chat-plan-icon-pending { color: var(--text-3, #8b8b8b); }
+.chat-plan-step-done .chat-plan-text { color: var(--text-3, #8b8b8b); }
+.chat-plan-step-active .chat-plan-text { color: var(--text-1, #ededed); }
+/* Status is carried by the icon for sighted users and by real text for
+   screen readers, so the list is not colour-only. */
+.chat-plan-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.chat-plan .spin { animation: chat-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-plan .spin { animation: none; }
+}
+
+/* Evidence, not warning: the things that really ran against this revision. */
+.chat-approval-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-1);
+  border-left: 2px solid #34d399;
+  border-radius: 8px;
+  background: var(--bg-1, transparent);
+}
+.chat-approval-evidence-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-approval-evidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-2, #c7c7c7);
+}
+.chat-approval-evidence-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.chat-approval-evidence-list svg {
+  flex: none;
+  margin-top: 3px;
+  color: #34d399;
+}
+.chat-approval-evidence-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3, #8b8b8b);
+}
+
+.chat-approval-hold-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3, #8b8b8b);
+}
+.chat-approval-hold-note svg { flex: none; margin-top: 2px; }
 
 .chat-approval-file-icon-added { color: #34d399; }
-.chat-approval-file-icon-modified { color: var(--ds-accent, #3b82f6); }
+.chat-approval-file-icon-modified { color: var(--blue); }
 .chat-approval-file-icon-deleted { color: #f87171; }
 
 .chat-approval-file-path {
@@ -3780,7 +4333,7 @@ html body .intab-tooltip.chat-ctx-card > span {
   font-size: 12px;
   font-family: inherit;
 }
-.chat-approval-note:focus { outline: 1px solid var(--ds-accent, #3b82f6); }
+.chat-approval-note:focus { outline: 1px solid var(--accent); }
 
 .chat-approval-actions {
   display: flex;
@@ -3812,3 +4365,37 @@ html body .intab-tooltip.chat-ctx-card > span {
   color: #052e22;
 }
 .chat-approval-btn-approve:hover:not(:disabled) { background: #34d399; }
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================
+   Deliberately the last block in the file: these rules override
+   animations declared above them, and at equal specificity a
+   declaration only wins if it comes later. The same guard near the top
+   of the sheet reads as correct and silently does nothing.
+
+   Durations collapse instead of `animation: none` so an element still
+   lands on its final frame rather than snapping back to a pre-animation
+   state. Spinners are exempt on purpose — they carry state, and the
+   rotation is small and local rather than a viewport-sized movement.
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-reasoning-streaming .chat-reasoning-label,
+  .chat-thinking-dot,
+  .chat-streaming-caret,
+  .chat-model-dropdown,
+  .chat-command-menu,
+  .chat-attach-chip,
+  .chat-skill-item,
+  .chat-summary-body,
+  .chat-sidebar-scrim,
+  .chat-repo-menu {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+
+  .chat-thinking-dot {
+    opacity: 0.7;
+  }
+}

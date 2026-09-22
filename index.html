@@ -17,9 +17,15 @@
     'unsafe-eval' is required by the code runner and the preview bundler
     (new Function / wasm runtimes); connect-src is intentionally open because
     the API tester and previewed apps must reach arbitrary hosts.
+
+    https://esm.sh is in script-src because the live preview's React shim is
+    an import map pointing there (see preview-runtime.ts). The preview frame is
+    a srcdoc document, so it INHERITS this policy — leaving esm.sh out of
+    script-src silently blocked the preview bundle's first `import "react"`,
+    and the pane rendered nothing at all with no error to show for it.
   -->
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://esm.sh; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
+    content="default-src 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net https://esm.sh blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://esm.sh; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
 
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="icon" type="image/png" href="/logo.png" />

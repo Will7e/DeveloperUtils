@@ -72,6 +72,45 @@ function wrap(status: number, message: string, detail?: string): GitHubWriteErro
   return new GitHubWriteError(detail ? `${message} — ${detail}` : message, status, classifyStatus(status, message));
 }
 
+/**
+ * GitHub's own explanation for a failed write, when it sent one.
+ *
+ * Worth the few lines: the interesting push failures are the ones the
+ * API names precisely — a token missing the `workflow` scope, an org
+ * that has not approved the OAuth app, a non-fast-forward ref. Throwing
+ * a generic "failed to create a blob" discards the only part of the
+ * response a user can act on.
+ */
+function apiMessage(body: unknown): string | undefined {
+  const message = (body as { message?: unknown } | null)?.message;
+  return typeof message === "string" && message.trim() ? message.trim() : undefined;
+}
+
+/**
+ * Failure text for a write stage, including GitHub's reason and the
+ * scope fix when the reason is a missing scope. Nothing here is
+ * speculative: the added sentences are only appended for the status and
+ * scope the API actually reported.
+ */
+function writeFailure(status: number, action: string, body: unknown): GitHubWriteError {
+  const detail = apiMessage(body);
+  if (status === 403 && /workflow/i.test(detail ?? "")) {
+    return wrap(
+      403,
+      action,
+      `${detail} — reconnecting GitHub with the \`workflow\` scope included is required to push changes under .github/workflows/.`
+    );
+  }
+  if (status === 403) {
+    return wrap(
+      403,
+      action,
+      `${detail ?? "GitHub refused the write"} — the token may be read-only for this repository, the OAuth app may not be approved by its organization, or SAML SSO authorization may be required.`
+    );
+  }
+  return wrap(status, action, detail);
+}
+
 // ── Refs & branches ──────────────────────────────────────────
 
 /** Head commit of a branch (GET /git/ref or /git/refs/heads fallback) */
@@ -150,7 +189,7 @@ export async function createBranch(
     )
   );
   if (!res.ok && res.status !== 422) {
-    throw wrap(res.status, "Failed to create the working branch.");
+    throw writeFailure(res.status, "Failed to create the working branch.", await res.body);
   }
   // 422 "Reference already exists" is tolerated — branch reuse is fine
 }
@@ -173,7 +212,11 @@ export async function updateRef(
     )
   );
   if (!res.ok) {
-    throw wrap(res.status, `Failed to update the branch ref (HTTP ${res.status}).`);
+    throw writeFailure(
+      res.status,
+      `Failed to update the working branch (HTTP ${res.status}).`,
+      await res.body
+    );
   }
 }
 
@@ -207,7 +250,7 @@ export async function createBlob(
   );
   const json = (await res.body) as { sha?: string };
   if (!res.ok || !json.sha) {
-    throw wrap(res.status, `Failed to create a blob for the push.`);
+    throw writeFailure(res.status, "Failed to create a blob for the push.", json);
   }
   return json.sha;
 }
@@ -227,7 +270,7 @@ export async function createTree(
   );
   const json = (await res.body) as { sha?: string };
   if (!res.ok || !json.sha) {
-    throw wrap(res.status, "Failed to create the git tree for the push.");
+    throw writeFailure(res.status, "Failed to create the git tree for the push.", json);
   }
   return json.sha;
 }
@@ -248,7 +291,7 @@ export async function createCommit(
   );
   const json = (await res.body) as { sha?: string };
   if (!res.ok || !json.sha) {
-    throw wrap(res.status, "Failed to create the commit.");
+    throw writeFailure(res.status, "Failed to create the commit.", json);
   }
   return json.sha;
 }
@@ -333,7 +376,7 @@ export async function getTreeBlobShas(
  * Preflight for a push: has the base branch moved, did any file the
  * agent touched change upstream, and may this token write at all?
  *
- * Every failure here is non-fatal by design — the write path is
+ * Every PROBE failure here is non-fatal by design — the write path is
  * path-scoped so a push cannot corrupt unrelated files. The point is
  * to tell the human (and the model) when they are about to overwrite
  * someone else's work, or to fail for a missing scope, instead of
@@ -372,6 +415,34 @@ export async function inspectPushPreconditions(
   }
 
   return { currentHeadSha: head.commitSha, baseMoved, upstreamChanged, canPush };
+}
+
+/**
+ * The definitive, pre-gate access check, as distinct from an advisory
+ * warning.
+ *
+ * A probe that FAILED is unknown and must not block anything (see the
+ * note on inspectPushPreconditions). `canPush === false` is the opposite:
+ * GitHub reported this token's permissions on this repository, so a
+ * human clicking Approve cannot make the push land — they would read a
+ * diff, approve it, and watch the write 403. That is the "access issue"
+ * an agent cannot talk its way out of, so it is refused early with an
+ * instruction the user can actually act on.
+ *
+ * Returns null when write access is possible or simply unknown.
+ */
+export function pushAccessBlocker(
+  preflight: PushPreflight,
+  target: { owner: string; repo: string }
+): string | null {
+  if (preflight.canPush !== false) return null;
+  return (
+    `The connected GitHub token has READ-ONLY access to ${target.owner}/${target.repo}, so GitHub will reject this push (403). ` +
+    "No approval can change that. Reconnect GitHub with a token that can write to this repository: " +
+    "a fine-grained token with Contents → Read and write (add Pull requests → Read and write to open the PR), " +
+    "or an OAuth / classic token with the `repo` and `workflow` scopes. " +
+    "If the repository belongs to an organization, the token may also need that organization's approval (or SAML SSO authorization)."
+  );
 }
 
 // ── High-level gated push orchestration ──────────────────────

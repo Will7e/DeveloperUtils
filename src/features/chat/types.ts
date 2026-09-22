@@ -83,6 +83,8 @@ export type ToolName =
   | "remember"
   | "delegate"
   | "run_checks"
+  | "verify_behavior"
+  | "update_plan"
   | "get_preview_layout"
   | "check_preview_visually"
   | "list_mcp_tools"
@@ -108,6 +110,13 @@ export interface ToolCallResult {
   durationMs: number;
   /** Display line for the collapsed activity row, e.g. "src/App.tsx" */
   summary?: string;
+  /**
+   * UI-only enrichment: for a file mutation, the diff this step
+   * produced. It is deliberately NOT part of `data` — `data` is what
+   * the model is sent, and a full patch per write would cost context
+   * for information the model already has (it wrote the text).
+   */
+  uiChange?: StepChange;
 }
 
 export type ChatMessageRole = "user" | "assistant";
@@ -136,6 +145,12 @@ export interface ToolResultMessage {
   content: string;
   durationMs: number;
   summary?: string;
+  /**
+   * What this step changed, captured when it ran (see ToolCallResult.
+   * uiChange). Present only on file mutations; the transcript uses it
+   * to open the step into its own diff.
+   */
+  change?: StepChange;
 }
 
 /** Runtime union marker on stored messages (absent = plain chat message) */
@@ -233,6 +248,32 @@ export interface ChatConversation {
    * Resume affordance takes over).
    */
   pendingTurn?: { startedAt: number; outcome?: "unresumable" };
+  /**
+   * The agent's living plan for this conversation.
+   *
+   * It lives on the conversation rather than in the transcript because it
+   * is STATE, not a message: the point is that it is visible and current
+   * while the turn runs, and that a reload restores it. A plan buried in
+   * a chat message is a snapshot of an intention, which is what makes
+   * long agent runs feel like a black box.
+   */
+  plan?: AgentPlan;
+}
+
+/** One step of the agent's plan */
+export interface PlanStep {
+  id: string;
+  text: string;
+  status: PlanStatus;
+}
+
+export type PlanStatus = "pending" | "active" | "done";
+
+export interface AgentPlan {
+  steps: PlanStep[];
+  updatedAt: number;
+  /** True once every step is done — the UI uses it to collapse, not to hide */
+  complete: boolean;
 }
 
 /** Rolling conversation summary — persisted compaction state */
@@ -309,6 +350,25 @@ export interface WorkspaceChange {
   patch: string;
 }
 
+/**
+ * One agent step's own diff, stored on the step's tool result.
+ *
+ * The workspace only ever holds the CURRENT file state, so deriving an
+ * earlier step's diff from it would show later edits — a step's row
+ * must show what that step did, and nothing after it. The patch is
+ * truncated because these live in the persisted transcript.
+ */
+export interface StepChange {
+  path: string;
+  status: WorkspaceFileStatus;
+  additions: number;
+  deletions: number;
+  /** Unified diff of this step, truncated to TRANSCRIPT_PATCH_MAX_LINES */
+  patch: string;
+  /** True when the diff was cut short for storage */
+  truncated: boolean;
+}
+
 /** A push awaiting user approval — shown in the PushApprovalModal */
 export interface PendingPush {
   conversationId: string;
@@ -326,19 +386,27 @@ export interface PendingPush {
    * read-only. Advisory only — the user still decides.
    */
   warnings?: PushWarning[];
+  /**
+   * What was actually executed against this workspace revision — the
+   * in-browser type check and any behaviour probes — with their age and
+   * whether they still describe this code. Kept separate from the
+   * warnings because passing evidence is not a warning.
+   */
+  verification?: string[];
 }
 
 export interface PushWarning {
   kind:
     | "base-moved"
     | "upstream-changed"
-    | "read-only-token"
     /** Automated push policy: protected paths, oversized change set */
     | "policy"
     /** The agent's summary claims something the turn's evidence does not support */
     | "evidence"
     /** Checks this repository declares that nothing in this workspace can run */
-    | "checks";
+    | "checks"
+    /** Behaviour probes or the type check ran and contradicted this diff */
+    | "probes";
   message: string;
 }
 
@@ -348,6 +416,13 @@ export interface PushDecision {
   note?: string;
   /** Whether to open a pull request after the push (default true) */
   openPr?: boolean;
+  /**
+   * Paths the user unchecked in the approval list. They are removed from
+   * this commit only — the workspace keeps the change and its diff, so
+   * "not yet" never means "lost". Unknown paths are ignored rather than
+   * trusted: a stale modal must not be able to decide what ships.
+   */
+  excludePaths?: string[];
 }
 
 /** Result of the approved GitHub push chain */

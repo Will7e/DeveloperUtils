@@ -8,24 +8,13 @@
 // arrows move the highlight, Enter selects, Escape closes.
 
 import React from "react";
-import { Bot, Check, ChevronDown, Search } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useClickOutside } from "@/features/api-tester/hooks/useClickOutside";
 import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
-import { ProviderLogo } from "./ProviderLogo";
+import { ProviderMark } from "./ProviderLogo";
+import { formatContext, formatModelLabel, formatPrice } from "../lib/model-format";
 import type { ModelInfo } from "../types";
-
-export function formatPrice(price?: number): string {
-  if (price === undefined) return "";
-  if (price === 0) return "Free";
-  return `$${price.toFixed(2)}`;
-}
-
-export function formatContext(n?: number): string {
-  if (!n) return "";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M ctx`;
-  return `${Math.round(n / 1000)}k ctx`;
-}
 
 const DROPDOWN_WIDTH = 340;
 const VIEWPORT_MARGIN = 8;
@@ -187,7 +176,7 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
 
   return (
     <div ref={containerRef} className="chat-model-picker">
-      <SimpleTooltip content="Switch model" side="bottom">
+      <SimpleTooltip content={`${value} · switch model`} side="bottom">
         <button
           ref={btnRef}
           type="button"
@@ -202,9 +191,10 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
           aria-haspopup="listbox"
           aria-expanded={open}
         >
-          <ProviderLogo modelId={value} className="h-3.5 w-3.5 chat-model-btn-logo" />
-          {!selected && <Bot className="h-3.5 w-3.5 chat-model-btn-icon" />}
-          <span className="chat-model-btn-label">{selected?.name ?? value}</span>
+          <ProviderMark modelId={value} className="h-3.5 w-3.5 chat-model-btn-logo" />
+          <span className="chat-model-btn-label">
+            {selected?.name ?? formatModelLabel(value)}
+          </span>
           <ChevronDown className="h-3 w-3 chat-model-btn-chevron" />
         </button>
       </SimpleTooltip>
@@ -262,7 +252,7 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
                   >
                     <div className="chat-model-item-main">
                       <div className="chat-model-item-head">
-                        <ProviderLogo modelId={m.id} className="h-3.5 w-3.5 chat-model-item-logo" />
+                        <ProviderMark modelId={m.id} className="h-3.5 w-3.5 chat-model-item-logo" />
                         <span className="chat-model-item-name">{m.name}</span>
                       </div>
                       <span className="chat-model-item-id">{m.id}</span>

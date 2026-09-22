@@ -7,7 +7,8 @@
 // it is a DIFFERENT model with its own request state.
 
 import { describe, it, expect } from "vitest";
-import { resolveCandidates } from "./turn-prep";
+import { prepareTurn, resolveCandidates } from "./turn-prep";
+import { useChatStore } from "@/stores/chat.store";
 
 describe("resolveCandidates", () => {
   it("sends the selected model alone when no escalation is configured", () => {
@@ -67,5 +68,25 @@ describe("resolveCandidates", () => {
       effort: "low",
     });
     expect(resolved.candidates[1]!.contextLength).toBe(200_000);
+  });
+});
+
+describe("prepareTurn with no API key", () => {
+  it("answers the send in the transcript rather than failing silently", async () => {
+    const store = useChatStore.getState();
+    store.updateSettings({ apiKey: "" });
+    const id = store.createConversation("openai/gpt-4o-mini");
+
+    const prepared = await prepareTurn(id);
+    expect(prepared).toBeNull();
+
+    // The toast and the settings modal are transient; this row is what
+    // the conversation keeps, and what stops an unanswered user message
+    // from looking like the agent ignored it.
+    const conversation = useChatStore.getState().conversations.find((c) => c.id === id);
+    expect(conversation?.messages).toHaveLength(1);
+    expect(conversation?.messages[0]?.role).toBe("assistant");
+    expect(conversation?.messages[0]?.error).toBe(true);
+    expect(conversation?.messages[0]?.content).toMatch(/API key/i);
   });
 });

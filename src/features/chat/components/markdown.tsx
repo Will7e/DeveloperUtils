@@ -198,7 +198,9 @@ function renderMarkdown(content: string): React.ReactNode {
     }
 
     // Headings
-    const headingMatch = line.match(/^(#{1,4})\s+(.*)$/);
+    // 1-6, as markdown defines it: `#####` used to fall through to a
+    // paragraph and render its hashes literally.
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       const level = headingMatch[1]!.length;
       const text = headingMatch[2]!;

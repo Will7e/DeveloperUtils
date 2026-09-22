@@ -18,7 +18,15 @@ import {
   writeFile,
   type PushFile,
 } from "../workspace/workspace";
-import type { PushWarning, ToolCallResult, WorkspaceState } from "../types";
+import { describeExclusions, partitionPushChanges } from "../workspace/push-selection";
+import {
+  proofSection,
+  recordVerification,
+  verificationEvidence,
+  verificationLines,
+  verificationWarnings,
+} from "../lib/verification-ledger";
+import type { PushWarning, StepChange, ToolCallResult, WorkspaceState } from "../types";
 import { applyStringEdit } from "../workspace/edit";
 import {
   SEARCH_MAX_FETCH_FILES,
@@ -34,6 +42,7 @@ import { clearToolCache } from "../lib/tool-cache";
 import {
   executePushChain,
   inspectPushPreconditions,
+  pushAccessBlocker,
   isProtectedBranchName,
   uniqueBranchName,
   GitHubWriteError,
@@ -173,6 +182,42 @@ export async function runWriteFile(
   return commitWrite(conversationId, result.ws, path, content, started);
 }
 
+/**
+ * Patch lines kept per step in the transcript. Step diffs are stored
+ * in the persisted conversation, so they are capped well below the
+ * 400-line diff the Changes pane shows.
+ */
+const TRANSCRIPT_PATCH_MAX_LINES = 120;
+
+/**
+ * What one mutation step did to one file, as a diff.
+ *
+ * Captured at the moment of the step rather than derived later: the
+ * workspace only holds the file's CURRENT state, so a diff computed
+ * at render time would show every later edit under an earlier step's
+ * row. Additions/deletions also travel in the model-visible payload
+ * (compact, and useful to the model); the patch stays UI-only.
+ */
+function fileChange(ws: WorkspaceState, path: string): StepChange | undefined {
+  const file = ws.files[path];
+  if (!file) return undefined;
+  const status =
+    file.status === "added" || file.status === "deleted" ? file.status : "modified";
+  const change = diffFile(path, status, file.baseContent, file.content);
+  const lines = change.patch.split("\n");
+  const truncated = lines.length > TRANSCRIPT_PATCH_MAX_LINES;
+  return {
+    path,
+    status,
+    additions: change.additions,
+    deletions: change.deletions,
+    patch: truncated
+      ? [...lines.slice(0, TRANSCRIPT_PATCH_MAX_LINES), "…[diff truncated]"].join("\n")
+      : change.patch,
+    truncated,
+  };
+}
+
 async function commitWrite(
   conversationId: string,
   ws: Parameters<typeof writeFile>[0],
@@ -190,6 +235,7 @@ async function commitWrite(
   schedulePreviewBuild(ws);
   const file = ws.files[path];
   const status = file?.status ?? "added";
+  const change = fileChange(ws, path);
   return {
     callId: "",
     name: "write_file",
@@ -198,8 +244,11 @@ async function commitWrite(
       path,
       status,
       lines: content.split("\n").length,
+      additions: change?.additions ?? 0,
+      deletions: change?.deletions ?? 0,
       note: "File written to the workspace (not yet on GitHub). Preview is rebuilding.",
     },
+    uiChange: change,
     durationMs: Date.now() - started,
     summary: path,
   };
@@ -238,11 +287,19 @@ export async function runDeleteFile(
     useChatStore.getState().setWorkspace(conversationId, result.ws);
     clearToolCache();
     schedulePreviewBuild(result.ws);
+    const change = fileChange(result.ws, path);
     return {
       callId: "",
       name: "delete_file",
       ok: true,
-      data: { path, status: "deleted", note: "File deleted in the workspace (not yet on GitHub)." },
+      data: {
+        path,
+        status: "deleted",
+        additions: change?.additions ?? 0,
+        deletions: change?.deletions ?? 0,
+        note: "File deleted in the workspace (not yet on GitHub).",
+      },
+      uiChange: change,
       durationMs: Date.now() - started,
       summary: path,
     };
@@ -253,11 +310,19 @@ export async function runDeleteFile(
   useChatStore.getState().setWorkspace(conversationId, result.ws);
   clearToolCache();
   schedulePreviewBuild(result.ws);
+  const change = fileChange(result.ws, path);
   return {
     callId: "",
     name: "delete_file",
     ok: true,
-    data: { path, status: "deleted", note: "File deleted in the workspace (not yet on GitHub)." },
+    data: {
+      path,
+      status: "deleted",
+      additions: change?.additions ?? 0,
+      deletions: change?.deletions ?? 0,
+      note: "File deleted in the workspace (not yet on GitHub).",
+    },
+    uiChange: change,
     durationMs: Date.now() - started,
     summary: path,
   };
@@ -339,6 +404,7 @@ export async function runEditFile(
   schedulePreviewBuild(result.ws);
 
   const lines = outcome.content.split("\n").length;
+  const change = fileChange(result.ws, path);
   return {
     callId: "",
     name: "edit_file",
@@ -349,8 +415,11 @@ export async function runEditFile(
       replacements: outcome.replacements,
       lines,
       lineDelta: lines - file.content.split("\n").length,
+      additions: change?.additions ?? 0,
+      deletions: change?.deletions ?? 0,
       note: "Edit applied to the workspace (not yet on GitHub). Preview is rebuilding.",
     },
+    uiChange: change,
     durationMs: Date.now() - started,
     summary: path,
   };
@@ -819,6 +888,38 @@ export async function discoverChecks(conversationId: string): Promise<{
 const CHECK_RUN_TIMEOUT_MS = 180_000;
 
 /**
+ * Runs the in-browser type check over the workspace.
+ *
+ * This is the one declared check that needs no runner: the preview already
+ * bundles the workspace with esbuild-wasm (which STRIPS types without
+ * checking them), so a compiler in a worker is what finally gives the
+ * agent a signal that can see a type error at all. Without it the agent's
+ * only build feedback was type-blind — `const x: string = 42` bundled
+ * cleanly — while its own instructions told it to verify before pushing.
+ */
+async function runLocalTypecheck(
+  conversationId: string,
+  ws: import("../types").WorkspaceState
+): Promise<import("../lib/typecheck-client").TypecheckResult> {
+  const { runTypecheck } = await import("../lib/typecheck-client");
+  const files = Object.entries(ws.files)
+    .filter(([, file]) => file.status !== "deleted")
+    .map(([path, file]) => ({ path, content: file.content }));
+  const changedPaths = Object.entries(ws.files)
+    .filter(([, file]) => file.status !== "unchanged")
+    .map(([path]) => path);
+  return runTypecheck({
+    files,
+    tsconfigRaw:
+      ws.files["tsconfig.json"]?.content ??
+      ws.files["jsconfig.json"]?.content ??
+      null,
+    treePaths: ws.tree.map((entry) => entry.path),
+    changedPaths,
+  });
+}
+
+/**
  * Reports the repository's declared verification checks, and executes
  * them ONLY when the user has configured a runner.
  *
@@ -856,28 +957,73 @@ export async function runRunChecks(
     (import.meta.env?.VITE_CHECKS_ENDPOINT as string | undefined)?.trim() ||
     "";
 
-  // ── No runner configured: report the contract, execute nothing ──
+  // ── No runner configured: run what CAN run here, report the rest ──
   if (!wantsRun || !endpoint) {
+    // The in-browser type check needs no runner and no network, so it runs
+    // regardless of `run` — it is the only real verification available in
+    // this environment, and a report that silently skipped it would be the
+    // same "declared but unverified" story this tool exists to end.
+    const typecheck = await runLocalTypecheck(conversationId, ws);
+    // Recorded as evidence, not just returned: a type error found now and
+    // visible at the push gate is the difference between "it compiles" and
+    // "nobody checked". An unavailable run records nothing at all — an
+    // entry that says "not checked" would still count as an entry.
+    if (typecheck.ok) {
+      const reported = typecheck.classification.reported.length;
+      const omitted = typecheck.classification.omitted;
+      recordVerification(conversationId, {
+        kind: "typecheck",
+        at: Date.now(),
+        workspaceUpdatedAt: ws.updatedAt,
+        ok: reported === 0,
+        summary:
+          reported === 0
+            ? `0 errors across ${typecheck.checkedFiles} file(s)`
+            : `${reported} error(s) across ${typecheck.checkedFiles} file(s)${omitted > 0 ? ` (${omitted} more omitted)` : ""}`,
+        details: typecheck.classification.reported
+          .slice(0, 12)
+          .map((d) => `${d.file ?? "(project)"}${d.line ? `:${d.line}` : ""} TS${d.code}: ${d.message.split("\n")[0] ?? d.message}`),
+        source: "run_checks",
+      });
+    }
     return {
       callId: "",
       name: "run_checks",
       ok: true,
       data: {
-        status: wantsRun && !endpoint ? "not-executed-no-runner" : "declared",
+        status: typecheck.ok
+          ? "typecheck-ran-in-browser"
+          : wantsRun && !endpoint
+            ? "not-executed-no-runner"
+            : "declared",
         checks: checks.map((c) => ({ label: c.label, command: c.command, source: c.source })),
-        statement,
-        executed: false,
+        // The statement now covers only what the local run could NOT do.
+        statement: [
+          typecheck.ok
+            ? "Type checking DID run — in the browser, over the workspace's own sources. Everything else below did not run."
+            : null,
+          statement,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        executed: typecheck.ok,
+        localChecks: [
+          {
+            label: "Type check (in-browser)",
+            ran: typecheck.ok,
+            report: typecheck.report,
+            ...(typecheck.unavailableReason ? { unavailable: typecheck.unavailableReason } : {}),
+          },
+        ],
         ...(notes.length > 0 ? { notes } : {}),
-        ...(wantsRun && !endpoint
-          ? {
-              note:
-                "No checks runner is configured, so nothing was executed. Add one in Chat Settings (or set VITE_CHECKS_ENDPOINT), " +
-                "and until then hand the commands above to the user instead of reporting their outcome.",
-            }
-          : {}),
+        note:
+          "A type check is not a test run and not a build. The test, lint and build commands above still need a runner " +
+          "(Chat Settings → checks endpoint) or the user's own terminal, so report their outcome as unverified until then.",
       },
       durationMs: Date.now() - started,
-      summary: summarizeChecks(checks),
+      summary: typecheck.ok
+        ? `${summarizeChecks(checks)} · typecheck ran`
+        : summarizeChecks(checks),
     };
   }
 
@@ -1425,12 +1571,28 @@ export async function runPushChanges(
       baseCommitSha: ws.baseCommitSha,
       files: changes.map((f) => ({ path: f.path, baseSha: f.baseSha })),
     });
-    if (preflight.canPush === false) {
-      warnings.push({
-        kind: "read-only-token",
-        message:
-          "This token cannot write to this repository — GitHub will reject the push (403). Use a fine-grained token with Contents: read and write.",
-      });
+    // A reported read-only token cannot be approved into working. Asking
+    // the user to review a diff that is guaranteed to fail with 403 spends
+    // their attention on a decision they cannot make differently, and the
+    // failure then arrives looking like a mysterious access problem. Say
+    // it up front, with the fix, and never open the gate for it.
+    const accessBlock = pushAccessBlocker(preflight, ws);
+    if (accessBlock) {
+      return {
+        callId: "",
+        name: "push_changes",
+        ok: false,
+        data: {
+          status: "no-write-access",
+          error: accessBlock,
+          action:
+            "Tell the user exactly which access is missing and stop calling push_changes until they reconnect " +
+            "GitHub with write access. Nothing is lost — every workspace change stays in the workspace and will be " +
+            "pushed by the next call once the token can write.",
+        },
+        durationMs: Date.now() - started,
+        summary: "push blocked: no write access",
+      };
     }
     if (preflight.baseMoved) {
       const upstream = preflight.upstreamChanged;
@@ -1455,10 +1617,18 @@ export async function runPushChanges(
   // visible warning instead of a sentence a reviewer skims past.
   const conversation = store.conversations.find((c) => c.id === conversationId);
   const toolsUsed = recentToolNames(conversation);
+  // Real evidence: what was actually run against THIS revision of the
+  // workspace, with its age and its staleness. Distinct from the claim
+  // audit below — this is what happened, that is what was said.
+  const verification = verificationEvidence(conversationId, { workspaceUpdatedAt: ws.updatedAt });
+  warnings.push(...verificationWarnings(verification));
+
   const evidence = auditClaims({
     claim: lastAssistantClaim(conversation),
     changedPaths: changes.map((f) => f.path),
     toolsUsed,
+    probes: verification.find((v) => v.kind === "probes") ?? null,
+    typecheck: verification.find((v) => v.kind === "typecheck") ?? null,
   });
   warnings.push(...evidenceWarnings(evidence));
 
@@ -1495,6 +1665,7 @@ export async function runPushChanges(
       additions: diffs.reduce((s, d) => s + d.additions, 0),
       deletions: diffs.reduce((s, d) => s + d.deletions, 0),
     },
+    ...(verification.length > 0 ? { verification: verificationLines(verification) } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
   });
 
@@ -1516,7 +1687,38 @@ export async function runPushChanges(
   }
 
   // ── Approved: execute the GitHub write chain ──
+  // Approval is per file, not per change set: the user may have unchecked
+  // paths they want held back. Those are dropped from THIS commit only —
+  // the diff, the content and the effect log all stay in the workspace.
   const openPr = decision.openPr ?? true;
+  const selection = partitionPushChanges(changes, decision.excludePaths);
+  if (selection.push.length === 0) {
+    return {
+      callId: "",
+      name: "push_changes",
+      ok: false,
+      data: {
+        status: "nothing-selected",
+        excluded: selection.excluded.map((f) => f.path),
+        error: "The user unchecked every changed file at the approval gate, so nothing was committed.",
+        action:
+          "Nothing was lost — every change stays in the workspace. Ask what they want different about the " +
+          "excluded files, apply it, then call push_changes again.",
+      },
+      durationMs: Date.now() - started,
+      summary: "push: nothing selected",
+    };
+  }
+  const pushedPaths = new Set(selection.push.map((f) => f.path));
+  const pushedDiffs = diffs.filter((d) => pushedPaths.has(d.path));
+  const exclusionNote = describeExclusions(selection.excluded);
+
+  // Proof-carrying PR: whatever really ran — the in-browser type check and
+  // any behaviour probes — is appended to the pull request body, with its
+  // verdict, its age and an explicit list of what was NOT run. A reviewer
+  // reading the PR on GitHub sees the evidence without trusting a summary.
+  const proof = proofSection(verification);
+  const withProof = (body: string): string => (proof ? `${body}\n\n${proof}` : body);
   try {
     const result = await executePushChain(store.settings.github.token, {
       owner: ws.owner,
@@ -1525,8 +1727,8 @@ export async function runPushChanges(
       baseCommitSha: ws.baseCommitSha,
       commitMessage,
       prTitle,
-      prBody: prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(diffs)}`,
-      files: changes.map((f) => ({ path: f.path, content: f.content, baseSha: f.baseSha })),
+      prBody: withProof(prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(pushedDiffs)}`),
+      files: selection.push.map((f) => ({ path: f.path, content: f.content, baseSha: f.baseSha })),
       createBranchIfNeeded: true,
       workingBranch: ws.workingBranch ?? branchName,
     });
@@ -1542,14 +1744,19 @@ export async function runPushChanges(
         result.branchName,
         ws.branch,
         prTitle,
-        prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(diffs)}`
+        withProof(prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(pushedDiffs)}`)
       );
       prUrl = pr.htmlUrl;
       prNumber = pr.number;
     }
 
-    // Mark files as pushed and pin the new base
-    const pushed = (await import("../workspace/workspace")).markPushed(ws, result.commitSha);
+    // Mark only the committed files as pushed and pin the new base. Files
+    // the user held back keep their pending status — see markPushed().
+    const pushed = (await import("../workspace/workspace")).markPushed(
+      ws,
+      result.commitSha,
+      selection.push.map((f) => f.path)
+    );
     const { invalidateRepoCache } = await import("../lib/github-client");
     invalidateRepoCache();
     // The branch head moved: cached tree/read results describe the
@@ -1568,7 +1775,14 @@ export async function runPushChanges(
         commit: result.commitSha,
         prUrl,
         prNumber,
-        files: changes.length,
+        files: selection.push.length,
+        ...(verification.length > 0 ? { verification: verificationLines(verification) } : {}),
+        ...(selection.excluded.length > 0
+          ? {
+              excluded: selection.excluded.map((f) => f.path),
+              excludedNote: exclusionNote,
+            }
+          : {}),
         ...(evidence.length > 0
           ? {
               evidenceWarning:
@@ -1578,7 +1792,11 @@ export async function runPushChanges(
           : {}),
       },
       durationMs: Date.now() - started,
-      summary: prUrl ?? result.branchName,
+      summary:
+        prUrl ??
+        (selection.excluded.length > 0
+          ? `${result.branchName} (${selection.excluded.length} file(s) held back)`
+          : result.branchName),
     };
   } catch (err) {
     const message =

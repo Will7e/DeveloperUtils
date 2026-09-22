@@ -17,7 +17,7 @@
 
 import React from "react";
 import { Bot, Check, CornerDownLeft } from "lucide-react";
-import { formatContext, formatPrice } from "./ModelPicker";
+import { formatContext, formatPrice } from "../lib/model-format";
 import { CURATED_FALLBACK_MODELS } from "../constants";
 import type { ModelInfo } from "../types";
 import type { ChatCommand } from "../lib/commands";

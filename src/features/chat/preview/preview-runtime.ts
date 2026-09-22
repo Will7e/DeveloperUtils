@@ -12,11 +12,13 @@
 //   • Static HTML entries skip the bundler entirely: relative
 //     links/scripts/images are rewritten to blob URLs
 //
-// Workspace files resolve through a virtual FS esbuild plugin.
-// Bare imports (react, lodash…) cannot be resolved in the browser
-// without npm — diagnostics tell the agent to vendor dependencies
-// or use an import map entry. React is shimmed via esm.sh CDN
-// import maps so common repos work out of the box.
+// Workspace files resolve through a virtual FS esbuild plugin, which
+// now applies PATH ALIASES (tsconfig `paths`, vite `resolve.alias`)
+// before deciding a specifier is a package. Anything that really is a
+// package gets an entry in an import map built from the repository's own
+// package.json — see ./module-resolution. A specifier with no
+// destination is reported by name instead of silently externalized,
+// which is what used to produce a black frame with no diagnostic.
 
 import * as esbuild from "esbuild-wasm";
 import { useChatStore } from "@/stores/chat.store";
@@ -24,7 +26,26 @@ import type { WorkspaceState } from "../types";
 import { PREVIEW_REBUILD_DEBOUNCE_MS } from "../constants";
 import { usePreviewStore, type PreviewDiagnostic } from "./preview.store";
 import { createWorkspaceVfs, type VFS } from "./vfs";
-import { preloadForPreview, preloadSeeds } from "./preload";
+import { configSeedPaths, preloadForPreview, preloadSeeds } from "./preload";
+import { detectEntry, unsupportedProjectReason } from "./entry";
+import {
+  buildPreviewImportMap,
+  isCoveredByImportMap,
+  parseLockfileVersions,
+  parsePackageJson,
+  pickLockfilePath,
+  splitBareSpecifier,
+  type PreviewImportMap,
+} from "./module-resolution";
+import {
+  readAliasConfig,
+  resolveAlias,
+  TSCONFIG_CANDIDATES,
+  VITE_CONFIG_CANDIDATES,
+  type AliasConfig,
+} from "./aliases";
+import { buildDefineMap, buildPreviewEnv, describeEnv } from "./env";
+import { detectCssToolchain, planCss, stripVendorCss, type CssPlan } from "./css-pipeline";
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
@@ -47,42 +68,41 @@ async function ensureEsbuild(): Promise<void> {
 }
 
 // ── Entry detection ──────────────────────────────────────────
-
-const HTML_ENTRIES = ["index.html", "public/index.html", "preview.html"];
-const JS_ENTRIES = ["src/main.tsx", "src/main.jsx", "src/index.tsx", "src/index.jsx", "main.tsx", "index.tsx", "main.jsx", "index.jsx", "src/main.ts", "src/index.ts", "main.ts", "index.ts", "src/main.js", "src/index.js", "main.js", "index.js"];
-
-export type EntryKind = "html" | "js";
-
-export interface DetectedEntry {
-  kind: EntryKind;
-  path: string;
-  /** For HTML entries: the script src it references (if any) */
-  scriptSrc?: string;
-}
-
-export function detectEntry(ws: WorkspaceState): DetectedEntry | null {
-  const paths = new Set(ws.tree.map((e) => e.path));
-  const has = (p: string) => paths.has(p) || ws.files[p] !== undefined;
-
-  for (const html of HTML_ENTRIES) {
-    if (has(html)) {
-      const content = ws.files[html]?.content ?? "";
-      const m = content.match(/<script[^>]+src=["']([^"']+)["']/i);
-      return { kind: "html", path: html, scriptSrc: m?.[1] };
-    }
-  }
-  for (const js of JS_ENTRIES) {
-    if (has(js)) return { kind: "js", path: js };
-  }
-  return null;
-}
+// Moved to ./entry — pure, and testable without loading esbuild. Re-exported
+// here because callers already reach for it through this module.
+export { detectEntry, unsupportedProjectReason } from "./entry";
+export type { DetectedEntry, EntryKind } from "./entry";
 
 // ── Virtual FS plugin ────────────────────────────────────────
 // Path resolution lives in ./vfs (shared with the preloader).
 
 const VFS_PLUGIN_NAME = "intab-workspace-vfs";
 
-function vfsPlugin(vfs: VFS): esbuild.Plugin {
+/**
+ * What a build learned about specifiers it could not resolve inside the
+ * workspace. Collected during the build (rather than predicted from a
+ * pre-scan) so the report describes what esbuild ACTUALLY emitted.
+ */
+interface ResolutionReport {
+  /** Bare specifiers left for the import map */
+  external: Set<string>;
+  /** Relative/absolute specifiers that are not files in the workspace */
+  missingLocal: Set<string>;
+  /** Specifiers whose Vite query suffix was stripped to keep them runnable */
+  queryStripped: Set<string>;
+}
+
+function vfsPlugin(
+  vfs: VFS,
+  context: {
+    aliases: AliasConfig;
+    report: ResolutionReport;
+    cssPlan: CssPlan;
+    /** Names of vendor directives removed, for the build's report */
+    strippedCss: string[];
+  }
+): esbuild.Plugin {
+  const { aliases, report } = context;
   return {
     name: VFS_PLUGIN_NAME,
     setup(build) {
@@ -90,15 +110,42 @@ function vfsPlugin(vfs: VFS): esbuild.Plugin {
       build.onResolve({ filter: /^[./]/ }, (args) => {
         const resolved = vfs.resolveRel(args.importer ?? "", args.path);
         if (resolved) return { path: resolved, namespace: "vfs" };
-        return { path: args.path, external: true }; // leave unresolvable as external
+        // Not a file we have. This used to be externalized in silence, so
+        // a typo or an unloaded file reached the browser as an import of
+        // "/src/typo.ts" and 404ed with nothing in the pane. Record it.
+        report.missingLocal.add(args.path);
+        return { path: args.path, external: true };
       });
 
-      // Bare imports: externalize — the import map handles react via esm.sh.
-      // Entry points must resolve INTO the vfs (they are bare paths like src/main.tsx).
+      // Aliases BEFORE packages. This ordering is the fix for `@/lib/utils`:
+      // it is not a package, and treating it as one aborted the module graph.
       build.onResolve({ filter: /^[^./]/ }, (args) => {
+        // Entry points are bare paths like src/main.tsx and must always
+        // resolve into the workspace.
         if (args.kind === "entry-point" || vfs.exists(args.path)) {
           return { path: args.path, namespace: "vfs" };
         }
+
+        const aliased = resolveAlias(args.path, aliases, (p) => vfs.exists(p));
+        if (aliased) return { path: aliased, namespace: "vfs" };
+
+        // A Vite query suffix (?raw, ?url, ?worker) names behaviour the
+        // browser has no equivalent for. Emitting the bare specifier would
+        // fail to match an import-map key and blank the frame, so the
+        // suffix is dropped to keep the module loading — and reported,
+        // because the semantics are now approximate.
+        const queryMatch = /^(.*?)\?(.+)$/.exec(args.path);
+        if (queryMatch) {
+          const base = queryMatch[1] as string;
+          report.queryStripped.add(args.path);
+          if (vfs.exists(base)) return { path: base, namespace: "vfs" };
+          report.external.add(base);
+          return { path: base, external: true };
+        }
+
+        // A real package: the browser resolves it through the import map.
+        const split = splitBareSpecifier(args.path);
+        if (split) report.external.add(args.path);
         return { path: args.path, external: true };
       });
 
@@ -122,7 +169,17 @@ function vfsPlugin(vfs: VFS): esbuild.Plugin {
                   : ext === "json"
                     ? "json"
                     : "js";
-        return { contents: content, loader, resolveDir: args.path.split("/").slice(0, -1).join("/") || "." };
+        // Vendor CSS directives are removed HERE, where a stylesheet is
+        // actually read: `@import "tailwindcss"` is a package import to
+        // esbuild and a directive the browser cannot execute, so leaving it
+        // in either fails the build or produces an unstyled page.
+        let contents = content;
+        if (loader === "css") {
+          const stripped = stripVendorCss(content, context.cssPlan);
+          contents = stripped.css;
+          context.strippedCss.push(...stripped.stripped);
+        }
+        return { contents, loader, resolveDir: args.path.split("/").slice(0, -1).join("/") || "." };
       });
     },
   };
@@ -132,9 +189,46 @@ function vfsPlugin(vfs: VFS): esbuild.Plugin {
 
 export interface BuildOutcome {
   status: "ready" | "error";
+  /**
+   * The entry document, handed to the frame via `srcdoc`. This is what the
+   * pane actually renders: a blob: URL requires the frame to NAVIGATE, and
+   * some browser builds refuse blob navigation without firing a load event
+   * — producing a black pane with nothing to show for it. `srcdoc` is parsed
+   * in place, so the document is always the thing on screen.
+   */
+  html: string | null;
+  /** Blob URL of the same document, for "open in new tab" */
   url: string | null;
   entry: string | null;
   diagnostics: PreviewDiagnostic[];
+  /**
+   * Fingerprint of the emitted JS. The pane reloads the frame only when
+   * this changes — a CSS-only edit is injected into the running frame
+   * instead, so the app keeps its state (and stops flashing on every write
+   * of a multi-file edit).
+   */
+  jsHash?: string;
+  /** The bundle's CSS, kept so it can be hot-swapped without a reload */
+  css?: string;
+}
+
+/** Wraps a document in the store's build payload (srcdoc + blob link) */
+function toDocument(html: string): { html: string; url: string } {
+  return { html, url: URL.createObjectURL(new Blob([html], { type: "text/html" })) };
+}
+
+/**
+ * Cheap, stable fingerprint of a string (FNV-1a). Used only to decide
+ * whether a rebuild produced different JS, so it needs to be fast and
+ * deterministic rather than cryptographic.
+ */
+function hashText(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
@@ -142,6 +236,27 @@ let lastBuildWs: WorkspaceState | null = null;
 let lastBuildResult: BuildOutcome | null = null;
 let inFlight = false;
 let pendingAfterCurrent = false;
+/** Fingerprint of the inputs the last SUCCESSFUL build used */
+let lastBuildInputHash: string | null = null;
+
+/**
+ * Fingerprints everything a build reads, so a workspace change that does
+ * not touch any file content cannot cause a reload.
+ *
+ * `schedulePreviewBuild` is called from every write path, and it used to
+ * rebuild unconditionally. That is how a three-file edit became three
+ * full frame reloads — and why state was lost each time. Comparing this
+ * hash first means the debounce collapses a burst of writes into ONE
+ * build, and a no-op change into none at all.
+ */
+function buildInputHash(ws: WorkspaceState): string {
+  const parts: string[] = [];
+  for (const [path, file] of Object.entries(ws.files)) {
+    parts.push(`${path}\u0000${file.status}\u0000${file.content.length}`);
+  }
+  parts.sort();
+  return hashText(`${ws.branch}\u0001${ws.baseCommitSha}\u0001${parts.join("\u0001")}`);
+}
 
 /** Debounced rebuild entry point (called on workspace mutations) */
 export function schedulePreviewBuild(ws: WorkspaceState): void {
@@ -151,6 +266,16 @@ export function schedulePreviewBuild(ws: WorkspaceState): void {
     rebuildTimer = null;
     void runPreviewBuild(ws);
   }, PREVIEW_REBUILD_DEBOUNCE_MS);
+}
+
+/**
+ * True when this workspace snapshot would produce the build that is
+ * already on screen, so the caller can skip the rebuild entirely.
+ */
+function inputsUnchanged(ws: WorkspaceState): boolean {
+  if (lastBuildInputHash === null) return false;
+  if (lastBuildResult?.status !== "ready") return false;
+  return buildInputHash(ws) === lastBuildInputHash;
 }
 
 /**
@@ -166,14 +291,46 @@ async function preloadForBuild(
 ): Promise<WorkspaceState> {
   const token = useChatStore.getState().settings.github.token;
   if (!token) return ws;
-  const seeds = preloadSeeds(detectEntry(ws));
-  if (seeds.length === 0) return ws;
 
-  const outcome = await preloadForPreview(ws, seeds, token);
-  if (outcome.loaded.length === 0) return ws;
+  const publish = (next: WorkspaceState): WorkspaceState => {
+    useChatStore.getState().setWorkspace(next.conversationId, next);
+    return next;
+  };
 
-  useChatStore.getState().setWorkspace(ws.conversationId, outcome.ws);
-  return outcome.ws;
+  // Pass 1 — configuration. The entry cannot be located without it
+  // (vite `root`, monorepo layout), and neither can the import map, the
+  // aliases, or the env defines. Fetching these first is what lets the
+  // second pass know what to look for.
+  let current = ws;
+  const configSeeds = configSeedPaths(ws.tree.map((e) => e.path));
+  if (configSeeds.length > 0) {
+    const configOutcome = await preloadForPreview(current, configSeeds, token);
+    if (configOutcome.loaded.length > 0) current = publish(configOutcome.ws);
+  }
+
+  // Pass 2 — the entry graph.
+  const entry = detectEntry(current, { root: readAliasConfigFor(current).root });
+  const seeds = preloadSeeds(entry);
+  if (seeds.length === 0) return current;
+
+  const outcome = await preloadForPreview(current, seeds, token);
+  if (outcome.loaded.length === 0) return current;
+  return publish(outcome.ws);
+}
+
+/**
+ * Reads the alias/root configuration from the files currently loaded.
+ * A single place for both the preload pass (which needs `root`) and the
+ * build (which needs the rules), so the two can never disagree about
+ * which files define a project's layout.
+ */
+function readAliasConfigFor(ws: WorkspaceState): AliasConfig {
+  const configs = new Map<string, string>();
+  for (const path of [...TSCONFIG_CANDIDATES, ...VITE_CONFIG_CANDIDATES]) {
+    const content = ws.files[path]?.content;
+    if (content !== undefined) configs.set(path, content);
+  }
+  return readAliasConfig({ configs, treePaths: ws.tree.map((e) => e.path) });
 }
 
 /** Immediate build (used on pane open) */
@@ -181,8 +338,13 @@ export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome>
   const store = usePreviewStore.getState();
   if (inFlight) {
     pendingAfterCurrent = true;
-    return lastBuildResult ?? { status: "error", url: null, entry: null, diagnostics: [] };
+    return lastBuildResult ?? { status: "error", html: null, url: null, entry: null, diagnostics: [] };
   }
+  if (inputsUnchanged(ws)) {
+    // Nothing a build reads has changed — do not tear down a running app.
+    return lastBuildResult!;
+  }
+
   inFlight = true;
   store.setStatus("building");
 
@@ -191,11 +353,15 @@ export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome>
     const loaded = await preloadForBuild(ws);
     const outcome = await buildWorkspace(loaded);
     lastBuildResult = outcome;
+    if (outcome.status === "ready") lastBuildInputHash = buildInputHash(loaded);
     usePreviewStore.getState().setBuild({
+      html: outcome.html,
       url: outcome.url,
       entry: outcome.entry,
       diagnostics: outcome.diagnostics,
       status: outcome.status,
+      jsHash: outcome.jsHash,
+      css: outcome.css,
     });
     return outcome;
   } catch (err) {
@@ -205,8 +371,10 @@ export async function runPreviewBuild(ws: WorkspaceState): Promise<BuildOutcome>
         severity: "error",
       },
     ];
-    lastBuildResult = { status: "error", url: null, entry: null, diagnostics };
-    usePreviewStore.getState().setBuild({ url: null, entry: null, diagnostics, status: "error" });
+    lastBuildResult = { status: "error", html: null, url: null, entry: null, diagnostics };
+    usePreviewStore
+      .getState()
+      .setBuild({ html: null, url: null, entry: null, diagnostics, status: "error" });
     return lastBuildResult;
   } finally {
     inFlight = false;
@@ -222,32 +390,137 @@ export function isPreviewSupported(): boolean {
   return typeof WebAssembly !== "undefined";
 }
 
+/** Reads the project configuration a build needs out of the workspace */
+interface ProjectConfig {
+  manifest: ReturnType<typeof parsePackageJson>;
+  importMap: PreviewImportMap;
+  aliases: AliasConfig;
+  cssPlan: CssPlan;
+  define: Record<string, string>;
+  root: string | null;
+  /** Diagnostics the configuration alone produced */
+  notes: PreviewDiagnostic[];
+}
+
+function readProjectConfig(ws: WorkspaceState, vfs: VFS): ProjectConfig {
+  const notes: PreviewDiagnostic[] = [];
+  const content = (path: string): string | null => ws.files[path]?.content ?? null;
+
+  // ── Dependencies → import map ──
+  const manifest = parsePackageJson(content("package.json"));
+  const lockfilePath = pickLockfilePath(ws.tree.map((e) => e.path));
+  const lockfileVersions = lockfilePath
+    ? parseLockfileVersions(content(lockfilePath))
+    : {};
+  const importMap = buildPreviewImportMap({ manifest, lockfileVersions });
+
+  const dependencyCount = Object.keys(manifest.dependencies).length;
+  if (dependencyCount === 0 && ws.tree.some((e) => e.path === "package.json")) {
+    notes.push({
+      message:
+        "package.json was read but declares no dependencies, so imported packages cannot be resolved in the preview. Check that the file was loaded and that dependencies are under `dependencies`/`devDependencies`.",
+      severity: "warning",
+    });
+  }
+
+  // ── Aliases and the configured root ──
+  const aliases = readAliasConfigFor(ws);
+  if (aliases.unparsed) {
+    notes.push({
+      message: `Path aliases could not be read from ${aliases.read.join(", ")} (the alias definition is computed rather than literal). Imports through an alias will not resolve in the preview.`,
+      severity: "warning",
+    });
+  }
+  const resolvedRules = aliases.rules.filter((r) => vfs.exists(r.target.replace(/\/$/, "")));
+  if (aliases.rules.length > 0 && resolvedRules.length === 0) {
+    notes.push({
+      message: `Alias rules were read (${aliases.rules.map((r) => r.prefix).join(", ")}) but none point at a file in the workspace, so aliased imports will fall through to the package resolver.`,
+      severity: "warning",
+    });
+  }
+
+  // ── CSS toolchain ──
+  const cssFiles: Array<{ path: string; content: string }> = [];
+  for (const entry of ws.tree) {
+    if (!/\.(css|scss|sass|less|styl)$/i.test(entry.path)) continue;
+    const fileContent = ws.files[entry.path]?.content;
+    if (fileContent !== undefined) cssFiles.push({ path: entry.path, content: fileContent });
+  }
+  const cssToolchain = detectCssToolchain({
+    manifest,
+    configPaths: ws.tree.map((e) => e.path).filter((p) => !p.includes("/")),
+    cssFiles,
+  });
+  const cssPlan = planCss(cssToolchain);
+  for (const diagnostic of cssPlan.diagnostics) {
+    notes.push(diagnostic);
+  }
+
+  // ── Environment ──
+  const envFiles = new Map<string, string>();
+  for (const [path, file] of Object.entries(ws.files)) {
+    const base = path.split("/").pop() ?? "";
+    if (/^\.env(\.|$)/.test(base) && file.content !== undefined) envFiles.set(path, file.content);
+  }
+  const env = buildPreviewEnv({
+    envFiles,
+    treePaths: ws.tree.map((e) => e.path),
+    baseUrl: "/",
+  });
+  const envNote = describeEnv(env);
+  if (envNote) notes.push({ message: envNote, severity: "warning" });
+
+  return {
+    manifest,
+    importMap,
+    aliases,
+    cssPlan,
+    define: buildDefineMap(env),
+    root: aliases.root,
+    notes,
+  };
+}
+
 async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
-  const entry = detectEntry(ws);
+  const vfs = createWorkspaceVfs(ws);
+  const config = readProjectConfig(ws, vfs);
+
+  const entry = detectEntry(ws, { root: config.root });
   if (!entry) {
+    const unsupported = unsupportedProjectReason(ws);
     return {
       status: "error",
+      html: null,
       url: null,
       entry: null,
       diagnostics: [
         {
           message:
-            "No preview entry found. Expected index.html, src/main.tsx, or main.tsx/index.tsx in the repository.",
+            unsupported ??
+            "No preview entry found. The preview looks for index.html (anywhere in the tree), src/main.tsx, src/index.tsx, main.tsx, index.tsx, or the equivalent .js/.ts entries — honouring a Vite `root` when one is configured.",
           severity: "error",
         },
+        ...config.notes,
       ],
     };
   }
 
-  const vfs = createWorkspaceVfs(ws);
-
   if (entry.kind === "html" && !entry.scriptSrc) {
     // Pure static HTML — rewrite relative assets to blob URLs
-    return buildStaticHtml(ws, entry.path);
+    return buildStaticHtml(ws, entry.path, config);
   }
 
   // ── Bundled path: HTML+script or standalone JS/TS entry ──
   const jsEntry = entry.kind === "js" ? entry.path : (entry.scriptSrc ?? "src/main.tsx");
+  const report: ResolutionReport = {
+    external: new Set(),
+    missingLocal: new Set(),
+    queryStripped: new Set(),
+  };
+
+  // Vendor CSS directives are stripped inside the VFS loader; the names
+  // removed are collected here so the build can report them.
+  const strippedCss: string[] = [];
 
   let result: esbuild.BuildResult;
   try {
@@ -261,18 +534,26 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
       jsxImportSource: "react",
       outdir: "/out",
       loader: { ".png": "dataurl", ".jpg": "dataurl", ".jpeg": "dataurl", ".gif": "dataurl", ".svg": "dataurl", ".webp": "dataurl" },
-      define: { "process.env.NODE_ENV": '"production"' },
-      plugins: [vfsPlugin(vfs)],
+      // import.meta.env + NODE_ENV come from the repository's own .env files.
+      define: config.define,
+      plugins: [
+        vfsPlugin(vfs, {
+          aliases: config.aliases,
+          report,
+          cssPlan: config.cssPlan,
+          strippedCss,
+        }),
+      ],
       logLevel: "silent",
     });
   } catch (err) {
-    const diagnostics = esbuildErrorsToDiagnostics(err);
-    return { status: "error", url: null, entry: jsEntry, diagnostics };
+    const diagnostics = [...esbuildErrorsToDiagnostics(err), ...config.notes];
+    return { status: "error", html: null, url: null, entry: jsEntry, diagnostics };
   }
 
   const errors = (result.errors ?? []).map((e) => esbuildMessage(e));
   if (errors.length > 0) {
-    return { status: "error", url: null, entry: jsEntry, diagnostics: errors };
+    return { status: "error", html: null, url: null, entry: jsEntry, diagnostics: [...errors, ...config.notes] };
   }
 
   // Collect the JS bundle + any CSS output
@@ -282,14 +563,75 @@ async function buildWorkspace(ws: WorkspaceState): Promise<BuildOutcome> {
     if (file.path.endsWith(".js")) js += file.text;
     if (file.path.endsWith(".css")) cssParts.push(file.text);
   }
+  const css = cssParts.join("\n\n");
 
-  const html = composeEntryHtml(js, cssParts.join("\n\n"));
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-  return { status: "ready", url, entry: jsEntry, diagnostics: [] };
+  // ── What the build could not resolve, named ──
+  // This is the report that did not exist before: an external specifier
+  // with no import-map entry used to reach the browser and abort the whole
+  // module graph with nothing on screen.
+  const diagnostics: PreviewDiagnostic[] = [...config.notes];
+  const unmapped: string[] = [];
+  for (const specifier of report.external) {
+    if (isCoveredByImportMap(specifier, config.importMap.imports)) continue;
+    const split = splitBareSpecifier(specifier);
+    const declared = split ? config.importMap.resolved[split.pkg] : undefined;
+    unmapped.push(
+      declared
+        ? `${specifier} (\`${split?.pkg}\` is declared as "${declared}", which names no publishable version)`
+        : `${specifier} (not in package.json)`
+    );
+  }
+  if (unmapped.length > 0) {
+    diagnostics.push({
+      message:
+        `These imports cannot be resolved in the browser, so the app will not start: ${unmapped.sort().join(", ")}. ` +
+        "Add the package to package.json (it is served from esm.sh), or vendor it into the repository.",
+      severity: "error",
+    });
+  }
+  if (report.missingLocal.size > 0) {
+    diagnostics.push({
+      message: `These local imports do not exist in the workspace, so they were left to fail at runtime: ${[...report.missingLocal].sort().join(", ")}.`,
+      severity: "warning",
+    });
+  }
+  if (report.queryStripped.size > 0) {
+    diagnostics.push({
+      message: `Vite query imports were loaded without their suffix (the browser has no equivalent): ${[...report.queryStripped].sort().join(", ")}.`,
+      severity: "warning",
+    });
+  }
+  if (strippedCss.length > 0) {
+    diagnostics.push({
+      message: `Removed ${strippedCss.length} vendor CSS import(s) the browser cannot fetch: ${[...new Set(strippedCss)].sort().join(", ")}. See the CSS notes above for what this costs.`,
+      severity: "warning",
+    });
+  }
+
+  const document = toDocument(
+    composeEntryHtml(js, css, {
+      importMap: config.importMap.imports,
+      scripts: config.cssPlan.scripts,
+    })
+  );
+  return {
+    status: "ready",
+    ...document,
+    entry: jsEntry,
+    diagnostics,
+    jsHash: hashText(js),
+    css,
+  };
 }
 
+
+
 /** Static HTML path: rewrite src/href references to blob URLs */
-async function buildStaticHtml(ws: WorkspaceState, htmlPath: string): Promise<BuildOutcome> {
+async function buildStaticHtml(
+  ws: WorkspaceState,
+  htmlPath: string,
+  config: ProjectConfig
+): Promise<BuildOutcome> {
   const raw = ws.files[htmlPath]?.content ?? "";
   const vfs = createWorkspaceVfs(ws);
   const blobUrls = new Map<string, string>();
@@ -307,9 +649,21 @@ async function buildStaticHtml(ws: WorkspaceState, htmlPath: string): Promise<Bu
     return url;
   });
 
-  const html = composeEntryHtml("", "", rewritten);
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-  return { status: "ready", url, entry: htmlPath, diagnostics: [] };
+  const document = toDocument(
+    composeEntryHtml("", "", {
+      importMap: config.importMap.imports,
+      scripts: config.cssPlan.scripts,
+      staticHtml: rewritten,
+    })
+  );
+  return {
+    status: "ready",
+    ...document,
+    entry: htmlPath,
+    diagnostics: config.notes,
+    jsHash: hashText(rewritten),
+    css: "",
+  };
 }
 
 /** Replaces relative src=/href= refs with blob URLs (async rewriter) */
@@ -337,25 +691,44 @@ async function rewriteAssets(
   return out;
 }
 
-/** Wraps the bundle in a host HTML doc with bridge + import map */
-function composeEntryHtml(js: string, css: string, staticHtml?: string): string {
-  const importMap = {
-    imports: {
-      react: "https://esm.sh/react@19.2.0",
-      "react/": "https://esm.sh/react@19.2.0/",
-      "react-dom": "https://esm.sh/react-dom@19.2.0",
-      "react-dom/": "https://esm.sh/react-dom@19.2.0/",
-      "react-dom/client": "https://esm.sh/react-dom@19.2.0/client",
-      "react/jsx-runtime": "https://esm.sh/react@19.2.0/jsx-runtime",
-      "react/jsx-dev-runtime": "https://esm.sh/react@19.2.0/jsx-dev-runtime",
-    },
-  };
-
+/**
+ * Wraps the bundle in a host HTML document with the bridge and the import
+ * map.
+ *
+ * The import map is built from the REPOSITORY's dependencies (see
+ * ./module-resolution) rather than a fixed React shim, and the runtime
+ * scripts come from the CSS plan. Both are passed in so this function
+ * stays a pure string composer.
+ *
+ * NOTE: every host these URLs name must also appear in the app's
+ * `script-src` (index.html for dev, vercel.json for production). A srcdoc
+ * document inherits the app's Content-Security-Policy, so a host missing
+ * there is blocked and the bundle's first import never resolves — the
+ * black-frame failure the CSP contract test exists to prevent.
+ */
+function composeEntryHtml(
+  js: string,
+  css: string,
+  options: {
+    importMap: Record<string, string>;
+    scripts: string[];
+    staticHtml?: string;
+  }
+): string {
+  const { importMap, scripts, staticHtml } = options;
+  // An import map must be inline: the spec removed `src` support, so this
+  // one script cannot be externalized the way the bundle could be.
+  const importMapTag = `<script type="importmap">${JSON.stringify({ imports: importMap })}</script>`;
+  // Runtime stylesheets (Tailwind's browser build) are separate scripts so
+  // a failure in one cannot silently swallow the bundle.
+  const runtimeTags = scripts
+    .map((url) => `<script type="module" src="${url}"></script>`)
+    .join("\n");
   const bridge = `<script>(${bridgeSource.toString()})();</script>`;
 
   if (staticHtml !== undefined) {
-    // Inject bridge + import map into the static document
-    const head = `<head><script type="importmap">${JSON.stringify(importMap)}</script>${bridge}`;
+    // Inject bridge + import map + runtime scripts into the static document
+    const head = `<head>${importMapTag}${runtimeTags}${bridge}`;
     const withHead = staticHtml.includes("<head>")
       ? staticHtml.replace("<head>", head)
       : `${head}</head>${staticHtml}`;
@@ -366,8 +739,9 @@ function composeEntryHtml(js: string, css: string, staticHtml?: string): string 
 <html>
 <head>
 <meta charset="utf-8">
-<script type="importmap">${JSON.stringify(importMap)}</script>
-<style>${css}</style>
+${importMapTag}
+<style id="intab-app-css">${css}</style>
+${runtimeTags}
 ${bridge}
 </head>
 <body>
@@ -415,6 +789,121 @@ function bridgeSource(): void {
     const reason = e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack ?? ""}` : String(e.reason);
     post("error", `Unhandled rejection: ${reason}`);
   });
+
+  // A preview that renders nothing has to say why. A blocked module import
+  // (CSP, offline CDN) is reported to the browser console as a violation, not
+  // as a page error, so it never reached this bridge — which is how a
+  // policy-blocked preview became a black rectangle with no explanation, in
+  // the pane and in get_preview_feedback alike. The preview document INHERITS
+  // the app's policy, so this is also the fastest way to see that the app's
+  // CSP and the preview's needs have drifted apart.
+  window.addEventListener("securitypolicyviolation", (e) => {
+    post(
+      "error",
+      `Content-Security-Policy blocked ${e.violatedDirective}` +
+        (e.blockedURI ? ` → ${e.blockedURI}` : "") +
+        ". The preview document inherits this app's policy, so every host the preview loads from — and the inline scripts this document needs — must be allowed by script-src in index.html (dev) AND vercel.json (production). A deployed build whose script-src lacks 'unsafe-inline' cannot run a srcdoc preview at all."
+    );
+  });
+
+  // ── Sandbox capability shims ──
+  // The frame is sandboxed WITHOUT allow-same-origin, so its origin is
+  // opaque. Measured in Chromium, that costs a generated app far more than
+  // it looks: reading `localStorage`, `sessionStorage`, `document.cookie` and
+  // `indexedDB` all THROW SecurityError, and `crypto.randomUUID` is missing
+  // outright (an opaque origin is not a secure context). An app that touches
+  // any of those while mounting dies before it can attach a single listener —
+  // the user sees a rendered page whose every button does nothing. Shimming
+  // them keeps the app running; the shims are in-memory and say so.
+  const memoryStorage = (): Storage => {
+    const map = new Map<string, string>();
+    return {
+      get length() {
+        return map.size;
+      },
+      clear: () => map.clear(),
+      getItem: (k: string) => (map.has(String(k)) ? (map.get(String(k)) as string) : null),
+      key: (i: number) => Array.from(map.keys())[i] ?? null,
+      removeItem: (k: string) => {
+        map.delete(String(k));
+      },
+      setItem: (k: string, v: string) => {
+        map.set(String(k), String(v));
+      },
+    } as unknown as Storage;
+  };
+
+  const shimStorage = (prop: "localStorage" | "sessionStorage") => {
+    try {
+      // The ACCESS itself is what throws in a sandboxed document.
+      void (window as unknown as Record<string, unknown>)[prop];
+      return;
+    } catch {
+      /* blocked — replace it below */
+    }
+    try {
+      Object.defineProperty(window, prop, {
+        value: memoryStorage(),
+        configurable: true,
+        writable: false,
+      });
+      post("system", `${prop} is blocked in the preview sandbox — in-memory storage in use (state resets on rebuild).`);
+    } catch {
+      /* could not shim; the app keeps seeing the original SecurityError */
+    }
+  };
+  shimStorage("localStorage");
+  shimStorage("sessionStorage");
+
+  // An opaque origin is not a secure context, so randomUUID (and subtle) are
+  // absent instead of throwing. getRandomValues still works, which is enough
+  // to build a real v4 UUID.
+  try {
+    const c = window.crypto as Crypto & { randomUUID?: () => string };
+    if (c && typeof c.randomUUID !== "function" && typeof c.getRandomValues === "function") {
+      Object.defineProperty(c, "randomUUID", {
+        configurable: true,
+        value: () => {
+          const b = new Uint8Array(16);
+          c.getRandomValues(b);
+          b[6] = ((b[6] as number) & 0x0f) | 0x40;
+          b[8] = ((b[8] as number) & 0x3f) | 0x80;
+          const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+          return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+        },
+      });
+      post("system", "crypto.randomUUID is unavailable in the preview sandbox — shimmed from getRandomValues.");
+    }
+  } catch {
+    /* leave crypto as the browser provides it */
+  }
+
+  // Cookie reads/writes throw here too. A jar in memory keeps an app that
+  // merely stores a banner preference from dying on its first render.
+  try {
+    void document.cookie;
+  } catch {
+    try {
+      const jar = new Map<string, string>();
+      Object.defineProperty(document, "cookie", {
+        configurable: true,
+        get: () => Array.from(jar, ([k, v]) => `${k}=${v}`).join("; "),
+        set: (raw: string) => {
+          const [pair, ...attrs] = String(raw).split(";");
+          const eq = (pair ?? "").indexOf("=");
+          if (eq <= 0) return;
+          const name = (pair ?? "").slice(0, eq).trim();
+          const value = (pair ?? "").slice(eq + 1).trim();
+          const expired = attrs.some((a) => /max-age\s*=\s*0/i.test(a));
+          if (expired) jar.delete(name);
+          else jar.set(name, value);
+        },
+      });
+      post("system", "document.cookie is blocked in the preview sandbox — in-memory cookie jar in use.");
+    } catch {
+      /* could not shim */
+    }
+  }
 
   // ── Agent execution requests (run_js / query_dom) ──
   // The parent posts {source, reqId, kind, ...}; this sandbox is the
@@ -719,13 +1208,33 @@ function bridgeSource(): void {
     }
   };
 
+  /**
+   * Replaces the app stylesheet in place (the `set_css` request). Only the
+   * element this document owns is rewritten, so a package-managed runtime
+   * stylesheet (Tailwind's browser build) is left alone.
+   */
+  const setAppCss = (css: string): { ok: boolean; result?: unknown; error?: string } => {
+    try {
+      let style = document.getElementById("intab-app-css") as HTMLStyleElement | null;
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "intab-app-css";
+        document.head.appendChild(style);
+      }
+      style.textContent = css;
+      return { ok: true, result: { bytes: css.length } };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
   window.addEventListener("message", (event: MessageEvent) => {
     // Only the embedding app may drive this execution sandbox. This frame has
     // an opaque origin, so `parent` identity is the only binding available;
     // without it any other window that reached this frame could ask it to
     // evaluate code or read its DOM on the agent's behalf.
     if (event.source !== window.parent) return;
-    const data = event.data as { source?: string; reqId?: number; kind?: string; code?: string; selector?: string; mode?: string; maxElements?: number } | null;
+    const data = event.data as { source?: string; reqId?: number; kind?: string; code?: string; selector?: string; mode?: string; maxElements?: number; css?: string } | null;
     if (!data || data.source !== "intab-preview" || typeof data.reqId !== "number") return;
     void (async () => {
       let response: { ok: boolean; result?: unknown; error?: string };
@@ -746,6 +1255,12 @@ function bridgeSource(): void {
         response = await captureScreenshot(
           typeof data.selector === "string" && data.selector.trim() ? data.selector : undefined
         );
+      } else if (data.kind === "set_css") {
+        // Hot-swap the stylesheet WITHOUT reloading the frame. A rebuild
+        // that only changed CSS used to remount the whole app, losing every
+        // bit of state the user had built up; now the running document just
+        // gets new rules.
+        response = setAppCss(typeof data.css === "string" ? data.css : "");
       } else {
         response = { ok: false, error: `Unknown request kind: ${String(data.kind)}` };
       }
@@ -756,6 +1271,37 @@ function bridgeSource(): void {
       }
     })();
   });
+
+  // ── Post-boot honesty check ──
+  // The bundle can load and still render nothing: an unresolved module
+  // specifier throws during module instantiation, which does NOT always
+  // reach window.onerror, and a component that throws on its first render
+  // leaves an empty root. Either way the pane used to show a blank frame
+  // with no explanation — the single most common "the preview is broken"
+  // report. So after the document settles, check whether anything is on
+  // screen and, if not, say so in the console channel the pane and the
+  // agent's feedback tool both read.
+  const ROOT_CANDIDATES = ["#root", "#app", "#__next", "main", "body"];
+  const reportIfEmpty = (phase: string): void => {
+    try {
+      const filled = ROOT_CANDIDATES.some((selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return false;
+        return el.childElementCount > 0 || (el.textContent ?? "").trim().length > 0;
+      });
+      if (filled) return;
+      post(
+        "error",
+        `The bundle loaded but rendered nothing (${phase}): every root element is empty. ` +
+          "Usual causes: a module specifier the browser could not resolve (check the pane's import-map report), " +
+          "an error thrown while the entry module initialised, or an entry file that mounts nothing."
+      );
+    } catch {
+      /* the check itself must never break the preview */
+    }
+  };
+  setTimeout(() => reportIfEmpty("2.5s after load"), 2_500);
+  window.addEventListener("load", () => setTimeout(() => reportIfEmpty("after the load event"), 900));
 
   post("system", "preview-ready");
 }

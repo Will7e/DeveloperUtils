@@ -55,6 +55,7 @@ import {
 import { recordUsageCalibration } from "../context/tokenizer-calibration";
 import { estimateTokens, estimateToolSchemaTokens } from "../context/tokenizer";
 import {
+  AGENT_AUTO_CONTINUATIONS,
   AGENT_MAX_ITERATIONS,
   AGENT_ITERATIONS_MAX,
   CURATED_FALLBACK_MODELS,
@@ -64,6 +65,8 @@ import {
   TURN_INACTIVITY_TIMEOUT_MS,
 } from "../constants";
 import type { ToolDefinition } from "../types";
+import { resetProbeCounter, runVerifyBehavior } from "../lib/probe-runner";
+import { runUpdatePlan } from "../services/plan-actions";
 import {
   resetPreviewExecCounter,
   runCallMcpTool,
@@ -172,6 +175,15 @@ const session: TurnSessionState = {
 
 /** Identical executions allowed before the ledger takes over */
 const REPEAT_MAX_EXECUTIONS = 2;
+/**
+ * In-place retries for a round that died with NOTHING rendered.
+ *
+ * A dropped stream with nothing on screen is not a loss the user should
+ * have to act on: telling them to "send again" is asking them to be the
+ * retry loop. One extra attempt cannot duplicate output (nothing was
+ * committed), so it is spent before the turn admits defeat.
+ */
+const LOST_ROUND_RETRIES = 1;
 /** Serialized result kept in the ledger for a reuse (bounded) */
 const LEDGER_RESULT_MAX_CHARS = 4_000;
 
@@ -624,6 +636,10 @@ async function runBridgeTool(
       return runVisualCheck(conversationId, args);
     case "run_checks":
       return runRunChecks(conversationId, args);
+    case "verify_behavior":
+      return runVerifyBehavior(conversationId, args);
+    case "update_plan":
+      return runUpdatePlan(conversationId, args);
     case "list_mcp_tools":
       return runListMcpTools(conversationId, args);
     case "call_mcp_tool":
@@ -1038,57 +1054,96 @@ async function runRound(
   return { kind: "exhausted", committed: Boolean(committedId) };
 }
 
-/** Runs rounds (stream → tools → stream) on a chosen transport */
-async function runRounds(conversationId: string, deps: EngineDeps): Promise<void> {
-  const cap = maxIterations();
-  let source = await deps.resolveSource();
-  session.source = source;
+/**
+ * Transport + fallback bookkeeping that outlives one batch of rounds.
+ * The transport can be swapped mid-turn (survivable host → page-local),
+ * and the swap must be remembered across a continuation, not re-tried.
+ */
+interface RoundRunner {
+  source: TurnSource;
+  localFallbacks: number;
+  /** Rounds that died with nothing rendered and were retried in place */
+  lostRetries: number;
+}
 
-  let localFallbacks = 0;
-  let hitCapWithTools = false;
-
+/**
+ * Runs up to `cap` rounds (stream → tools → stream).
+ *
+ * Returns true when the turn is genuinely over: the model stopped
+ * talking, the transport died with nothing to retry on, or the user
+ * aborted. Returns false only when the batch ran out of iterations
+ * while the agent was still calling tools — i.e. the work is unfinished,
+ * not finished.
+ */
+async function runBatch(
+  conversationId: string,
+  deps: EngineDeps,
+  runner: RoundRunner,
+  cap: number
+): Promise<boolean> {
   for (let iteration = 0; iteration < cap; iteration++) {
-    if (session.abort?.signal.aborted) return;
+    if (session.abort?.signal.aborted) return true;
 
-    const result = await runRound(conversationId, source, deps);
+    const result = await runRound(conversationId, runner.source, deps);
 
     // Transport refused (another conversation owns the host) or went
-    // silent: retry ONCE in-page — but only when nothing was committed,
-    // so a partial reply is never duplicated by a second full answer.
+    // silent. A round that already produced something is never retried —
+    // that would duplicate visible output — so it ends the turn here.
     if (result.kind === "busy" || result.kind === "lost") {
-      if (result.committed) return;
-      if (!source.survivable || localFallbacks > 0) {
-        // No retry left on another transport: explain the loss here,
-        // where the round's outcome is still in hand.
-        if (result.kind === "lost" && result.outcome) {
-          commitRender(conversationId, result.outcome);
-          useChatStore.getState().endStreaming(false);
-        }
-        return;
+      if (result.committed) return true;
+
+      // 1. A dead survivable transport is never going to answer: move
+      //    the rest of the turn to the page-local one.
+      if (runner.source.survivable && runner.localFallbacks === 0) {
+        runner.localFallbacks += 1;
+        useChatStore.getState().discardStreaming();
+        logTurnEvent({
+          turnId: null,
+          conversationId,
+          phase: "failover",
+          detail:
+            result.kind === "busy"
+              ? "session host busy — retrying in-page"
+              : "session host lost — retrying in-page",
+        });
+        runner.source = deps.createFallbackSource();
+        session.source = runner.source;
+        continue;
       }
-      localFallbacks += 1;
-      useChatStore.getState().discardStreaming();
-      logTurnEvent({
-        turnId: null,
-        conversationId,
-        phase: "failover",
-        detail:
-          result.kind === "busy"
-            ? "session host busy — retrying in-page"
-            : "session host lost — retrying in-page",
-      });
-      source = deps.createFallbackSource();
-      session.source = source;
-      continue;
+
+      // 2. Nothing was rendered, so the round can simply be run again.
+      //    A stream that drops before its first token is a transient
+      //    failure far more often than it is a real answer of "nothing".
+      if (result.kind === "lost" && runner.lostRetries < LOST_ROUND_RETRIES) {
+        runner.lostRetries += 1;
+        logTurnEvent({
+          turnId: null,
+          conversationId,
+          phase: "failover",
+          detail: "round dropped with nothing rendered — retrying it",
+        });
+        continue;
+      }
+
+      // 3. Out of options: explain the loss here, where the round's
+      //    outcome is still in hand.
+      if (result.kind === "lost" && result.outcome) {
+        commitRender(conversationId, result.outcome);
+        useChatStore.getState().endStreaming(false);
+      }
+      return true;
     }
 
-    if (result.kind === "done" || result.kind === "exhausted") return;
+    if (result.kind === "done" || result.kind === "exhausted") return true;
 
     // Tool calls → execute them here, then loop with results in the transcript.
     const calls = session.toolCalls;
     session.toolCalls = [];
-    if (calls.length === 0) return;
-    if (session.abort?.signal.aborted) return;
+    if (calls.length === 0) return true;
+    if (session.abort?.signal.aborted) return true;
+    // A completed exchange is progress: the retry the next dead round
+    // may need is available again.
+    runner.lostRetries = 0;
 
     session.inToolPhase = true;
     logTurnEvent({
@@ -1116,17 +1171,55 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
         deps
       );
     }
-
-    if (iteration === cap - 1) hitCapWithTools = true;
   }
 
-  if (hitCapWithTools && !session.abort?.signal.aborted) {
-    useChatStore.getState().addMessage(conversationId, {
-      role: "assistant",
-      content:
-        "Reached the tool-use limit for this turn. Ask me to continue and I'll pick up where I left off.",
+  // Every iteration ended in tool calls: the cap, not the model, stopped
+  // this turn.
+  return false;
+}
+
+/**
+ * Runs rounds (stream → tools → stream) on a chosen transport, keeping
+ * the loop alive across tool-use checkpoints.
+ *
+ * The iteration cap is a checkpoint, not a stop. When it is reached the
+ * agent still holds its tool results and has nothing half-written to
+ * redo, so the only thing standing between it and the rest of the task
+ * is a sentence the user has to type ("continue"). Stopping there made
+ * every multi-file change a manual relay: the loop starts another batch
+ * on its own, and only asks for help once the continuation budget is
+ * genuinely spent — which is the one case where "continue" is the
+ * honest answer rather than a chore.
+ */
+async function runRounds(conversationId: string, deps: EngineDeps): Promise<void> {
+  const cap = maxIterations();
+  const runner: RoundRunner = {
+    source: await deps.resolveSource(),
+    localFallbacks: 0,
+    lostRetries: 0,
+  };
+  session.source = runner.source;
+
+  for (let continuation = 0; ; continuation++) {
+    const finished = await runBatch(conversationId, deps, runner, cap);
+    if (finished) return;
+    if (session.abort?.signal.aborted) return;
+    if (continuation >= AGENT_AUTO_CONTINUATIONS) break;
+
+    logTurnEvent({
+      turnId: null,
+      conversationId,
+      phase: "resume",
+      detail: `tool-use checkpoint hit — auto-continuing (${continuation + 1}/${AGENT_AUTO_CONTINUATIONS})`,
     });
   }
+
+  useChatStore.getState().addMessage(conversationId, {
+    role: "assistant",
+    content:
+      "Reached the tool-use limit for this turn and the automatic continuations are spent. " +
+      "Ask me to continue and I'll pick up where I left off.",
+  });
 }
 
 // ── Public entry points ─────────────────────────────────────
@@ -1156,6 +1249,7 @@ export async function runTurn(
   session.escalated = false;
   session.stuckRefusals = 0;
   resetPreviewExecCounter(conversationId);
+  resetProbeCounter(conversationId);
 
   try {
     await runRounds(conversationId, resolved);

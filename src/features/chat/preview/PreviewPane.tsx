@@ -14,6 +14,9 @@ import {
   ExternalLink,
   Loader2,
   Monitor,
+  Pause,
+  Play,
+  RefreshCw,
   Smartphone,
   Terminal,
   Undo2,
@@ -23,6 +26,8 @@ import { usePreviewStore } from "./preview.store";
 import type { PreviewConsoleEntry } from "./preview.store";
 import { useChatStore } from "@/stores/chat.store";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
+import { runPreviewBuild } from "./preview-runtime";
+import { setPreviewCss } from "./preview-bridge";
 
 interface PreviewPaneProps {
   onClose: () => void;
@@ -35,15 +40,36 @@ export const PreviewPane = React.memo(function PreviewPane({
   drawerOpenOverride,
 }: PreviewPaneProps) {
   const status = usePreviewStore((s) => s.status);
+  const html = usePreviewStore((s) => s.html);
   const url = usePreviewStore((s) => s.url);
   const entry = usePreviewStore((s) => s.entry);
   const diagnostics = usePreviewStore((s) => s.diagnostics);
   const consoleEntries = usePreviewStore((s) => s.console);
-  const buildId = usePreviewStore((s) => s.buildId);
+  const jsHash = usePreviewStore((s) => s.jsHash);
+  const css = usePreviewStore((s) => s.css);
   const setRuntimeReady = usePreviewStore((s) => s.setRuntimeReady);
+  // `buildId` is deliberately no longer the frame's key: it bumps on every
+  // build, including CSS-only ones that must NOT reload the app.
 
   const [viewMode, setViewMode] = React.useState<"desktop" | "mobile">("desktop");
   const [drawerOpenUser, setDrawerOpen] = React.useState(false);
+  /**
+   * Live updates can be paused while the agent works. Watching an app
+   * reload five times during one edit is worse than watching it once, and
+   * a paused preview keeps whatever state the user was inspecting.
+   */
+  const [autoUpdate, setAutoUpdate] = React.useState(true);
+  /**
+   * The document the FRAME was mounted with, and the JS it was built from.
+   *
+   * The iframe is driven by `srcDoc`, so writing a new document to that
+   * attribute reloads the frame. Holding the document in state and only
+   * replacing it on an intentional remount is what lets a CSS-only rebuild
+   * reach a running app without restarting it.
+   */
+  const [frameDoc, setFrameDoc] = React.useState<string | null>(null);
+  const [frameKey, setFrameKey] = React.useState(0);
+  const mountedJsHash = React.useRef<string | null>(null);
 
   // Effect-log undo: enabled while the active conversation's
   // workspace has at least one restorable agent mutation.
@@ -52,6 +78,56 @@ export const PreviewPane = React.memo(function PreviewPane({
     conversationId ? s.workspaces[conversationId]?.mutations : undefined
   );
   const canUndo = Boolean(mutations?.length);
+  const workspace = useChatStore((s) =>
+    conversationId ? s.workspaces[conversationId] : undefined
+  );
+
+  // Opening this pane is the user asking to SEE the app. A build that
+  // never produced a document (idle) or that failed on a transient error
+  // leaves the pane explaining a failure the user cannot act on — so one
+  // rebuild is attempted per open. Guarded by a ref, because a build that
+  // fails again would otherwise retry forever on every status change.
+  const rebuiltFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!conversationId || !workspace) return;
+    if (status === "ready" || status === "building" || status === "unsupported") return;
+    if (rebuiltFor.current === conversationId) return;
+    rebuiltFor.current = conversationId;
+    void runPreviewBuild(workspace);
+  }, [conversationId, workspace, status]);
+
+  /**
+   * Decides what a finished build does to the running frame:
+   *
+   *   • first build, or different JS  → remount (the app must reload)
+   *   • same JS, different CSS       → inject the new stylesheet in place,
+   *                                   so the app keeps its state
+   *   • updates paused               → do nothing until asked
+   *
+   * Before this, every rebuild bumped the frame's key and restarted the
+   * app — which is why the preview read as "it does not run in realtime":
+   * it was reloading on every file the agent touched.
+   */
+  React.useEffect(() => {
+    if (status !== "ready" || !html) return;
+    if (!autoUpdate) return;
+
+    const mounted = mountedJsHash.current;
+    if (mounted === null) {
+      mountedJsHash.current = jsHash;
+      setFrameDoc(html);
+      setFrameKey((k) => k + 1);
+      return;
+    }
+    if (mounted !== jsHash) {
+      mountedJsHash.current = jsHash;
+      setFrameDoc(html);
+      setFrameKey((k) => k + 1);
+      return;
+    }
+    // Same JS: a stylesheet-only change. Swap it into the live document.
+    void setPreviewCss(css);
+  }, [status, html, jsHash, css, autoUpdate]);
 
   const consoleErrors = consoleEntries.filter((e) => e.level === "error").length;
   const shouldAutoOpen = status === "error" && diagnostics.length > 0;
@@ -73,6 +149,36 @@ export const PreviewPane = React.memo(function PreviewPane({
           {status === "building" ? "Building" : status === "ready" ? "Ready" : status === "error" ? "Error" : status}
         </span>
         <div className="chat-preview-actions">
+          <button
+            type="button"
+            className={`toolbar-icon-btn ${autoUpdate ? "" : "active"}`}
+            onClick={() => {
+              const next = !autoUpdate;
+              setAutoUpdate(next);
+              if (next && workspace) void runPreviewBuild(workspace);
+            }}
+            title={
+              autoUpdate
+                ? "Pause live updates (keeps the app's current state)"
+                : "Resume live updates"
+            }
+            aria-label={autoUpdate ? "Pause live updates" : "Resume live updates"}
+            aria-pressed={!autoUpdate}
+          >
+            {autoUpdate ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            className="toolbar-icon-btn"
+            onClick={() => {
+              if (workspace) void runPreviewBuild(workspace);
+            }}
+            disabled={!workspace || status === "building"}
+            title="Rebuild the preview now"
+            aria-label="Rebuild the preview now"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${status === "building" ? "spin" : ""}`} />
+          </button>
           <button
             type="button"
             className="toolbar-icon-btn"
@@ -109,12 +215,12 @@ export const PreviewPane = React.memo(function PreviewPane({
       </div>
 
       <div className={`chat-preview-body ${viewMode === "mobile" ? "chat-preview-body-mobile" : ""}`}>
-        {status === "ready" && url ? (
+        {status === "ready" && (frameDoc ?? html) ? (
           <iframe
-            key={buildId}
+            key={frameKey}
             className="chat-preview-frame"
             sandbox="allow-scripts allow-modals allow-forms allow-popups"
-            src={url}
+            srcDoc={frameDoc ?? html ?? ""}
             title="Live preview"
             onLoad={() => setRuntimeReady(true)}
           />

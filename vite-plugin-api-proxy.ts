@@ -1,4 +1,4 @@
-import type { Plugin } from "vite";
+import { loadEnv, type Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { validateUrlForSSRF } from "./src/utils/ssrfGuard";
 import { escapeHtmlAttribute, safeJsonForHtml } from "./src/utils/htmlEmbed";
@@ -53,15 +53,17 @@ function isAllowedDevOrigin(originStr?: string): boolean {
  * tools while enforcing strict origin validation and SSRF metadata blocking.
  */
 export function apiProxyPlugin(): Plugin {
+  let devEnv: Record<string, string> = {};
   return {
     name: "vite-plugin-api-proxy",
+    configResolved(config) {
+      devEnv = loadEnv(config.mode, config.root, "");
+    },
     configureServer(server) {
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
-        // ── Dev stub for the GitHub OAuth exchange edge function ──
-        // Mirrors api/github.ts: in dev there is no server route, so
-        // the popup flow cannot exchange the code for a token.
-        // Without a GITHUB_CLIENT_SECRET configured the stub reports a
-        // clear configuration error (the PAT path still works fully).
+        // ── Dev handler for the GitHub OAuth exchange edge function ──
+        // Mirrors api/github.ts: exchanges the temporary code for an access
+        // token using GITHUB_CLIENT_SECRET in local development.
         if (req.url?.startsWith("/api/github")) {
           const origin = (req.headers["origin"] as string) || "";
           res.setHeader("Access-Control-Allow-Origin", isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "");
@@ -74,19 +76,95 @@ export function apiProxyPlugin(): Plugin {
             return;
           }
 
+          // Dynamically read env so updates to .env while dev is running are picked up
+          const currentEnv = { ...devEnv, ...loadEnv("development", process.cwd(), "") };
+          const clientId =
+            currentEnv.GITHUB_CLIENT_ID ||
+            process.env.GITHUB_CLIENT_ID ||
+            currentEnv.VITE_GITHUB_CLIENT_ID ||
+            process.env.VITE_GITHUB_CLIENT_ID ||
+            "";
+          const clientSecret =
+            currentEnv.GITHUB_CLIENT_SECRET ||
+            process.env.GITHUB_CLIENT_SECRET ||
+            "";
+
           const parsedGithubUrl = new URL(req.url, "http://localhost");
+          const code = parsedGithubUrl.searchParams.get("code");
+          const state = parsedGithubUrl.searchParams.get("state") || "";
           const ghError = parsedGithubUrl.searchParams.get("error");
-          const ghPayload = ghError
-            ? {
-                ok: false,
-                state: parsedGithubUrl.searchParams.get("state") || "",
-                error: parsedGithubUrl.searchParams.get("error_description") || ghError,
+
+          let ghPayload: { ok: boolean; state?: string; accessToken?: string; error?: string };
+
+          if (ghError) {
+            ghPayload = {
+              ok: false,
+              state,
+              error: parsedGithubUrl.searchParams.get("error_description") || ghError,
+            };
+          } else if (!clientId || !clientSecret) {
+            ghPayload = {
+              ok: false,
+              state,
+              error: "GitHub OAuth exchange is not configured in local dev — please ensure GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set in your .env file, or use a Personal Access Token in Chat Settings → GitHub.",
+            };
+          } else if (!code) {
+            ghPayload = {
+              ok: false,
+              state,
+              error: "Missing ?code parameter from GitHub callback.",
+            };
+          } else {
+            try {
+              const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                },
+                body: JSON.stringify({
+                  client_id: clientId,
+                  client_secret: clientSecret,
+                  code,
+                  state,
+                }),
+              });
+
+              if (!tokenRes.ok) {
+                ghPayload = {
+                  ok: false,
+                  state,
+                  error: `GitHub token exchange failed (HTTP ${tokenRes.status}).`,
+                };
+              } else {
+                const data = (await tokenRes.json()) as {
+                  access_token?: string;
+                  error?: string;
+                  error_description?: string;
+                };
+
+                if (data.error || !data.access_token) {
+                  ghPayload = {
+                    ok: false,
+                    state,
+                    error: data.error_description || data.error || "GitHub did not return an access token.",
+                  };
+                } else {
+                  ghPayload = {
+                    ok: true,
+                    accessToken: data.access_token,
+                    state,
+                  };
+                }
               }
-            : {
+            } catch (err: unknown) {
+              ghPayload = {
                 ok: false,
-                state: parsedGithubUrl.searchParams.get("state") || "",
-                error: "GitHub OAuth exchange is not configured in local dev — use a Personal Access Token in Chat Settings → GitHub, or set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET.",
+                state,
+                error: err instanceof Error ? err.message : "GitHub token exchange network error.",
               };
+            }
+          }
 
           // Mirrors api/github.ts: payload in a JSON data block (escaped), logic
           // in the shared external script, so no string can escape into markup.

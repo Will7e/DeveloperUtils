@@ -12,6 +12,10 @@
 // transcript as a prompt (it used to, whenever the token wasn't an
 // exact command id). The menu also opens while a reply is streaming,
 // which is what makes /stop reachable from the keyboard.
+// Mentions: "@" opens the repository-file picker; the picked path is
+// inserted as text and resolved to file CONTENTS at send time (see
+// services/mention-context.ts). The menu appears only when there are
+// matching files, so prose like "install @types/node" is unaffected.
 // Attachments: paperclip picker, clipboard image paste, and file
 // drop — image files become multimodal attachments, text files are
 // inlined as fenced code blocks in the draft. While this
@@ -37,6 +41,8 @@ import { useAppStore } from "@/stores/app.store";
 import { importChatFiles, MAX_ATTACHMENTS } from "../lib/attachments";
 import { CHAT_COMMAND_BY_ID, commandsFor, type ChatCommand } from "../lib/commands";
 import { CommandMenu, type CommandMenuMode } from "./CommandMenu";
+import { MentionMenu } from "./MentionMenu";
+import { applyMention, findMentionQuery, rankMentionCandidates } from "../lib/mentions";
 import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
 import type { ChatAttachment, ChatMode, ModelInfo } from "../types";
 
@@ -85,6 +91,11 @@ interface ComposerProps {
   onRunCommand?: (command: ChatCommand, arg: string) => void;
   /** Switch model for this conversation (submenu pick) */
   onModelChange?: (modelId: string) => void;
+  /**
+   * Repository paths the "@" picker may offer. Empty (or unattached repo)
+   * simply means no mention menu — the token stays plain text.
+   */
+  mentionPaths?: string[];
 }
 
 export function Composer({
@@ -106,12 +117,19 @@ export function Composer({
   mode = "build",
   onRunCommand,
   onModelChange,
+  mentionPaths = [],
 }: ComposerProps) {
   const innerRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [cmdHighlighted, setCmdHighlighted] = useState(0);
   const [cmdMode, setCmdMode] = useState<CommandMenuMode>("commands");
+  // Caret position is needed by the mention rules (an "@" only counts when
+  // the caret is inside it), and a mention candidate set is only shown when
+  // it is non-empty, so "install @types/node" never opens a menu.
+  const [caret, setCaret] = useState(0);
+  const [mentionHighlighted, setMentionHighlighted] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState(false);
   const addToast = useAppStore((s) => s.addToast);
 
   const setRefs = React.useCallback(
@@ -168,10 +186,41 @@ export function Composer({
   );
   const commandsValid = filteredCommands.some((c) => c.id === cmdToken);
 
+  // ── @-mention menu state ──
+  // Unlike the slash menu this one is NOT modal: the draft is ordinary
+  // prose that happens to contain an @-token, so Enter still sends unless
+  // the menu is actually showing rows.
+  const mentionQuery = findMentionQuery(value, caret);
+  const mentionCandidates = React.useMemo(
+    () =>
+      mentionQuery.active && mentionPaths.length > 0
+        ? rankMentionCandidates(mentionQuery.query, mentionPaths)
+        : [],
+    [mentionQuery.active, mentionQuery.query, mentionPaths]
+  );
+  const mentionVisible =
+    mentionQuery.active && !mentionDismissed && mentionCandidates.length > 0 && !isSlashDraft && !disabled;
+
   /** Edits reopen a dismissed menu (typing again is a new intent) */
-  const handleChange = (next: string) => {
+  const handleChange = (next: string, nextCaret?: number) => {
     if (menuDismissed) setMenuDismissed(false);
+    if (mentionDismissed) setMentionDismissed(false);
+    setCaret(nextCaret ?? next.length);
     onChange(next);
+  };
+
+  const insertMention = (path: string) => {
+    const out = applyMention(value, mentionQuery, path);
+    setMentionHighlighted(0);
+    setCaret(out.caret);
+    onChange(out.text);
+    // Restore the caret after React writes the new value.
+    requestAnimationFrame(() => {
+      const el = innerRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(out.caret, out.caret);
+    });
   };
 
   const filteredModels = React.useMemo(() => {
@@ -193,6 +242,11 @@ export function Composer({
 
   // Highlight/highlighted list length converges on the current mode.
   const menuRowCount = modelMode ? filteredModels.length : filteredCommands.length;
+
+  // Keep the mention highlight inside the shrinking candidate list.
+  if (mentionHighlighted >= mentionCandidates.length && mentionCandidates.length > 0) {
+    setMentionHighlighted(mentionCandidates.length - 1);
+  }
 
   // Reset highlight to the top whenever the query or mode changes
   // (render-time adjustment — converges before commit; see
@@ -272,6 +326,32 @@ export function Composer({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionVisible) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionHighlighted((i) => (i + 1) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionHighlighted((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        // The menu owns Enter only while it is showing rows — that is the
+        // one case where the user is picking a file rather than sending.
+        e.preventDefault();
+        const picked = mentionCandidates[mentionHighlighted];
+        if (picked) insertMention(picked);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionDismissed(true);
+        return;
+      }
+    }
+
     if (menuVisible) {
       // Navigation works whenever there is a selectable row.
       if (menuRowCount > 0) {
@@ -440,18 +520,27 @@ export function Composer({
         <textarea
           ref={setRefs}
           value={value}
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={(e) => handleChange(e.target.value, e.target.selectionStart)}
           onKeyDown={handleKeyDown}
+          onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+          onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           placeholder={placeholderText}
           className={`chat-composer-input ${isSlashDraft ? "chat-composer-input-slash" : ""}`}
           rows={1}
           disabled={disabled}
           aria-label="Chat message"
           aria-busy={isStreaming}
-          aria-expanded={menuVisible}
-          aria-controls={menuVisible ? "chat-command-listbox" : undefined}
+          aria-expanded={menuVisible || mentionVisible}
+          aria-controls={
+            menuVisible ? "chat-command-listbox" : mentionVisible ? "chat-mention-listbox" : undefined
+          }
           aria-activedescendant={
-            menuVisible && menuRowCount > 0 ? `chat-command-opt-${cmdHighlighted}` : undefined
+            menuVisible && menuRowCount > 0
+              ? `chat-command-opt-${cmdHighlighted}`
+              : mentionVisible
+                ? `chat-mention-opt-${mentionHighlighted}`
+                : undefined
           }
         />
 
@@ -480,6 +569,15 @@ export function Composer({
           </SimpleTooltip>
         )}
       </div>
+
+      {mentionVisible && (
+        <MentionMenu
+          candidates={mentionCandidates}
+          highlightedIdx={mentionHighlighted}
+          query={mentionQuery.query}
+          onSelect={insertMention}
+        />
+      )}
 
       {menuVisible && (
         <CommandMenu

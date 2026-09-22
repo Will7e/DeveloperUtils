@@ -124,6 +124,47 @@ export async function preloadForPreview(
   return { ws: current, loaded, failed, remaining: queue.length };
 }
 
+/**
+ * Config files a build needs BEFORE it can even find its entry: the
+ * manifest and lockfile decide the import map, the tsconfig and vite
+ * config decide the aliases and the root, .env files decide the defines,
+ * and the tailwind/postcss configs decide the CSS plan.
+ *
+ * These used to be fetched only if the agent happened to read them, so a
+ * fresh workspace previewed a repository as if it had no dependencies and
+ * no aliases — which is exactly the blank frame this ordering fixes.
+ */
+const CONFIG_SEED_MATCHERS: RegExp[] = [
+  /(^|\/)package\.json$/,
+  /(^|\/)package-lock\.json$/,
+  /(^|\/)npm-shrinkwrap\.json$/,
+  /(^|\/)pnpm-lock\.yaml$/,
+  /(^|\/)yarn\.lock$/,
+  /(^|\/)tsconfig(\.[\w.-]+)?\.json$/,
+  /(^|\/)jsconfig\.json$/,
+  /(^|\/)vite\.config\.[cm]?[jt]s$/,
+  /(^|\/)tailwind\.config\.[cm]?[jt]s$/,
+  /(^|\/)postcss\.config\.[cm]?[jt]s$/,
+  /(^|\/)\.env(\.[\w.-]+)?$/,
+];
+
+/** Cap so one preview cannot turn into a config-file crawl in a monorepo */
+export const PREVIEW_CONFIG_SEED_MAX = 24;
+
+/**
+ * Config-file seeds present in the tree, shallowest first so the
+ * repository's own files beat a nested package's.
+ */
+export function configSeedPaths(treePaths: Iterable<string>): string[] {
+  const matches = [...new Set(treePaths)].filter((path) =>
+    CONFIG_SEED_MATCHERS.some((re) => re.test(path))
+  );
+  matches.sort(
+    (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b)
+  );
+  return matches.slice(0, PREVIEW_CONFIG_SEED_MAX);
+}
+
 /** Entry point seeds for a build: the entry file plus its script src */
 export function preloadSeeds(entry: {
   kind: "html" | "js";

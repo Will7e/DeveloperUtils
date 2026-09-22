@@ -70,10 +70,20 @@ function NavItem({ to, icon, label, active, collapsed, onClick, staggered }: Nav
 
   const className = cn("nav-item", active && "nav-item-active");
 
+  // Collapsed items are icon-only, and a tooltip is hover-only — a screen
+  // reader gets a nameless link. The label rides on the control itself so
+  // the item is announceable in both states.
+  const nameForCollapsed = collapsed ? label : undefined;
+
   // If it's a button (onClick), render button
   if (onClick) {
     const btn = (
-      <button className={className} onClick={onClick} type="button">
+      <button
+        className={className}
+        onClick={onClick}
+        type="button"
+        aria-label={nameForCollapsed}
+      >
         {content}
       </button>
     );
@@ -92,7 +102,7 @@ function NavItem({ to, icon, label, active, collapsed, onClick, staggered }: Nav
 
   // Otherwise render Link
   const link = (
-    <Link to={to!} className={className}>
+    <Link to={to!} className={className} aria-label={nameForCollapsed}>
       {content}
     </Link>
   );
@@ -188,7 +198,10 @@ export function MainLayout() {
   return (
     <div className="main-layout">
       {/* Collapsible Navigation Sidebar */}
-      <nav className={cn("activity-bar", sidebarCollapsed && "activity-bar-collapsed")}>
+      <nav
+        className={cn("activity-bar", sidebarCollapsed && "activity-bar-collapsed")}
+        aria-label="Main navigation"
+      >
         {/* Brand / Logo — Click redirects to home */}
         {(() => {
           const brandLink = (
@@ -342,6 +355,8 @@ export function MainLayout() {
                 className="nav-collapse-btn"
                 onClick={toggleSidebarCollapse}
                 type="button"
+                aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-expanded={!sidebarCollapsed}
               >
                 {sidebarCollapsed ? (
                   <ChevronsRight className="h-4 w-4" />

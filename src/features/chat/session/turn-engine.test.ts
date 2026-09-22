@@ -17,8 +17,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runTurn, getSessionState } from "./turn-engine";
 import { LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
-import { resetTurnLog } from "./turn-log";
+import { getTurnLog, resetTurnLog } from "./turn-log";
 import { useChatStore } from "@/stores/chat.store";
+import { AGENT_ITERATIONS_DEFAULT } from "../constants";
 import type {
   HostEvent,
   HostSnapshot,
@@ -259,6 +260,35 @@ describe("turn engine — transport failure", () => {
     }
   );
 
+  it(
+    "retries a round that died with nothing rendered instead of asking the user to resend",
+    { timeout: 5000 },
+    async () => {
+      // First attempt drops before its first token; the second works.
+      const source = new ScriptedSource("local", false, (s, payload) => {
+        const attempt = s.starts.length;
+        queueMicrotask(() => {
+          if (attempt === 1) return; // nothing rendered: the retryable case
+          s.emit({ type: "DELTA", delta: { turnId: payload.turnId, seq: 1, content: "second try" } });
+          s.emit({ type: "END", payload: { turnId: payload.turnId, reason: "done" } });
+        });
+      });
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurn(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 40,
+      });
+
+      expect(source.starts).toHaveLength(2);
+      const messages = assistantMessages();
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.content).toBe("second try");
+      expect(messages[0]!.error ?? false).toBe(false);
+    }
+  );
+
   it("clears the pending-turn marker on every exit path", async () => {
     const local = new LocalTurnSource(async (params) => {
       params.onChunk("done");
@@ -353,6 +383,67 @@ describe("turn engine — weak-model recovery", () => {
       const refusals = results.filter((r) => r.summary === "repeated failing call refused");
       expect(refusals.length).toBeGreaterThan(0);
       expect(refusals[0]!.content).toMatch(/Change your approach/);
+    }
+  );
+});
+
+describe("turn engine — tool-use checkpoints", () => {
+  it(
+    "keeps working past the iteration cap instead of stopping mid-task",
+    { timeout: 5000 },
+    async () => {
+      store().updateSettings({ agentMaxIterations: 1, autoEscalate: false });
+      // Two tool rounds, then the model is finished.
+      const source = repeatingCallSource(2, {
+        id: "call_1",
+        name: "read_file",
+        arguments: "src/a.ts",
+      });
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurnWithTools(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+      });
+
+      // The cap of 1 is a checkpoint: the turn ran the model three
+      // times and finished on the model's own terms.
+      expect(source.starts).toHaveLength(3);
+      expect(assistantMessages().some((m) => /tool-use limit/i.test(m.content))).toBe(false);
+
+      // …and the extra rounds are on the record, not silent.
+      const autoContinued = getTurnLog().filter((e) => /auto-continuing/.test(e.detail ?? ""));
+      expect(autoContinued).toHaveLength(2);
+      store().updateSettings({ agentMaxIterations: AGENT_ITERATIONS_DEFAULT, autoEscalate: true });
+    }
+  );
+
+  it(
+    "asks the user to continue only once the continuation budget is spent",
+    { timeout: 5000 },
+    async () => {
+      store().updateSettings({ agentMaxIterations: 1, autoEscalate: false });
+      // A model that never stops calling tools — the shape that used to
+      // end every large task with "Ask me to continue".
+      const source = repeatingCallSource(99, {
+        id: "call_1",
+        name: "read_file",
+        arguments: "src/a.ts",
+      });
+
+      await runTurn(conversationId, {
+        prepare: async () => preparedTurnWithTools(),
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+      });
+
+      // Three cap-sized batches in total: the cap, then the bounded
+      // automatic continuations. A runaway loop costs a bounded budget.
+      expect(source.starts).toHaveLength(3);
+      expect(assistantMessages().some((m) => /tool-use limit/i.test(m.content))).toBe(true);
+      store().updateSettings({ agentMaxIterations: AGENT_ITERATIONS_DEFAULT, autoEscalate: true });
     }
   );
 });

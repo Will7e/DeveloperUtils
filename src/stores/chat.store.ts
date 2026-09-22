@@ -11,6 +11,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { createEncryptedStorage } from "@/services/encrypted-storage.service";
 import { generateId } from "@/lib/utils";
 import type {
+  AgentPlan,
   ChatConversation,
   ChatMessage,
   ChatMode,
@@ -80,7 +81,12 @@ export interface ChatStoreState {
   removeWorkspace: (conversationId: string) => void;
   /** Opens the approval gate; resolves when the user decides */
   requestPushApproval: (pending: PendingPush) => Promise<PushDecision>;
-  resolvePushApproval: (approved: boolean, note?: string, openPr?: boolean) => void;
+  resolvePushApproval: (
+    approved: boolean,
+    note?: string,
+    openPr?: boolean,
+    excludePaths?: string[]
+  ) => void;
   clearPendingPush: () => void;
 
   // ── Conversation actions ──
@@ -98,6 +104,8 @@ export interface ChatStoreState {
   setConversationSystemPrompt: (id: string, prompt: string | undefined) => void;
   /** Attaches/detaches the GitHub repo this conversation works against */
   setConversationRepo: (id: string, repo: RepoContext | undefined) => void;
+  /** Replaces the agent's living plan for this conversation */
+  setConversationPlan: (id: string, plan: AgentPlan | undefined) => void;
   /** Replaces the oldest `summary.coversCount` messages with the rolling summary */
   applyCompaction: (conversationId: string, summary: ConversationSummary) => void;
   /**
@@ -299,10 +307,16 @@ export const useChatStore = create<ChatStoreState>()(
           });
         }),
 
-      resolvePushApproval: (approved, note, openPr) =>
+      resolvePushApproval: (approved, note, openPr, excludePaths) =>
         set((s) => {
           const gate = s.pushGate;
-          if (gate) gate.resolve({ approved, note, openPr });
+          if (gate)
+            gate.resolve({
+              approved,
+              note,
+              openPr,
+              ...(excludePaths && excludePaths.length > 0 ? { excludePaths } : {}),
+            });
           return { pushGate: null, pendingPush: approved ? null : s.pendingPush };
         }),
 
@@ -417,6 +431,14 @@ export const useChatStore = create<ChatStoreState>()(
               repoContext: repo ? { ...repo, attachedAt: Date.now() } : undefined,
             })
           ),
+        })),
+
+      setConversationPlan: (id, plan) =>
+        set((s) => ({
+          // Deliberately NOT touchConversation: progress on a plan is not a
+          // content change, and reordering the sidebar on every step tick
+          // would make the list jump while the user is reading it.
+          conversations: mapConversation(s.conversations, id, (c) => ({ ...c, plan })),
         })),
 
       applyCompaction: (conversationId, summary) =>
@@ -624,6 +646,9 @@ export const useChatStore = create<ChatStoreState>()(
                     content,
                     durationMs: result.durationMs,
                     summary: result.summary,
+                    // UI-only: lets the transcript open a mutation step
+                    // into the diff that step produced.
+                    change: result.uiChange,
                   },
                 },
               ],

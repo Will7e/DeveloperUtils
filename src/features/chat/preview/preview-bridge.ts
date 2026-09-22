@@ -32,13 +32,15 @@ let nextRequestId = 1;
 
 /** Posts one request into the live preview iframe and awaits its response */
 function postPreviewRequest(
-  kind: "run_js" | "query_dom" | "layout" | "screenshot",
+  kind: "run_js" | "query_dom" | "layout" | "screenshot" | "set_css",
   payload: Record<string, unknown>
 ): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   return new Promise((resolve) => {
     const state = usePreviewStore.getState();
     const frame = document.querySelector<HTMLIFrameElement>("iframe.chat-preview-frame");
-    if (!frame || !state.runtimeReady || !state.url) {
+    // The document rides `srcdoc`; `url` is the blob link for opening it in a
+    // new tab. Either one proves a build produced a frame to talk to.
+    if (!frame || !state.runtimeReady || (!state.html && !state.url)) {
       resolve({ ok: false, error: "The preview is not running. Write files first and wait for the build to finish." });
       return;
     }
@@ -94,6 +96,19 @@ export function capturePreviewScreenshot(
   selector?: string
 ): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   return postPreviewRequest("screenshot", { selector });
+}
+
+/**
+ * Replaces the running preview's app stylesheet WITHOUT reloading it.
+ *
+ * A rebuild that only changed CSS used to remount the whole frame, so an
+ * agent's multi-file edit flashed the app repeatedly and threw away every
+ * bit of state the user had accumulated. The JS fingerprint now decides:\n * same JS + different CSS goes through here, and the app never notices.
+ */
+export function setPreviewCss(
+  css: string
+): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  return postPreviewRequest("set_css", { css });
 }
 
 /** Rejects every pending request (preview reloaded / conversation switched) */

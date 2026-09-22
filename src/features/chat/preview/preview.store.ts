@@ -28,7 +28,18 @@ export interface PreviewConsoleEntry {
 export interface PreviewState {
   conversationId: string | null;
   status: PreviewBuildStatus;
-  /** Blob URL of the built entry document (iframe src) */
+  /**
+   * The built entry document itself, rendered into the frame with `srcdoc`.
+   *
+   * The frame used to navigate to a blob: URL. A blob document has to be
+   * NAVIGATED to before any of it runs, and navigation to blob: URLs is
+   * refused outright in some browser builds — the frame then fires no load
+   * event at all and the pane is simply black, with nothing to diagnose.
+   * `srcdoc` is parsed into the frame directly, so the document always
+   * arrives, and it keeps the sandbox/opaque-origin contract unchanged.
+   */
+  html: string | null;
+  /** Blob URL of the built document — kept for the "open in new tab" link */
   url: string | null;
   /** Entry file the bundler resolved, shown in the header */
   entry: string | null;
@@ -44,14 +55,25 @@ export interface PreviewState {
   buildId: number;
   /** Completion time of the last successful/failed build (freshness gate) */
   builtAt: number;
+  /**
+   * Fingerprint of the emitted JS. The pane compares it with what the
+   * running frame was built from: same JS means a CSS-only change, which is
+   * injected into the live document instead of remounting it.
+   */
+  jsHash: string;
+  /** The bundle's CSS, kept for that hot swap */
+  css: string;
 
   setConversation: (id: string | null) => void;
   setStatus: (status: PreviewBuildStatus) => void;
   setBuild: (payload: {
+    html: string | null;
     url: string | null;
     entry: string | null;
     diagnostics: PreviewDiagnostic[];
     status: PreviewBuildStatus;
+    jsHash?: string;
+    css?: string;
   }) => void;
   addConsole: (entries: Array<{ level: PreviewConsoleEntry["level"]; text: string }>) => void;
   clearConsole: () => void;
@@ -66,6 +88,7 @@ const CONSOLE_SEED_SEQ = 1;
 export const usePreviewStore = create<PreviewState>((set) => ({
   conversationId: null,
   status: "idle",
+  html: null,
   url: null,
   entry: null,
   diagnostics: [],
@@ -75,29 +98,37 @@ export const usePreviewStore = create<PreviewState>((set) => ({
   screenshot: null,
   buildId: 0,
   builtAt: 0,
+  jsHash: "",
+  css: "",
 
   setConversation: (id) =>
     set({
       conversationId: id,
       status: "idle",
+      html: null,
       url: null,
       entry: null,
       diagnostics: [],
       console: [],
       runtimeReady: false,
       screenshot: null,
+      jsHash: "",
+      css: "",
     }),
 
   setStatus: (status) => set({ status }),
 
-  setBuild: ({ url, entry, diagnostics, status }) =>
+  setBuild: ({ html, url, entry, diagnostics, status, jsHash, css }) =>
     set((s) => ({
+      html,
       url,
       entry,
       diagnostics,
       status,
       runtimeReady: false,
       screenshot: null,
+      jsHash: jsHash ?? s.jsHash,
+      css: css ?? s.css,
       buildId: s.buildId + 1,
       builtAt: Date.now(),
     })),
@@ -130,4 +161,26 @@ export const usePreviewStore = create<PreviewState>((set) => ({
 export function collectFeedbackErrors(): PreviewConsoleEntry[] {
   const state = usePreviewStore.getState();
   return state.console.filter((e) => e.level === "error" || e.level === "warn");
+}
+
+/**
+ * Whether the agent panel (changes / preview) belongs on screen now.
+ *
+ * The rule is derived, never toggled: attaching a repository opens the
+ * panel (an attached repo means the agent can start editing, and the
+ * changes it makes are the point), and closing it stashes the `attachedAt`
+ * timestamp the close applied to so it stays closed for THAT attachment —
+ * a fresh attach, or the floating button clearing the stamp, brings it
+ * back.
+ *
+ * Pure and separated from the component for one reason: this exact
+ * expression was wrong once (an extra manual-open flag ANDed in meant the
+ * panel could never open on its own), and nothing could catch it.
+ */
+export function isAgentPanelVisible(params: {
+  repoAttached: boolean;
+  attachedAt: number;
+  closedForAttachment: number | null;
+}): boolean {
+  return params.repoAttached && params.closedForAttachment !== params.attachedAt;
 }

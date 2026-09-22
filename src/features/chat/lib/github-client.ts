@@ -25,7 +25,11 @@ export class GitHubError extends Error {
 
 function classify(status: number): GitHubError["code"] | undefined {
   if (status === 401) return "unauthorized";
-  if (status === 403) return "rate_limited"; // 403 with 0 remaining = rate limit
+  // A 403 here is NOT a rate limit: the rate-limit case is detected and
+  // thrown separately, with its own code and reset time. Labeling every
+  // remaining 403 "rate_limited" made a permissions failure look like
+  // something that clears itself in an hour.
+  if (status === 403) return "forbidden";
   if (status === 404) return "not_found";
   if (status === 422) return "forbidden";
   return undefined;
@@ -115,9 +119,21 @@ export async function githubFetch(
     }
     const messages: Record<number, string> = {
       401: "GitHub token is invalid or expired. Reconnect in Chat Settings.",
-      403: "GitHub refused the request (token lacks access or SSO is required).",
       404: "Not found on GitHub — the repo or path may not exist or is private.",
     };
+    // A 403 is the one status whose cause is worth spelling out, because
+    // every cause has a different fix and the API's own message (when it
+    // sent one) names which it is. Never swallow it behind a generic line.
+    if (res.status === 403) {
+      throw new GitHubError(
+        `GitHub refused the request (403)${detail ? ` — ${detail}` : ""}. ` +
+          "The token may lack the required access to this repository, the OAuth app may not be approved by its " +
+          "organization, SAML SSO authorization may be required, or a `workflow` scope may be missing for " +
+          "changes under .github/workflows/.",
+        403,
+        "forbidden"
+      );
+    }
     throw new GitHubError(
       messages[res.status] ?? detail ?? `GitHub request failed (HTTP ${res.status}).`,
       res.status,

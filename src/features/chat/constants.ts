@@ -10,8 +10,14 @@ export const GITHUB_API_BASE_URL = "https://api.github.com";
 export const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 /** Edge function that exchanges the OAuth code for a token (server-side secret) */
 export const GITHUB_EXCHANGE_PATH = "/api/github";
-/** OAuth scopes: full repo read access (private + public) */
-export const GITHUB_OAUTH_SCOPES = "repo read:org";
+/**
+ * OAuth scopes: full repository access (private + public), plus
+ * `workflow`, which GitHub requires before any push may create or edit a
+ * file under `.github/workflows/`. Without it those pushes are rejected
+ * with an access error that reads like a permissions problem, and an
+ * agent asked to touch CI has no way to tell the difference.
+ */
+export const GITHUB_OAUTH_SCOPES = "repo workflow read:org";
 /** OAuth popup dimensions (matches the cloud-sync popup conventions) */
 export const GITHUB_POPUP_WIDTH = 640;
 export const GITHUB_POPUP_HEIGHT = 720;
@@ -25,6 +31,19 @@ export const AGENT_MAX_ITERATIONS = 8;
 /** Default agent iteration cap (settings-overridable, hard-capped) */
 export const AGENT_ITERATIONS_DEFAULT = 24;
 export const AGENT_ITERATIONS_MAX = 50;
+/**
+ * Extra cap-sized batches the loop may run on its own before it asks the
+ * user to continue.
+ *
+ * The iteration cap is a checkpoint, not a stop: when the agent runs out
+ * of iterations it still holds its tool results and has nothing
+ * half-written to redo, so stopping there turns every multi-file task
+ * into a manual relay ("type continue"). The loop starts another batch
+ * by itself, and only speaks up when it hits the cap while STILL calling
+ * tools — which is the one case where "continue" is the honest answer.
+ * Bounded so a stuck model still cannot spend an unbounded budget.
+ */
+export const AGENT_AUTO_CONTINUATIONS = 2;
 /** Tool definitions are only sent when a repo is attached AND the model is known-capable */
 export const TOOL_RESULT_MAX_CHARS = 12_000;
 

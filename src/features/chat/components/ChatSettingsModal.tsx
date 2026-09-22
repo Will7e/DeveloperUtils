@@ -246,7 +246,7 @@ function SettingsModalInner({
             className={`settings-tab-item ${activeTab === "connection" ? "active" : ""}`}
             onClick={() => setActiveTab("connection")}
           >
-            <Key size={14} />
+            <Key className="h-3.5 w-3.5" />
             <span>Connection</span>
           </button>
           <button
@@ -254,7 +254,7 @@ function SettingsModalInner({
             className={`settings-tab-item ${activeTab === "chat" ? "active" : ""}`}
             onClick={() => setActiveTab("chat")}
           >
-            <MessageSquare size={14} />
+            <MessageSquare className="h-3.5 w-3.5" />
             <span>Chat</span>
           </button>
           <button
@@ -262,7 +262,7 @@ function SettingsModalInner({
             className={`settings-tab-item ${activeTab === "skills" ? "active" : ""}`}
             onClick={() => setActiveTab("skills")}
           >
-            <Blocks size={14} />
+            <Blocks className="h-3.5 w-3.5" />
             <span>Skills</span>
           </button>
           <button
@@ -270,7 +270,7 @@ function SettingsModalInner({
             className={`settings-tab-item ${activeTab === "github" ? "active" : ""}`}
             onClick={() => setActiveTab("github")}
           >
-            <GitBranch size={14} />
+            <GitBranch className="h-3.5 w-3.5" />
             <span>GitHub</span>
           </button>
         </div>
@@ -283,7 +283,7 @@ function SettingsModalInner({
               <div className="settings-security-card">
                 <div className="settings-security-badge-group">
                   <div className="settings-security-card-icon-wrap">
-                    <ShieldCheck size={18} />
+                    <ShieldCheck className="h-[18px] w-[18px]" />
                   </div>
                   <div>
                     <div className="settings-security-card-title">Bring your own key</div>
@@ -381,7 +381,7 @@ function SettingsModalInner({
                     >
                       {keyState.status === "checking" ? (
                         <>
-                          <Loader2 size={12} className="animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                           <span>Testing…</span>
                         </>
                       ) : (
@@ -643,7 +643,7 @@ function SettingsModalInner({
                       onClick={() => setConfirmClear(true)}
                       disabled={conversationCount === 0}
                     >
-                      <Trash2 size={12} />
+                      <Trash2 className="h-3 w-3" />
                       Clear All
                     </button>
                   )}
@@ -652,7 +652,7 @@ function SettingsModalInner({
                 {confirmClear && (
                   <div className="settings-vault-subform danger-box">
                     <div className="settings-subform-title danger">
-                      <AlertTriangle size={14} />
+                      <AlertTriangle className="h-3.5 w-3.5" />
                       Delete all conversations?
                     </div>
                     <p className="settings-subform-warning">
@@ -670,12 +670,12 @@ function SettingsModalInner({
                       >
                         {clearingState === "clearing" ? (
                           <>
-                            <Loader2 size={13} className="animate-spin" />
+                            <Loader2 className="h-[13px] w-[13px] animate-spin" />
                             <span>Deleting…</span>
                           </>
                         ) : clearingState === "done" ? (
                           <>
-                            <CheckCircle2 size={13} />
+                            <CheckCircle2 className="h-[13px] w-[13px]" />
                             <span>Deleted!</span>
                           </>
                         ) : (
@@ -821,7 +821,7 @@ function GitHubTabContent({
       <div className="settings-info-card">
         <div className="settings-info-badge-group">
           <div className="settings-info-card-icon-wrap">
-            <GitBranch size={18} />
+            <GitBranch className="h-[18px] w-[18px]" />
           </div>
           <div>
             <div className="settings-info-card-title">Coding agent over your repositories</div>
@@ -882,7 +882,7 @@ function GitHubTabContent({
                 >
                   {ghBusy === "oauth" ? (
                     <>
-                      <Loader2 size={12} className="animate-spin" />
+                      <Loader2 className="h-3 w-3 animate-spin" />
                       <span>Connecting…</span>
                     </>
                   ) : (
@@ -957,7 +957,7 @@ function GitHubTabContent({
                 >
                   {ghBusy === "pat" ? (
                     <>
-                      <Loader2 size={12} className="animate-spin" />
+                      <Loader2 className="h-3 w-3 animate-spin" />
                       <span>Testing…</span>
                     </>
                   ) : (
@@ -1191,7 +1191,11 @@ function SkillsTabContent({
                 onClick={() => (isEditing ? closeEditor() : startEdit(skill))}
                 aria-label={isEditing ? "Close editor" : `Edit ${skill.name}`}
               >
-                {isEditing ? <X size={13} /> : <Pencil size={13} />}
+                {isEditing ? (
+                  <X className="h-[13px] w-[13px]" />
+                ) : (
+                  <Pencil className="h-[13px] w-[13px]" />
+                )}
               </button>
             </SimpleTooltip>
             <SimpleTooltip content="Export .md" side="top">
@@ -1201,7 +1205,7 @@ function SkillsTabContent({
                 onClick={() => downloadSkillFile(skill)}
                 aria-label={`Export ${skill.name}`}
               >
-                <Download size={13} />
+                <Download className="h-[13px] w-[13px]" />
               </button>
             </SimpleTooltip>
             <SimpleTooltip
@@ -1216,7 +1220,7 @@ function SkillsTabContent({
                   isConfirmingDelete ? "Click again to confirm delete" : `Delete ${skill.name}`
                 }
               >
-                <Trash2 size={13} />
+                <Trash2 className="h-[13px] w-[13px]" />
               </button>
             </SimpleTooltip>
             <Toggle
@@ -1276,7 +1280,7 @@ function SkillsTabContent({
                   onClick={commitEditor}
                   disabled={!draft.name.trim() || !draft.content.trim()}
                 >
-                  <CheckCircle2 size={12} />
+                  <CheckCircle2 className="h-3 w-3" />
                   <span>{editingSkill ? "Save changes" : "Add skill"}</span>
                 </button>
               </div>
@@ -1292,7 +1296,7 @@ function SkillsTabContent({
       <div className="settings-info-card">
         <div className="settings-info-badge-group">
           <div className="settings-info-card-icon-wrap">
-            <Blocks size={18} />
+            <Blocks className="h-[18px] w-[18px]" />
           </div>
           <div>
             <div className="settings-info-card-title">Prompt Skills</div>
@@ -1314,7 +1318,7 @@ function SkillsTabContent({
           className="settings-action-btn"
           onClick={startCreate}
         >
-          <Plus size={12} />
+          <Plus className="h-3 w-3" />
           <span>New skill</span>
         </button>
         <button
@@ -1322,7 +1326,7 @@ function SkillsTabContent({
           className="settings-action-btn"
           onClick={() => fileInputRef.current?.click()}
         >
-          <Upload size={12} />
+          <Upload className="h-3 w-3" />
           <span>Import .md</span>
         </button>
         <input
@@ -1341,7 +1345,7 @@ function SkillsTabContent({
           }}
           title="Restore all built-in skills to their original text"
         >
-          <RotateCcw size={12} />
+          <RotateCcw className="h-3 w-3" />
           <span>Reset built-ins</span>
         </button>
       </div>
@@ -1401,7 +1405,7 @@ function SkillsTabContent({
                   onClick={commitEditor}
                   disabled={!draft.name.trim() || !draft.content.trim()}
                 >
-                  <CheckCircle2 size={12} />
+                  <CheckCircle2 className="h-3 w-3" />
                   <span>Add skill</span>
                 </button>
               </div>

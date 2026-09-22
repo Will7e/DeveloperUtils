@@ -109,16 +109,22 @@ const CSS_IMPORT_PATTERNS = [
 ];
 
 /**
- * Local (repo-relative) import specifiers found in one file. Static,
- * dynamic, re-export and require forms are covered, plus CSS
- * @import. Bare specifiers (npm packages) and URLs are ignored — the
- * bundler externalizes those rather than loading them from the repo.
+ * EVERY import specifier found in one file — relative, absolute and bare.
+ * Static, dynamic, re-export and require forms are covered, plus CSS
+ * @import.
  *
- * This is a scanner, not a parser: it only needs to over-approximate
- * the dependency graph, since the preloader fetches what exists and
- * skips what does not.
+ * This is a scanner, not a parser: it only needs to over-approximate the
+ * dependency graph, since the preloader fetches what exists and skips what
+ * does not.
+ *
+ * It is the single source of specifier detection for three callers that
+ * must agree: the preloader (which local files to fetch), the alias-aware
+ * resolver (which specifiers are path aliases, not packages), and the
+ * module-resolution reporter (which bare specifiers need an import map
+ * entry). Duplicating the patterns is how those three drift apart, and a
+ * drift there is a silently blank preview.
  */
-export function localImportSpecifiers(content: string, path: string): string[] {
+export function importSpecifiers(content: string, path: string): string[] {
   const patterns = path.toLowerCase().endsWith(".css")
     ? CSS_IMPORT_PATTERNS
     : JS_IMPORT_PATTERNS;
@@ -128,9 +134,18 @@ export function localImportSpecifiers(content: string, path: string): string[] {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(content)) !== null) {
       const spec = match[1]?.trim();
-      if (!spec || !isLocalSpecifier(spec)) continue;
+      if (!spec) continue;
       if (!out.includes(spec)) out.push(spec);
     }
   }
   return out;
+}
+
+/**
+ * Local (repo-relative) import specifiers found in one file. Bare
+ * specifiers (npm packages) and URLs are dropped — the bundler
+ * externalizes those rather than loading them from the repo.
+ */
+export function localImportSpecifiers(content: string, path: string): string[] {
+  return importSpecifiers(content, path).filter(isLocalSpecifier);
 }

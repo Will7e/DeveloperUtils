@@ -12,7 +12,7 @@ import { Brain, Check, ChevronDown, Copy, Image as ImageIcon, RefreshCw, Triangl
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
 import { ToolCallBlock } from "./ToolCallBlock";
-import { ProviderLogo } from "./ProviderLogo";
+import { ProviderMark } from "./ProviderLogo";
 import type { ChatMessage } from "../types";
 
 function formatTime(ts: number): string {
@@ -115,7 +115,7 @@ export const MessageItem = React.memo(function MessageItem({
         <span className="chat-msg-role">{isUser ? "You" : "Assistant"}</span>
         {message.model && !isUser && (
           <span className="chat-msg-model">
-            <ProviderLogo modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />
+            <ProviderMark modelId={message.model} className="h-3 w-3 chat-msg-model-logo" />
             {message.model}
             {message.effort && (
               <span className="chat-msg-model-state" title="Reasoning effort">
@@ -224,7 +224,7 @@ export const MessageItem = React.memo(function MessageItem({
         ) : content ? (
           <MarkdownContent
             content={content}
-            className="chat-md chat-md-assistant"
+            className="chat-md"
           />
         ) : null}
         {isStreaming && <span className="chat-streaming-caret" aria-hidden="true" />}

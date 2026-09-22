@@ -34,6 +34,7 @@ export const VERIFICATION_TOOLS: ReadonlySet<string> = new Set([
   "query_preview_dom",
   "get_preview_layout",
   "check_preview_visually",
+  "verify_behavior",
 ]);
 
 /**
@@ -48,7 +49,11 @@ export const VERIFICATION_TOOLS: ReadonlySet<string> = new Set([
  */
 export const VISUAL_TOOLS: ReadonlySet<string> = new Set(["check_preview_visually"]);
 
-export type EvidenceCode = "unbacked-file-claim" | "unverified-claim";
+export type EvidenceCode =
+  | "unbacked-file-claim"
+  | "unverified-claim"
+  /** Real verification ran and its result contradicts the summary */
+  | "contradicted-claim";
 
 export interface EvidenceFinding {
   code: EvidenceCode;
@@ -58,6 +63,17 @@ export interface EvidenceFinding {
   evidence: string[];
 }
 
+/**
+ * A verification result as the ledger reports it. The audit needs two
+ * bits: did it run, and did it pass — plus whether it still describes the
+ * code being pushed, because a stale pass supports nothing.
+ */
+export interface VerificationFact {
+  status: "fresh-pass" | "fresh-fail" | "stale";
+  summary: string;
+  details?: string[];
+}
+
 export interface EvidenceAuditInput {
   /** The agent's final message (what it asserts) */
   claim: string;
@@ -65,7 +81,15 @@ export interface EvidenceAuditInput {
   changedPaths: string[];
   /** Tool names that ran during this turn */
   toolsUsed?: string[];
+  /** Behaviour probes, when any ran against this revision */
+  probes?: VerificationFact | null;
+  /** The in-browser type check, when it ran against this revision */
+  typecheck?: VerificationFact | null;
 }
+
+/** Verbs that assert an outcome, used to spot a contradicted summary */
+const OUTCOME_ASSERTION =
+  /\b(?:works?|working|works\s+now|functions?|functional|passes?|passing|succeeds?|succeeded|verified|fixed|no\s+(?:longer\s+)?(?:issue|problem|error)s?|all\s+good|done|complete[d]?|correct(?:ly)?)\b/i;
 
 /** Verbs that turn a sentence into a change claim */
 const CHANGE_VERB =
@@ -211,6 +235,42 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
         "no visual check ran in this turn. A DOM query or a geometry map cannot see colour, contrast or paint order — " +
         "run check_preview_visually, or drop the claim.",
       evidence: [visual[0]],
+    });
+  }
+
+  // ── 5. Verification that ran and says the opposite ──
+  // The only case where a summary is contradicted by hard evidence rather
+  // than merely unsupported. Failing probes are quoted verbatim: the model
+  // cannot argue with its own output, and the reviewer needs the detail.
+  const probes = input.probes ?? null;
+  const typecheck = input.typecheck ?? null;
+  const contradicts = probes?.status === "fresh-fail" || typecheck?.status === "fresh-fail";
+  if (contradicts && OUTCOME_ASSERTION.test(claim)) {
+    const source = probes?.status === "fresh-fail" ? "Behaviour probes" : "The in-browser type check";
+    const failed = probes?.status === "fresh-fail" ? probes : typecheck;
+    const shown = (failed?.details ?? []).slice(0, 3);
+    findings.push({
+      code: "contradicted-claim",
+      message:
+        `${source} ran against this exact workspace revision and FAILED (${failed?.summary ?? "no summary"}), ` +
+        `while the summary describes the change as working.` +
+        (shown.length > 0 ? ` First failures — ${shown.join(" | ")}` : ""),
+      evidence: shown.length > 0 ? shown : [failed?.summary ?? "failed"],
+    });
+  }
+
+  // ── 6. A pass that no longer describes this code ──
+  // "Probes passed" is true but useless once the files have changed. The
+  // distinction matters because it is exactly the sentence a model writes
+  // after fixing something without re-running anything.
+  if ((probes?.status === "stale" || typecheck?.status === "stale") && OUTCOME_ASSERTION.test(claim)) {
+    const which = probes?.status === "stale" ? "behaviour probes" : "the in-browser type check";
+    findings.push({
+      code: "unverified-claim",
+      message:
+        `The summary leans on ${which}, which ran before the last edit to the workspace — it describes older code, ` +
+        "not this diff. Re-run it, or say plainly that the current revision was not verified.",
+      evidence: [probes?.status === "stale" ? (probes?.summary ?? "") : (typecheck?.summary ?? "")].filter(Boolean),
     });
   }
 

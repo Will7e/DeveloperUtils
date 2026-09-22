@@ -104,21 +104,17 @@ export function MessageList({
 
   // Interrupted-turn recovery affordance: when auto-resume failed
   // for this conversation, offer an explicit one-click Resume.
+  //
+  // Read straight from the store rather than mirrored into state by an
+  // effect: the effect form called setState synchronously on mount and
+  // on every change, which is a cascading render for a boolean the store
+  // already publishes. The selector returns a primitive, so it re-renders
+  // only when the answer actually flips.
   const activeId = useChatStore((s) => s.activeConversationId);
-  const [hasUnresumable, setHasUnresumable] = React.useState(false);
-  React.useEffect(() => {
-    if (!activeId) {
-      setHasUnresumable(false);
-      return;
-    }
-    const check = () => {
-      const conv = useChatStore.getState().conversations.find((c) => c.id === activeId);
-      setHasUnresumable(conv?.pendingTurn?.outcome === "unresumable");
-    };
-    check();
-    const unsub = useChatStore.subscribe(check);
-    return unsub;
-  }, [activeId]);
+  const hasUnresumable = useChatStore((s) => {
+    const conv = s.conversations.find((c) => c.id === s.activeConversationId);
+    return conv?.pendingTurn?.outcome === "unresumable";
+  });
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const innerRef = React.useRef<HTMLDivElement>(null);
@@ -254,7 +250,21 @@ export function MessageList({
         </button>
       )}
       <div ref={scrollRef} className="chat-message-list">
-        <div ref={innerRef} className="chat-message-list-inner">
+        {/* A transcript is a log: committed messages are ADDITIONS and
+            only those are announced. `aria-relevant="additions"` is what
+            keeps this from narrating every streamed token — the growing
+            bubble mutates inside a node that already exists, so a screen
+            reader hears the finished reply once, when it is committed.
+            No aria-busy: holding announcements until the turn ends would
+            also swallow tool-phase messages that arrive mid-turn. */}
+        <div
+          ref={innerRef}
+          className="chat-message-list-inner"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Conversation transcript"
+        >
           {summary && <SummaryBlock summary={summary} />}
           {visible.map((message, idx) => (
             <MessageItem
@@ -275,8 +285,10 @@ export function MessageList({
             />
           )}
 
+          {/* The inner status span announces the wait. A live region on
+              this wrapper would re-announce on every dot frame. */}
           {showThinking && (
-            <div className="chat-msg chat-msg-assistant" aria-live="polite">
+            <div className="chat-msg">
               <div className="chat-msg-bubble chat-msg-bubble-assistant">
                 {streamingReasoning !== "" && (
                   <div className="chat-reasoning chat-reasoning-streaming">

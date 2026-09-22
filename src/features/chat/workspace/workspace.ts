@@ -375,19 +375,39 @@ export function revertAll(ws: WorkspaceState): WorkspaceState {
   return next;
 }
 
-/** Updates baseShas + base content after a successful push */
-export function markPushed(ws: WorkspaceState, commitSha: string): WorkspaceState {
+/**
+ * Updates baseShas + base content after a successful push.
+ *
+ * `paths` names the files actually committed. Anything outside it is left
+ * pending on purpose: a file the user unchecked at the approval gate is
+ * still only on this side of the branch, and marking it "unchanged" would
+ * make the workspace claim content the repo does not have.
+ */
+export function markPushed(
+  ws: WorkspaceState,
+  commitSha: string,
+  paths?: string[]
+): WorkspaceState {
+  const shipped = paths ? new Set(paths) : null;
   const files: Record<string, WorkspaceFile> = {};
+  const stillPending = new Set<string>();
   for (const [path, f] of Object.entries(ws.files)) {
+    if (shipped && !shipped.has(path)) {
+      files[path] = f;
+      stillPending.add(path);
+      continue;
+    }
     if (f.status === "deleted") {
       delete files[path];
       continue;
     }
     files[path] = { ...f, baseContent: f.content, baseSha: null, status: "unchanged", updatedAt: Date.now() };
   }
-  // The push moved the base — the effect log's before-states are
-  // stale from here on.
-  return { ...ws, files, baseCommitSha: commitSha, mutations: [], updatedAt: Date.now() };
+  // The push moved the base — the effect log's before-states are stale
+  // from here on, except for excluded files: their change is still
+  // pending, so their history has to stay rewindable.
+  const mutations = (ws.mutations ?? []).filter((m) => stillPending.has(m.path));
+  return { ...ws, files, baseCommitSha: commitSha, mutations, updatedAt: Date.now() };
 }
 
 // ── Push snapshots ───────────────────────────────────────────

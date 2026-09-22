@@ -13,6 +13,54 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { WorkspaceState } from "../types";
+import { configSeedPaths, PREVIEW_CONFIG_SEED_MAX } from "./preload";
+
+describe("configSeedPaths", () => {
+  it("seeds every config file a build needs before it can find its entry", () => {
+    const seeds = configSeedPaths([
+      "src/main.tsx",
+      "package.json",
+      "package-lock.json",
+      "tsconfig.json",
+      "vite.config.ts",
+      "tailwind.config.js",
+      ".env",
+      ".env.local",
+      "README.md",
+    ]);
+    expect(seeds).toEqual(
+      expect.arrayContaining([
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "vite.config.ts",
+        "tailwind.config.js",
+        ".env",
+        ".env.local",
+      ])
+    );
+    expect(seeds).not.toContain("src/main.tsx");
+    expect(seeds).not.toContain("README.md");
+  });
+
+  it("prefers the repository's own files over a nested package's", () => {
+    const seeds = configSeedPaths(["apps/web/package.json", "package.json"]);
+    expect(seeds[0]).toBe("package.json");
+  });
+
+  it("caps the crawl so a monorepo cannot turn one preview into a sweep", () => {
+    const many = Array.from({ length: 60 }, (_, i) => `pkg${i}/package.json`);
+    expect(configSeedPaths(many)).toHaveLength(PREVIEW_CONFIG_SEED_MAX);
+  });
+
+  it("finds nothing in a tree with no config files", () => {
+    expect(configSeedPaths(["src/a.ts", "src/b.ts"])).toEqual([]);
+  });
+
+  it("does not mistake a lookalike for a config file", () => {
+    expect(configSeedPaths(["docs/package.json.md", "src/env.ts"])).toEqual([]);
+  });
+});
 
 const { fetchLog, fileMap } = vi.hoisted(() => ({
   fetchLog: [] as string[],

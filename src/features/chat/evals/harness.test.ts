@@ -28,7 +28,7 @@ import { resetTurnLog } from "../session/turn-log";
 import { useChatStore } from "@/stores/chat.store";
 import { assessPushPolicy } from "../lib/push-policy";
 import { auditClaims, evidenceWarnings } from "../lib/evidence-audit";
-import { TOOL_RESULT_FOLD_TURNS } from "../constants";
+import { AGENT_AUTO_CONTINUATIONS, TOOL_RESULT_FOLD_TURNS } from "../constants";
 import type { ChatConversation, ChatMessage, ModelInfo, ToolName } from "../types";
 import type { PreparedTurn } from "../services/turn-prep";
 
@@ -243,7 +243,11 @@ describe("promise: a runaway agent loop terminates and says why", () => {
     expect(getSessionState().phase).toBe("idle");
   });
 
-  it("stops at the configured iteration cap with an honest notice", async () => {
+  it("runs its bounded automatic continuations, then stops with an honest notice", async () => {
+    // The cap is a checkpoint: the loop continues on its own, but only
+    // for a bounded number of cap-sized batches. Runaway cost stays
+    // bounded AND a large task no longer needs a human to type
+    // "continue" after every cap.
     // A model that asks for a tool on every single round: the classic
     // runaway. Each round's call FAILS validation, which is also how a
     // real stuck model behaves.
@@ -271,7 +275,7 @@ describe("promise: a runaway agent loop terminates and says why", () => {
       inactivityTimeoutMs: 60,
     });
 
-    expect(rounds).toBe(3);
+    expect(rounds).toBe(3 * (1 + AGENT_AUTO_CONTINUATIONS));
     const messages = store().conversations.find((c) => c.id === conversationId)?.messages ?? [];
     expect(messages.some((m) => /tool-use limit/.test(m.content))).toBe(true);
   });
