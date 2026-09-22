@@ -241,6 +241,8 @@ interface ChatCompletionChunk {
     completion_tokens?: number;
     total_tokens?: number;
     cost?: number;
+    /** Cache accounting: how many prompt tokens were served from cache */
+    prompt_tokens_details?: { cached_tokens?: number } | null;
   } | null;
   error?: { code?: number | string; message?: string };
 }
@@ -436,6 +438,7 @@ export async function streamChat({
           promptTokens: chunk.usage.prompt_tokens ?? null,
           completionTokens: chunk.usage.completion_tokens ?? null,
           cost: typeof chunk.usage.cost === "number" ? chunk.usage.cost : null,
+          cachedTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? null,
         });
       }
     },
@@ -475,13 +478,25 @@ export async function streamChat({
 export interface CompleteChatParams {
   apiKey: string;
   model: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+  /**
+   * `content` is a string for text-only turns, or content parts when the
+   * request carries an image (visual verification). Only the user role
+   * may send parts — the OpenAI protocol has no image in a tool row,
+   * which is exactly why a picture is described by a vision model whose
+   * TEXT answer becomes the tool result.
+   */
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string | CompletionContentPart[] }>
   temperature?: number;
   maxTokens?: number;
   /** Per-request model state merged into the JSON body (tier state) */
   requestState?: Record<string, unknown>;
   signal?: AbortSignal;
 }
+
+/** One piece of a multimodal message (text or an inline/remote image) */
+export type CompletionContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
 
 export interface CompleteChatResult {
   content: string;
@@ -543,6 +558,7 @@ export async function completeChat({
       prompt_tokens?: number;
       completion_tokens?: number;
       cost?: number;
+      prompt_tokens_details?: { cached_tokens?: number } | null;
     };
     error?: { message?: string; code?: number | string };
   };
@@ -569,6 +585,7 @@ export async function completeChat({
           promptTokens: u.prompt_tokens ?? null,
           completionTokens: u.completion_tokens ?? null,
           cost: typeof u.cost === "number" ? u.cost : null,
+          cachedTokens: u.prompt_tokens_details?.cached_tokens ?? null,
         }
       : null,
   };
@@ -674,7 +691,12 @@ export async function completeChatWithTools({
         }>;
       };
     }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      cost?: number;
+      prompt_tokens_details?: { cached_tokens?: number } | null;
+    };
     error?: { message?: string; code?: number | string };
   };
   try {
@@ -709,6 +731,7 @@ export async function completeChatWithTools({
           promptTokens: u.prompt_tokens ?? null,
           completionTokens: u.completion_tokens ?? null,
           cost: typeof u.cost === "number" ? u.cost : null,
+          cachedTokens: u.prompt_tokens_details?.cached_tokens ?? null,
         }
       : null,
   };

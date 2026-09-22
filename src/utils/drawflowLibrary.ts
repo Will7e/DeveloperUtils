@@ -19,7 +19,13 @@ export type ExcalidrawLibraryItem = DrawFlowLibraryItem;
 
 let cachedLibraries: DrawFlowLibraryItem[] | null = null;
 
-const CDN_BASE_URL = "https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@main/libraries";
+// Pinned to a commit SHA, not @main: an unpinned ref on a CDN is a
+// supply-chain hole — whatever lands upstream ships to every user, and a
+// moved branch can change content under an identical URL. Bump this SHA
+// deliberately when refreshing the community library catalogue.
+// (commit: "feat: new library Dashboard Charts (#2639)", 2026-09-03)
+const EXCALIDRAW_LIBRARIES_COMMIT = "297a349eaff859e678f78d4dbc8e68df5fce42e5";
+const CDN_BASE_URL = `https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@${EXCALIDRAW_LIBRARIES_COMMIT}/libraries`;
 
 /** Get local preview URL using Vite BASE_URL */
 export function getDrawFlowLibraryPreviewUrl(previewPath: string): string {
@@ -47,7 +53,7 @@ export async function getDrawFlowLibraries(): Promise<DrawFlowLibraryItem[]> {
     : `${import.meta.env.BASE_URL}/`;
 
   const localUrl = `${baseUrl}drawflow-libraries/libraries.json`;
-  const cdnUrl = "https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@main/libraries.json";
+  const cdnUrl = `https://cdn.jsdelivr.net/gh/excalidraw/excalidraw-libraries@${EXCALIDRAW_LIBRARIES_COMMIT}/libraries.json`;
 
   // Try local first
   try {

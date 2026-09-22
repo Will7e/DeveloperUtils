@@ -17,7 +17,6 @@ import {
   resolveModelInfo,
   sendUserMessage,
   stopChatStream,
-  downloadConversation,
   ensureModelCatalog,
   resumeInterruptedTurn,
   resumeUserTurn,
@@ -40,7 +39,8 @@ import { modelSupportsImages } from "./services/chat-runner";
 import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
 import { isTurnUnrecoverable } from "./session/turn-engine";
-import { availableEfforts } from "./lib/model-state";
+import { availableEfforts, modelSupportsTools } from "./lib/model-state";
+import { resolveToolProfile } from "./lib/tool-profiles";
 import { DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "./constants";
 import type {
   ChatAttachment,
@@ -295,14 +295,24 @@ export function ChatPage() {
     return composeSystemPrompt(withSkills, activeConversation?.summary);
   }, [activeConversation?.systemPrompt, activeConversation?.summary, settings.systemPrompt, settings.skills]);
 
+  // The tool schemas this conversation would actually send next turn —
+  // the meter must charge for them, exactly as the runner does, or it
+  // reports a window several thousand tokens emptier than the truth.
+  const contextTools = useMemo(() => {
+    if (!activeConversation?.repoContext || !settings.github.token) return undefined;
+    if (!modelSupportsTools(modelInfo)) return undefined;
+    return resolveToolProfile(mode, modelInfo).tools;
+  }, [activeConversation?.repoContext, settings.github.token, modelInfo, mode]);
+
   const context = useMemo(
     () =>
       getConversationContext({
         conversation: activeConversation ?? { id: "", title: "", messages: [], createdAt: 0, updatedAt: 0 },
         model: modelInfo,
         effectiveSystemPrompt,
+        tools: contextTools,
       }),
-    [activeConversation, modelInfo, effectiveSystemPrompt]
+    [activeConversation, modelInfo, effectiveSystemPrompt, contextTools]
   );
 
   /** Runs a registry command against this conversation */
@@ -454,9 +464,6 @@ export function ChatPage() {
           mode={mode}
           onModeChange={handleModeChange}
           context={context}
-          onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
-          onExport={() => activeConversationId && downloadConversation(activeConversationId)}
-          hasMessages={Boolean(activeConversation && activeConversation.messages.length > 0)}
           hasConversationPrompt={Boolean(activeConversation?.systemPrompt)}
           activeSkillCount={(settings.skills ?? []).filter((s) => s.enabled).length}
           onOpenSkills={() => useChatStore.getState().setSettingsOpen(true, "skills")}

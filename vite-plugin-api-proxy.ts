@@ -1,6 +1,7 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { validateUrlForSSRF } from "./src/utils/ssrfGuard";
+import { escapeHtmlAttribute, safeJsonForHtml } from "./src/utils/htmlEmbed";
 
 /**
  * Hop-by-hop headers that should not be forwarded to the upstream server.
@@ -16,6 +17,15 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
   "host",
 ]);
+
+/**
+ * Headers never copied from the incoming request to the upstream target.
+ * `cookie` is excluded because the browser attaches this origin's cookies to
+ * same-origin requests, and relaying them to an arbitrary target would leak
+ * them. An explicit Cookie header still works through `x-proxy-headers`,
+ * which is applied after this filter.
+ */
+const NEVER_FORWARDED_HEADERS = new Set(["cookie"]);
 
 /**
  * Check if the request Origin is an authorized local development origin.
@@ -67,25 +77,30 @@ export function apiProxyPlugin(): Plugin {
           const parsedGithubUrl = new URL(req.url, "http://localhost");
           const ghError = parsedGithubUrl.searchParams.get("error");
           const ghPayload = ghError
-            ? { ok: false, error: parsedGithubUrl.searchParams.get("error_description") || ghError }
-            : { ok: false, error: "GitHub OAuth exchange is not configured in local dev — use a Personal Access Token in Chat Settings → GitHub, or set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET." };
+            ? {
+                ok: false,
+                state: parsedGithubUrl.searchParams.get("state") || "",
+                error: parsedGithubUrl.searchParams.get("error_description") || ghError,
+              }
+            : {
+                ok: false,
+                state: parsedGithubUrl.searchParams.get("state") || "",
+                error: "GitHub OAuth exchange is not configured in local dev — use a Personal Access Token in Chat Settings → GitHub, or set GITHUB_CLIENT_ID/GITHUB_CLIENT_SECRET.",
+              };
 
+          // Mirrors api/github.ts: payload in a JSON data block (escaped), logic
+          // in the shared external script, so no string can escape into markup.
+          res.setHeader(
+            "Content-Security-Policy",
+            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+          );
           res.end(
             `<!DOCTYPE html>
 <html>
   <head><meta charset="utf-8"><title>Connecting GitHub…</title></head>
   <body>
-    <script>
-      (function () {
-        if (window.opener) {
-          window.opener.postMessage(
-            { source: "intab-github-oauth", payload: ${JSON.stringify(ghPayload)} },
-            ${JSON.stringify(origin || "http://localhost:5173")}
-          );
-        }
-        setTimeout(function () { window.close(); }, 150);
-      })();
-    </script>
+    <script id="intab-oauth-payload" type="application/json">${safeJsonForHtml(ghPayload)}</script>
+    <script src="/oauth/github-popup.js" data-target-origin="${escapeHtmlAttribute(origin || "http://localhost:5173")}"></script>
     <p style="font-family: system-ui; color: #555;">Completing GitHub sign-in…</p>
   </body>
 </html>`
@@ -226,6 +241,7 @@ export function apiProxyPlugin(): Plugin {
             const lower = key.toLowerCase();
             if (
               !HOP_BY_HOP_HEADERS.has(lower) &&
+              !NEVER_FORWARDED_HEADERS.has(lower) &&
               lower !== "x-target-url" &&
               lower !== "x-proxy-headers" &&
               typeof val === "string"

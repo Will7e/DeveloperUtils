@@ -158,6 +158,7 @@ export function ToastContainer() {
               variant={variant}
               title={toast.title}
               message={toast.message}
+              multiline={toast.multiline}
               leaving={leaving}
               action={
                 toast.action && !leaving

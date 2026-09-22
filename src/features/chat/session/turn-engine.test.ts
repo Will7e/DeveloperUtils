@@ -357,6 +357,96 @@ describe("turn engine — weak-model recovery", () => {
   );
 });
 
+describe("turn engine — escalation", () => {
+  /** The stalled-model shape: the same unparseable call, round after round */
+  function stalledSource() {
+    return repeatingCallSource(6, { id: "call_1", name: "read_file", arguments: "src/a.ts" });
+  }
+
+  it(
+    "continues a stalled turn on a stronger model, names it, and keeps the choice to one turn",
+    { timeout: 5000 },
+    async () => {
+      const source = stalledSource();
+      const overrides: Array<string | undefined> = [];
+
+      await runTurn(conversationId, {
+        prepare: async (_id, opts) => {
+          overrides.push(opts?.modelOverride);
+          return preparedTurnWithTools();
+        },
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+        pickEscalation: () => ({ modelId: "strong/model", reason: "test ladder", explicit: false }),
+      });
+
+      // The turn started on the user's model…
+      expect(overrides[0]).toBeUndefined();
+      // …and continued on the stronger one once the loop proved it was stuck.
+      expect(overrides).toContain("strong/model");
+
+      // The switch is announced in the transcript, not silent, and only once.
+      const notes = assistantMessages().filter((m) => m.content.includes("Switching this turn"));
+      expect(notes).toHaveLength(1);
+      expect(notes[0]!.content).toContain("strong/model");
+      expect(notes[0]!.content).toContain("test ladder");
+
+      // The conversation's own model is untouched: the swap dies with the turn.
+      const conv = store().conversations.find((c) => c.id === conversationId);
+      expect(conv?.model).toBe("model-a");
+    }
+  );
+
+  it(
+    "stays on the selected model when escalation is switched off",
+    { timeout: 5000 },
+    async () => {
+      store().updateSettings({ autoEscalate: false });
+      const source = stalledSource();
+      const overrides: Array<string | undefined> = [];
+
+      await runTurn(conversationId, {
+        prepare: async (_id, opts) => {
+          overrides.push(opts?.modelOverride);
+          return preparedTurnWithTools();
+        },
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+        pickEscalation: () => ({ modelId: "strong/model", reason: "test ladder", explicit: false }),
+      });
+
+      expect(overrides.every((m) => m === undefined)).toBe(true);
+      expect(assistantMessages().some((m) => m.content.includes("Switching this turn"))).toBe(false);
+      store().updateSettings({ autoEscalate: true });
+    }
+  );
+
+  it(
+    "says nothing rather than swapping sideways when no stronger model is known",
+    { timeout: 5000 },
+    async () => {
+      const source = stalledSource();
+      const overrides: Array<string | undefined> = [];
+
+      await runTurn(conversationId, {
+        prepare: async (_id, opts) => {
+          overrides.push(opts?.modelOverride);
+          return preparedTurnWithTools();
+        },
+        resolveSource: async () => source,
+        createFallbackSource: () => source,
+        inactivityTimeoutMs: 60,
+        pickEscalation: () => null,
+      });
+
+      expect(overrides.every((m) => m === undefined)).toBe(true);
+      expect(assistantMessages().some((m) => m.content.includes("Switching this turn"))).toBe(false);
+    }
+  );
+});
+
 describe("turn engine — single flight", () => {
   it("refuses a second turn while one is running", { timeout: 5000 }, async () => {
     const first = silentSource("host", true);

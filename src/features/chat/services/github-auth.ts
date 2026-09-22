@@ -25,16 +25,33 @@ const VITE_GITHUB_CLIENT_ID =
 
 const MESSAGE_SOURCE = "intab-github-oauth";
 const POPUP_TIMEOUT_MS = 120_000;
+/** Where the OAuth `state` we generated is stashed for the CSRF check */
+const OAUTH_STATE_KEY = "intab:github-oauth-state";
 
 interface OAuthSuccess {
   ok: true;
   accessToken: string;
+  /** Echoed by /api/github so we can verify the response is ours */
+  state?: string;
 }
 interface OAuthFailure {
   ok: false;
   error: string;
+  state?: string;
 }
 type OAuthPayload = OAuthSuccess | OAuthFailure;
+
+/**
+ * Reads the stashed state. Returns null when storage is unavailable, in which
+ * case the check is skipped rather than turning every sign-in into a failure.
+ */
+function readStashedState(): string | null {
+  try {
+    return sessionStorage.getItem(OAUTH_STATE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /** Opens the OAuth popup and resolves with the exchanged token */
 function openOAuthPopup(authorizeUrl: string): Promise<OAuthPayload> {
@@ -79,8 +96,24 @@ function openOAuthPopup(authorizeUrl: string): Promise<OAuthPayload> {
 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
+      // The credential must come from the popup this call opened — not from
+      // any other same-origin frame that can reach this window.
+      if (event.source !== popup) return;
       const data = event.data as { source?: string; payload?: OAuthPayload } | null;
       if (!data || data.source !== MESSAGE_SOURCE || !data.payload) return;
+
+      // CSRF guard: /api/github echoes the state we generated. A response
+      // carrying a different state did not originate from our sign-in and is
+      // dropped instead of being stored as the GitHub token.
+      const expected = readStashedState();
+      if (expected && data.payload.state !== expected) {
+        finish({
+          ok: false,
+          error: "GitHub sign-in response failed its state check — try again.",
+        });
+        return;
+      }
+
       finish(data.payload);
     };
     window.addEventListener("message", onMessage);
@@ -103,7 +136,7 @@ function buildAuthorizeUrl(): string {
   const state = crypto.randomUUID();
   // Stash the state so the edge function can echo it back verbatim
   try {
-    sessionStorage.setItem("intab:github-oauth-state", state);
+    sessionStorage.setItem(OAUTH_STATE_KEY, state);
   } catch {
     /* storage unavailable — flow still works, just without state check */
   }
@@ -141,7 +174,7 @@ export async function connectViaOAuth(): Promise<
       return { ok: false, state: { status: "error", message: payload.error } };
     }
     try {
-      sessionStorage.removeItem("intab:github-oauth-state");
+      sessionStorage.removeItem(OAUTH_STATE_KEY);
     } catch {
       /* ignore */
     }

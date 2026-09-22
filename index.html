@@ -3,7 +3,21 @@
 
 <head>
   <meta charset="UTF-8" />
-  <!-- Content Security Policy — Secured while allowing trusted developer runtime CDNs -->
+  <!--
+    Content Security Policy — trusted developer runtime CDNs only.
+
+    This meta tag is the DEV / non-Vercel policy, so it keeps script-src
+    'unsafe-inline' for Vite's injected HMR preamble. The authoritative
+    production policy is the Content-Security-Policy header in vercel.json,
+    which is stricter: it drops 'unsafe-inline' from script-src. Both policies
+    apply in production and browsers enforce their intersection, which is why
+    index.html contains no inline <script> — everything lives in
+    /theme-init.js and /boot.js. Keep the two definitions in sync.
+
+    'unsafe-eval' is required by the code runner and the preview bundler
+    (new Function / wasm runtimes); connect-src is intentionally open because
+    the API tester and previewed apps must reach arbitrary hosts.
+  -->
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://esm.sh; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; base-uri 'self'; form-action 'self';" />
 
@@ -173,28 +187,8 @@
     }
   </style>
 
-  <!-- Prevent theme flashing on load -->
-  <script>
-    try {
-      const theme = localStorage.getItem('intab_theme') || localStorage.getItem('devutils_theme');
-      if (theme === 'light') {
-        document.documentElement.classList.add('light');
-      } else if (!theme) {
-        const stateStr = localStorage.getItem('intab-app-state') || localStorage.getItem('devutils-app-state');
-        if (stateStr) {
-          const state = JSON.parse(stateStr);
-          if (state && state.state && state.state.editorSettings && state.state.editorSettings.theme === 'light') {
-            document.documentElement.classList.add('light');
-          }
-        }
-      }
-    } catch (e) {}
-  </script>
-
-  <!-- DrawFlow / Excalidraw engine assets path -->
-  <script>
-    window.EXCALIDRAW_ASSET_PATH = "/";
-  </script>
+  <!-- Prevent theme flashing on load (external: production CSP forbids inline script) -->
+  <script src="/theme-init.js"></script>
 </head>
 
 <body>
@@ -212,26 +206,8 @@
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
 
-  <!-- Controlled dismiss of loading screen -->
-  <script>
-    window.__INTAB_DISMISS_LOADER__ = function() {
-      if (window.__INTAB_LOADER_DISMISSED__) return;
-      window.__INTAB_LOADER_DISMISSED__ = true;
-      const loader = document.getElementById('loading-screen');
-      if (loader) {
-        loader.classList.add('hidden');
-        setTimeout(() => {
-          try { loader.remove(); } catch (e) {}
-        }, 500);
-      }
-    };
-    window.__DEVUTILS_DISMISS_LOADER__ = window.__INTAB_DISMISS_LOADER__;
-
-    // Safety fallback: guarantee loading screen is dismissed even if network stalls
-    setTimeout(() => {
-      window.__INTAB_DISMISS_LOADER__();
-    }, 3500);
-  </script>
+  <!-- Excalidraw asset path, loader dismissal and its stall fallback -->
+  <script src="/boot.js"></script>
 </body>
 
 </html>

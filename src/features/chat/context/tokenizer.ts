@@ -8,7 +8,7 @@
 // back onto the heuristic so budgets and the ContextMeter stay
 // honest across model families.
 
-import type { ChatMessage } from "../types";
+import type { ChatMessage, ToolDefinition } from "../types";
 import { getCalibrationRatio } from "./tokenizer-calibration";
 
 /** Framing overhead per message (role tags, separators) */
@@ -60,7 +60,42 @@ export function estimateMessageTokens(message: ChatMessage, modelId?: string): n
   return estimateTokens(message.content, modelId) + MESSAGE_OVERHEAD_TOKENS + imageTokens;
 }
 
-/** Total tokens for a message list */
+/**
+ * Total tokens for a message list. Kept as estimates per message so
+ * per-category attribution (system / tools / memory / messages) can
+ * reuse exactly the same arithmetic as the budget check.
+ */
 export function estimateConversationTokens(messages: ChatMessage[], modelId?: string): number {
   return messages.reduce((sum, m) => sum + estimateMessageTokens(m, modelId), 0);
+}
+
+/**
+ * Wire tokens of the tool definitions a request carries. The JSON
+ * schema payload is serialized exactly as it goes on the wire (minus
+ * the transport envelope), because tool schemas are the single
+ * largest fixed cost of an agent request — fifteen schemas are worth
+ * several thousand prompt tokens on EVERY iteration, and a budget
+ * that ignores them under-reports the window and compacts too late.
+ *
+ * Memoized on array identity: the tool surface is built once per turn
+ * and re-read on every render of the context meter.
+ */
+const TOOL_SCHEMA_CACHE = new WeakMap<readonly ToolDefinition[], number>();
+
+export function estimateToolSchemaTokens(
+  tools?: readonly ToolDefinition[] | null,
+  modelId?: string
+): number {
+  if (!tools || tools.length === 0) return 0;
+
+  const cached = TOOL_SCHEMA_CACHE.get(tools);
+  if (cached !== undefined) return cached;
+
+  // Only the `function` block is billed — `type` is a constant tag.
+  const serialized = tools
+    .map((t) => JSON.stringify(t.function))
+    .join("\n");
+  const tokens = estimateTokens(serialized, modelId);
+  TOOL_SCHEMA_CACHE.set(tools, tokens);
+  return tokens;
 }

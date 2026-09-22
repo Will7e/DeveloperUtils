@@ -18,16 +18,20 @@ import type {
   ChatMessage,
   ContentPart,
   ContextBreakdown,
+  ContextPart,
   ConversationSummary,
   ModelInfo,
   ToolCallRequest,
   ToolCallResult,
+  ToolDefinition,
   WireContent,
 } from "../types";
 import { visibleMessages } from "../types";
 import { computeBudget, healthFromPercentage, type RequestBudget } from "./budget";
 import { buildCompactionMarker, compactMessages } from "./compactor";
 import { estimateConversationTokens, estimateTokens } from "./tokenizer";
+import { isCalibrated } from "./tokenizer-calibration";
+import { summarizeSpend } from "../lib/cost-meter";
 
 /**
  * Wire message in the OpenAI tool protocol: an assistant row may carry
@@ -239,11 +243,17 @@ export function prepareRequest(params: {
   extraReserveTokens?: number;
   /** The concrete wire model (calibration key) — defaults to model.id */
   modelId?: string;
+  /**
+   * Tool definitions this request will carry. They occupy the same
+   * prompt window as history, so they are budgeted with it.
+   */
+  tools?: readonly ToolDefinition[];
 }): PreparedRequest {
   const modelId = params.modelId ?? params.model?.id;
   const budget = computeBudget({
     model: params.model,
     systemPrompt: params.effectiveSystemPrompt,
+    tools: params.tools,
   });
 
   const budgetTokens = Math.max(
@@ -312,9 +322,14 @@ function assertLogInvariant(
     return;
   }
 
+  // Matched by ID, not by object identity: sanitization legitimately
+  // CLONES a row when it degrades a tool-calls turn to plain text
+  // (`{...m, toolCalls: undefined}`), and an identity check reads that
+  // clone as "history was edited destructively". The invariant is about
+  // which stored messages are visible, so compare what identifies one.
   let cursor = 0;
   for (const row of sanitized) {
-    const idx = visible.indexOf(row, cursor);
+    const idx = visible.findIndex((m, i) => i >= cursor && m.id === row.id);
     if (idx === -1) {
       reportLogInvariantViolation(visible.length, wire.length, "sanitized slice left stored order");
       return;
@@ -343,43 +358,175 @@ function reportLogInvariantViolation(visibleCount: number, wireCount: number, wh
 }
 
 /**
- * Context meter numbers for the active conversation. Estimates are
- * used throughout; the ContextMeter can refine per-message with
- * exact usage once the runner has recorded it (kept simple here:
- * exacts live in usage metadata and this estimate stays stable).
+ * Splits the effective system prompt into its own text and the rolling
+ * summary embedded in it (see composeSystemPrompt). The summary is
+ * attributed to "memory" rather than "system" in the breakdown, and
+ * the split is a subtraction so the two parts still sum to exactly
+ * what is sent. When the caller passed a prompt WITHOUT the summary,
+ * nothing is attributed to memory.
+ */
+function splitSystemAndMemory(
+  effectiveSystemPrompt: string | undefined,
+  summaryText: string | undefined,
+  modelId?: string
+): { system: number; memory: number } {
+  const systemWithSummary = estimateTokens(effectiveSystemPrompt, modelId);
+  if (!summaryText?.trim() || !effectiveSystemPrompt?.includes(summaryText.trim())) {
+    return { system: systemWithSummary, memory: 0 };
+  }
+  const memory = Math.min(systemWithSummary, estimateTokens(summaryText, modelId));
+  return { system: systemWithSummary - memory, memory };
+}
+
+/**
+ * Context meter numbers for the active conversation — what competes
+ * for the window, who is spending it, and the exact ground truth from
+ * the last real request.
+ *
+ * Two kinds of number live here and they must not be conflated:
+ *
+ *  · ESTIMATES (parts, totalTokens) — the heuristic accounting of the
+ *    conversation as it stands now, corrected by each model's learned
+ *    chars/token ratio. They move as you type and as history grows.
+ *  · EXACT (lastPromptTokens / lastCachedTokens) — what the provider
+ *    actually billed on the previous request. These are the only
+ *    numbers nobody has to guess, so the UI shows them side by side
+ *    with the estimate for the same slice.
  */
 export function getConversationContext(params: {
   conversation: ChatConversation;
   model?: ModelInfo;
   effectiveSystemPrompt?: string;
-  /** Concrete wire model for calibration (InTab passes the pool pick) */
+  /** Concrete wire model for calibration */
   modelId?: string;
+  /** Tool definitions the next request will carry (agent turns only) */
+  tools?: readonly ToolDefinition[];
 }): ContextBreakdown {
   const modelId = params.modelId ?? params.model?.id;
   const budget = computeBudget({
     model: params.model,
     systemPrompt: params.effectiveSystemPrompt,
+    tools: params.tools,
   });
 
-  // System tokens already include the rolling summary when the
-  // caller composed the prompt via composeSystemPrompt().
-  const stored = estimateConversationTokens(params.conversation.messages, modelId);
-  const totalTokens = budget.systemTokens + stored;
   const summary = params.conversation.summary;
-  const compactedTokens = summary?.freedTokens ?? 0;
-  const pct = Math.min(
-    100,
-    (totalTokens / Math.max(1, budget.window - budget.outputReserve)) * 100
+  // System tokens already include the rolling summary when the caller
+  // composed the prompt via composeSystemPrompt() — split them so the
+  // breakdown attributes memory to memory, not to the system prompt.
+  const { system, memory } = splitSystemAndMemory(
+    params.effectiveSystemPrompt,
+    summary?.text,
+    modelId
   );
 
+  const messages = estimateConversationTokens(params.conversation.messages, modelId);
+  const toolTokens = budget.toolTokens;
+  const spend = system + toolTokens + memory + messages;
+
+  const usableTokens = Math.max(1, budget.window - budget.outputReserve);
+  const free = Math.max(0, usableTokens - spend);
+  const pct = Math.min(100, (spend / usableTokens) * 100);
+
+  // Exact provider truth from the most recent completed reply
+  const exact = lastExactUsage(params.conversation.messages);
+
+  // ── Window attribution. Zero rows are omitted (a chat with no repo
+  // has no tool schemas worth a row); "free" always closes the bar.
+  // The literal is annotated and filtered into a second binding: typing
+  // the FILTERED result directly widens every `key` to `string` (the
+  // literal loses its context through .filter) and stops being a
+  // ContextPart[] — which then rejects the push below.
+  const rows: ContextPart[] = [
+    {
+      key: "system",
+      label: "System prompt",
+      tokens: system,
+      detail: "Instructions, skills and repo context sent with every request",
+    },
+    {
+      key: "tools",
+      label: "Tool schemas",
+      tokens: toolTokens,
+      detail: params.tools?.length
+        ? `${params.tools.length} tool definitions available this turn`
+        : "No tools on this turn",
+    },
+    {
+      key: "memory",
+      label: "Compacted memory",
+      tokens: memory,
+      detail: summary
+        ? `Summary of ${summary.coversCount} earlier message${summary.coversCount === 1 ? "" : "s"}`
+        : "Nothing summarized yet",
+    },
+    {
+      key: "messages",
+      label: "Conversation",
+      tokens: messages,
+      detail: `${params.conversation.messages.length} stored message${params.conversation.messages.length === 1 ? "" : "s"}`,
+    },
+  ];
+
+  const parts = rows.filter((p) => p.tokens > 0);
+
+  parts.push({
+    key: "free",
+    label: "Free space",
+    tokens: free,
+    detail: "Room left before compaction is needed",
+  });
+
   return {
-    totalTokens,
-    sentTokens: stored,
-    compactedTokens,
+    totalTokens: spend,
+    sentTokens: spend,
+    compactedTokens: summary?.freedTokens ?? 0,
     maxTokens: budget.window,
+    usableTokens,
+    outputReserve: budget.outputReserve,
     percentageUsed: Math.round(pct * 10) / 10,
     health: healthFromPercentage(pct),
+    parts,
+    lastPromptTokens: exact.promptTokens,
+    lastCachedTokens: exact.cachedTokens,
+    totalCost: exact.totalCost,
+    completionTokens: exact.completionTokens,
+    spend: summarizeSpend(params.conversation.messages),
+    calibrated: isCalibrated(modelId),
   };
+}
+
+/**
+ * Ground truth from the transcript: the most recent provider-reported
+ * usage frame, plus the conversation's running totals. Reads stored
+ * messages only — never the network.
+ */
+function lastExactUsage(messages: ChatMessage[]): {
+  promptTokens: number | null;
+  cachedTokens: number | null;
+  totalCost: number;
+  completionTokens: number;
+} {
+  let promptTokens: number | null = null;
+  let cachedTokens: number | null = null;
+  let totalCost = 0;
+  let completionTokens = 0;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const usage = messages[i]!.usage;
+    if (!usage) continue;
+    if (promptTokens === null && usage.promptTokens != null) {
+      promptTokens = usage.promptTokens;
+      cachedTokens = usage.cachedTokens ?? null;
+    }
+  }
+  for (const m of messages) {
+    if (typeof m.usage?.cost === "number") totalCost += m.usage.cost;
+    if (typeof m.usage?.completionTokens === "number") {
+      completionTokens += m.usage.completionTokens;
+    }
+  }
+
+  return { promptTokens, cachedTokens, totalCost, completionTokens };
 }
 
 /**

@@ -26,6 +26,7 @@ import { MEMORY_PATH, MEMORY_PROMPT_BLOCK } from "../lib/project-memory";
 import { resolveToolProfile } from "../lib/tool-profiles";
 import { modelSupportsTools, modelSupportsVision, resolveEffortState } from "../lib/model-state";
 import { resolveModelInfo, ensureModelCatalog } from "../lib/model-catalog";
+import { pickEscalationTarget } from "../lib/escalation";
 import { DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "../constants";
 import { ensureCompaction } from "./compaction";
 import { visibleMessages } from "../types";
@@ -76,8 +77,11 @@ export function resolveModelState(conversation: ChatConversation | undefined): {
 }
 
 /**
- * Resolves the candidate list for a turn. One candidate: the selected
- * model, carrying the request state its own catalog entry supports.
+ * Resolves the candidate list for a turn: the selected model, plus (when
+ * the catalog offers one) a capably stronger model the host may fall
+ * back to if the first one's provider refuses the request. Each
+ * candidate carries the request state ITS OWN catalog entry supports —
+ * a reasoning rung means different things to different providers.
  * `toolsSupported: false` means the caller must send no tools at all —
  * strict providers reject tools on models that cannot call them.
  */
@@ -86,19 +90,35 @@ export function resolveCandidates(params: {
   effort: ReasoningEffort;
   /** Turn will carry tool definitions (repo attached + token present) */
   needsTools?: boolean;
+  /** Second attempt for the host (see lib/escalation.ts) */
+  escalationModel?: string;
 }): { toolsSupported: boolean; candidates: HostCandidate[] } {
-  const { requestedModel, effort, needsTools = false } = params;
+  const { requestedModel, effort, needsTools = false, escalationModel } = params;
   const info: ModelInfo | undefined = resolveModelInfo(requestedModel);
-  return {
-    toolsSupported: !needsTools || modelSupportsTools(info),
-    candidates: [
-      {
-        modelId: requestedModel,
-        contextLength: info?.contextLength,
-        requestState: resolveEffortState(effort, info),
-      },
-    ],
-  };
+  const candidates: HostCandidate[] = [
+    {
+      modelId: requestedModel,
+      contextLength: info?.contextLength,
+      requestState: resolveEffortState(effort, info),
+    },
+  ];
+
+  // The escalation candidate is a real failover path, not decoration: the
+  // host walks this list when a provider rejects a request, so a rate
+  // limit or an outage on the selected model becomes an answer from a
+  // stronger one instead of a dead turn. The message records which model
+  // actually replied, so the swap is never hidden.
+  const escalateTo = escalationModel?.trim();
+  if (escalateTo && escalateTo !== requestedModel) {
+    const altInfo = resolveModelInfo(escalateTo);
+    candidates.push({
+      modelId: escalateTo,
+      contextLength: altInfo?.contextLength,
+      requestState: resolveEffortState(effort, altInfo),
+    });
+  }
+
+  return { toolsSupported: !needsTools || modelSupportsTools(info), candidates };
 }
 
 /** Warns once per conversation when the selected model cannot call tools */
@@ -114,7 +134,19 @@ function warnToolsUnavailable(key: string, message: string): void {
  * Composes the effective system prompt + prepared wire request for
  * the conversation's CURRENT state. Called once per host round.
  */
-export async function prepareTurn(conversationId: string): Promise<TurnPreparation> {
+export interface PrepareTurnOptions {
+  /**
+   * Model this turn continues on, instead of the conversation's own.
+   * Set by the engine after an escalation; the conversation's selection
+   * is never rewritten by it.
+   */
+  modelOverride?: string;
+}
+
+export async function prepareTurn(
+  conversationId: string,
+  opts: PrepareTurnOptions = {}
+): Promise<TurnPreparation> {
   const store = useChatStore.getState();
   const conversation = store.conversations.find((c) => c.id === conversationId);
   if (!conversation) return null;
@@ -131,12 +163,30 @@ export async function prepareTurn(conversationId: string): Promise<TurnPreparati
     return null;
   }
 
-  const { model: requestedModel, effort, mode } = resolveModelState(conversation);
+  const modelState = resolveModelState(conversation);
+  const { effort, mode } = modelState;
+  // An escalated turn continues on another model; the conversation keeps
+  // the model the user picked, so the override dies with the turn.
+  const requestedModel = opts.modelOverride?.trim() || modelState.model;
 
   // Tool definitions only ride turns that have a repo AND a token to
   // reach it; plan mode narrows the set to the read-only subset.
   const needsTools = Boolean(conversation.repoContext && settings.github.token);
-  const resolved = resolveCandidates({ requestedModel, effort, needsTools });
+  // Who the host may fall back to when the selected provider refuses.
+  // Refused rather than guessed when nothing in the catalog is known to
+  // be stronger (see lib/escalation.ts) — a lateral swap is not a rescue.
+  const escalationChoice = pickEscalationTarget(requestedModel, {
+    enabled: settings.autoEscalate,
+    preferred: settings.escalationModel,
+    needTools: needsTools,
+    minContext: resolveModelInfo(requestedModel)?.contextLength,
+  });
+  const resolved = resolveCandidates({
+    requestedModel,
+    effort,
+    needsTools,
+    escalationModel: escalationChoice?.modelId,
+  });
   const toolsAllowed = resolved.toolsSupported;
 
   if (needsTools && !toolsAllowed) {
@@ -151,13 +201,21 @@ export async function prepareTurn(conversationId: string): Promise<TurnPreparati
     conversation.systemPrompt?.trim() || settings.systemPrompt.trim() || "";
   const composedPrompt = buildEffectiveSystemPrompt(basePrompt, settings.skills ?? []);
 
-  // Compact before the request when the budget demands it
+  // Compact before the request when the budget demands it. The tool
+  // schemas this turn will carry are part of that budget — they are
+  // prompt tokens like any other, and the second-largest fixed cost
+  // after the system prompt.
   const modelInfo = resolveModelInfo(requestedModel);
+  const budgetTools =
+    conversation.repoContext && settings.github.token && toolsAllowed
+      ? resolveToolProfile(mode, modelInfo).tools
+      : undefined;
   const contextNow = getConversationContext({
     conversation,
     model: modelInfo,
     effectiveSystemPrompt: composedPrompt,
     modelId: requestedModel,
+    tools: budgetTools,
   });
   if (needsCompaction(contextNow)) {
     await ensureCompaction(conversationId);
@@ -214,6 +272,7 @@ export async function prepareTurn(conversationId: string): Promise<TurnPreparati
     model: modelInfo,
     effectiveSystemPrompt,
     modelId: requestedModel,
+    tools,
   });
 
   // Warm the live catalog in the background (model picker + effort state)
@@ -254,10 +313,13 @@ export function composeRepoPrompt(repo: RepoContext): string {
     `- run_in_preview: execute JavaScript inside the built preview app to verify runtime behavior`,
     `- query_preview_dom: query the preview's rendered DOM with a CSS selector to verify UI output`,
     `- get_preview_feedback: read build errors + console output from the preview`,
+    `- get_preview_layout: read a geometry map of the running preview (boxes, overflow, off-screen elements) — the way to verify VISUAL results that query_preview_dom cannot see`,
+    `- run_checks: read this repository's declared verification checks (test/lint/typecheck/build) and what of them could actually run — call it before summarising a change set`,
     `- create_working_branch / push_changes: ship the workspace diff to GitHub as one commit (+ optional PR) after user approval`,
     `- remember: record one durable, repo-specific fact in ${MEMORY_PATH} so later sessions stop rediscovering it`,
     `- read_skill: load the full instructions of an available skill by name (see the skill index above)`,
     `- delegate: hand a research task to a read-only helper agent that returns only a report — use it when searching would flood your context with file contents you do not need`,
+    `- list_mcp_tools / call_mcp_tool: the user's connected MCP servers (external services such as issue trackers or wikis). List before calling, and call one only when the request clearly needs it — those calls change data OUTSIDE this repository, so report what you did.`,
     ``,
     `Guidelines:`,
     `- Prefer tools over guessing. Ground every claim about the codebase in files you actually read.`,

@@ -54,6 +54,15 @@ export function CompilerPreview() {
     }
   };
 
+  // DEMO-ONLY execution on the app origin.
+  //
+  // Unlike the real code runner (a Web Worker with no DOM/storage access),
+  // this runs `new Function` in the page, so the code shares this origin's
+  // localStorage, IDB and session. That is acceptable only because `code` can
+  // solely ever be a bundled preset or text the user typed into the textarea
+  // above — it is never hydrated from storage, a URL or model output.
+  // Keep that invariant if this demo ever starts accepting input from outside
+  // the component; otherwise route it through compiler.service instead.
   const executeCode = (sourceCode: string) => {
     setIsRunning(true);
     const capturedLogs: string[] = [];

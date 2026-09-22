@@ -15,6 +15,70 @@ export const config = {
 
 const LS_API_BASE = "https://api.lemonsqueezy.com/v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+/** Max license entries held per edge isolate (keys are caller-supplied) */
+const CACHE_MAX_ENTRIES = 500;
+/** Best-effort per-isolate throttle: requests allowed per window per client */
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
+
+/**
+ * Origins allowed to call this endpoint. It is POST-only and same-origin
+ * from the app, so an allowlist costs nothing and keeps the endpoint from
+ * being used as a validation oracle by third-party pages.
+ */
+function isAllowedOrigin(originStr: string | null): boolean {
+  if (!originStr) return true; // Non-browser client (no Origin header)
+  try {
+    const o = new URL(originStr);
+    const host = o.hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.endsWith(".localhost") ||
+      host === "in-tab.se" ||
+      host.endsWith(".in-tab.se") ||
+      host === "intab.dev" ||
+      host.endsWith(".intab.dev") ||
+      host === process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+      host === process.env.VERCEL_URL ||
+      (host.endsWith(".vercel.app") && process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? host.endsWith(
+            "." + String(process.env.VERCEL_PROJECT_PRODUCTION_URL).replace(/^www\./, "")
+          )
+        : false)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Best-effort fixed-window throttle (per edge isolate, not global) */
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function withinRateLimit(key: string): boolean {
+  const now = Date.now();
+
+  if (rateBuckets.size > 5_000) {
+    for (const [k, v] of rateBuckets) {
+      if (v.resetAt <= now) rateBuckets.delete(k);
+    }
+    if (rateBuckets.size > 5_000) rateBuckets.clear();
+  }
+
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= RATE_LIMIT_MAX_REQUESTS;
+}
+
+function clientKey(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0]!.trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
 
 interface LsLicense {
   id: number;
@@ -72,7 +136,18 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ valid: false, error: "Method not allowed" }, 405);
   }
 
-  const apiKey = import.meta.env.LEMON_SQUEEZY_API_KEY as string | undefined;
+  if (!isAllowedOrigin(req.headers.get("origin"))) {
+    return json({ valid: false, error: "Forbidden origin" }, 403);
+  }
+
+  if (!withinRateLimit(clientKey(req))) {
+    return json({ valid: false, error: "Too many license checks — try again shortly." }, 429);
+  }
+
+  // Server-only env var. This runs on the Vercel edge runtime, where
+  // `process.env` is the supported interface; `import.meta.env` is a Vite
+  // construct that is never populated here.
+  const apiKey = process.env.LEMON_SQUEEZY_API_KEY;
   if (!apiKey) {
     return json({ valid: false, error: "License service not configured" }, 503);
   }
@@ -119,6 +194,12 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
+    // Bounded cache: the key comes from the caller, so an unbounded map is a
+    // memory-growth vector inside a warm isolate.
+    if (cache.size >= CACHE_MAX_ENTRIES && !cache.has(licenseKey)) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
     cache.set(licenseKey, { result: meta, at: Date.now() });
 
     if (!meta.valid) {

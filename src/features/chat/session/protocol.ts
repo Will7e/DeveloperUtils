@@ -82,6 +82,8 @@ export interface HostUsage {
   promptTokens: number | null;
   completionTokens: number | null;
   cost: number | null;
+  /** Prompt tokens served from the provider's cache (discounted) */
+  cachedTokens?: number | null;
 }
 
 /** Outcome kinds mirrored from the in-page loop */

@@ -17,8 +17,60 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 /**
+ * Headers never copied from the *incoming* request to the upstream target.
+ * `cookie` is included because the browser attaches this origin's cookies to
+ * same-origin requests, and relaying them to an arbitrary third-party host
+ * would leak them. A client that genuinely wants to send a Cookie header can
+ * still do so explicitly through `x-proxy-headers` (that path is applied
+ * after this filter), which is exactly how the API tester sends one.
+ */
+const NEVER_FORWARDED_HEADERS = new Set(["cookie"]);
+
+/**
+ * Best-effort fixed-window throttle. This endpoint is a public relay: it
+ * blocks private/metadata targets, but without a limit it is still free
+ * bandwidth and a useful anonymizer for anyone with a script. Per-isolate
+ * and deliberately generous — real client usage is bursty.
+ */
+const RATE_LIMIT_WINDOW_MS = 10_000;
+const RATE_LIMIT_MAX_REQUESTS = 200;
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function withinRateLimit(key: string): boolean {
+  const now = Date.now();
+
+  if (rateBuckets.size > 5_000) {
+    for (const [k, v] of rateBuckets) {
+      if (v.resetAt <= now) rateBuckets.delete(k);
+    }
+    if (rateBuckets.size > 5_000) rateBuckets.clear();
+  }
+
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  bucket.count += 1;
+  return bucket.count <= RATE_LIMIT_MAX_REQUESTS;
+}
+
+function clientKey(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0]!.trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+/**
  * Checks if the incoming request Origin is an authorized InTab origin.
  * Prevents third-party malicious sites from abusing InTab as an open anonymous proxy.
+ *
+ * A missing Origin header is allowed on purpose: browsers omit it on
+ * same-origin GET/HEAD requests, which the app itself makes (GitHub and
+ * OpenRouter reads fall back to this proxy), and non-browser clients are
+ * indistinguishable from those. The SSRF guard plus the rate limit bound
+ * what an Origin-less caller can do; a shared secret would be the next step
+ * if the relay ever needs to be closed completely.
  */
 function isAllowedOrigin(originStr: string | null): boolean {
   if (!originStr) return true; // Direct same-origin request (no Origin header)
@@ -65,6 +117,22 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   const allowedOriginHeader = origin || "*";
+
+  // Throttle before doing any work: this endpoint is an open relay for
+  // Origin-less callers (see isAllowedOrigin).
+  if (!withinRateLimit(clientKey(req))) {
+    return new Response(
+      JSON.stringify({ error: "Too many proxy requests — slow down.", code: "RATE_LIMITED" }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": allowedOriginHeader,
+          "Retry-After": "10",
+        },
+      }
+    );
+  }
 
   // CORS Preflight
   if (req.method === "OPTIONS") {
@@ -124,7 +192,12 @@ export default async function handler(req: Request): Promise<Response> {
     const forwardHeaders = new Headers();
     req.headers.forEach((val, key) => {
       const lower = key.toLowerCase();
-      if (!HOP_BY_HOP_HEADERS.has(lower) && lower !== "x-target-url" && lower !== "x-proxy-headers") {
+      if (
+        !HOP_BY_HOP_HEADERS.has(lower) &&
+        !NEVER_FORWARDED_HEADERS.has(lower) &&
+        lower !== "x-target-url" &&
+        lower !== "x-proxy-headers"
+      ) {
         forwardHeaders.set(key, val);
       }
     });

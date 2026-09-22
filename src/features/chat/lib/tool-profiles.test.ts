@@ -67,6 +67,20 @@ describe("resolveToolProfile", () => {
     }
   });
 
+  it("gives a weak model the visual check but not the program interpreter", () => {
+    const names = resolveToolProfile("build", small).tools.map((t) => t.function.name);
+    // A one-argument tool that describes the model's own output back to it
+    // is exactly what a weak model needs; a schemas-in-schemas tool is not.
+    expect(names).toContain("check_preview_visually");
+    expect(names).not.toContain("run_tool_program");
+  });
+
+  it("declares the new observation tools plan-safe", () => {
+    for (const name of ["check_preview_visually", "get_preview_layout", "run_checks"]) {
+      expect(getToolMeta(name as never)?.planSafe, name).toBe(true);
+    }
+  });
+
   it("preserves registry order in the lean surface", () => {
     const names = resolveToolProfile("build", small).tools.map((t) => t.function.name);
     const ordered = [...names].sort(

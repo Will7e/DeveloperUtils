@@ -430,6 +430,103 @@
   min-width: 0;
 }
 
+/* Model · effort · mode read as ONE control: a single bordered strip
+   with hairline dividers, so the header shows a control and a status
+   (the context meter) instead of a row of buttons. */
+.chat-header-controls {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 2px;
+  min-width: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+}
+
+.chat-header-controls > * + * {
+  box-shadow: inset 1px 0 0 var(--border-1);
+}
+
+/* Children lose their own chrome inside the strip — the strip is the
+   only border the eye should see. */
+.chat-header-controls .chat-model-btn,
+.chat-header-controls .chat-tier-btn {
+  height: 30px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+}
+
+/* Let the model name truncate instead of overflowing the strip: the
+   picker wrappers must shrink, and the buttons must fill them (an
+   inline-level button would otherwise keep its min-content width and
+   bleed past the strip's border). */
+.chat-header-controls .chat-model-picker,
+.chat-header-controls .chat-tier-picker {
+  min-width: 0;
+}
+
+.chat-header-controls .chat-model-btn,
+.chat-header-controls .chat-tier-btn {
+  max-width: 240px;
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-header-controls .chat-model-btn-label,
+.chat-header-controls .chat-tier-btn-label {
+  min-width: 0;
+}
+
+.chat-header-controls .chat-model-btn:hover,
+.chat-header-controls .chat-tier-btn:hover {
+  background: var(--bg-3);
+  border: none;
+}
+
+.chat-header-controls .chat-mode-btn {
+  height: 30px;
+  border-radius: calc(var(--radius-sm) - 2px);
+}
+
+/* Below this width the two labels are worth less than the room they
+   take: the icons (leaf/gauge/brain/sparkles, hammer/route) still say
+   what the control is, and the tooltips carry the words. */
+@media (max-width: 1100px) {
+  .chat-header-controls .chat-tier-btn-label,
+  .chat-header-controls .chat-mode-btn-label {
+    display: none;
+  }
+
+  .chat-header-left {
+    gap: 8px;
+  }
+}
+
+/* Narrow panes: the model name gets a readable floor and truncates
+   from there, and the meter sheds its text so the bar still fits
+   (its aria-label keeps the number for screen readers). */
+@media (max-width: 700px) {
+  .chat-header-controls {
+    flex: 1 1 auto;
+  }
+
+  .chat-header-controls .chat-model-picker {
+    flex: 1 1 auto;
+    min-width: 96px;
+  }
+
+  .chat-ctx-meter-label,
+  .chat-ctx-compact-badge {
+    display: none;
+  }
+
+  .chat-header-left {
+    gap: 6px;
+  }
+}
+
 .chat-header-right {
   display: flex;
   align-items: center;
@@ -630,29 +727,18 @@
   line-height: 1.45;
 }
 
-/* ── Mode Toggle — agent mode (Build / Plan) ── */
-
-.chat-mode-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  height: 32px;
-  padding: 2px;
-  background: var(--bg-1);
-  border: 1px solid var(--border-1);
-  border-radius: var(--radius-sm);
-}
+/* ── Mode Toggle — agent mode (Build / Plan), one button ── */
 
 .chat-mode-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 9px;
+  height: 30px;
+  padding: 0 10px;
   font-size: 12px;
   font-weight: 500;
   font-family: var(--font-sans);
-  color: var(--text-3);
+  color: var(--text-2);
   background: transparent;
   border: none;
   border-radius: calc(var(--radius-sm) - 2px);
@@ -670,13 +756,17 @@
   cursor: not-allowed;
 }
 
-.chat-mode-btn-active {
-  color: var(--text-1);
-  background: var(--bg-3);
+.chat-mode-btn-build .chat-mode-btn-icon {
+  color: var(--blue);
 }
 
-.chat-mode-btn-active .chat-mode-btn-icon {
-  color: var(--blue);
+/* Plan mode is a read-only contract — make it visible, not ambient */
+.chat-mode-btn-plan {
+  color: var(--text-1);
+}
+
+.chat-mode-btn-plan .chat-mode-btn-icon {
+  color: var(--amber, #d97706);
 }
 
 .chat-mode-btn-icon {
@@ -685,11 +775,6 @@
 
 .chat-mode-btn-label {
   white-space: nowrap;
-}
-
-/* Plan mode is a read-only contract — make it visible, not ambient */
-.chat-mode-btn-active[aria-checked="true"]:last-child .chat-mode-btn-icon {
-  color: var(--amber, #d97706);
 }
 
 .chat-composer-mode-badge {
@@ -874,47 +959,63 @@
 }
 
 /* ── Context meter ── */
+/* Segmented: each category of spend owns a slice of the track, and
+   the label carries the health color. The breakdown card hangs off
+   the meter's tooltip (see ContextMeter.tsx). */
 
 .chat-ctx-meter {
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: default;
+  padding: 2px 5px;
+  margin: -2px -5px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.chat-ctx-meter:hover,
+.chat-ctx-meter:focus-visible {
+  background: var(--bg-hover, var(--bg-3));
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
 }
 
 .chat-ctx-meter-track {
-  width: 64px;
-  height: 4px;
+  display: flex;
+  width: 78px;
+  height: 5px;
   background: var(--ds-gray-alpha-200);
   border-radius: 999px;
   overflow: hidden;
+  /* Hairline gaps make each category legible at 5px tall */
+  gap: 1px;
 }
 
-.chat-ctx-meter-fill {
+.chat-ctx-meter-track-warn {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--yellow) 45%, transparent);
+}
+
+.chat-ctx-seg {
   height: 100%;
-  border-radius: 999px;
-  transition: width 0.3s ease, background 0.3s ease;
+  min-width: 2px;
+  transition: width 0.3s ease;
 }
 
-.chat-ctx-meter-fill-zero {
-  background: transparent;
-  transition: none;
+.chat-ctx-seg-system {
+  background: var(--purple);
 }
 
-.chat-ctx-meter-fill-optimal {
-  background: var(--green);
-}
-
-.chat-ctx-meter-fill-moderate {
+.chat-ctx-seg-tools {
   background: var(--blue);
 }
 
-.chat-ctx-meter-fill-near {
-  background: var(--yellow);
+.chat-ctx-seg-memory {
+  background: var(--amber);
 }
 
-.chat-ctx-meter-fill-exceeded {
-  background: var(--red);
+.chat-ctx-seg-messages {
+  background: var(--green);
 }
 
 .chat-ctx-meter-label {
@@ -923,7 +1024,277 @@
   color: var(--text-3);
   font-family: var(--font-mono);
   font-feature-settings: "tnum";
-  min-width: 28px;
+  min-width: 26px;
+}
+
+/* Health colors — declared last so they beat the label's base color */
+.chat-ctx-health-optimal {
+  color: var(--green);
+}
+
+.chat-ctx-health-moderate {
+  color: var(--blue);
+}
+
+.chat-ctx-health-near-limit {
+  color: var(--yellow);
+}
+
+.chat-ctx-health-exceeded {
+  color: var(--red);
+}
+
+/* ── Context breakdown card (tooltip skin) ── */
+/* The shared tooltip bubble is inverted-contrast and padded for one
+   short line; the card repaints it with panel tokens. Selector is
+   deliberately specific (and unlayered) so it wins over
+   `html.light .intab-tooltip` in either theme. */
+
+html body .intab-tooltip.chat-ctx-card {
+  padding: 0;
+  background: var(--bg-2);
+  color: var(--text-1);
+  border-color: var(--border-1);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
+  font-weight: 400;
+  font-size: 12px;
+  max-width: none;
+  white-space: normal;
+}
+
+html body .intab-tooltip.chat-ctx-card > span {
+  display: block;
+}
+
+.chat-ctx-card-inner {
+  width: 292px;
+  padding: 10px 12px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.chat-ctx-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-ctx-card-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.chat-ctx-card-health {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chat-ctx-card-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-feature-settings: "tnum";
+}
+
+.chat-ctx-card-total strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.chat-ctx-card-sub {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.chat-ctx-card-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.chat-ctx-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  font-feature-settings: "tnum";
+}
+
+.chat-ctx-row-free {
+  color: var(--text-3);
+}
+
+.chat-ctx-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.chat-ctx-dot-system {
+  background: var(--purple);
+}
+
+.chat-ctx-dot-tools {
+  background: var(--blue);
+}
+
+.chat-ctx-dot-memory {
+  background: var(--amber);
+}
+
+.chat-ctx-dot-messages {
+  background: var(--green);
+}
+
+.chat-ctx-dot-free {
+  background: transparent;
+  border: 1px dashed var(--border-1);
+  border-radius: 999px;
+}
+
+.chat-ctx-row-val {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+  text-align: right;
+}
+
+.chat-ctx-row-free .chat-ctx-row-val {
+  color: var(--text-3);
+}
+
+.chat-ctx-row-pct {
+  min-width: 36px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-align: right;
+}
+
+.chat-ctx-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+/* Prose lines flow as one paragraph; the marker is inline so the
+   sentence never breaks into separately-spaced flex items. */
+.chat-ctx-card-line {
+  display: block;
+}
+
+.chat-ctx-card-line strong {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.chat-ctx-card-line-icon {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: var(--green);
+}
+
+.chat-ctx-card-cache-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  vertical-align: middle;
+  border-radius: 999px;
+  background: var(--amber);
+}
+
+.chat-ctx-card-hint {
+  display: block;
+  color: var(--yellow);
+}
+
+.chat-ctx-card-hint svg {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -1px;
+}
+
+.chat-ctx-card-hint code {
+  padding: 0 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+
+.chat-ctx-card-note {
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.85;
+}
+
+/* Per-model spend attribution: a proportional bar behind each row, so the
+   model doing the expensive work is visible at a glance. */
+.chat-ctx-spend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.chat-ctx-spend-row {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--bg-3);
+}
+
+.chat-ctx-spend-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent-soft, rgba(120, 150, 255, 0.22));
+  pointer-events: none;
+}
+
+.chat-ctx-spend-model {
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-ctx-spend-val {
+  position: relative;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.chat-ctx-spend-note {
+  font-size: 10px;
+  color: var(--text-3);
 }
 
 /* ============================================================
@@ -997,6 +1368,14 @@
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-3);
+}
+
+/* Cache-hit line: prompt tokens the provider served from its cache */
+.chat-msg-cache {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--amber);
 }
 
 .chat-msg-bubble {
@@ -2711,6 +3090,11 @@
   box-shadow: var(--ds-shadow-modal);
   overflow: hidden;
   animation: settings-tab-enter 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-header-right .chat-repo-menu {
+  left: auto;
+  right: 0;
 }
 
 .chat-repo-search {

@@ -381,6 +381,9 @@ ${bridge}
 function bridgeSource(): void {
   const post = (level: string, text: string) => {
     try {
+      // "*" is required: this document is blob-backed and sandboxed, so it has
+      // an opaque origin that cannot be named. The parent verifies that the
+      // sender is its own preview frame.
       parent.postMessage({ source: "intab-preview", level, text }, "*");
     } catch {
       /* parent gone */
@@ -490,8 +493,239 @@ function bridgeSource(): void {
     }
   };
 
+  /**
+   * Collects a geometry map of the document (or one subtree).
+   *
+   * Two passes on purpose: measuring rects is cheap, but
+   * getComputedStyle is not, so candidates are measured first, ranked by
+   * area, and only the reported slice gets its computed style read. The
+   * scan itself is capped so a 5,000-node page cannot block the preview.
+   *
+   * What it returns is deliberately dumb: raw boxes with a few cheap
+   * overflow numbers. The ANALYSIS lives in the parent
+   * (lib/preview-layout.ts), where it is unit-tested and can change
+   * without rebundling the preview.
+   */
+  const LAYOUT_SCAN_MAX = 600;
+  const LAYOUT_TEXT_MAX = 40;
+
+  const collectLayout = (selector: string | undefined, maxElements: number): { ok: boolean; result?: unknown; error?: string } => {
+    try {
+      const root = selector ? document.querySelector(selector) : document.body;
+      if (!root) return { ok: false, error: `No element matches '${selector}'.` };
+      const isBody = root === document.body;
+      const nodes = [
+        ...(isBody ? [] : [root]),
+        ...Array.from(root.querySelectorAll("*")),
+      ].slice(0, LAYOUT_SCAN_MAX);
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      interface Candidate { el: Element; x: number; y: number; w: number; h: number }
+      const candidates: Candidate[] = [];
+      for (const el of nodes) {
+        const r = el.getBoundingClientRect();
+        candidates.push({ el, x: r.left, y: r.top, w: r.width, h: r.height });
+      }
+
+      // Rank by area (descending) so the reported slice is the structure
+      // that decides the layout, not whichever <span> came first.
+      candidates.sort((a, b) => b.w * b.h - a.w * a.h);
+
+      const kept = candidates.slice(0, Math.max(1, Math.min(80, maxElements)));
+      // Restore document order within the slice: a map the model can read
+      // top-to-bottom is worth more than a size-ordered one.
+      kept.sort((a, b) => (a.y === b.y ? a.x - b.x : a.y - b.y));
+
+      const elements = kept.map(({ el, x, y, w, h }) => {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden") return null;
+        const isLeaf = el.children.length === 0;
+        const id = el.id || undefined;
+        const cls = el.className && typeof el.className === "string"
+          ? el.className.trim().split(/\s+/).slice(0, 2).join(" ")
+          : undefined;
+        const text = isLeaf ? (el.textContent ?? "").trim().slice(0, LAYOUT_TEXT_MAX) : "";
+        return {
+          tag: el.tagName.toLowerCase(),
+          ...(id ? { id } : {}),
+          ...(cls ? { cls } : {}),
+          x: Math.round(x),
+          y: Math.round(y),
+          w: Math.round(w),
+          h: Math.round(h),
+          ...(el.scrollWidth - el.clientWidth > 1 ? { ow: el.scrollWidth - el.clientWidth } : {}),
+          ...(el.scrollHeight - el.clientHeight > 1 ? { oh: el.scrollHeight - el.clientHeight } : {}),
+          ...(style.position !== "static" ? { pos: style.position } : {}),
+          ...(text ? { txt: text } : {}),
+        };
+      }).filter((e) => e !== null);
+
+      return {
+        ok: true,
+        result: {
+          viewport: { w: vw, h: vh },
+          document: {
+            w: document.documentElement.scrollWidth,
+            h: document.documentElement.scrollHeight,
+          },
+          total: nodes.length,
+          elements,
+        },
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  // ── Screenshot (visual verification) ──
+  // This frame has an opaque origin, so the parent cannot reach in to
+  // rasterize it: the capture happens HERE and travels back as a data URL.
+  // With no dependency available, the only rasterizer is the browser's own
+  // — serialize the DOM into an SVG <foreignObject>, load that as an image,
+  // draw it to a canvas. That is worth its limitations, both of which the
+  // caller is TOLD rather than left to guess:
+  //   • web fonts and cross-origin images do not load inside an SVG image,
+  //     so the picture is layout-accurate and typographically approximate;
+  //   • a browser that cannot render foreignObject yields a blank canvas,
+  //     which is detected below and reported as a failure — never passed
+  //     off as "the page renders nothing".
+  const SHOT_MAX_SIDE = 1280;
+  const SHOT_MAX_CHARS = 1_400_000;
+  const SHOT_SCALES = [1, 0.6, 0.35];
+
+  const captureScreenshot = async (
+    selector: string | undefined
+  ): Promise<{ ok: boolean; result?: unknown; error?: string }> => {
+    try {
+      const target: Element | null = selector ? document.querySelector(selector) : document.body;
+      if (!target) return { ok: false, error: `No element matches '${selector}'.` };
+
+      const rect = target.getBoundingClientRect();
+      const cssW = Math.max(1, Math.round(selector ? rect.width : window.innerWidth));
+      const cssH = Math.max(1, Math.round(selector ? rect.height : window.innerHeight));
+      const baseScale = Math.min(1, SHOT_MAX_SIDE / Math.max(cssW, cssH));
+
+      const bodyStyle = window.getComputedStyle(document.body);
+      // Every readable stylesheet goes into the snapshot: inline <style>
+      // blocks carry the bundle's CSS, and same-origin rules are read out of
+      // the CSSOM so a <link>ed sheet is captured too. Cross-origin sheets
+      // cannot be read (and would not load inside the image anyway).
+      const cssParts: string[] = Array.from(document.querySelectorAll("style")).map(
+        (s) => s.textContent ?? ""
+      );
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          for (const rule of Array.from(sheet.cssRules)) cssParts.push(rule.cssText);
+        } catch {
+          /* cross-origin stylesheet — skipped, and the capture says so */
+        }
+      }
+      const css = cssParts.join("\n");
+
+      // The clone is what gets rasterized. Scripts are stripped so nothing
+      // re-executes inside the image, and a body capture drops its own tag
+      // so the snapshot nests legally inside the SVG.
+      const clone = target.cloneNode(true) as Element;
+      clone.querySelectorAll("script, link[rel=stylesheet]").forEach((n) => n.remove());
+      const container = document.createElement("div");
+      if (target === document.body) container.innerHTML = (clone as HTMLElement).innerHTML;
+      else container.appendChild(clone);
+
+      const wrapper = document.createElement("div");
+      wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+      wrapper.style.cssText = [
+        `width:${cssW}px`,
+        `height:${cssH}px`,
+        "margin:0",
+        "overflow:hidden",
+        `background:${bodyStyle.backgroundColor || "#ffffff"}`,
+        `color:${bodyStyle.color}`,
+        `font-family:${bodyStyle.fontFamily}`,
+        `font-size:${bodyStyle.fontSize}`,
+      ].join(";");
+      const styleEl = document.createElement("style");
+      styleEl.textContent = css;
+      wrapper.appendChild(styleEl);
+      wrapper.appendChild(container);
+
+      const html = new XMLSerializer().serializeToString(wrapper);
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${cssW}" height="${cssH}" viewBox="0 0 ${cssW} ${cssH}">` +
+        `<foreignObject x="0" y="0" width="${cssW}" height="${cssH}">${html}</foreignObject></svg>`;
+
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("the browser refused to decode the DOM snapshot"));
+        image.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      });
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return { ok: false, error: "This browser provided no 2D canvas context." };
+
+      let dataUrl = "";
+      let shotW = cssW;
+      let shotH = cssH;
+      for (const step of SHOT_SCALES) {
+        const scale = baseScale * step;
+        shotW = Math.max(1, Math.round(cssW * scale));
+        shotH = Math.max(1, Math.round(cssH * scale));
+        canvas.width = shotW;
+        canvas.height = shotH;
+        ctx.fillStyle = bodyStyle.backgroundColor || "#ffffff";
+        ctx.fillRect(0, 0, shotW, shotH);
+        ctx.drawImage(image, 0, 0, shotW, shotH);
+        try {
+          dataUrl = canvas.toDataURL("image/png");
+        } catch {
+          return { ok: false, error: "The rendered pixels could not be read out of the canvas." };
+        }
+        if (dataUrl.length <= SHOT_MAX_CHARS) break;
+      }
+      if (dataUrl.length > SHOT_MAX_CHARS) {
+        return {
+          ok: false,
+          error: "The page is too detailed to capture within the transport budget. Capture a selector instead of the whole viewport.",
+        };
+      }
+
+      // A rasterizer without foreignObject support still produces a valid
+      // one-colour image. Detect that and say so, rather than handing the
+      // model a blank page and letting it describe emptiness as a bug.
+      const sample = ctx.getImageData(0, 0, shotW, shotH).data;
+      const colors = new Set<string>();
+      for (let i = 0; i < sample.length; i += 4 * 97) {
+        colors.add(`${sample[i]},${sample[i + 1]},${sample[i + 2]}`);
+        if (colors.size > 4) break;
+      }
+      if (shotW > 40 && shotH > 40 && colors.size <= 1) {
+        return {
+          ok: false,
+          error:
+            "This browser could not rasterize the preview DOM (the capture came back blank). " +
+            "Use get_preview_layout or query_preview_dom instead.",
+        };
+      }
+
+      return {
+        ok: true,
+        result: { dataUrl, width: shotW, height: shotH, selector: selector ?? null, approximate: true },
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
   window.addEventListener("message", (event: MessageEvent) => {
-    const data = event.data as { source?: string; reqId?: number; kind?: string; code?: string; selector?: string; mode?: string } | null;
+    // Only the embedding app may drive this execution sandbox. This frame has
+    // an opaque origin, so `parent` identity is the only binding available;
+    // without it any other window that reached this frame could ask it to
+    // evaluate code or read its DOM on the agent's behalf.
+    if (event.source !== window.parent) return;
+    const data = event.data as { source?: string; reqId?: number; kind?: string; code?: string; selector?: string; mode?: string; maxElements?: number } | null;
     if (!data || data.source !== "intab-preview" || typeof data.reqId !== "number") return;
     void (async () => {
       let response: { ok: boolean; result?: unknown; error?: string };
@@ -503,6 +737,15 @@ function bridgeSource(): void {
         response = typeof data.selector === "string" && data.selector.trim()
           ? queryDom(data.selector, data.mode === "text" ? "text" : "html")
           : { ok: false, error: "query_dom request is missing its selector." };
+      } else if (data.kind === "layout") {
+        response = collectLayout(
+          typeof data.selector === "string" && data.selector.trim() ? data.selector : undefined,
+          typeof data.maxElements === "number" && Number.isFinite(data.maxElements) ? data.maxElements : 40
+        );
+      } else if (data.kind === "screenshot") {
+        response = await captureScreenshot(
+          typeof data.selector === "string" && data.selector.trim() ? data.selector : undefined
+        );
       } else {
         response = { ok: false, error: `Unknown request kind: ${String(data.kind)}` };
       }

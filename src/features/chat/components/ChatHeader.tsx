@@ -5,14 +5,11 @@
 import React from "react";
 import {
   Blocks,
-  Download,
   Menu,
-  Settings,
   SlidersHorizontal,
   X,
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { useAppStore } from "@/stores/app.store";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { ModeToggle } from "./ModeToggle";
@@ -40,10 +37,10 @@ interface ChatHeaderProps {
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
   context: ContextBreakdown;
-  onOpenSettings: () => void;
-  onExport: () => void;
+  onOpenSettings?: () => void;
+  onExport?: () => void;
   /** Whether the active conversation has anything to export */
-  hasMessages: boolean;
+  hasMessages?: boolean;
   /** Per-conversation system prompt indicator */
   hasConversationPrompt: boolean;
   /** Number of enabled skills (0 hides the chip) */
@@ -70,9 +67,6 @@ export function ChatHeader({
   mode,
   onModeChange,
   context,
-  onOpenSettings,
-  onExport,
-  hasMessages,
   hasConversationPrompt,
   activeSkillCount,
   onOpenSkills,
@@ -82,17 +76,6 @@ export function ChatHeader({
   onToggleSidebar,
   isSidebarOpen,
 }: ChatHeaderProps) {
-  const handleExport = () => {
-    if (!hasMessages) {
-      useAppStore.getState().addToast({
-        message: "Nothing to export yet — send a message first.",
-        type: "info",
-      });
-      return;
-    }
-    onExport();
-  };
-
   return (
     <div className="chat-header">
       <div className="chat-header-left">
@@ -115,28 +98,30 @@ export function ChatHeader({
             )}
           </button>
         </SimpleTooltip>
-        <ModelPicker
-          value={model}
-          models={models}
-          isLoading={modelsLoading}
-          onChange={onModelChange}
-        />
-        {/* Model state (reasoning effort) — applied to every send and
-            snapped to what this model declares it accepts. Hidden for
-            models with no reasoning support. */}
-        <EffortPicker value={effort} efforts={efforts} onChange={onEffortChange} />
-        {/* Build/Plan — enforced by the tool list and the executor */}
-        <ModeToggle
-          value={mode}
-          onChange={onModeChange}
-          disabled={!repoContext}
-        />
+
+        {/* One control strip, not three loose buttons: model · effort ·
+            mode are one decision (what answers, how hard it thinks,
+            what it may do), so they read as a single control with
+            hairline dividers. */}
+        <div className="chat-header-controls">
+          <ModelPicker
+            value={model}
+            models={models}
+            isLoading={modelsLoading}
+            onChange={onModelChange}
+          />
+          {/* Model state (reasoning effort) — applied to every send and
+              snapped to what this model declares it accepts. Hidden for
+              models with no reasoning support. */}
+          <EffortPicker value={effort} efforts={efforts} onChange={onEffortChange} />
+          {/* Build/Plan — enforced by the tool list and the executor */}
+          <ModeToggle
+            value={mode}
+            onChange={onModeChange}
+            disabled={!repoContext}
+          />
+        </div>
         <ContextMeter context={context} />
-        <RepoPicker
-          repoContext={repoContext}
-          token={githubToken}
-          onChange={onRepoChange}
-        />
       </div>
 
       <div className="chat-header-right">
@@ -167,26 +152,11 @@ export function ChatHeader({
             </button>
           </SimpleTooltip>
         )}
-        <SimpleTooltip content="Export chat as Markdown" side="bottom">
-          <button
-            type="button"
-            className="chat-header-btn"
-            onClick={handleExport}
-            aria-label="Export chat"
-          >
-            <Download className="h-3.5 w-3.5" />
-          </button>
-        </SimpleTooltip>
-        <SimpleTooltip content="Chat settings" side="bottom">
-          <button
-            type="button"
-            className="chat-header-btn"
-            onClick={onOpenSettings}
-            aria-label="Open chat settings"
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </button>
-        </SimpleTooltip>
+        <RepoPicker
+          repoContext={repoContext}
+          token={githubToken}
+          onChange={onRepoChange}
+        />
       </div>
     </div>
   );

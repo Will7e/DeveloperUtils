@@ -82,6 +82,16 @@ export function getCalibrationRatio(modelId: string | undefined): number {
   return Math.min(MAX_RATIO, Math.max(MIN_RATIO, ratio));
 }
 
+/**
+ * True when a model has enough samples for its correction ratio to be
+ * applied — i.e. the estimates shown for it have been checked against
+ * real provider counts rather than being pure heuristic.
+ */
+export function isCalibrated(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  return (state.samples[modelId]?.length ?? 0) >= MIN_SAMPLES;
+}
+
 /** Clears learned calibration (settings reset / debugging) */
 export function resetCalibration(): void {
   state.samples = {};

@@ -2,6 +2,8 @@
 // AI Chat Types — OpenRouter-Backed Multi-Model Chat
 // ============================================================
 
+import type { SpendSummary } from "./lib/cost-meter";
+
 export interface UsageInfo {
   /** Exact prompt tokens reported by the provider (null when estimated) */
   promptTokens: number | null;
@@ -9,6 +11,12 @@ export interface UsageInfo {
   completionTokens: number | null;
   /** Cost in OpenRouter credits for this response */
   cost: number | null;
+  /**
+   * Prompt tokens served from the provider's prompt cache
+   * (`usage.prompt_tokens_details.cached_tokens`). Cached reads are
+   * billed at a discount, so this is the savings number worth showing.
+   */
+  cachedTokens?: number | null;
 }
 
 /**
@@ -73,7 +81,12 @@ export type ToolName =
   | "run_tool_program"
   | "read_skill"
   | "remember"
-  | "delegate";
+  | "delegate"
+  | "run_checks"
+  | "get_preview_layout"
+  | "check_preview_visually"
+  | "list_mcp_tools"
+  | "call_mcp_tool";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -323,7 +336,9 @@ export interface PushWarning {
     /** Automated push policy: protected paths, oversized change set */
     | "policy"
     /** The agent's summary claims something the turn's evidence does not support */
-    | "evidence";
+    | "evidence"
+    /** Checks this repository declares that nothing in this workspace can run */
+    | "checks";
   message: string;
 }
 
@@ -371,6 +386,21 @@ export interface ChatSkill {
 }
 
 /** How the user connected GitHub */
+/**
+ * One configured MCP server. The shape lives here (not in lib/mcp.ts)
+ * because it is PERSISTED settings, alongside the GitHub and skill
+ * settings it sits next to in the same store.
+ */
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  /** HTTPS endpoint speaking streamable-HTTP MCP */
+  url: string;
+  /** Optional bearer token sent as Authorization */
+  apiKey?: string;
+  enabled?: boolean;
+}
+
 export type GitHubAuthMode = "oauth" | "pat";
 
 export interface GitHubSettings {
@@ -412,8 +442,34 @@ export interface ChatSettings {
   syncImageAttachments: boolean;
   /** Max agent tool-loop iterations per user message (coding-agent mode) */
   agentMaxIterations: number;
+  /**
+   * Optional external checks runner (see lib/verify-contract.ts). When
+   * set, `run_checks` POSTs the repository's declared commands here and
+   * returns real results. Empty = no shell anywhere, which the harness
+   * then states plainly instead of guessing.
+   */
+  checksEndpoint?: string;
+  /**
+   * Connected MCP servers (browser-native streamable HTTP — no local
+   * daemon). Their tools are reachable through list_mcp_tools /
+   * call_mcp_tool. See lib/mcp.ts.
+   */
+  mcpServers?: McpServerConfig[];
   /** GitHub OAuth/PAT credentials for agent mode (encrypted at rest) */
   github: GitHubSettings;
+  /**
+   * When a turn stalls — the model repeats the same FAILING tool call, or
+   * the provider refuses the request — continue it on a capably stronger
+   * model instead of giving up. Default on; every switch is announced in
+   * the transcript and attributed on the reply. See lib/escalation.ts.
+   */
+  autoEscalate?: boolean;
+  /**
+   * Explicit escalation target. Empty = choose automatically (the
+   * cheapest capably stronger model the catalog knows about, within the
+   * automatic budget).
+   */
+  escalationModel?: string;
 }
 
 /** Reasoning capability metadata advertised by the OpenRouter catalog */
@@ -468,6 +524,22 @@ export interface ToolDefinition {
 
 export type ContextHealth = "optimal" | "moderate" | "near-limit" | "exceeded";
 
+/** What a slice of the window is spent on */
+export type ContextPartKey = "system" | "tools" | "memory" | "messages" | "free";
+
+/**
+ * One attributed slice of the context window. `free` is the only part
+ * that is not spend — it closes the bar out to the usable window.
+ */
+export interface ContextPart {
+  key: ContextPartKey;
+  /** Short label for the breakdown list */
+  label: string;
+  tokens: number;
+  /** What this slice actually contains (tooltip / breakdown detail) */
+  detail: string;
+}
+
 export interface ContextBreakdown {
   /** Tokens of the full stored conversation (estimates + exacts where known) */
   totalTokens: number;
@@ -475,7 +547,46 @@ export interface ContextBreakdown {
   sentTokens: number;
   /** Tokens hidden by compaction in the last request */
   compactedTokens: number;
+  /** The model's full context window */
   maxTokens: number;
+  /**
+   * Denominator of `percentageUsed`: the window actually spendable on
+   * input (window − output reserve). 100% means compaction is due, not
+   * that the window is literally full.
+   */
+  usableTokens: number;
+  /** Tokens held back for the model's own output */
+  outputReserve: number;
   percentageUsed: number;
   health: ContextHealth;
+  /**
+   * Ordered attribution of the window: system → tools → memory →
+   * messages → free. Always sums to the full window.
+   */
+  parts: ContextPart[];
+  /**
+   * Provider-reported prompt tokens of the most recent reply (exact,
+   * null before the first completed turn) — the ground truth the
+   * estimates are checked against.
+   */
+  lastPromptTokens: number | null;
+  /** Provider-reported cached prompt tokens of that same request */
+  lastCachedTokens: number | null;
+  /** Total spend in OpenRouter credits across the conversation */
+  totalCost: number;
+  /** Completion tokens the conversation has generated so far */
+  completionTokens: number;
+  /**
+   * Spend attributed to the model that ACTUALLY answered, per model (see
+   * lib/cost-meter.ts). A harness that routes work to cheaper models —
+   * delegation, vision checks, escalation — has to show its work, or the
+   * savings are indistinguishable from a billing mistake.
+   */
+  spend: SpendSummary;
+  /**
+   * True when the estimator has a learned correction for this model
+   * (see context/tokenizer-calibration.ts) — i.e. the numbers shown
+   * have already been corrected against real provider counts.
+   */
+  calibrated: boolean;
 }

@@ -147,6 +147,12 @@ export interface Toast {
   action?: { label: string; onClick: () => void };
   /** Keep the toast on screen until manually dismissed */
   preserve?: boolean;
+  /**
+   * Render the message as a fixed-width report: newlines are honored
+   * and the text is monospaced, so pre-aligned columns line up (used
+   * by the /context breakdown and /status).
+   */
+  multiline?: boolean;
 }
 
 /** Command palette action */

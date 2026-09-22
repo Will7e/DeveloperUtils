@@ -10,9 +10,19 @@
 // and is then stored client-side (encrypted at rest, like the
 // OpenRouter key).
 //
+// The response page never interpolates untrusted text into markup
+// or into a <script> body: the payload is embedded in a
+// <script type="application/json"> data block with HTML-significant
+// characters escaped, and the logic lives in an external file
+// (/oauth/github-popup.js). That keeps the page safe under a strict
+// default-src 'none' policy and immune to the "error_description
+// closes the script element" XSS class.
+//
 // Requires (Vercel env vars — NEVER prefix with VITE_):
 //   GITHUB_CLIENT_ID
 //   GITHUB_CLIENT_SECRET
+
+import { escapeHtmlAttribute, safeJsonForHtml } from "../src/utils/htmlEmbed.js";
 
 export const config = {
   runtime: "edge",
@@ -45,24 +55,18 @@ function isAllowedOrigin(originStr: string | null): boolean {
   }
 }
 
-function htmlPage(body: string, origin: string): Response {
+function htmlPage(payload: unknown, origin: string): Response {
+  const targetOrigin = escapeHtmlAttribute(origin);
   return new Response(
     `<!DOCTYPE html>
 <html>
-  <head><meta charset="utf-8"><title>Connecting GitHub…</title></head>
+  <head>
+    <meta charset="utf-8">
+    <title>Connecting GitHub…</title>
+  </head>
   <body>
-    <script>
-      (function () {
-        var payload = ${body};
-        if (window.opener) {
-          window.opener.postMessage(
-            { source: "intab-github-oauth", payload: payload },
-            ${JSON.stringify(origin)}
-          );
-        }
-        setTimeout(function () { window.close(); }, 150);
-      })();
-    </script>
+    <script id="intab-oauth-payload" type="application/json">${safeJsonForHtml(payload)}</script>
+    <script src="/oauth/github-popup.js" data-target-origin="${targetOrigin}"></script>
     <p style="font-family: system-ui; color: #555;">Completing GitHub sign-in…</p>
   </body>
 </html>`,
@@ -73,6 +77,10 @@ function htmlPage(body: string, origin: string): Response {
         "Cache-Control": "no-store",
         // The page runs in a popup opened by the app; it needs no CORS.
         "X-Content-Type-Options": "nosniff",
+        // Defence in depth: this popup needs no network, no images and no
+        // inline script. Nothing here can be reached by an injected string.
+        "Content-Security-Policy":
+          "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
       },
     }
   );
@@ -84,10 +92,9 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response("Forbidden origin", { status: 403 });
   }
 
-  const clientId =
-    process.env.GITHUB_CLIENT_ID ||
-    (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined) ||
-    "";
+  // Server-only config. `import.meta.env` is a Vite (client) construct and is
+  // not populated by the edge runtime, so reading it here would throw.
+  const clientId = process.env.GITHUB_CLIENT_ID || "";
   const clientSecret = process.env.GITHUB_CLIENT_SECRET || "";
 
   const url = new URL(req.url);
@@ -98,23 +105,28 @@ export default async function handler(req: Request): Promise<Response> {
   // ── Error path: user denied or GitHub errored ──
   if (errorParam) {
     return htmlPage(
-      JSON.stringify({ ok: false, error: url.searchParams.get("error_description") || errorParam }),
+      {
+        ok: false,
+        state,
+        error: url.searchParams.get("error_description") || errorParam,
+      },
       origin
     );
   }
 
   if (!clientId || !clientSecret) {
     return htmlPage(
-      JSON.stringify({
+      {
         ok: false,
+        state,
         error: "GitHub sign-in is not configured on the server (missing GITHUB_CLIENT_ID/SECRET).",
-      }),
+      },
       origin
     );
   }
 
   if (!code) {
-    return htmlPage(JSON.stringify({ ok: false, error: "Missing ?code parameter." }), origin);
+    return htmlPage({ ok: false, state, error: "Missing ?code parameter." }, origin);
   }
 
   // ── Exchange the code for an access token ──
@@ -143,21 +155,26 @@ export default async function handler(req: Request): Promise<Response> {
 
     if (!tokenRes.ok || data.error || !data.access_token) {
       return htmlPage(
-        JSON.stringify({
+        {
           ok: false,
-          error: data.error_description || data.error || `Token exchange failed (HTTP ${tokenRes.status}).`,
-        }),
+          state,
+          error:
+            data.error_description ||
+            data.error ||
+            `Token exchange failed (HTTP ${tokenRes.status}).`,
+        },
         origin
       );
     }
 
-    return htmlPage(JSON.stringify({ ok: true, accessToken: data.access_token }), origin);
+    return htmlPage({ ok: true, state, accessToken: data.access_token }, origin);
   } catch (err) {
     return htmlPage(
-      JSON.stringify({
+      {
         ok: false,
+        state,
         error: err instanceof Error ? err.message : "Token exchange failed.",
-      }),
+      },
       origin
     );
   }

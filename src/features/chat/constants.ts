@@ -151,6 +151,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   skills: [],
   syncImageAttachments: true,
   agentMaxIterations: AGENT_ITERATIONS_DEFAULT,
+  checksEndpoint: "",
   github: {
     token: "",
     mode: null,

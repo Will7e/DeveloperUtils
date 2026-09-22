@@ -20,5 +20,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  // The dev-server plugin and the Vercel edge functions were previously
+  // outside every tsconfig, so `npm run build` never checked them — which is
+  // how a construct that only exists in Vite-land survived in api/license.ts.
+  "include": ["vite.config.ts", "vite-plugin-api-proxy.ts", "api"]
 }

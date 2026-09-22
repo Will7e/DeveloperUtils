@@ -8,7 +8,7 @@
 // Streaming content is rendered inline with a blinking caret.
 
 import React from "react";
-import { Brain, Check, ChevronDown, Copy, Image as ImageIcon, RefreshCw, TriangleAlert } from "lucide-react";
+import { Brain, Check, ChevronDown, Copy, Image as ImageIcon, RefreshCw, TriangleAlert, Zap } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown";
 import { ToolCallBlock } from "./ToolCallBlock";
@@ -107,6 +107,7 @@ export const MessageItem = React.memo(function MessageItem({
   const content = streamingContentOverride ?? message.content;
   const isUser = message.role === "user";
   const tps = tokensPerSecond(message);
+  const cachedTokens = message.usage?.cachedTokens ?? 0;
 
   return (
     <div className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"} ${message.error ? "chat-msg-error" : ""}`}>
@@ -124,9 +125,26 @@ export const MessageItem = React.memo(function MessageItem({
           </span>
         )}
         <span className="chat-msg-meta-time">{formatTime(message.timestamp)}</span>
+        {/* Prompt tokens: what this turn actually cost to send. The
+            number comes from the provider's usage frame, so it is
+            exact — see usage.promptTokens on the message. */}
+        {message.usage?.promptTokens != null && !isUser && (
+          <span className="chat-msg-tokens" title="Prompt tokens sent with this request (exact)">
+            {formatTokens(message.usage.promptTokens)} in
+          </span>
+        )}
         {message.usage?.completionTokens != null && !isUser && (
-          <span className="chat-msg-tokens">
-            {formatTokens(message.usage.completionTokens)} tok
+          <span className="chat-msg-tokens" title="Tokens this reply generated">
+            {formatTokens(message.usage.completionTokens)} out
+          </span>
+        )}
+        {cachedTokens > 0 && !isUser && (
+          <span
+            className="chat-msg-tokens chat-msg-cache"
+            title={`${cachedTokens.toLocaleString()} prompt tokens were served from the prompt cache — billed at a discount`}
+          >
+            <Zap className="h-3 w-3" />
+            {formatTokens(cachedTokens)} cached
           </span>
         )}
         {tps !== null && !isUser && (

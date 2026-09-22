@@ -410,6 +410,7 @@ export class HostTurnController {
               promptTokens: turn.usage.promptTokens,
               completionTokens: turn.usage.completionTokens,
               cost: turn.usage.cost,
+              cachedTokens: turn.usage.cachedTokens ?? null,
             }
           : undefined,
         latencyMs: startedAt ? Date.now() - startedAt : undefined,

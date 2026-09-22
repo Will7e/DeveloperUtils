@@ -39,13 +39,39 @@ import {
   GitHubWriteError,
 } from "../lib/github-write";
 import { schedulePreviewBuild, runPreviewBuild } from "../preview/preview-runtime";
-import { runJsInPreview, queryPreviewDom } from "../preview/preview-bridge";
+import { capturePreviewLayout, runJsInPreview, queryPreviewDom } from "../preview/preview-bridge";
+import {
+  analyzeLayout,
+  formatLayoutMap,
+  normalizeLayoutReport,
+  summarizeLayout,
+} from "../lib/preview-layout";
+import {
+  VERIFY_MANIFEST_PATH,
+  checksFromAgentsMd,
+  checksFromPackageJson,
+  mergeChecks,
+  parseVerifyManifest,
+  summarizeChecks,
+  unrunChecksStatement,
+} from "../lib/verify-contract";
 import { usePreviewStore } from "../preview/preview.store";
 import { assessPushPolicy, policyWarnings } from "../lib/push-policy";
 import { auditClaims, evidenceWarnings } from "../lib/evidence-audit";
 import { appendMemory, MEMORY_PATH, parseMemoryFacts } from "../lib/project-memory";
 import { delegateToolResult, pickResearchModel, runDelegateLoop } from "./delegate";
-import { completeChatWithTools } from "../lib/openrouter-client";
+import { activeServers, callServerTool, findServer, listAllTools } from "../lib/mcp";
+import { completeChat, completeChatWithTools } from "../lib/openrouter-client";
+import { capturePreviewScreenshot } from "../preview/preview-bridge";
+import { getCachedModelCatalog } from "../lib/model-catalog";
+import {
+  VISUAL_CHECK_SYSTEM_PROMPT,
+  buildVisualCheckPrompt,
+  captureCaveat,
+  normalizeScreenshot,
+  parseVisualVerdict,
+  pickVisionModel,
+} from "../lib/visual-check";
 import { executeToolCall, parseToolArguments } from "../lib/tools";
 import type { ChatConversation } from "../types";
 
@@ -612,6 +638,526 @@ export async function runCreateWorkingBranch(
   }
 }
 
+/** Plain-object guard for model-supplied arguments */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// ── MCP (external tools over streamable HTTP) ────────────────
+
+/**
+ * Lists the tools every connected MCP server exposes.
+ *
+ * Errors are per-server and reported, never swallowed: a server that
+ * refuses the browser origin (CORS) is the most common failure, and it
+ * must be visible as exactly that — an empty list with no explanation
+ * would look like "the tool you asked for does not exist".
+ */
+export async function runListMcpTools(
+  _conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const configured = activeServers(useChatStore.getState().settings.mcpServers);
+  // Optional narrowing: with several servers connected, a listing of all
+  // of them is context the model usually does not need.
+  const filter = typeof args.server === "string" ? args.server.trim() : "";
+  const servers = filter ? configured.filter((s) => findServer([s], filter)) : configured;
+  if (servers.length === 0) {
+    return {
+      callId: "",
+      name: "list_mcp_tools",
+      ok: true,
+      data: {
+        servers: [],
+        note: "No MCP servers are connected. The user can add one in Chat Settings → Chat.",
+      },
+      durationMs: Date.now() - started,
+      summary: "no MCP servers",
+    };
+  }
+
+  const results = await listAllTools(servers);
+  const ok = results.filter((r) => !r.error);
+  const failed = results.filter((r) => r.error);
+
+  return {
+    callId: "",
+    name: "list_mcp_tools",
+    // Partial success is success: one unreachable server must not stop
+    // the agent using the others.
+    ok: true,
+    data: {
+      servers: results.map((r) => ({
+        server: r.server.name,
+        id: r.server.id,
+        toolCount: r.tools.length,
+        ...(r.error ? { error: r.error } : {}),
+        tools: r.tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+        })),
+      })),
+      ...(failed.length > 0
+        ? {
+            note: `${failed.length} server(s) did not answer. Their tools are unavailable this turn; tell the user rather than working around it silently.`,
+          }
+        : {}),
+    },
+    durationMs: Date.now() - started,
+    summary:
+      ok.length === 0
+        ? `0/${servers.length} MCP servers reachable`
+        : `${ok.reduce((n, r) => n + r.tools.length, 0)} MCP tool(s) from ${ok.length} server(s)`,
+  };
+}
+
+/** Calls one tool on one connected MCP server */
+export async function runCallMcpTool(
+  _conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const servers = useChatStore.getState().settings.mcpServers;
+  const serverRef = typeof args.server === "string" ? args.server.trim() : "";
+  const toolName = typeof args.tool === "string" ? args.tool.trim() : "";
+  const toolArgs = isRecord(args.arguments) ? args.arguments : {};
+
+  const fail = (error: string): ToolCallResult => ({
+    callId: "",
+    name: "call_mcp_tool",
+    ok: false,
+    data: { error },
+    durationMs: Date.now() - started,
+    summary: toolName || "MCP call",
+  });
+
+  if (!serverRef || !toolName) {
+    return fail('Missing required arguments: "server" and "tool" (see list_mcp_tools).');
+  }
+  const server = findServer(servers, serverRef);
+  if (!server) {
+    const known = activeServers(servers)
+      .map((s) => `${s.name} (${s.id})`)
+      .join(", ");
+    return fail(
+      known
+        ? `No MCP server matches \`${serverRef}\`. Connected servers: ${known}.`
+        : `No MCP servers are connected, so \`${serverRef}\` does not exist.`
+    );
+  }
+
+  const outcome = await callServerTool(server, toolName, toolArgs);
+  if (!outcome.ok && outcome.error) return fail(outcome.error);
+
+  return {
+    callId: "",
+    name: "call_mcp_tool",
+    ok: outcome.ok,
+    data: {
+      server: server.name,
+      tool: toolName,
+      result: outcome.text,
+      note: "Result of a tool running in an EXTERNAL service — report what changed to the user.",
+    },
+    durationMs: Date.now() - started,
+    summary: `${server.name}/${toolName}`,
+  };
+}
+
+// ── run_checks (the verification contract) ───────────────────
+
+/** Best-effort read of one repo file: workspace first, then GitHub */
+async function readRepoFile(
+  conversationId: string,
+  path: string
+): Promise<string | null> {
+  const store = useChatStore.getState();
+  const ws = store.workspaces[conversationId];
+  const local = ws?.files[path];
+  if (local && local.status !== "deleted") return local.content;
+  const repo = store.conversations.find((c) => c.id === conversationId)?.repoContext;
+  const token = store.settings.github.token;
+  if (!repo || !token) return null;
+  try {
+    const { readFileContent } = await import("../lib/github-client");
+    const file = await readFileContent(token, repo.owner, repo.repo, path, repo.branch);
+    return file.text;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Discovers every verification check this repository declares.
+ * Exported because the push gate reuses it: a reviewer should know which
+ * declared checks were never executed, not just which ones the model
+ * claimed.
+ */
+export async function discoverChecks(conversationId: string): Promise<{
+  checks: ReturnType<typeof mergeChecks>;
+  notes: string[];
+}> {
+  const notes: string[] = [];
+  const [manifestRaw, packageRaw, agentsRaw] = await Promise.all([
+    readRepoFile(conversationId, VERIFY_MANIFEST_PATH),
+    readRepoFile(conversationId, "package.json"),
+    readRepoFile(conversationId, "AGENTS.md"),
+  ]);
+
+  const manifest = parseVerifyManifest(manifestRaw);
+  if (manifest.error) notes.push(manifest.error);
+  const checks = mergeChecks(
+    manifest.checks,
+    checksFromPackageJson(packageRaw),
+    checksFromAgentsMd(agentsRaw)
+  );
+  return { checks, notes };
+}
+
+/** Timeout for one external check run (a test suite can be slow) */
+const CHECK_RUN_TIMEOUT_MS = 180_000;
+
+/**
+ * Reports the repository's declared verification checks, and executes
+ * them ONLY when the user has configured a runner.
+ *
+ * The uncomfortable truth this tool exists to make usable: there is no
+ * shell here. An agent without this tool says "all tests pass" and is
+ * believed. An agent with it can say "this repo declares four checks, I
+ * ran none of them, here are the commands" — which is checkable. When a
+ * runner IS configured the declared commands are executed there (the
+ * only place in the product where that can happen) and real results come
+ * back.
+ */
+export async function runRunChecks(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const store = useChatStore.getState();
+  const ws = await latestWorkspace(conversationId);
+  if (!ws) {
+    return {
+      callId: "",
+      name: "run_checks",
+      ok: false,
+      data: { error: "No workspace available — attach a repository first." },
+      durationMs: Date.now() - started,
+      summary: "no workspace",
+    };
+  }
+
+  const { checks, notes } = await discoverChecks(conversationId);
+  const statement = unrunChecksStatement(checks);
+  const wantsRun = args.run === true;
+  const endpoint =
+    store.settings.checksEndpoint?.trim() ||
+    (import.meta.env?.VITE_CHECKS_ENDPOINT as string | undefined)?.trim() ||
+    "";
+
+  // ── No runner configured: report the contract, execute nothing ──
+  if (!wantsRun || !endpoint) {
+    return {
+      callId: "",
+      name: "run_checks",
+      ok: true,
+      data: {
+        status: wantsRun && !endpoint ? "not-executed-no-runner" : "declared",
+        checks: checks.map((c) => ({ label: c.label, command: c.command, source: c.source })),
+        statement,
+        executed: false,
+        ...(notes.length > 0 ? { notes } : {}),
+        ...(wantsRun && !endpoint
+          ? {
+              note:
+                "No checks runner is configured, so nothing was executed. Add one in Chat Settings (or set VITE_CHECKS_ENDPOINT), " +
+                "and until then hand the commands above to the user instead of reporting their outcome.",
+            }
+          : {}),
+      },
+      durationMs: Date.now() - started,
+      summary: summarizeChecks(checks),
+    };
+  }
+
+  // ── Runner configured: POST the declared commands + the change set ──
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHECK_RUN_TIMEOUT_MS);
+  try {
+    const changes = collectChanges(ws);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        repo: { owner: ws.owner, repo: ws.repo, branch: ws.branch },
+        checks: checks.map((c) => ({ id: c.id, label: c.label, command: c.command })),
+        files: changes.map((f) => ({ path: f.path, content: f.content })),
+      }),
+    });
+    if (!response.ok) {
+      return {
+        callId: "",
+        name: "run_checks",
+        ok: false,
+        data: {
+          status: "runner-error",
+          error: `The checks runner returned HTTP ${response.status}.`,
+          statement,
+        },
+        durationMs: Date.now() - started,
+        summary: "runner error",
+      };
+    }
+    const json = (await response.json()) as {
+      results?: Array<{ id?: string; ok?: boolean; output?: string }>;
+      error?: string;
+    };
+    const results = (json.results ?? []).map((r) => ({
+      id: r.id ?? "unknown",
+      ok: r.ok === true,
+      output: typeof r.output === "string" ? r.output.slice(0, 2_000) : undefined,
+    }));
+    const failed = results.filter((r) => !r.ok);
+
+    return {
+      callId: "",
+      name: "run_checks",
+      ok: failed.length === 0,
+      data: {
+        status: "executed",
+        executed: true,
+        ran: results.length,
+        failed: failed.map((r) => r.id),
+        results,
+        ...(json.error ? { runnerNote: json.error } : {}),
+      },
+      durationMs: Date.now() - started,
+      summary:
+        results.length === 0
+          ? "runner returned no results"
+          : failed.length === 0
+            ? `${results.length} check(s) passed`
+            : `${failed.length}/${results.length} check(s) failed`,
+    };
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    return {
+      callId: "",
+      name: "run_checks",
+      ok: false,
+      data: {
+        status: aborted ? "runner-timeout" : "runner-unreachable",
+        error: aborted
+          ? `The checks runner did not finish within ${Math.round(CHECK_RUN_TIMEOUT_MS / 1000)}s.`
+          : `Could not reach the checks runner: ${err instanceof Error ? err.message : "unknown error"}`,
+        statement,
+      },
+      durationMs: Date.now() - started,
+      summary: aborted ? "runner timeout" : "runner unreachable",
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── get_preview_layout (geometry the model can reason about) ─
+
+export async function runPreviewLayout(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const preview = usePreviewStore.getState();
+  const selector = typeof args.selector === "string" ? args.selector.trim() : undefined;
+  const requested =
+    typeof args.maxElements === "number" && Number.isFinite(args.maxElements)
+      ? Math.floor(args.maxElements)
+      : 40;
+  const maxElements = Math.min(Math.max(1, requested), 80);
+
+  if (preview.conversationId && preview.conversationId !== conversationId) {
+    return {
+      callId: "",
+      name: "get_preview_layout",
+      ok: false,
+      data: {
+        error:
+          "The preview is showing a different conversation. Open this conversation's preview, then retry.",
+      },
+      durationMs: Date.now() - started,
+      summary: "wrong preview",
+    };
+  }
+
+  const response = await capturePreviewLayout(selector, maxElements);
+  if (!response.ok) {
+    return {
+      callId: "",
+      name: "get_preview_layout",
+      ok: false,
+      data: { error: response.error ?? "The preview did not answer the layout request." },
+      durationMs: Date.now() - started,
+      summary: "layout unavailable",
+    };
+  }
+
+  const report = normalizeLayoutReport(response.result);
+  const findings = analyzeLayout(report);
+  const map = formatLayoutMap(report, maxElements);
+
+  return {
+    callId: "",
+    name: "get_preview_layout",
+    ok: true,
+    data: {
+      viewport: `${report.viewport.w}×${report.viewport.h}`,
+      document: `${report.document.w}×${report.document.h}`,
+      boxes: report.elements.length,
+      findings: findings.length > 0 ? findings : ["No layout problems detected."],
+      map,
+      note:
+        findings.length > 0
+          ? "Fix these and re-check — a layout problem is a real bug, not a style preference."
+          : "Geometry only: this cannot see colours, contrast, or overlapping paint order.",
+    },
+    durationMs: Date.now() - started,
+    summary: summarizeLayout(report, findings),
+  };
+}
+
+// ── check_preview_visually (screenshot → vision model) ──────
+
+/**
+ * Looks at the running preview and answers a question about it.
+ *
+ * This is the observation channel a terminal-based agent cannot have.
+ * DOM queries prove an element exists; geometry proves where it is;
+ * neither can tell you that the text is white on white, that the icon
+ * font silently fell back to tofu boxes, that the button collapsed to
+ * zero height, or that a modal is painted UNDER the overlay it belongs
+ * on. A picture can.
+ *
+ * The transport makes the shape: a tool result is text, so the image
+ * cannot enter the transcript as an image. The picture is shown to a
+ * VISION model whose written answer becomes the tool result — with the
+ * model and the capture's limitations attributed in the result, because
+ * this is evidence, never proof.
+ */
+export async function runVisualCheck(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const fail = (error: string, summary = "visual check unavailable"): ToolCallResult => ({
+    callId: "",
+    name: "check_preview_visually",
+    ok: false,
+    data: { error },
+    durationMs: Date.now() - started,
+    summary,
+  });
+
+  const question = typeof args.question === "string" ? args.question.trim().slice(0, 500) : "";
+  if (!question) {
+    return fail('Missing required argument: "question" — say what the picture should show.');
+  }
+  const claim = typeof args.claim === "string" ? args.claim.trim().slice(0, 500) : undefined;
+  const selector = typeof args.selector === "string" ? args.selector.trim() : undefined;
+
+  const store = useChatStore.getState();
+  const preview = usePreviewStore.getState();
+  if (preview.conversationId && preview.conversationId !== conversationId) {
+    return fail("The preview is showing a different conversation. Open this conversation's preview, then retry.");
+  }
+
+  const apiKey = store.settings.apiKey?.trim();
+  if (!apiKey) return fail("No OpenRouter API key is configured.");
+
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  const currentModel = conversation?.model ?? store.settings.defaultModel;
+  const choice = pickVisionModel(currentModel, getCachedModelCatalog() ?? []);
+  if (!choice) {
+    return fail(
+      "No vision-capable model is known in the model catalog, so nothing can look at the preview. " +
+        "Open Chat Settings → Models to refresh the list, or pick a model with image input."
+    );
+  }
+
+  const response = await capturePreviewScreenshot(selector || undefined);
+  if (!response.ok) return fail(response.error ?? "The preview did not answer the capture request.");
+  const capture = normalizeScreenshot(response.result);
+  if (!capture) {
+    return fail("The preview returned a capture that could not be used (wrong format or too large).");
+  }
+
+  let answer: string;
+  let cost: number | null;
+  try {
+    const completion = await completeChat({
+      apiKey,
+      model: choice.modelId,
+      temperature: 0,
+      maxTokens: 700,
+      messages: [
+        { role: "system", content: VISUAL_CHECK_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: buildVisualCheckPrompt({ question, claim, capture }) },
+            { type: "image_url", image_url: { url: capture.dataUrl } },
+          ],
+        },
+      ],
+    });
+    answer = completion.content;
+    cost = completion.usage?.cost ?? null;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "the vision request failed";
+    return fail(
+      `The vision request to \`${choice.modelId}\` failed: ${detail}`,
+      "vision request failed"
+    );
+  }
+
+  const verdict = parseVisualVerdict(answer);
+
+  return {
+    callId: "",
+    name: "check_preview_visually",
+    // A written verdict is a SUCCESSFUL check even when it reports a
+    // defect — otherwise the loop's failure ledger would treat "the UI is
+    // broken" as the tool misbehaving and refuse the re-check after a fix.
+    ok: true,
+    data: {
+      verdict: verdict.verdict,
+      issues: verdict.issues,
+      model: choice.modelId,
+      routedBy: choice.reason,
+      capture: captureCaveat(capture),
+      ...(cost !== null ? { costUsd: cost } : {}),
+      ...(verdict.malformed
+        ? { contractViolation: "The vision model did not answer in the required VERDICT/ISSUES form — its text is reported verbatim below and must not be read as approval." }
+        : {}),
+      ...(verdict.malformed || verdict.verdict === "unclear" ? { raw: verdict.raw } : {}),
+      note:
+        verdict.verdict === "ok"
+          ? "Evidence, not proof: the vision model saw no defect in this capture. It does not prove the feature works, and it saw rendered pixels only — not your code."
+          : verdict.verdict === "problem"
+            ? "These are visible defects in the rendered page. Fix them and run this check again."
+            : "The check established nothing. Answer from get_preview_layout, query_preview_dom or get_preview_feedback, and do not claim the UI was verified.",
+    },
+    durationMs: Date.now() - started,
+    summary:
+      verdict.verdict === "ok"
+        ? "no visible problem"
+        : verdict.verdict === "problem"
+          ? `${verdict.issues.length} visible problem(s)`
+          : "no verdict from the vision model",
+  };
+}
+
 // ── delegate (nested read-only research) ─────────────────────
 
 /**
@@ -915,6 +1461,24 @@ export async function runPushChanges(
     toolsUsed,
   });
   warnings.push(...evidenceWarnings(evidence));
+
+  // The repository's own definition of done, checked against reality. A
+  // reviewer looking at a diff has no idea that `npm test` was never run
+  // — this is the one line that tells them, and it comes from the repo's
+  // files rather than from the agent's summary.
+  try {
+    const { checks } = await discoverChecks(conversationId);
+    if (checks.length > 0) {
+      warnings.push({
+        kind: "checks",
+        message:
+          `This repository declares ${checks.length} check(s), and none of them can run in this workspace: ` +
+          `${checks.map((c) => `\`${c.command}\``).join(", ")}. The diff has not been verified by any of them — run them before merging.`,
+      });
+    }
+  } catch {
+    // Discovery is best-effort: a failed read must never block the gate.
+  }
 
   // ── Open the gate: pause the agent loop until the user decides ──
   const decision = await store.requestPushApproval({

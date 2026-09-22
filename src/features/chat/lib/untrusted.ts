@@ -50,6 +50,15 @@ export const UNTRUSTED_TOOLS: ReadonlySet<string> = new Set([
   "get_repo_overview",
   "get_workspace_diff",
   "run_tool_program",
+  // MCP servers are third parties: their tool descriptions and results are
+  // written by whoever runs the server, not by this app.
+  "list_mcp_tools",
+  "call_mcp_tool",
+  // A delegated helper's report quotes repository content…
+  "delegate",
+  // …and a vision check describes text RENDERED by the page, which is
+  // another route for the same instructions to arrive as prose.
+  "check_preview_visually",
 ]);
 
 export function isUntrustedTool(name: string): boolean {

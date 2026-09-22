@@ -146,11 +146,29 @@ function isRestrictedIpv6(host: string, options?: SSRFGuardOptions): boolean {
     return true;
   }
 
-  // IPv4-mapped IPv6 (::ffff:x.x.x.x or ::ffff:x:x)
+  // IPv4-mapped IPv6, dotted form (::ffff:127.0.0.1)
   const mappedMatch = cleanHost.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   if (mappedMatch && mappedMatch[1]) {
     const octets = parseNumericIpv4(mappedMatch[1]);
     if (octets && isRestrictedIpv4(octets, options)) return true;
+  }
+
+  // IPv4-mapped IPv6, hex-pair form (::ffff:7f00:1 === 127.0.0.1). The last two
+  // hextets carry the IPv4 address; without this the loopback/private ranges
+  // are reachable through a syntactically different literal.
+  const hexMapped = cleanHost.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (hexMapped && hexMapped[1] && hexMapped[2]) {
+    const high = parseInt(hexMapped[1], 16);
+    const low = parseInt(hexMapped[2], 16);
+    if (Number.isFinite(high) && Number.isFinite(low)) {
+      const octets: [number, number, number, number] = [
+        (high >>> 8) & 255,
+        high & 255,
+        (low >>> 8) & 255,
+        low & 255,
+      ];
+      if (isRestrictedIpv4(octets, options)) return true;
+    }
   }
 
   // IPv6 Link-local (fe80::/10)
@@ -254,6 +272,27 @@ export function validateUrlForSSRF(
       return {
         allowed: false,
         reason: `Target hostname contains restricted IP address '${dottedIp}' via DNS wildcard/rebinding service`,
+      };
+    }
+  }
+
+  // 5c. Detect a whole address crammed into ONE label of a multi-label
+  // hostname (e.g. `2130706433.nip.io` = 127.0.0.1, `0x7f000001.sslip.io`).
+  // The dotted-quad scan above only matches labels of 1-3 digits, so long
+  // decimal and hex labels walk straight past it.
+  // Length floors keep ordinary labels out: "0" parses as 0.0.0.0 and
+  // "1" as 0.0.0.1, so treating every numeric label as an address would
+  // reject legitimate names like 192.168.0.10. Only whole-address encodings
+  // (8+ decimal digits / 8+ hex digits) are candidates.
+  for (const label of rawHostname.split(".")) {
+    const wholeDecimal = /^\d{8,}$/.test(label);
+    const wholeHex = /^0x[0-9a-f]{8,}$/i.test(label);
+    if (!wholeDecimal && !wholeHex) continue;
+    const labelOctets = parseNumericIpv4(label);
+    if (labelOctets && isRestrictedIpv4(labelOctets, options)) {
+      return {
+        allowed: false,
+        reason: `Target hostname embeds restricted IP '${labelOctets.join(".")}' as a numeric label via a DNS wildcard/rebinding service`,
       };
     }
   }

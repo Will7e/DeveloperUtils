@@ -11,6 +11,7 @@ import {
   evidenceWarnings,
   extractClaimedPaths,
   ranVerification,
+  ranVisualVerification,
 } from "./evidence-audit";
 
 const CHANGED = ["src/App.tsx", "src/util/format.ts"];
@@ -113,7 +114,60 @@ describe("ranVerification", () => {
   it("only counts the tools that can actually observe a running app", () => {
     expect(ranVerification(["read_file", "edit_file"])).toBe(false);
     expect(ranVerification(["query_preview_dom"])).toBe(true);
+    expect(ranVerification(["get_preview_layout"])).toBe(true);
+    expect(ranVerification(["check_preview_visually"])).toBe(true);
     expect(ranVerification(undefined)).toBe(false);
+  });
+
+  it("keeps the visual set narrower than the verification set", () => {
+    // A DOM query or a geometry map cannot see colour, contrast or paint
+    // order, so neither counts as having LOOKED at the page.
+    expect(ranVisualVerification(["query_preview_dom"])).toBe(false);
+    expect(ranVisualVerification(["get_preview_layout"])).toBe(false);
+    expect(ranVisualVerification(["check_preview_visually"])).toBe(true);
+    expect(ranVisualVerification(undefined)).toBe(false);
+  });
+});
+
+describe("auditClaims — visual claims", () => {
+  it("flags a rendering claim nothing looked at", () => {
+    const findings = auditClaims({
+      claim: "The header now renders correctly on narrow screens.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "query_preview_dom"],
+    });
+    expect(findings.map((f) => f.code)).toEqual(["unverified-claim"]);
+    expect(findings[0]!.message).toMatch(/rendered pixels|check_preview_visually/);
+  });
+
+  it("accepts a rendering claim a visual check backed", () => {
+    const findings = auditClaims({
+      claim: "The header now renders correctly on narrow screens.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file", "check_preview_visually"],
+    });
+    expect(findings).toHaveLength(0);
+  });
+
+  it("catches the softer ways a model says the same thing", () => {
+    for (const claim of [
+      "That looks right now.",
+      "The card is styled correctly.",
+      "Visually verified the new dialog.",
+      "The page renders cleanly.",
+    ]) {
+      const findings = auditClaims({ claim, changedPaths: CHANGED, toolsUsed: ["edit_file"] });
+      expect(findings.length, claim).toBeGreaterThan(0);
+    }
+  });
+
+  it("stays quiet about layout work that makes no rendering claim", () => {
+    const findings = auditClaims({
+      claim: "Replaced the flex row with a grid and updated the breakpoint in src/App.tsx.",
+      changedPaths: CHANGED,
+      toolsUsed: ["edit_file"],
+    });
+    expect(findings).toHaveLength(0);
   });
 });
 

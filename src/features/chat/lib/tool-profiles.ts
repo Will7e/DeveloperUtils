@@ -51,6 +51,9 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "get_workspace_diff",
   "push_changes",
   "get_preview_feedback",
+  // A weak model is the one that most needs its own output described back
+  // to it, and this is a single flat argument. Cheap enough to keep.
+  "check_preview_visually",
 ];
 
 /** Below this context length a model gets the lean surface */

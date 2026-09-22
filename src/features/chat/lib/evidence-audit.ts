@@ -32,7 +32,21 @@ export const VERIFICATION_TOOLS: ReadonlySet<string> = new Set([
   "get_preview_feedback",
   "run_in_preview",
   "query_preview_dom",
+  "get_preview_layout",
+  "check_preview_visually",
 ]);
+
+/**
+ * Tools that actually LOOKED at the rendered page.
+ *
+ * Deliberately narrower than VERIFICATION_TOOLS: a DOM query proves an
+ * element exists and the layout map proves where its box is, but neither
+ * can see white-on-white text, a collapsed button, or an icon font that
+ * fell back to boxes. A claim about how the UI *looks* therefore needs a
+ * tool that saw pixels. Keeping the two sets apart is the entire reason
+ * `check_preview_visually` exists as a separate call.
+ */
+export const VISUAL_TOOLS: ReadonlySet<string> = new Set(["check_preview_visually"]);
 
 export type EvidenceCode = "unbacked-file-claim" | "unverified-claim";
 
@@ -72,6 +86,14 @@ const IMPOSSIBLE_CLAIM =
  */
 const UNVERIFIED_CLAIM =
   /\b(?:build\s+(?:pass(?:e[sd])?|succeeds?(?:ed)?|is\s+green|clean)|compiles?\s+(?:cleanly|successfully|without)|i\s+verified|i\s+checked|confirmed\s+working|manually\s+tested|verified\s+(?:working|that\s+it\s+works))\b/i;
+
+/**
+ * Claims about how the page LOOKS. Only a visual check can substantiate
+ * these — a passing DOM assertion says nothing about contrast, colour, or
+ * whether an element is painted behind something else.
+ */
+const VISUAL_CLAIM =
+  /\b(?:renders?\s+(?:correctly|properly|cleanly|as\s+expected|fine)|looks?\s+(?:correct|right|good|great|fine|clean)|visually\s+(?:verified|checked|confirmed)|styled\s+correctly)\b/i;
 
 /** A path-looking token: has a separator, or a known source extension */
 const PATH_TOKEN =
@@ -118,6 +140,12 @@ export function extractClaimedPaths(claim: string): string[] {
 export function ranVerification(toolsUsed: string[] | undefined): boolean {
   if (!toolsUsed?.length) return false;
   return toolsUsed.some((t) => VERIFICATION_TOOLS.has(t));
+}
+
+/** True when a tool in this turn actually saw the rendered page */
+export function ranVisualVerification(toolsUsed: string[] | undefined): boolean {
+  if (!toolsUsed?.length) return false;
+  return toolsUsed.some((t) => VISUAL_TOOLS.has(t));
 }
 
 /**
@@ -170,6 +198,19 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
         "No preview build, DOM query or in-preview run happened in this turn, so this is an " +
         "expectation rather than an observation.",
       evidence: [expected[0]],
+    });
+  }
+
+  // ── 4. Claims about how the page LOOKS, with nothing having looked ──
+  const visual = VISUAL_CLAIM.exec(claim);
+  if (visual && !ranVisualVerification(input.toolsUsed)) {
+    findings.push({
+      code: "unverified-claim",
+      message:
+        `The summary describes how the page renders ("${visual[0]}"), but nothing looked at the rendered pixels: ` +
+        "no visual check ran in this turn. A DOM query or a geometry map cannot see colour, contrast or paint order — " +
+        "run check_preview_visually, or drop the claim.",
+      evidence: [visual[0]],
     });
   }
 

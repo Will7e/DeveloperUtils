@@ -462,6 +462,52 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
       typeof args.fact === "string" ? args.fact.slice(0, 60) : "project memory",
   },
   {
+    name: "list_mcp_tools",
+    planSafe: true,
+    description:
+      "List the tools exposed by the user's connected MCP servers (external services like issue trackers, docs, or databases). Call this BEFORE call_mcp_tool when you are unsure what is available, or when a task mentions a service that is not in this repository. Servers the browser cannot reach (CORS) are reported with that reason rather than silently missing.",
+    parameters: { type: "object", properties: {} },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: () => "MCP tools",
+  },
+  {
+    name: "call_mcp_tool",
+    planSafe: false,
+    description:
+      "Call one tool on one connected MCP server. Arguments must match the tool's input schema (see list_mcp_tools). These tools act OUTSIDE this repository and can create or change real data in an external service, so only call one when the user's request clearly needs it, and report what you changed. Results are text only.",
+    parameters: {
+      type: "object",
+      properties: {
+        server: {
+          type: "string",
+          minLength: 1,
+          maxLength: 80,
+          description: "Server id or name exactly as reported by list_mcp_tools.",
+        },
+        tool: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+          description: "Tool name as the server exposes it.",
+        },
+        arguments: {
+          type: "object",
+          description: "Arguments object for the tool (may be empty).",
+        },
+      },
+      required: ["server", "tool"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.tool === "string"
+        ? `${typeof args.server === "string" ? `${args.server}/` : ""}${args.tool}`
+        : "MCP call",
+  },
+  {
     name: "get_workspace_diff",
     planSafe: true,
     description:
@@ -597,6 +643,86 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     cacheable: false,
     programmable: false,
     summarize: (args) => (typeof args.selector === "string" ? args.selector : "(no selector)"),
+  },
+  {
+    name: "run_checks",
+    planSafe: true,
+    description:
+      "Report what this repository declares must be verified (test / lint / typecheck / build scripts, or an .intab/verify.json manifest) and what of it could actually be executed. There is no shell in this workspace, so by default NOTHING runs: the result names each declared check, the exact command, and states plainly that none ran. Use it before you summarise a change set, so your report names the checks you did not run instead of implying they passed. When the user has configured a checks runner, the declared commands are executed there and real results come back.",
+    parameters: {
+      type: "object",
+      properties: {
+        run: {
+          type: "boolean",
+          description:
+            "Set true to also execute the declared checks on the configured runner (no-op with an explanation when none is configured). Default false = report only.",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args, ok) =>
+      args.run === true ? (ok ? "checks executed" : "check run failed") : "declared checks",
+  },
+  {
+    name: "get_preview_layout",
+    planSafe: true,
+    description:
+      "Read a compact LAYOUT MAP of the running preview: viewport and document size, plus each visible element's box, whether it overflows or is clipped, and its text. Use it to verify visual results that query_preview_dom cannot see — collapsed containers, content spilling off-screen, elements stacked on top of each other, zero-height sections. Call it after a UI change and fix what it reports.",
+    parameters: {
+      type: "object",
+      properties: {
+        selector: {
+          type: "string",
+          maxLength: 300,
+          description: "Optional CSS selector to scope the map to one subtree (default: whole document).",
+        },
+        maxElements: {
+          type: "number",
+          description: "Maximum elements to report, 1-80 (default 40, largest-first).",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.selector === "string" && args.selector ? args.selector : "layout map",
+  },
+  {
+    name: "check_preview_visually",
+    planSafe: true,
+    description:
+      "Look at the running preview and answer a question about how it RENDERS. A screenshot is captured inside the preview frame and analysed by a vision model; you get back its written verdict (VERDICT: ok | problem | unclear, plus specific issues). Use it for what DOM queries and geometry cannot see: wrong or missing colours, text that is invisible against its background, broken images, an element that collapsed to nothing, a dialog painted behind an overlay, a layout that clearly is not what the user asked for. It sees PIXELS ONLY — it cannot read or judge code — and the capture is approximate (web fonts and remote images may be missing, so a font or image substitution is not a defect). It costs one extra request on a vision-capable model.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          maxLength: 500,
+          description:
+            'What the picture should show, phrased so a defect is visible — e.g. "Is the total price visible and readable against the card background?"',
+        },
+        claim: {
+          type: "string",
+          maxLength: 500,
+          description:
+            "Optional: what you believe the change did, so the check can confirm or refute it instead of describing the whole page.",
+        },
+        selector: {
+          type: "string",
+          maxLength: 300,
+          description:
+            "Optional CSS selector to capture one element instead of the whole viewport (use it when you only need to check a specific component).",
+        },
+      },
+      required: ["question"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (_args, ok) => (ok ? "visual check" : "visual check unavailable"),
   },
   {
     name: "run_tool_program",

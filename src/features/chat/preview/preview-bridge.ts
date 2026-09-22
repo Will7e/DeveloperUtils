@@ -31,7 +31,10 @@ const pendingRequests = new Map<number, PendingRequest>();
 let nextRequestId = 1;
 
 /** Posts one request into the live preview iframe and awaits its response */
-function postPreviewRequest(kind: "run_js" | "query_dom", payload: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+function postPreviewRequest(
+  kind: "run_js" | "query_dom" | "layout" | "screenshot",
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   return new Promise((resolve) => {
     const state = usePreviewStore.getState();
     const frame = document.querySelector<HTMLIFrameElement>("iframe.chat-preview-frame");
@@ -46,6 +49,9 @@ function postPreviewRequest(kind: "run_js" | "query_dom", payload: Record<string
     }, REQUEST_TIMEOUT_MS);
     pendingRequests.set(reqId, { resolve, timer });
     try {
+      // "*" is required, not sloppy: the preview document is a blob URL in a
+      // sandboxed frame, so its origin is opaque and cannot be named as a
+      // targetOrigin. The receiving side checks sender identity instead.
       frame.contentWindow?.postMessage({ source: BRIDGE_SOURCE, reqId, kind, ...payload }, "*");
     } catch (err) {
       clearTimeout(timer);
@@ -63,6 +69,31 @@ export function runJsInPreview(code: string): Promise<{ ok: boolean; result?: un
 /** Queries the preview's DOM; resolves with match count + snippets */
 export function queryPreviewDom(selector: string, mode: "html" | "text"): Promise<{ ok: boolean; result?: unknown; error?: string }> {
   return postPreviewRequest("query_dom", { selector, mode });
+}
+
+/**
+ * Reads a geometry map of the running preview: viewport/document size and
+ * a capped list of viewport-relative boxes, collected INSIDE the preview
+ * document (where layout actually happened) and analysed here.
+ */
+export function capturePreviewLayout(
+  selector: string | undefined,
+  maxElements: number | undefined
+): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  return postPreviewRequest("layout", { selector, maxElements });
+}
+
+/**
+ * Rasterizes the running preview inside its own frame and resolves with a
+ * PNG data URL (plus its size). The capture has to happen there — the
+ * preview's origin is opaque, so the parent cannot read its DOM — and it
+ * is a DOM rasterization, not a screenshot of a real window: layout is
+ * accurate, web fonts and remote images may be missing.
+ */
+export function capturePreviewScreenshot(
+  selector?: string
+): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+  return postPreviewRequest("screenshot", { selector });
 }
 
 /** Rejects every pending request (preview reloaded / conversation switched) */
@@ -87,6 +118,15 @@ export function usePreviewBridge(): void {
         error?: string;
       } | null;
       if (!data || data.source !== BRIDGE_SOURCE) return;
+
+      // Only the live preview iframe may speak on this channel. Without this
+      // check any window holding a handle to the app could inject console
+      // output (which is fed back to the model as observed reality) or answer
+      // a pending run_js/query_dom request. The preview has an opaque origin
+      // (`allow-scripts` without `allow-same-origin`), so identity — not
+      // origin — is the checkable property here.
+      const frame = document.querySelector<HTMLIFrameElement>("iframe.chat-preview-frame");
+      if (!frame || event.source !== frame.contentWindow) return;
 
       // Response to a pending execution request
       if (typeof data.reqId === "number") {

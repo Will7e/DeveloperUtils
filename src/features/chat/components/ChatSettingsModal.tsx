@@ -41,6 +41,7 @@ import {
   parseSkillFile,
   skillFromParsed,
 } from "../lib/skills";
+import { activeServers, parseMcpServersJson, serializeMcpServers } from "../lib/mcp";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { availableEfforts } from "../lib/model-state";
@@ -288,8 +289,8 @@ function SettingsModalInner({
                     <div className="settings-security-card-title">Bring your own key</div>
                     <div className="settings-security-card-desc">
                       Your key is encrypted at rest (AES-256-GCM) and sent only to OpenRouter over
-                      TLS. With Cloud Sync enabled it syncs across devices — still end-to-end
-                      encrypted.
+                      TLS. With Cloud Sync enabled it syncs across devices, encrypted before it
+                      leaves this device.
                     </div>
                   </div>
                 </div>
@@ -525,6 +526,80 @@ function SettingsModalInner({
                       className="settings-slider"
                     />
                     <span className="settings-value">{settings.agentMaxIterations}</span>
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-checks-endpoint">
+                      Checks runner
+                    </label>
+                    <span className="settings-sublabel">
+                      Optional HTTPS endpoint that executes a repository's own
+                      test / lint / typecheck commands (the `run_checks` tool).
+                      Leave empty and the agent will report which checks exist
+                      and state plainly that it could not run them.
+                    </span>
+                  </div>
+                  <div className="settings-control settings-control-wide">
+                    <input
+                      id="chat-checks-endpoint"
+                      type="text"
+                      value={settings.checksEndpoint ?? ""}
+                      onChange={(e) => onUpdate({ checksEndpoint: e.target.value })}
+                      placeholder="https://checks.example.com/run"
+                      className="settings-input"
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+
+                <McpServersEditor settings={settings} onUpdate={onUpdate} />
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-auto-escalate">
+                      Continue a stalled turn on a stronger model
+                    </label>
+                    <span className="settings-sublabel">
+                      When the selected model repeats the same failing tool call,
+                      the rest of that turn continues on a capably stronger model
+                      (announced in the transcript, and attributed on the reply
+                      and in the spend breakdown). Never changes the model saved
+                      on the conversation.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-auto-escalate"
+                      size="sm"
+                      checked={settings.autoEscalate !== false}
+                      onCheckedChange={(checked) => onUpdate({ autoEscalate: checked })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-escalation-model">
+                      Escalation model
+                    </label>
+                    <span className="settings-sublabel">
+                      Leave empty to let the harness choose the cheapest model the
+                      catalog knows to be stronger (capped at $20 per million
+                      output tokens). Name a model id to decide it yourself —
+                      switching to it is then announced the same way.
+                    </span>
+                  </div>
+                  <div className="settings-control settings-control-wide">
+                    <input
+                      id="chat-escalation-model"
+                      type="text"
+                      value={settings.escalationModel ?? ""}
+                      onChange={(e) => onUpdate({ escalationModel: e.target.value })}
+                      placeholder={settings.defaultModel ? `${settings.defaultModel} (default)` : "provider/model-id"}
+                      className="settings-input"
+                      spellCheck={false}
+                    />
                   </div>
                 </div>
               </div>
@@ -899,6 +974,79 @@ function GitHubTabContent({
 }
 
 // ============================================================
+// ── MCP servers — external tools over streamable HTTP ───────
+
+/**
+ * Editor for connected MCP servers. A JSON textarea rather than a form:
+ * the shape is three fields of which two are optional, and the people who
+ * connect MCP servers already have the config to hand. It commits on
+ * blur so an intermediate, unparseable keystroke is never persisted.
+ */
+function McpServersEditor({
+  settings,
+  onUpdate,
+}: {
+  settings: ChatSettings;
+  onUpdate: (patch: Partial<ChatSettings>) => void;
+}) {
+  const stored = React.useMemo(() => serializeMcpServers(settings.mcpServers), [settings.mcpServers]);
+  const [draft, setDraft] = React.useState(stored);
+  const [error, setError] = React.useState<string | null>(null);
+  const [syncedFrom, setSyncedFrom] = React.useState(stored);
+
+  // Re-sync when the stored config changes beneath us (cloud sync,
+  // import, another window) without clobbering local typing. Adjusting
+  // state during render — rather than in an effect — is React's own
+  // answer for "a prop changed": the textarea never renders one frame of
+  // stale config, and no second pass is scheduled to fix it.
+  if (stored !== syncedFrom) {
+    setSyncedFrom(stored);
+    setDraft(stored);
+    setError(null);
+  }
+
+  const commit = () => {
+    const parsed = parseMcpServersJson(draft);
+    if (parsed.error) {
+      setError(parsed.error);
+      return;
+    }
+    setError(null);
+    onUpdate({ mcpServers: parsed.servers.length > 0 ? parsed.servers : undefined });
+  };
+
+  const connected = activeServers(settings.mcpServers).length;
+
+  return (
+    <div className="settings-row settings-row-stacked">
+      <div className="settings-row-info">
+        <label className="settings-label" htmlFor="chat-mcp-servers">
+          MCP servers{connected > 0 ? ` (${connected} connected)` : ""}
+        </label>
+        <span className="settings-sublabel">
+          External tools the agent can list and call (list_mcp_tools /
+          call_mcp_tool). A JSON array of {"{"} name, url, apiKey? {"}"} objects.
+          Servers are contacted directly from this page, so they must allow browser
+          origins (CORS) — a server that does not will be reported as unreachable.
+        </span>
+      </div>
+      <div className="settings-control settings-control-wide">
+        <textarea
+          id="chat-mcp-servers"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          rows={4}
+          spellCheck={false}
+          placeholder={'[{"name":"linear","url":"https://mcp.example.com/mcp"}]'}
+          className="settings-textarea"
+        />
+        {error && <span className="chat-key-status chat-key-status-invalid">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 // Skills Tab — Manage prompt modules
 // ============================================================
 
@@ -914,7 +1062,12 @@ function SkillsTabContent({
 >) {
   const [editingSkill, setEditingSkill] = React.useState<ChatSkill | null>(null);
   const [creating, setCreating] = React.useState(false);
-  const [draft, setDraft] = React.useState({ name: "", description: "", content: "" });
+  const [draft, setDraft] = React.useState({
+    name: "",
+    description: "",
+    content: "",
+    triggers: "",
+  });
   const [importError, setImportError] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -932,13 +1085,18 @@ function SkillsTabContent({
   const enabledCount = skills.filter((s) => s.enabled).length;
 
   const startCreate = () => {
-    setDraft({ name: "", description: "", content: "" });
+    setDraft({ name: "", description: "", content: "", triggers: "" });
     setCreating(true);
     setEditingSkill(null);
   };
 
   const startEdit = (skill: ChatSkill) => {
-    setDraft({ name: skill.name, description: skill.description, content: skill.content });
+    setDraft({
+      name: skill.name,
+      description: skill.description,
+      content: skill.content,
+      triggers: (skill.triggers ?? []).join(", "),
+    });
     setEditingSkill(skill);
     setCreating(false);
     setConfirmDeleteId(null);
@@ -954,11 +1112,23 @@ function SkillsTabContent({
     const content = draft.content.trim();
     if (!name || !content) return;
 
+    // Triggers are what make a skill discoverable: the model sees them in
+    // the skill index and loads the body itself, so a skill without
+    // triggers still works (it can be enabled outright or found by name)
+    // but will not be offered at the right moment.
+    const triggers = draft.triggers
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 12);
+    const triggerPatch = triggers.length > 0 ? { triggers } : { triggers: undefined };
+
     if (editingSkill) {
       onUpdateSkill(editingSkill.id, {
         name,
         description: draft.description.trim(),
         content,
+        ...triggerPatch,
       });
     } else {
       onAddSkill({
@@ -967,6 +1137,7 @@ function SkillsTabContent({
         description: draft.description.trim(),
         content,
         enabled: false,
+        ...triggerPatch,
       });
     }
     closeEditor();
@@ -1075,6 +1246,13 @@ function SkillsTabContent({
               className="settings-input chat-skill-input"
               maxLength={140}
             />
+            <input
+              type="text"
+              value={draft.triggers}
+              onChange={(e) => setDraft((d) => ({ ...d, triggers: e.target.value }))}
+              placeholder="Triggers, comma separated (e.g. push, failing build)"
+              className="settings-input chat-skill-input"
+            />
             <textarea
               value={draft.content}
               onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
@@ -1119,8 +1297,11 @@ function SkillsTabContent({
           <div>
             <div className="settings-info-card-title">Prompt Skills</div>
             <div className="settings-info-card-desc">
-              Reusable prompt modules injected into every message when enabled. Enabled
-              skills count toward the context window — the header meter shows the cost.
+              Reusable prompt modules. <strong>Enabled</strong> skills are injected into every
+              message and count against the context window. <strong>Available</strong> skills cost
+              one index line — the agent loads their full text on demand with
+              <code>read_skill</code> when a session matches their triggers, so the whole library
+              stays usable without paying for it on every turn.
               {enabledCount > 0 && ` ${enabledCount} active now.`}
             </div>
           </div>
@@ -1189,6 +1370,13 @@ function SkillsTabContent({
               placeholder="Short description (optional)"
               className="settings-input chat-skill-input"
               maxLength={140}
+            />
+            <input
+              type="text"
+              value={draft.triggers}
+              onChange={(e) => setDraft((d) => ({ ...d, triggers: e.target.value }))}
+              placeholder="Triggers, comma separated (e.g. push, failing build)"
+              className="settings-input chat-skill-input"
             />
             <textarea
               value={draft.content}

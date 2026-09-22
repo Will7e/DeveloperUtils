@@ -33,19 +33,22 @@ export function SimpleTooltip({
   children,
   side = "top",
   delayDuration = 150,
+  className,
 }: {
   content: React.ReactNode;
   shortcut?: string;
   children: React.ReactNode;
   side?: "top" | "right" | "bottom" | "left";
   delayDuration?: number;
+  /** Extra classes for the bubble — omit the short-tooltip defaults */
+  className?: string;
 }) {
   if (!content && !shortcut) return <>{children}</>;
 
   return (
     <Tooltip delayDuration={delayDuration}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side={side}>
+      <TooltipContent side={side} className={className}>
         <span className="flex items-center gap-1.5">
           {content && <span>{content}</span>}
           {shortcut && (

@@ -42,8 +42,10 @@ import {
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
 import { CURATED_FALLBACK_MODELS } from "../constants";
-import { REASONING_EFFORT_META } from "./model-state";
+import { REASONING_EFFORT_META, modelSupportsTools } from "./model-state";
+import { resolveToolProfile } from "./tool-profiles";
 import { downloadConversation } from "../services/export-conversation";
+import { resolveModelInfo } from "./model-catalog";
 import { runCompactCommand } from "../services/compaction";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { canUndo } from "../workspace/undo";
@@ -54,10 +56,75 @@ import { isTurnRunning, stopTurn } from "../session/turn-engine";
 import { getTurnLog, formatTurnLog } from "../session/turn-log";
 import { sessionHost } from "../session/session-client";
 import { rankCommandSpecs } from "./slash";
-import type { ChatMode, ModelInfo, ReasoningEffort } from "../types";
+import type {
+  ChatMode,
+  ContextBreakdown,
+  ModelInfo,
+  ReasoningEffort,
+  ToolDefinition,
+} from "../types";
 
-function toast(message: string, type: "success" | "error" | "info" = "info"): void {
-  useAppStore.getState().addToast({ message, type, duration: 5000 });
+function toast(
+  message: string,
+  type: "success" | "error" | "info" = "info",
+  multiline = false
+): void {
+  useAppStore.getState().addToast({ message, type, duration: 5000, multiline });
+}
+
+/**
+ * Renders the window breakdown as an aligned report. Colored bars are
+ * worth more than a paragraph in the meter card, but a command's job
+ * is to be copyable — this is the same accounting as text.
+ */
+function contextReport(info: ContextBreakdown, modelId: string): string {
+  const free = info.parts.find((p) => p.key === "free");
+  const rows: Array<[string, number]> = [
+    ...info.parts.filter((p) => p.key !== "free").map((p) => [p.label, p.tokens] as [string, number]),
+    ...(free ? [[free.label, free.tokens] as [string, number]] : []),
+  ];
+
+  const width = Math.max(...rows.map(([label]) => label.length));
+  const lines = rows.map(([label, tokens]) => {
+    const share = (tokens / Math.max(1, info.usableTokens)) * 100;
+    return `${label.padEnd(width)}  ${formatTokenCount(tokens).padStart(7)}  ${share.toFixed(1).padStart(5)}%`;
+  });
+
+  const foot = [
+    `Window ${info.maxTokens.toLocaleString()} · ${info.outputReserve.toLocaleString()} reserved for the reply · ${info.usableTokens.toLocaleString()} usable`,
+    !info.calibrated
+      ? "Estimates only — no measured token ratio for this model yet"
+      : null,
+    info.lastPromptTokens != null
+      ? `Last request: ${info.lastPromptTokens.toLocaleString()} prompt tokens (exact)` +
+        (info.lastCachedTokens
+          ? ` · ${info.lastCachedTokens.toLocaleString()} from cache`
+          : "")
+      : "No completed request yet — estimates only",
+    info.compactedTokens > 0
+      ? `${formatTokenCount(info.compactedTokens)} tokens folded into compacted memory`
+      : null,
+    info.totalCost > 0
+      ? `Spend $${info.totalCost.toFixed(4)} · ${formatTokenCount(info.completionTokens)} generated`
+      : null,
+    info.percentageUsed >= 70 ? "Older messages get summarized before the next send." : null,
+  ].filter(Boolean);
+
+  return [
+    `Context · ${modelId}`,
+    `${formatTokenCount(info.totalTokens)} of ${formatTokenCount(info.usableTokens)} usable tokens · ${info.percentageUsed}% · ${info.health}`,
+    "",
+    ...lines,
+    "",
+    ...foot,
+  ].join("\n");
+}
+
+/** Compact token count for text reports (matches the meter's units) */
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
 }
 
 /** Menu sections — the order here is the order rendered */
@@ -138,6 +205,21 @@ function effectiveSystemPrompt(conversationId: string): string {
 
 function activeConversation(conversationId: string) {
   return useChatStore.getState().conversations.find((c) => c.id === conversationId);
+}
+
+/**
+ * Tool definitions the next turn of this conversation would carry —
+ * the same condition the runner checks, so /context and /status charge
+ * for exactly the schemas that will ride the request.
+ */
+function contextToolsFor(conversationId: string): ToolDefinition[] | undefined {
+  const store = useChatStore.getState();
+  const conv = activeConversation(conversationId);
+  if (!conv?.repoContext || !store.settings.github.token) return undefined;
+  const { model, mode } = currentModelState();
+  const info = resolveModelInfo(model);
+  if (!modelSupportsTools(info)) return undefined;
+  return resolveToolProfile(mode, info).tools;
 }
 
 /** Reasoning-effort aliases users actually type */
@@ -243,16 +325,12 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
         conversation: conv,
         effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
         modelId,
+        tools: contextToolsFor(conversationId),
       });
-      const visible = conv.messages.filter((m) => !m.hidden).length;
-      const hidden = conv.messages.length - visible;
       toast(
-        `${info.percentageUsed}% of ${info.maxTokens.toLocaleString()} tokens · ` +
-          `${info.sentTokens.toLocaleString()} in history · ${visible} messages` +
-          (hidden > 0 ? ` (+${hidden} hidden)` : "") +
-          (conv.summary ? ` · summary covers ${conv.summary.coversCount}` : "") +
-          (info.percentageUsed >= 70 ? " — run /compact to free room." : ""),
-        info.percentageUsed >= 85 ? "error" : "info"
+        contextReport(info, modelId),
+        info.percentageUsed >= 85 ? "error" : "info",
+        true
       );
     },
   },
@@ -332,6 +410,7 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
         },
         effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
         modelId,
+        tools: contextToolsFor(conversationId),
       });
       const parts = [
         modelId,
@@ -339,7 +418,12 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
         `mode: ${mode}`,
         `transport: ${sessionHost.available ? "session host" : "page-local"}`,
         `streaming: ${store.isStreaming ? "yes" : "no"}${isTurnRunning() ? " (turn running)" : ""}`,
-        `context: ${info.percentageUsed}%`,
+        `context: ${info.percentageUsed}% of ${formatTokenCount(info.usableTokens)}`,
+        `tools: ${info.parts.find((p) => p.key === "tools")?.tokens.toLocaleString() ?? 0} tok`,
+        info.lastPromptTokens != null
+          ? `last request: ${info.lastPromptTokens.toLocaleString()} tok exact`
+          : "last request: none",
+        conv?.summary ? `summary covers ${conv.summary.coversCount}` : null,
         `messages: ${conv?.messages.filter((m) => !m.hidden).length ?? 0}`,
         conv?.pendingTurn ? "pending turn marker SET" : null,
         conv?.repoContext ? `repo: ${conv.repoContext.owner}/${conv.repoContext.repo}` : null,

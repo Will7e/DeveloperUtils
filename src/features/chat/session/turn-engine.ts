@@ -43,28 +43,43 @@ import {
   reuseResultText,
   type CallLedgerEntry,
 } from "../lib/tool-repair";
-import { modelDisplayName } from "../lib/model-catalog";
+import { getCachedModelCatalog, modelDisplayName } from "../lib/model-catalog";
+import {
+  canEscalate,
+  escalationNote,
+  noEscalationReason,
+  pickEscalationTarget,
+  type EscalationOptions,
+  type EscalationTargetChoice,
+} from "../lib/escalation";
 import { recordUsageCalibration } from "../context/tokenizer-calibration";
-import { estimateTokens } from "../context/tokenizer";
+import { estimateTokens, estimateToolSchemaTokens } from "../context/tokenizer";
 import {
   AGENT_MAX_ITERATIONS,
   AGENT_ITERATIONS_MAX,
+  CURATED_FALLBACK_MODELS,
   DEFAULT_CHAT_MODE,
   DEFAULT_REASONING_EFFORT,
   TOOL_EXECUTION_CONCURRENCY,
   TURN_INACTIVITY_TIMEOUT_MS,
 } from "../constants";
+import type { ToolDefinition } from "../types";
 import {
   resetPreviewExecCounter,
+  runCallMcpTool,
   runCreateWorkingBranch,
   runDelegate,
   runDeleteFile,
   runEditFile,
   runInPreview,
+  runListMcpTools,
   runPreviewFeedback,
   runPushChanges,
+  runPreviewLayout,
+  runVisualCheck,
   runQueryPreviewDom,
   runRemember,
+  runRunChecks,
   runSearchWorkspace,
   runWorkspaceDiff,
   runWriteFile,
@@ -118,6 +133,23 @@ export interface TurnSessionState {
   /** Model state the current round was prepared with (message metadata) */
   effort: ReasoningEffort;
   mode: ChatMode;
+  /**
+   * Model the rest of this turn continues on, set after an escalation
+   * (lib/escalation.ts). Null while the turn runs on the conversation's
+   * own model. Cleared when the turn ends — a swap is a property of the
+   * turn, never of the conversation.
+   */
+  modelOverride: string | null;
+  /** True once this turn spent its single escalation */
+  escalated: boolean;
+  /**
+   * Count of calls the repetition policy had to REFUSE this turn because
+   * the model kept repeating a failing one. A refusal only happens after
+   * the same call has failed twice and been demanded to change, so one
+   * refusal is already "the model is stuck" — and it is the signal
+   * escalation acts on.
+   */
+  stuckRefusals: number;
 }
 
 const session: TurnSessionState = {
@@ -133,6 +165,9 @@ const session: TurnSessionState = {
   recoveredNote: null,
   effort: DEFAULT_REASONING_EFFORT,
   mode: DEFAULT_CHAT_MODE,
+  modelOverride: null,
+  escalated: false,
+  stuckRefusals: 0,
 };
 
 /** Identical executions allowed before the ledger takes over */
@@ -165,11 +200,23 @@ export interface EngineDeps {
   /** Chooses the transport for a turn */
   resolveSource: () => Promise<TurnSource>;
   /** Request preparation (context engine, routing, compaction) */
-  prepare: (conversationId: string) => Promise<TurnPreparation>;
+  prepare: (
+    conversationId: string,
+    opts?: { modelOverride?: string }
+  ) => Promise<TurnPreparation>;
   /** Transport used when the survivable one refuses or dies */
   createFallbackSource: () => TurnSource;
   /** Renderer inactivity ceiling (transport silence → turn ends) */
   inactivityTimeoutMs: number;
+  /**
+   * Escalation policy (lib/escalation.ts): which model a stalled turn
+   * continues on, if any. Injected so a test can drive a switch without a
+   * populated model catalog, and so the policy stays in one leaf module.
+   */
+  pickEscalation: (
+    fromModel: string,
+    opts?: EscalationOptions
+  ) => EscalationTargetChoice | null;
 }
 
 async function defaultResolveSource(): Promise<TurnSource> {
@@ -186,6 +233,13 @@ const defaultDeps: EngineDeps = {
   prepare: prepareTurn,
   createFallbackSource: () => new LocalTurnSource(),
   inactivityTimeoutMs: TURN_INACTIVITY_TIMEOUT_MS,
+  // Curated list as the last resort: a cold catalog (first run, before the
+  // model list arrives) still escalates on evidence, just coarser evidence.
+  pickEscalation: (fromModel, opts) =>
+    pickEscalationTarget(fromModel, {
+      catalog: getCachedModelCatalog() ?? CURATED_FALLBACK_MODELS,
+      ...opts,
+    }),
 };
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -564,6 +618,16 @@ async function runBridgeTool(
       return runInPreview(conversationId, args);
     case "query_preview_dom":
       return runQueryPreviewDom(conversationId, args);
+    case "get_preview_layout":
+      return runPreviewLayout(conversationId, args);
+    case "check_preview_visually":
+      return runVisualCheck(conversationId, args);
+    case "run_checks":
+      return runRunChecks(conversationId, args);
+    case "list_mcp_tools":
+      return runListMcpTools(conversationId, args);
+    case "call_mcp_tool":
+      return runCallMcpTool(conversationId, args);
     default: {
       // Registry-consistency guard: a tool marked kind:"bridge" must
       // have a case here.
@@ -659,6 +723,7 @@ async function executeToolPhase(
         durationMs: 0,
         summary: reuse ? "reused earlier result" : "repeated failing call refused",
       });
+      if (!reuse) session.stuckRefusals += 1;
       logTurnEvent({
         turnId: session.turnId,
         conversationId,
@@ -756,6 +821,59 @@ async function executeToolPhase(
   }
 }
 
+/**
+ * Spends this turn's single escalation: pick a stronger model, announce
+ * the switch, and point the rest of the turn at it.
+ *
+ * Deliberately narrow. It fires only when the model has already been told
+ * in words that a call fails and repeated it anyway, it fires at most once
+ * per turn, and it says nothing when the catalog offers no model known to
+ * be stronger — an honest failure is worth more than a lateral swap that
+ * looks like a retry.
+ *
+ * The conversation's own model is untouched: the override dies with the
+ * turn, so the next message goes back to the model the user picked.
+ */
+function maybeEscalate(conversationId: string, fromModel: string, deps: EngineDeps): void {
+  const store = useChatStore.getState();
+  if (!canEscalate({ enabled: store.settings.autoEscalate, alreadyEscalated: session.escalated })) {
+    return;
+  }
+  // The model that got stuck is the one this turn is running on — which
+  // may already be an escalated model, in which case nothing else to try.
+  const from = session.modelOverride ?? fromModel;
+  const choice = deps.pickEscalation(from, {
+    enabled: store.settings.autoEscalate,
+    preferred: store.settings.escalationModel,
+    needTools: true,
+  });
+  session.escalated = true;
+  if (!choice) {
+    logTurnEvent({
+      turnId: session.turnId,
+      conversationId,
+      phase: "failover",
+      detail: `stalled on ${from}; ${noEscalationReason(null, { enabled: store.settings.autoEscalate })}`,
+    });
+    return;
+  }
+
+  session.modelOverride = choice.modelId;
+  logTurnEvent({
+    turnId: session.turnId,
+    conversationId,
+    phase: "failover",
+    modelId: choice.modelId,
+    detail: `stalled on ${from} → ${choice.modelId} (${choice.reason})`,
+  });
+  // Visible, and in the transcript the next round is built from: the model
+  // reading it knows the harness changed its mind about who is answering.
+  store.addMessage(conversationId, {
+    role: "assistant",
+    content: escalationNote(choice, modelDisplayName(from)),
+  });
+}
+
 // ── Rounds ──────────────────────────────────────────────────
 
 interface RoundResult {
@@ -771,7 +889,9 @@ async function runRound(
   source: TurnSource,
   deps: EngineDeps
 ): Promise<RoundResult> {
-  const prepared = await deps.prepare(conversationId);
+  const prepared = await deps.prepare(conversationId, {
+    modelOverride: session.modelOverride ?? undefined,
+  });
   if (prepared === null) return { kind: "done", committed: false };
 
   const turn: PreparedTurn = prepared;
@@ -863,12 +983,16 @@ async function runRound(
     }
   }
 
-  // Token calibration for the exact payload we sent
+  // Token calibration for the exact payload we sent. The estimate
+  // must use the same accounting the context meter shows (one shared
+  // tool-schema estimator), otherwise the learned ratio absorbs the
+  // difference and quietly skews every budget.
   if (outcome.usage?.promptTokens != null) {
     const assigned = outcome.modelId ?? turn.modelId;
-    const toolSchemaTokens = turn.tools
-      ? estimateTokens(JSON.stringify(turn.tools), assigned)
-      : 0;
+    const toolSchemaTokens = estimateToolSchemaTokens(
+      turn.tools as ToolDefinition[] | undefined,
+      assigned
+    );
     const estimated =
       estimateTokens(turn.systemPrompt, assigned) + turn.sentTokens + toolSchemaTokens;
     recordUsageCalibration(assigned, estimated, outcome.usage.promptTokens);
@@ -979,6 +1103,20 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
       session.inToolPhase = false;
     }
 
+    // ── Escalation ──
+    // The model has been told, in words, that the call it keeps making
+    // fails, and it made it again. Continuing on the same model just
+    // repeats the argument: hand the rest of the turn to something with
+    // more capability, announce it, and let the loop continue.
+    if (session.stuckRefusals > 0 && !session.escalated) {
+      const conversation = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      maybeEscalate(
+        conversationId,
+        conversation?.model ?? useChatStore.getState().settings.defaultModel,
+        deps
+      );
+    }
+
     if (iteration === cap - 1) hitCapWithTools = true;
   }
 
@@ -1014,6 +1152,9 @@ export async function runTurn(
   session.callLedger = new Map();
   session.recoveredTextCalls = false;
   session.recoveredNote = null;
+  session.modelOverride = null;
+  session.escalated = false;
+  session.stuckRefusals = 0;
   resetPreviewExecCounter(conversationId);
 
   try {
@@ -1104,6 +1245,9 @@ export async function adoptTurn(
   session.callLedger = new Map();
   session.recoveredTextCalls = false;
   session.recoveredNote = null;
+  session.modelOverride = null;
+  session.escalated = false;
+  session.stuckRefusals = 0;
 
   logTurnEvent({
     turnId: snapshot.turnId,
