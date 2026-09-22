@@ -5,11 +5,10 @@
 // edited in this conversation's workspace, in path order, each with
 // its unified diff, and the totals for the change set as a whole.
 //
-// This is the question a rendered preview cannot answer. A preview
-// shows what the app LOOKS like; approving a push (and trusting an
-// agent at all) means seeing which files moved and how, which is a
-// diff. It is deliberately the same change set the push gate shows,
-// diffed by the same function, so what you read here is what ships.
+// Approving a push (and trusting an agent at all) means seeing which
+// files moved and how, which is a diff. It is deliberately the same
+// change set the push gate shows, diffed by the same function, so
+// what you read here is what ships.
 //
 // Edits appear as they land: the pane reads the workspace store, and
 // every agent write publishes a new snapshot.
@@ -27,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
-import { useChatStore } from "@/stores/chat.store";
+import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { collectChangeSet } from "../lib/change-set";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { DiffView } from "./DiffView";
@@ -42,9 +41,10 @@ export const ChangesPane = React.memo(function ChangesPane({
   conversationId,
   onClose,
 }: ChangesPaneProps) {
-  const workspace = useChatStore((s) =>
-    conversationId ? s.workspaces[conversationId] : undefined
-  );
+  // Fail closed: right after a repository switch the in-memory entry is the
+  // previous repository's, and showing its change set under the new
+  // repository's name is how a diff of the wrong code gets reviewed.
+  const workspace = useChatStore((s) => selectWorkspace(s, conversationId) ?? undefined);
   const repoAttached = useChatStore((s) =>
     Boolean(s.conversations.find((c) => c.id === conversationId)?.repoContext)
   );
@@ -83,8 +83,8 @@ export const ChangesPane = React.memo(function ChangesPane({
 
   return (
     <div className="chat-changes" role="region" aria-label="Agent code changes">
-      <div className="chat-preview-header">
-        <span className="chat-preview-title">
+      <div className="chat-changes-header">
+        <span className="chat-changes-title">
           <FileDiff className="h-3.5 w-3.5" aria-hidden="true" />
           Changes
         </span>
@@ -95,7 +95,7 @@ export const ChangesPane = React.memo(function ChangesPane({
             <span className="chat-changes-del">−{changes.deletions}</span>
           </span>
         )}
-        <div className="chat-preview-actions">
+        <div className="chat-changes-actions">
           {changes.fileCount > 0 && (
             <>
               <button

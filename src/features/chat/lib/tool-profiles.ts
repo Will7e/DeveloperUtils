@@ -39,6 +39,13 @@ export type ToolProfileId = "full" | "lean";
 export const LEAN_TOOL_NAMES: readonly string[] = [
   "list_repo_files",
   "read_file",
+  // A weak model is the one most likely to answer about a dependency from
+  // memory, and these are reading tools with one flat argument each — the
+  // same shape as read_file, so they add no loop the profile has to teach.
+  // search_web matters even more here: given only fetch_url, a model that
+  // does not know the URL will invent one.
+  "search_web",
+  "fetch_url",
   "search_workspace",
   "search_code",
   "get_repo_overview",
@@ -50,10 +57,6 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "edit_file",
   "get_workspace_diff",
   "push_changes",
-  "get_preview_feedback",
-  // A weak model is the one that most needs its own output described back
-  // to it, and this is a single flat argument. Cheap enough to keep.
-  "check_preview_visually",
 ];
 
 /** Below this context length a model gets the lean surface */

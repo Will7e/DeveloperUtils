@@ -30,6 +30,10 @@ import { findSkill, matchSkills } from "./skills";
 import { isUntrustedTool, wrapUntrusted } from "./untrusted";
 import { AGENT_TOOLS, summarizeToolCall } from "./tool-registry";
 import type { ChatSkill } from "../types";
+import { WEB_MAX_TEXT_CHARS, flattenWebBody } from "./web-page";
+import { fetchWebDocument } from "./web-fetch";
+import { searchWeb } from "./search-client";
+import { SEARCH_DEFAULT_LIMIT } from "./search-providers";
 
 /**
  * Reads the installed skills (builtins + user) from the chat store.
@@ -216,8 +220,11 @@ export async function executeToolCall(
         // tombstoned files should read as deleted rather than resurrect
         // pristine repo content.
         try {
-          const { useChatStore } = await import("@/stores/chat.store");
-          const ws = useChatStore.getState().workspaces[ctx.conversationId ?? ""];
+          const { selectWorkspace, useChatStore } = await import("@/stores/chat.store");
+          // Fail closed: another repository's working copy is not this agent's
+          // view of the file, so a miss falls through to the repository the
+          // thread is actually on.
+          const ws = selectWorkspace(useChatStore.getState(), ctx.conversationId ?? "");
           const local = ws?.files[path];
           if (local) {
             if (local.status === "deleted") {
@@ -308,6 +315,78 @@ export async function executeToolCall(
           },
           durationMs: Date.now() - started,
           summary: path,
+        };
+      }
+
+      case "search_web": {
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (!query) return fail("Missing required argument: query");
+        const limit =
+          typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0
+            ? Math.floor(args.limit)
+            : SEARCH_DEFAULT_LIMIT;
+
+        const outcome = await searchWeb(query, { signal, limit });
+        if (!outcome.ok) return fail(outcome.error);
+        if (signal?.aborted) return fail("Aborted by the user.");
+
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: {
+            query: outcome.query,
+            provider: outcome.provider,
+            results: outcome.results,
+            note:
+              outcome.results.length === 0
+                ? "Nothing matched. Rephrase the query (name the library or the exact error), or ask the user for the URL — do not guess one."
+                : "These are leads, not answers: an excerpt can be from an older version than this project uses. Read the page with fetch_url before relying on it, and check the project's own version first.",
+          },
+          durationMs: Date.now() - started,
+          summary: summarize(call.name, args, true),
+        };
+      }
+
+      case "fetch_url": {
+        const url = typeof args.url === "string" ? args.url.trim() : "";
+        if (!url) return fail("Missing required argument: url");
+        const maxChars =
+          typeof args.maxChars === "number" && Number.isFinite(args.maxChars) && args.maxChars > 0
+            ? Math.floor(args.maxChars)
+            : WEB_MAX_TEXT_CHARS;
+
+        const fetched = await fetchWebDocument(url, { signal });
+        if (!fetched.ok) return fail(fetched.error);
+        if (signal?.aborted) return fail("Aborted by the user.");
+
+        const page = flattenWebBody(fetched.body, fetched.contentType, maxChars);
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: {
+            url: fetched.requestedUrl,
+            status: fetched.status,
+            contentType: fetched.contentType,
+            title: page.title,
+            kind: page.kind,
+            text: truncateForBudget(page.text),
+            // Either limit is worth stating: the byte cap cut the response, or
+            // the character budget cut the extracted text.
+            truncated: page.truncated || fetched.bodyTruncated,
+            // True when CORS forced the relay, which is the common case and
+            // worth a caller knowing when a redirect or a final URL matters.
+            viaRelay: fetched.viaProxy,
+            redirected: fetched.redirectNote,
+            note: page.note,
+            statusNote:
+              fetched.status >= 400
+                ? `The server answered ${fetched.status}, so this is an error or refusal page rather than the content — read it as a diagnostic, not as the documentation.`
+                : null,
+          },
+          durationMs: Date.now() - started,
+          summary: summarize(call.name, args, true),
         };
       }
 

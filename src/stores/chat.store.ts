@@ -44,6 +44,13 @@ import {
 } from "@/features/chat/constants";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
 import { PENDING_TURN_MAX_AGE_MS } from "@/features/chat/session/resume-plan";
+import {
+  bindingIdOf,
+  clearAttachment,
+  forgetThread,
+  setAttachment,
+} from "@/features/chat/identity/bindings";
+import { attachmentIdOf, bindingKey, isAttached } from "@/features/chat/identity/identity";
 
 /**
  * What a new chat starts from.
@@ -431,10 +438,10 @@ export const useChatStore = create<ChatStoreState>()(
         // A new chat INHERITS the active chat's workspace context: the same
         // repository, and the same agent mode.
         //
-        // The repository is the expensive part — a tree, the files the agent
-        // reads, a preview build — and it used to be re-attached by hand for
-        // every new chat, which made "new chat" a project reset instead of a
-        // new conversation about the same project. Nothing else is inherited:
+        // The repository is the expensive part — a tree and the files the
+        // agent reads — and it used to be re-attached by hand for every new
+        // chat, which made "new chat" a project reset instead of a new
+        // conversation about the same project. Nothing else is inherited:
         // the new thread starts from the repository's base commit, not from
         // the other thread's uncommitted edits (that is a deliberate choice a
         // caller can make with an explicit seed).
@@ -468,7 +475,7 @@ export const useChatStore = create<ChatStoreState>()(
           ),
         })),
 
-      deleteConversation: (id) =>
+      deleteConversation: (id) => {
         set((s) => {
           const remaining = s.conversations.filter((c) => c.id !== id);
           const active =
@@ -491,7 +498,14 @@ export const useChatStore = create<ChatStoreState>()(
             workspaces,
             composerDrafts,
           };
-        }),
+        });
+        // The deleted thread's binding is announced so every cache scoped to it
+        // releases its share: file reads, published URLs, recorded evidence.
+        // Before, each of those was forgotten (or not) separately, and the ones
+        // that were not kept a readable copy of a deleted repository's code
+        // alive for the life of the tab.
+        void forgetThread(id);
+      },
 
       duplicateConversation: (id) => {
         const source = get().conversations.find((c) => c.id === id);
@@ -550,7 +564,7 @@ export const useChatStore = create<ChatStoreState>()(
           ),
         })),
 
-      setConversationRepo: (id, repo) =>
+      setConversationRepo: (id, repo) => {
         set((s) => ({
           conversations: mapConversation(s.conversations, id, (c) =>
             // Stamp attachedAt here (impure Date.now stays out of render)
@@ -559,7 +573,15 @@ export const useChatStore = create<ChatStoreState>()(
               repoContext: repo ? { ...repo, attachedAt: Date.now() } : undefined,
             })
           ),
-        })),
+        }));
+        // `repoContext` is the PERSISTED PROJECTION of the thread's binding, so
+        // the binding is declared in the same call that writes it. Leaving that
+        // to a component effect is a hop that can be missed, and missing it is
+        // exactly how a thread came to be on repository B while its workspace
+        // and its recorded evidence still belonged to A.
+        if (repo) void setAttachment(id, repo);
+        else void clearAttachment(id);
+      },
 
       setConversationPlan: (id, plan) =>
         set((s) => ({
@@ -951,4 +973,43 @@ export const useChatStore = create<ChatStoreState>()(
 /** Selector: the active conversation object (or undefined) */
 export function selectActiveConversation(state: ChatStoreState): ChatConversation | undefined {
   return state.conversations.find((c) => c.id === state.activeConversationId);
+}
+
+/**
+ * A thread's working copy — but ONLY when it is a copy of what the thread is
+ * currently attached to.
+ *
+ * `workspaces[threadId]` answers a different question than the one every caller
+ * means to ask. It says "what did this thread last have in memory", and the
+ * honest answer right after a repository switch is the PREVIOUS repository's
+ * working copy, because the new one is still being fetched. Reading it directly
+ * is how a write tool edited files in a repository the thread had already left,
+ * how a diff showed another repository's changes, and how a push shipped a
+ * change set that was no longer on screen.
+ *
+ * Fail-closed on purpose: null is the answer that makes a caller wait or
+ * re-derive (`ensureWorkspace`), and the wrong workspace is never an acceptable
+ * answer. The check is the binding itself rather than a comparison of owner and
+ * repo fields, so it cannot drift from what the change set, the ledger and the
+ * persisted record are keyed by.
+ */
+export function selectWorkspace(
+  state: ChatStoreState,
+  threadId: string | null
+): WorkspaceState | null {
+  if (!threadId) return null;
+  const binding = bindingIdOf(threadId);
+  // A thread with nothing attached has nothing to work on, whatever happens to
+  // be left in memory from before it detached.
+  if (!isAttached(binding)) return null;
+  const workspace = state.workspaces[threadId];
+  if (!workspace) return null;
+  return bindingKey(threadId, attachmentIdOf(workspace)) === binding
+    ? workspace
+    : null;
+}
+
+/** `selectWorkspace` for callers that are not rendering */
+export function currentWorkspace(threadId: string | null): WorkspaceState | null {
+  return selectWorkspace(useChatStore.getState(), threadId);
 }

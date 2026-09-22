@@ -39,7 +39,9 @@ import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import type { ChatConversation } from "../types";
 import {
   conversationMatchesQuery,
+  conversationRowMeta,
   groupConversationsByRepository,
+  hasRowMeta,
   type ConversationGroup,
   type RepoIdentity,
 } from "../lib/conversation-groups";
@@ -172,11 +174,13 @@ export function ChatSidebar({
       lastMessage && lastMessage.compactedFrom === undefined
         ? lastMessage.content.slice(0, 60)
         : "";
-    // Inside a repo group the repo name is on the header, so the row spends
-    // its width on the branch instead — and only when this repo's threads are
-    // not all on the same one, which is the case where the branch tells you
-    // something.
-    const showBranch = group.branches.length > 1 && conv.repoContext?.branch;
+    // The branch (only when this repo's threads are not all on one, which is
+    // when it tells you something) and the changed count. Decided in
+    // ../lib/conversation-groups so the rule is testable — and so this is a
+    // BOOLEAN. Computing it inline as `(showBranch || conv.pendingChanges) &&`
+    // made `undefined || 0` — the number zero — render under every new chat.
+    const meta = conversationRowMeta(group, conv);
+    const showMeta = hasRowMeta(group, conv);
 
     return (
       <div
@@ -231,26 +235,24 @@ export function ChatSidebar({
                   {formatRelativeTime(conv.updatedAt)}
                 </span>
               </div>
-              {(showBranch || conv.pendingChanges) && (
+              {showMeta && (
                 <div className="chat-conv-item-repo">
-                  {showBranch && (
+                  {meta.branch && (
                     <span className="chat-conv-item-repo-chip">
                       <GitBranch className="h-3 w-3" aria-hidden="true" />
-                      <span className="chat-conv-item-repo-name">
-                        {conv.repoContext!.branch}
-                      </span>
+                      <span className="chat-conv-item-repo-name">{meta.branch}</span>
                     </span>
                   )}
                   {/* Which of the group's threads is holding the unreleased
                       work. The header totals it; this says where it is. */}
-                  {conv.pendingChanges ? (
+                  {meta.changed > 0 && (
                     <span
                       className="chat-conv-item-changes"
-                      title={`${conv.pendingChanges} file${conv.pendingChanges === 1 ? "" : "s"} changed in this chat's workspace, not yet pushed`}
+                      title={`${meta.changed} file${meta.changed === 1 ? "" : "s"} changed in this chat's workspace, not yet pushed`}
                     >
-                      {conv.pendingChanges} changed
+                      {meta.changed} changed
                     </span>
-                  ) : null}
+                  )}
                 </div>
               )}
               {preview && <div className="chat-conv-item-preview">{preview}</div>}

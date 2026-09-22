@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "companion": "node --env-file-if-exists=.env.local src/features/chat/companion/companion-server.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -23,7 +24,6 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "esbuild-wasm": "^0.28.2",
     "lucide-react": "^1.11.0",
     "prettier": "^3.8.3",
     "react": "^19.2.5",

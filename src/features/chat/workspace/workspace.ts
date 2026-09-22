@@ -30,6 +30,7 @@ import type {
   WorkspaceTreeEntry,
 } from "../types";
 import { readValue, writeValue } from "@/services/idb-storage.service";
+import { registerScopedResource } from "../identity/scoped-resources";
 
 const IDB_KEY_PREFIX = "intab_workspace_";
 const IDB_INDEX_PREFIX = "intab_workspace_index_";
@@ -141,6 +142,37 @@ function scheduleSave(_conversationId: string, state: WorkspaceState): void {
     }, WORKSPACE_SAVE_DEBOUNCE_MS)
   );
 }
+
+/**
+ * Cancels any pending debounced save for one conversation's workspaces.
+ *
+ * A save is debounced, so a timer scheduled a moment before a chat is deleted
+ * fires AFTER the deletion and writes the record straight back — the chat is
+ * gone from the list and its working copy is on disk again, invisible. Nothing
+ * had ever cancelled one, because the timer map is private to this module and
+ * deletion happens in the store.
+ */
+export function cancelWorkspaceSaves(conversationId: string): void {
+  const marker = `${IDB_KEY_PREFIX}${conversationId}__`;
+  for (const [slot, timer] of [...saveTimers]) {
+    if (slot.startsWith(marker)) {
+      clearTimeout(timer);
+      saveTimers.delete(slot);
+    }
+  }
+}
+
+/**
+ * Registered for deletion, because a deleted chat's pending save is the one
+ * thing here that outlives the chat it belongs to.
+ */
+registerScopedResource({
+  name: "workspace.pending-saves",
+  scope: "thread",
+  release: ({ transition }) => {
+    if (transition.type === "thread.deleted") cancelWorkspaceSaves(transition.threadId);
+  },
+});
 
 /** Immediate IDB write (used on flush and before pushes) */
 export async function persistWorkspace(ws: WorkspaceState): Promise<void> {
@@ -283,8 +315,8 @@ export async function readFile(
 
 /**
  * Folds already-fetched file text into the workspace. Pure: no
- * network, no store. Callers that fetch many files at once (the
- * preview preloader) fetch in parallel but must MERGE sequentially —
+ * network, no store. Callers that fetch many files at once fetch in
+ * parallel but must MERGE sequentially —
  * a workspace is a read-modify-write value, so concurrent merges on
  * one snapshot would silently drop all but the last file.
  */
@@ -576,7 +608,7 @@ export function pendingChangeCount(ws: WorkspaceState | undefined | null): numbe
   return Object.values(ws.files).filter((f) => f.status !== "unchanged").length;
 }
 
-/** Paths of loaded files (for the preview bundler's virtual FS) */
+/** Paths of files currently loaded into the workspace */
 export function loadedFilePaths(ws: WorkspaceState): string[] {
   return Object.values(ws.files)
     .filter((f) => f.status !== "deleted")

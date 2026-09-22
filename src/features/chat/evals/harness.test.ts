@@ -323,7 +323,7 @@ describe("promise: nothing dangerous or unsupported reaches Approve silently", (
     const findings = auditClaims({
       claim: "Moved the date helper into src/util/format.ts so both callers share it.",
       changedPaths: changed,
-      toolsUsed: ["read_file", "edit_file", "get_preview_feedback"],
+      toolsUsed: ["read_file", "edit_file"],
     });
     expect(findings).toHaveLength(0);
   });

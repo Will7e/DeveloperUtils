@@ -5,7 +5,7 @@
 // page: a type check must not freeze the chat while a stream is arriving.
 //
 // Three things are loaded lazily, at most once per worker:
-//   • the compiler itself, from the same module host the preview uses;
+//   • the compiler itself, from the app's module host;
 //   • TypeScript's OWN lib .d.ts files (lib.es2020.d.ts, lib.dom.d.ts and
 //     their transitive references), because without them every `Promise`
 //     and `console` in the workspace is an error and the report becomes

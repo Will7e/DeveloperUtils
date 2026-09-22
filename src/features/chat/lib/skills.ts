@@ -18,7 +18,28 @@ export const SKILL_INDEX_RULE =
   "Skills marked `load` are available but their instructions are NOT loaded yet — call " +
   "`read_skill` with the skill name before acting when the task matches (its triggers, or the " +
   "kind of work you are about to do). Loading two or three relevant skills up front is cheap " +
-  "and makes the rest of the turn more accurate.";
+  "and makes the rest of the turn more accurate. Match on what the user MEANS, not only on the " +
+  "words listed: \"it is still broken\", \"doesn't work\" and \"fix this\" match a debugging or " +
+  "verification skill, and a failing build or a change about to be shipped is exactly when " +
+  "loading one pays for itself.";
+
+/**
+ * Builtins that have been REMOVED from the shipped set.
+ *
+ * Needed because `reconcileBuiltins` only ever ADDS: a skill deleted from
+ * BUILTIN_SKILLS would otherwise live on in the settings modal of every user
+ * who had already opened the app, which is everyone. Retiring is therefore a
+ * two-part change — drop it from the shipped list, and name it here.
+ */
+export const RETIRED_BUILTIN_SKILL_IDS: readonly string[] = [
+  "builtin-code-reviewer", // superseded by builtin-review-this-diff
+  "builtin-commit-writer", // the push flow needs a conventional message anyway
+  "builtin-test-writer", // superseded by builtin-add-tests-for-change
+  "builtin-sql-explainer", // generic, not this product's loop
+  "builtin-regex-debugger",
+  "builtin-docs-simplifier",
+  "builtin-api-designer",
+];
 
 /** One index line per loadable skill: name, description, triggers, globs */
 export function buildSkillIndex(skills: ChatSkill[]): string | null {
@@ -277,14 +298,28 @@ export function skillFromParsed(parsed: ParsedSkillFile): ChatSkill {
  * Reconciles the stored skill list with the shipped builtins:
  *  - adds any builtin missing locally (new version shipped one)
  *  - restores deleted builtins
+ *  - removes RETIRED builtins the user never touched
  *  - never touches edited builtins (`updated: true`) or user skills
  * Returns the same array reference when nothing changed.
+ *
+ * Retirement is deliberately narrow. A retired skill is removed only when
+ * the user left it alone — not edited, and not ENABLED. Deleting something
+ * a user explicitly switched on would be the harness overruling a choice
+ * they made, which is a worse outcome than one stale index line; an edited
+ * builtin is their text, and their text is never ours to delete.
  */
 export function reconcileBuiltins(stored: ChatSkill[] | undefined): ChatSkill[] | null {
   const list = Array.isArray(stored) ? stored : [];
   const byId = new Map(list.map((s) => [s.id, s]));
   let changed = false;
-  const next = [...list];
+
+  const next = list.filter((skill) => {
+    if (!RETIRED_BUILTIN_SKILL_IDS.includes(skill.id)) return true;
+    const touched = skill.builtin !== true || skill.updated === true || skill.enabled === true;
+    if (touched) return true;
+    changed = true;
+    return false;
+  });
 
   for (const builtin of BUILTIN_SKILLS) {
     const existing = byId.get(builtin.id);
@@ -294,6 +329,8 @@ export function reconcileBuiltins(stored: ChatSkill[] | undefined): ChatSkill[] 
     }
   }
 
+  // Same reference when nothing changed: the store treats that as "no write",
+  // and a needless array identity is a needless persistence pass.
   return changed ? next : null;
 }
 

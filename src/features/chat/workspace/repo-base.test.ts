@@ -3,9 +3,8 @@
 // ============================================================
 // A workspace holds what the REPO says (the tree, pristine file contents) and
 // what THIS CHAT did to it (edits, undo log). Both used to be created per
-// conversation, so a second chat on the same repo re-fetched the tree,
-// re-downloaded files the first chat had already read, and rebuilt its
-// preview from nothing.
+// conversation, so a second chat on the same repo re-fetched the tree and
+// re-downloaded files the first chat had already read.
 //
 // What these tests pin is the sharing, and its limits:
 //

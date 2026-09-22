@@ -6,8 +6,8 @@
 // engine owns every turn rule exactly once:
 //
 //  - rounds: prepare → start → render → (tool calls? run them → next
-//    round). Tool EXECUTION stays here because the workspace and the
-//    preview live in the page.
+//    round). Tool EXECUTION stays here because the workspace lives in
+//    the page.
 //  - the renderer, including an inactivity watchdog: silence from
 //    the transport (killed worker, dropped port) ends the turn with
 //    an honest error instead of a spinner that never stops.
@@ -22,7 +22,6 @@
 // refused rather than interleaved.
 
 import { useChatStore } from "@/stores/chat.store";
-import { usePreviewStore } from "../preview/preview.store";
 import {
   prepareTurn,
   resolveModelState,
@@ -65,25 +64,20 @@ import {
   TURN_INACTIVITY_TIMEOUT_MS,
 } from "../constants";
 import type { ToolDefinition } from "../types";
-import { resetProbeCounter, runVerifyBehavior } from "../lib/probe-runner";
 import { runUpdatePlan } from "../services/plan-actions";
 import {
-  resetPreviewExecCounter,
   runCallMcpTool,
   runCreateWorkingBranch,
   runDelegate,
   runDeleteFile,
   runEditFile,
-  runInPreview,
   runListMcpTools,
-  runPreviewFeedback,
   runPushChanges,
-  runPreviewLayout,
-  runVisualCheck,
-  runQueryPreviewDom,
   runRemember,
   runRunChecks,
+  runCiVerification,
   runSearchWorkspace,
+  runShellCommand,
   runWorkspaceDiff,
   runWriteFile,
 } from "../services/agent-actions";
@@ -616,34 +610,18 @@ async function runBridgeTool(
       return runCreateWorkingBranch(conversationId, args);
     case "push_changes":
       return runPushChanges(conversationId, args);
-    case "get_preview_feedback": {
-      const buildErrors = usePreviewStore
-        .getState()
-        .diagnostics.filter((d) => d.severity === "error")
-        .map(
-          (d) =>
-            `${d.file ? `${d.file}${d.line ? `:${d.line}` : ""}: ` : "build: "}${d.message.split("\n")[0] ?? d.message}`
-        );
-      return runPreviewFeedback(conversationId, args, buildErrors);
-    }
-    case "run_in_preview":
-      return runInPreview(conversationId, args);
-    case "query_preview_dom":
-      return runQueryPreviewDom(conversationId, args);
-    case "get_preview_layout":
-      return runPreviewLayout(conversationId, args);
-    case "check_preview_visually":
-      return runVisualCheck(conversationId, args);
     case "run_checks":
       return runRunChecks(conversationId, args);
-    case "verify_behavior":
-      return runVerifyBehavior(conversationId, args);
     case "update_plan":
       return runUpdatePlan(conversationId, args);
     case "list_mcp_tools":
       return runListMcpTools(conversationId, args);
     case "call_mcp_tool":
       return runCallMcpTool(conversationId, args);
+    case "run_command":
+      return runShellCommand(conversationId, args);
+    case "verify_with_ci":
+      return runCiVerification(conversationId, args);
     default: {
       // Registry-consistency guard: a tool marked kind:"bridge" must
       // have a case here.
@@ -802,8 +780,8 @@ async function executeToolPhase(
     // tool is a read-modify-write on the same workspace snapshot, so
     // running them concurrently made the last write win and silently
     // discard its siblings' files. Sequential execution also makes
-    // `push_changes` and `run_in_preview` observe the edits that
-    // preceded them in the same model turn.
+    // `push_changes` observe the edits that preceded it in the same
+    // model turn.
     const bridgeTools = pending.filter(isBridge);
     for (const p of bridgeTools) {
       if (session.abort?.signal.aborted) return;
@@ -1248,8 +1226,6 @@ export async function runTurn(
   session.modelOverride = null;
   session.escalated = false;
   session.stuckRefusals = 0;
-  resetPreviewExecCounter(conversationId);
-  resetProbeCounter(conversationId);
 
   try {
     await runRounds(conversationId, resolved);

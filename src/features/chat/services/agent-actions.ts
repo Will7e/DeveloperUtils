@@ -1,12 +1,12 @@
 // ============================================================
-// Agent Actions — Executor Bridge for Write/Ship/Preview Tools
+// Agent Actions — Executor Bridge for Write/Ship Tools
 // ============================================================
 // tools.ts stays UI-free and store-free for the read tools; this
 // module owns the coding-agent tools that need the chat store
-// (workspace, gate), the GitHub write client, and the preview
-// runtime. chat-runner.ts routes write/ship/feedback calls here.
+// (workspace, gate) and the GitHub write client. chat-runner.ts
+// routes write/ship calls here.
 
-import { useChatStore } from "@/stores/chat.store";
+import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { diffFile, summarizeChanges } from "../workspace/diff";
 import {
   collectChanges,
@@ -47,14 +47,6 @@ import {
   uniqueBranchName,
   GitHubWriteError,
 } from "../lib/github-write";
-import { schedulePreviewBuild, runPreviewBuild } from "../preview/preview-runtime";
-import { capturePreviewLayout, runJsInPreview, queryPreviewDom } from "../preview/preview-bridge";
-import {
-  analyzeLayout,
-  formatLayoutMap,
-  normalizeLayoutReport,
-  summarizeLayout,
-} from "../lib/preview-layout";
 import {
   VERIFY_MANIFEST_PATH,
   checksFromAgentsMd,
@@ -64,23 +56,29 @@ import {
   summarizeChecks,
   unrunChecksStatement,
 } from "../lib/verify-contract";
-import { usePreviewStore } from "../preview/preview.store";
+import { bindingIdOf } from "../identity/bindings";
+import { describeBinding } from "../identity/identity";
 import { assessPushPolicy, policyWarnings } from "../lib/push-policy";
+import { assessCommandPolicy, summarizeCommandPolicy } from "../lib/command-policy";
+import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
+import {
+  companionCredentials,
+  probeCompanion,
+  runOnCompanion,
+} from "../companion/companion-client";
+import { describeRejections, planMaterialization } from "../companion/materialize-plan";
+import { readFileContent } from "../lib/github-client";
+import { CI_MAX_WAIT_MS, ciWorkflowPaths, planCiVerification } from "../lib/ci-plan";
+import {
+  dispatchWorkflow,
+  findDispatchedRun,
+  waitForRun,
+} from "../lib/ci-client";
 import { auditClaims, evidenceWarnings } from "../lib/evidence-audit";
 import { appendMemory, MEMORY_PATH, parseMemoryFacts } from "../lib/project-memory";
 import { delegateToolResult, pickResearchModel, runDelegateLoop } from "./delegate";
 import { activeServers, callServerTool, findServer, listAllTools } from "../lib/mcp";
 import { completeChat, completeChatWithTools } from "../lib/openrouter-client";
-import { capturePreviewScreenshot } from "../preview/preview-bridge";
-import { getCachedModelCatalog } from "../lib/model-catalog";
-import {
-  VISUAL_CHECK_SYSTEM_PROMPT,
-  buildVisualCheckPrompt,
-  captureCaveat,
-  normalizeScreenshot,
-  parseVisualVerdict,
-  pickVisionModel,
-} from "../lib/visual-check";
 import { executeToolCall, parseToolArguments } from "../lib/tools";
 import type { ChatConversation } from "../types";
 
@@ -91,18 +89,25 @@ import type { ChatConversation } from "../types";
  * start from this rather than from a snapshot captured earlier: a
  * workspace is a read-modify-write structure, and a stale snapshot
  * silently reverts whatever landed in between.
+ *
+ * `selectWorkspace` is what makes "current" mean it. Reading the map directly
+ * answered "what does this thread have in memory", which is not the same
+ * question and is wrong at exactly the moment it matters: right after the thread
+ * moves to another repository, the entry in memory is the one it just left.
+ * A write executor using it edits files in a repository the thread is no longer
+ * on — memory-only, invisible, and pushed nowhere, which is worse than an error.
  */
 async function latestWorkspace(conversationId: string): Promise<WorkspaceState | null> {
   const store = useChatStore.getState();
-  const live = store.workspaces[conversationId];
+  const live = selectWorkspace(store, conversationId);
   if (live) return live;
   return store.ensureWorkspace(conversationId);
 }
 
 /**
  * Applies a workspace mutation and publishes it: store first, then a
- * debounced IDB flush, then a preview rebuild. Returns the stored
- * state so callers can diff against it.
+ * debounced IDB flush. Returns the stored state so callers can diff
+ * against it.
  */
 function publishWorkspace(conversationId: string, ws: WorkspaceState): WorkspaceState {
   useChatStore.getState().setWorkspace(conversationId, ws);
@@ -231,8 +236,6 @@ async function commitWrite(
   // for this repo+branch are now stale (the model must see its own
   // edits, not the pre-edit repo content).
   clearToolCache();
-  // Trigger a debounced preview rebuild so the pane stays live
-  schedulePreviewBuild(ws);
   const file = ws.files[path];
   const status = file?.status ?? "added";
   const change = fileChange(ws, path);
@@ -246,7 +249,7 @@ async function commitWrite(
       lines: content.split("\n").length,
       additions: change?.additions ?? 0,
       deletions: change?.deletions ?? 0,
-      note: "File written to the workspace (not yet on GitHub). Preview is rebuilding.",
+      note: "File written to the workspace (not yet on GitHub).",
     },
     uiChange: change,
     durationMs: Date.now() - started,
@@ -286,7 +289,6 @@ export async function runDeleteFile(
     if (!result.ok) return fail(result.error ?? "Delete failed.");
     useChatStore.getState().setWorkspace(conversationId, result.ws);
     clearToolCache();
-    schedulePreviewBuild(result.ws);
     const change = fileChange(result.ws, path);
     return {
       callId: "",
@@ -309,7 +311,6 @@ export async function runDeleteFile(
   if (!result.ok) return fail(result.error ?? "Delete failed.");
   useChatStore.getState().setWorkspace(conversationId, result.ws);
   clearToolCache();
-  schedulePreviewBuild(result.ws);
   const change = fileChange(result.ws, path);
   return {
     callId: "",
@@ -401,7 +402,6 @@ export async function runEditFile(
   // The workspace diverged from GitHub — cached reads for this
   // repo+branch would show the model its own pre-edit text.
   clearToolCache();
-  schedulePreviewBuild(result.ws);
 
   const lines = outcome.content.split("\n").length;
   const change = fileChange(result.ws, path);
@@ -417,7 +417,7 @@ export async function runEditFile(
       lineDelta: lines - file.content.split("\n").length,
       additions: change?.additions ?? 0,
       deletions: change?.deletions ?? 0,
-      note: "Edit applied to the workspace (not yet on GitHub). Preview is rebuilding.",
+      note: "Edit applied to the workspace (not yet on GitHub).",
     },
     uiChange: change,
     durationMs: Date.now() - started,
@@ -510,8 +510,8 @@ export async function runSearchWorkspace(
     if (scan(p, loaded.content)) break;
   }
 
-  // Persist fetched files: they are now readable by read_file and
-  // bundled by the preview, so one search warms the whole session.
+  // Persist fetched files so they are readable by read_file — one
+  // search warms the whole session.
   if (fetched > 0) {
     useChatStore.getState().setWorkspace(conversationId, ws);
     void flushWorkspaceSave(conversationId, ws);
@@ -834,6 +834,399 @@ export async function runCallMcpTool(
   };
 }
 
+// ── run_command (the only tool that can VERIFY) ──────────────
+
+/**
+ * The first few lines of a failure, for the ledger and the gate.
+ *
+ * stderr first, because a compiler and a test runner both put their verdict
+ * there; stdout only when stderr is empty, because a failing Node process
+ * often writes nothing to stderr but prints the assertion diff to stdout.
+ */
+function failureLines(outcome: { stdout: string; stderr: string }): string[] {
+  const source = outcome.stderr.trim() || outcome.stdout.trim();
+  if (!source) return [];
+  return source
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 3);
+}
+
+/**
+ * Run a shell command in a real working tree, on the user's own machine.
+ *
+ * Every other tool in this file INFERS: `run_checks` reads a manifest and
+ * reports which checks exist. This one runs the project's own command and
+ * reports the exit code, which is the only thing in the product that can
+ * turn "this should work" into "this passed".
+ *
+ * Three refusals are deliberate, and each is a way the tool would otherwise
+ * lie:
+ *
+ *   • a blocked command is REFUSED rather than attempted quietly;
+ *   • no companion means the command was NOT RUN — reported as unverified,
+ *     never as success, because a green result the agent cannot support is
+ *     worse than no result at all;
+ *   • a non-zero exit is `ok: false`. A failing test run is a successful
+ *     tool call carrying a failed verification, and the distinction is what
+ *     stops "tests failed" from being summarised as "done".
+ */
+export async function runShellCommand(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const command = typeof args.command === "string" ? args.command.trim() : "";
+  const why = typeof args.why === "string" ? args.why.trim() : "";
+  const fail = (error: string, summary: string): ToolCallResult => ({
+    callId: "",
+    name: "run_command",
+    ok: false,
+    data: { error, command, ...(why ? { why } : {}) },
+    durationMs: Date.now() - started,
+    summary,
+  });
+
+  if (!command) return fail("Pass a `command` to run.", "no command");
+  if (command.length > 2_000) {
+    return fail("That command line is too long for the user to review before it runs.", "too long");
+  }
+
+  const policy = assessCommandPolicy(command);
+  const policyLine = summarizeCommandPolicy(policy);
+  if (!policy.allowed) {
+    return fail(
+      `${policyLine ?? "Refused by policy."} Rewrite the command so it stays inside the workspace, ` +
+        "or tell the user the exact command to run by hand — do not try a variant that hides what it does.",
+      "refused by policy"
+    );
+  }
+
+  const ws = await latestWorkspace(conversationId);
+  if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
+
+  const store = useChatStore.getState();
+  // Where the companion is, and the token to talk to it with. In an `npm run
+  // dev` session the dev server started it and publishes both; a deployed build
+  // reads them from the environment.
+  const credentials = await companionCredentials();
+  if (!credentials.origin) {
+    return fail(
+      `${command} was NOT RUN — ${credentials.error ?? "no companion is running"} Running real commands needs the ` +
+        "local companion, which `npm run dev` starts for you (or `npm run companion` by hand). Report this change as " +
+        "UNVERIFIED until it has run.",
+      "not run — unverified"
+    );
+  }
+  const probe = await probeCompanion(credentials.origin);
+  if (!probe.available) {
+    return fail(
+      `${command} was NOT RUN — ${probe.error ?? "no companion answered"} Running real commands needs the ` +
+        "local companion, which `npm run dev` starts for you. Report this change as " +
+        "UNVERIFIED until it has run.",
+      "not run — unverified"
+    );
+  }
+  if (probe.protocolVersion !== null && probe.protocolVersion !== COMPANION_PROTOCOL_VERSION) {
+    return fail(
+      `The companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}. ` +
+        "It was NOT run: restart the companion so the two agree rather than letting it answer a request it does not understand.",
+      "not run — version mismatch"
+    );
+  }
+
+  const companionToken = credentials.token;
+  if (!companionToken) {
+    return fail(
+      `${command} was NOT RUN — ${credentials.error ?? "no pairing token"}. ` +
+        "In an `npm run dev` session the dev server provides one; a deployed build reads " +
+        "VITE_COMPANION_TOKEN.",
+      "not run — unpaired"
+    );
+  }
+
+  // Only the workspace's own changes are written: with a repository ref the
+  // companion checks out the base commit first, so the tree is the whole
+  // project and the change set is the agent's delta on top of it.
+  const plan = planMaterialization({
+    base: [],
+    changes: collectChanges(ws).map((change) => ({
+      path: change.path,
+      content: change.content,
+      status: change.status,
+    })),
+  });
+  const rejectedLine = describeRejections(plan);
+
+  const ghToken = store.settings.github.token;
+  const repo =
+    ws.owner && ws.repo && ws.baseCommitSha
+      ? {
+          url: ghToken
+            ? `https://x-access-token:${ghToken}@github.com/${ws.owner}/${ws.repo}.git`
+            : `https://github.com/${ws.owner}/${ws.repo}.git`,
+          ref: ws.baseCommitSha,
+        }
+      : undefined;
+
+  const result = await runOnCompanion({
+    origin: probe.origin,
+    token: companionToken,
+    conversationId,
+    command,
+    writes: plan.writes,
+    deletes: plan.deletes,
+    ...(repo ? { repo } : {}),
+    ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
+  });
+
+  if (!result.ok) return fail(`The command was not run: ${result.error}`, "not run — unverified");
+
+  const outcome = result.outcome;
+  const passed = outcome.exitCode === 0;
+
+  // Into the ledger, not just into the tool result. A result is read once and
+  // forgotten; the push gate needs to know what was proven, about WHICH
+  // revision, and how long ago — and a passing run of code that has since
+  // changed is exactly the claim this ledger exists to stop.
+  recordVerification(conversationId, {
+    kind: "command",
+    at: Date.now(),
+    workspaceUpdatedAt: ws.updatedAt,
+    ok: passed,
+    summary: `\`${command}\` ${
+      passed
+        ? "exited 0"
+        : outcome.timedOut
+          ? "was killed after its timeout"
+          : `exited ${outcome.exitCode}`
+    } in ${outcome.durationMs}ms`,
+    details: passed ? [] : failureLines(outcome),
+    source: "run_command",
+  });
+
+  return {
+    callId: "",
+    name: "run_command",
+    ok: passed,
+    data: {
+      command: outcome.command,
+      ...(why ? { why } : {}),
+      exitCode: outcome.exitCode,
+      signal: outcome.signal,
+      stdout: outcome.stdout,
+      stderr: outcome.stderr,
+      timedOut: outcome.timedOut,
+      outputTruncated: outcome.truncated,
+      cwd: outcome.cwd,
+      durationMs: outcome.durationMs,
+      notes: outcome.notes,
+      // Warnings the user approved, so a later reader can see what was risky
+      // about a run that looked ordinary.
+      warnings: policy.findings.map((finding) => finding.code),
+      materialized: {
+        files: plan.writes.length,
+        deleted: plan.deletes.length,
+        ...(rejectedLine ? { rejected: rejectedLine } : {}),
+      },
+      /**
+       * The verdict, stated in the result rather than left to inference. A
+       * model that has to derive "did this pass" from an exit code will,
+       * under pressure, derive it wrongly.
+       */
+      verification: passed
+        ? { status: "passed", evidence: `\`${command}\` exited 0 in ${outcome.cwd}.` }
+        : {
+            status: outcome.timedOut ? "timed-out" : "failed",
+            evidence: `\`${command}\` ${outcome.timedOut ? "was killed after its timeout" : `exited ${outcome.exitCode}`}.`,
+          },
+    },
+    durationMs: Date.now() - started,
+    summary: `${passed ? "exit 0" : outcome.timedOut ? "timed out" : `exit ${outcome.exitCode}`} — ${command.slice(0, 48)}`,
+  };
+}
+
+// ── verify_with_ci (the repository's own definition of green) ─
+
+/** How long a single tool call will wait for CI before reporting "running" */
+const CI_TOOL_WAIT_MS = 5 * 60_000;
+
+/**
+ * Verify a change by running the repository's own CI.
+ *
+ * This is the tier that reaches what the browser cannot: Python, Rust, a
+ * Postgres service, a Docker build, a test matrix — none of it needs an
+ * image, a language runtime, or a cent of compute, because the repository
+ * already declares all of it and GitHub already runs it.
+ *
+ * It is also the slowest tier, so the honest failure modes matter more than
+ * the happy one:
+ *
+ *   • it needs a PUSHED branch. CI runs against a ref, so with nothing
+ *     pushed there is nothing to verify, and the result says to push first
+ *     rather than dispatching into the void;
+ *   • it needs `actions: write`, which is NOT the permission that pushes —
+ *     a 403 is reported as a scope problem with its fix;
+ *   • it reports "running" rather than a verdict when the wait runs out. The
+ *     run is still going on GitHub; calling it either way would be
+ *     inventing an answer.
+ */
+export async function runCiVerification(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const workflowPath = typeof args.workflow === "string" ? args.workflow.trim() : "";
+  const fail = (error: string, summary: string): ToolCallResult => ({
+    callId: "",
+    name: "verify_with_ci",
+    ok: false,
+    data: { error, ...(workflowPath ? { workflow: workflowPath } : {}) },
+    durationMs: Date.now() - started,
+    summary,
+  });
+
+  const ws = await latestWorkspace(conversationId);
+  if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
+  if (!ws.workingBranch) {
+    return fail(
+      "This change has not been pushed, and CI runs against a branch — so there is nothing to verify yet. " +
+        "Push it first (the user reviews the diff), then verify.",
+      "not pushed"
+    );
+  }
+
+  const store = useChatStore.getState();
+  const token = store.settings.github.token;
+  if (!token) return fail("Connect GitHub before verifying with CI.", "no token");
+
+  // Read the workflow files the tree already lists. A fetch per file is
+  // cheap here (a repository has a handful) and keeps CI detection honest:
+  // the plan is built from the files' actual triggers, not from their names.
+  const paths = ciWorkflowPaths(ws.tree.map((entry) => entry.path));
+  const workflows: { path: string; content: string }[] = [];
+  const unreadable: string[] = [];
+  for (const path of paths) {
+    try {
+      const file = await readFileContent(token, ws.owner, ws.repo, path, ws.branch);
+      if (file.text !== null) workflows.push({ path, content: file.text });
+      else unreadable.push(path);
+    } catch {
+      unreadable.push(path);
+    }
+  }
+
+  const plan = planCiVerification({
+    workflows,
+    ref: ws.workingBranch,
+    ...(workflowPath ? { preferredPath: workflowPath } : {}),
+  });
+  if (!plan.ok) {
+    return fail(
+      `${plan.message}${unreadable.length > 0 ? ` (Could not read: ${unreadable.join(", ")}.)` : ""}`,
+      "cannot dispatch"
+    );
+  }
+
+  const dispatchedAt = new Date().toISOString();
+  const dispatch = await dispatchWorkflow({
+    token,
+    owner: ws.owner,
+    repo: ws.repo,
+    workflowPath: plan.workflow.path,
+    ref: plan.ref,
+    inputs: plan.inputs,
+  });
+  if (!dispatch.ok) return fail(dispatch.error, "dispatch refused");
+
+  // The dispatch has no body, so the run is found by asking for runs created
+  // after this moment — the newest-first list alone returns yesterday's green
+  // run and every verification passes on it.
+  let run = await findDispatchedRun({
+    token,
+    owner: ws.owner,
+    repo: ws.repo,
+    workflowPath: plan.workflow.path,
+    ref: plan.ref,
+    sinceIso: dispatchedAt,
+  });
+  if (!run) {
+    // GitHub accepts a dispatch before the run is queryable. One short grace
+    // poll, then an honest "dispatched but not visible yet" rather than a
+    // retry loop that hides the real problem.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    run = await findDispatchedRun({
+      token,
+      owner: ws.owner,
+      repo: ws.repo,
+      workflowPath: plan.workflow.path,
+      ref: plan.ref,
+      sinceIso: dispatchedAt,
+    });
+  }
+  if (!run) {
+    return fail(
+      `Dispatched ${plan.workflow.path} on ${plan.ref}, but no run has appeared yet. It may still be queued — ` +
+        "nothing has been verified yet.",
+      "dispatched, no run yet"
+    );
+  }
+
+  const requestedWait = typeof args.maxWaitMs === "number" ? args.maxWaitMs : CI_TOOL_WAIT_MS;
+  const waited = await waitForRun(
+    { token, owner: ws.owner, repo: ws.repo, run },
+    { maxWaitMs: Math.min(Math.max(requestedWait, 10_000), CI_MAX_WAIT_MS) }
+  );
+  if (!waited.ok) return fail(`Watching the CI run failed: ${waited.error}`, "ci error");
+
+  const verdict = waited.verdict;
+
+  // Only a DEFINITIVE verdict is recorded. The ledger has one failure state,
+  // and a run that is still going — or one that finished "skipped" and
+  // therefore checked nothing — is not a failure, it is an absence of
+  // evidence. Recording it as `ok: false` would make the next summary read
+  // as "CI ran and FAILED", which is a different and wrong claim. Leaving it
+  // unrecorded is what is honest: nothing then substantiates a green claim,
+  // and the claim audit says so.
+  if (verdict.status === "passed" || verdict.status === "failed" || verdict.status === "timed-out") {
+    recordVerification(conversationId, {
+      kind: "ci",
+      at: Date.now(),
+      workspaceUpdatedAt: ws.updatedAt,
+      ok: verdict.status === "passed",
+      summary: `${plan.workflow.label} — ${verdict.status} (${verdict.evidence})`,
+      details: verdict.status === "passed" ? [] : [verdict.evidence],
+      source: "verify_with_ci",
+    });
+  }
+
+  return {
+    callId: "",
+    name: "verify_with_ci",
+    // Only a definitive pass is a success. A skipped, neutral or still-running
+    // run is not verification, and reporting it as one is the failure this
+    // whole tier exists to remove.
+    ok: verdict.status === "passed",
+    data: {
+      workflow: plan.workflow.path,
+      workflowLabel: plan.workflow.label,
+      ref: plan.ref,
+      why: plan.reason,
+      runId: run.id,
+      runUrl: run.htmlUrl,
+      status: verdict.status,
+      authoritativelyGreen: verdict.authoritativelyGreen,
+      evidence: verdict.evidence,
+      jobs: plan.workflow.jobs,
+      ...(unreadable.length > 0 ? { unreadableWorkflows: unreadable } : {}),
+      cost: "Runs on the repository's own CI — no sandbox, no cloud compute.",
+    },
+    durationMs: Date.now() - started,
+    summary: `ci: ${verdict.status} — ${plan.workflow.label}`,
+  };
+}
+
 // ── run_checks (the verification contract) ───────────────────
 
 /** Best-effort read of one repo file: workspace first, then GitHub */
@@ -842,7 +1235,9 @@ async function readRepoFile(
   path: string
 ): Promise<string | null> {
   const store = useChatStore.getState();
-  const ws = store.workspaces[conversationId];
+  // Fail closed here too: a file read from another repository's working copy is
+  // a wrong answer, and the fallback below reads the RIGHT repository.
+  const ws = selectWorkspace(store, conversationId);
   const local = ws?.files[path];
   if (local && local.status !== "deleted") return local.content;
   const repo = store.conversations.find((c) => c.id === conversationId)?.repoContext;
@@ -890,12 +1285,10 @@ const CHECK_RUN_TIMEOUT_MS = 180_000;
 /**
  * Runs the in-browser type check over the workspace.
  *
- * This is the one declared check that needs no runner: the preview already
- * bundles the workspace with esbuild-wasm (which STRIPS types without
- * checking them), so a compiler in a worker is what finally gives the
- * agent a signal that can see a type error at all. Without it the agent's
- * only build feedback was type-blind — `const x: string = 42` bundled
- * cleanly — while its own instructions told it to verify before pushing.
+ * A compiler in a worker is what gives the agent a signal that can see a
+ * type error at all — without it the agent's only build feedback was
+ * type-blind (`const x: string = 42` ran cleanly) while its own
+ * instructions told it to verify before pushing.
  */
 async function runLocalTypecheck(
   conversationId: string,
@@ -1108,202 +1501,6 @@ export async function runRunChecks(
   }
 }
 
-// ── get_preview_layout (geometry the model can reason about) ─
-
-export async function runPreviewLayout(
-  conversationId: string,
-  args: Record<string, unknown>
-): Promise<ToolCallResult> {
-  const started = Date.now();
-  const preview = usePreviewStore.getState();
-  const selector = typeof args.selector === "string" ? args.selector.trim() : undefined;
-  const requested =
-    typeof args.maxElements === "number" && Number.isFinite(args.maxElements)
-      ? Math.floor(args.maxElements)
-      : 40;
-  const maxElements = Math.min(Math.max(1, requested), 80);
-
-  if (preview.conversationId && preview.conversationId !== conversationId) {
-    return {
-      callId: "",
-      name: "get_preview_layout",
-      ok: false,
-      data: {
-        error:
-          "The preview is showing a different conversation. Open this conversation's preview, then retry.",
-      },
-      durationMs: Date.now() - started,
-      summary: "wrong preview",
-    };
-  }
-
-  const response = await capturePreviewLayout(selector, maxElements);
-  if (!response.ok) {
-    return {
-      callId: "",
-      name: "get_preview_layout",
-      ok: false,
-      data: { error: response.error ?? "The preview did not answer the layout request." },
-      durationMs: Date.now() - started,
-      summary: "layout unavailable",
-    };
-  }
-
-  const report = normalizeLayoutReport(response.result);
-  const findings = analyzeLayout(report);
-  const map = formatLayoutMap(report, maxElements);
-
-  return {
-    callId: "",
-    name: "get_preview_layout",
-    ok: true,
-    data: {
-      viewport: `${report.viewport.w}×${report.viewport.h}`,
-      document: `${report.document.w}×${report.document.h}`,
-      boxes: report.elements.length,
-      findings: findings.length > 0 ? findings : ["No layout problems detected."],
-      map,
-      note:
-        findings.length > 0
-          ? "Fix these and re-check — a layout problem is a real bug, not a style preference."
-          : "Geometry only: this cannot see colours, contrast, or overlapping paint order.",
-    },
-    durationMs: Date.now() - started,
-    summary: summarizeLayout(report, findings),
-  };
-}
-
-// ── check_preview_visually (screenshot → vision model) ──────
-
-/**
- * Looks at the running preview and answers a question about it.
- *
- * This is the observation channel a terminal-based agent cannot have.
- * DOM queries prove an element exists; geometry proves where it is;
- * neither can tell you that the text is white on white, that the icon
- * font silently fell back to tofu boxes, that the button collapsed to
- * zero height, or that a modal is painted UNDER the overlay it belongs
- * on. A picture can.
- *
- * The transport makes the shape: a tool result is text, so the image
- * cannot enter the transcript as an image. The picture is shown to a
- * VISION model whose written answer becomes the tool result — with the
- * model and the capture's limitations attributed in the result, because
- * this is evidence, never proof.
- */
-export async function runVisualCheck(
-  conversationId: string,
-  args: Record<string, unknown>
-): Promise<ToolCallResult> {
-  const started = Date.now();
-  const fail = (error: string, summary = "visual check unavailable"): ToolCallResult => ({
-    callId: "",
-    name: "check_preview_visually",
-    ok: false,
-    data: { error },
-    durationMs: Date.now() - started,
-    summary,
-  });
-
-  const question = typeof args.question === "string" ? args.question.trim().slice(0, 500) : "";
-  if (!question) {
-    return fail('Missing required argument: "question" — say what the picture should show.');
-  }
-  const claim = typeof args.claim === "string" ? args.claim.trim().slice(0, 500) : undefined;
-  const selector = typeof args.selector === "string" ? args.selector.trim() : undefined;
-
-  const store = useChatStore.getState();
-  const preview = usePreviewStore.getState();
-  if (preview.conversationId && preview.conversationId !== conversationId) {
-    return fail("The preview is showing a different conversation. Open this conversation's preview, then retry.");
-  }
-
-  const apiKey = store.settings.apiKey?.trim();
-  if (!apiKey) return fail("No OpenRouter API key is configured.");
-
-  const conversation = store.conversations.find((c) => c.id === conversationId);
-  const currentModel = conversation?.model ?? store.settings.defaultModel;
-  const choice = pickVisionModel(currentModel, getCachedModelCatalog() ?? []);
-  if (!choice) {
-    return fail(
-      "No vision-capable model is known in the model catalog, so nothing can look at the preview. " +
-        "Open Chat Settings → Models to refresh the list, or pick a model with image input."
-    );
-  }
-
-  const response = await capturePreviewScreenshot(selector || undefined);
-  if (!response.ok) return fail(response.error ?? "The preview did not answer the capture request.");
-  const capture = normalizeScreenshot(response.result);
-  if (!capture) {
-    return fail("The preview returned a capture that could not be used (wrong format or too large).");
-  }
-
-  let answer: string;
-  let cost: number | null;
-  try {
-    const completion = await completeChat({
-      apiKey,
-      model: choice.modelId,
-      temperature: 0,
-      maxTokens: 700,
-      messages: [
-        { role: "system", content: VISUAL_CHECK_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: buildVisualCheckPrompt({ question, claim, capture }) },
-            { type: "image_url", image_url: { url: capture.dataUrl } },
-          ],
-        },
-      ],
-    });
-    answer = completion.content;
-    cost = completion.usage?.cost ?? null;
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : "the vision request failed";
-    return fail(
-      `The vision request to \`${choice.modelId}\` failed: ${detail}`,
-      "vision request failed"
-    );
-  }
-
-  const verdict = parseVisualVerdict(answer);
-
-  return {
-    callId: "",
-    name: "check_preview_visually",
-    // A written verdict is a SUCCESSFUL check even when it reports a
-    // defect — otherwise the loop's failure ledger would treat "the UI is
-    // broken" as the tool misbehaving and refuse the re-check after a fix.
-    ok: true,
-    data: {
-      verdict: verdict.verdict,
-      issues: verdict.issues,
-      model: choice.modelId,
-      routedBy: choice.reason,
-      capture: captureCaveat(capture),
-      ...(cost !== null ? { costUsd: cost } : {}),
-      ...(verdict.malformed
-        ? { contractViolation: "The vision model did not answer in the required VERDICT/ISSUES form — its text is reported verbatim below and must not be read as approval." }
-        : {}),
-      ...(verdict.malformed || verdict.verdict === "unclear" ? { raw: verdict.raw } : {}),
-      note:
-        verdict.verdict === "ok"
-          ? "Evidence, not proof: the vision model saw no defect in this capture. It does not prove the feature works, and it saw rendered pixels only — not your code."
-          : verdict.verdict === "problem"
-            ? "These are visible defects in the rendered page. Fix them and run this check again."
-            : "The check established nothing. Answer from get_preview_layout, query_preview_dom or get_preview_feedback, and do not claim the UI was verified.",
-    },
-    durationMs: Date.now() - started,
-    summary:
-      verdict.verdict === "ok"
-        ? "no visible problem"
-        : verdict.verdict === "problem"
-          ? `${verdict.issues.length} visible problem(s)`
-          : "no verdict from the vision model",
-  };
-}
-
 // ── delegate (nested read-only research) ─────────────────────
 
 /**
@@ -1464,7 +1661,6 @@ export async function runRemember(
   const result = writeFile(current, MEMORY_PATH, content);
   if (!result.ok) return fail(result.error ?? `Could not write ${MEMORY_PATH}.`);
   publishWorkspace(conversationId, result.ws);
-  schedulePreviewBuild(result.ws);
 
   return {
     callId: "",
@@ -1611,10 +1807,12 @@ export async function runPushChanges(
   // ── Policy + evidence warnings for the reviewer ──
   warnings.push(...policyWarnings(policy));
 
-  // The gap this closes: there is no shell here, so "all tests pass" can
-  // only ever be an assertion. Comparing the summary against the change
-  // set and the tools that actually ran turns that assertion into a
-  // visible warning instead of a sentence a reviewer skims past.
+  // The gap this closes: a summary is prose until it is compared against the
+  // change set, the tools that actually ran, and the evidence the ledger
+  // holds. There IS a shell now (run_command) and a CI tier
+  // (verify_with_ci), so the audit is evidence-based rather than assuming
+  // nothing could have run — a passing test run must not be flagged, and a
+  // FAILING one must not pass unnoticed.
   const conversation = store.conversations.find((c) => c.id === conversationId);
   const toolsUsed = recentToolNames(conversation);
   // Real evidence: what was actually run against THIS revision of the
@@ -1627,8 +1825,11 @@ export async function runPushChanges(
     claim: lastAssistantClaim(conversation),
     changedPaths: changes.map((f) => f.path),
     toolsUsed,
-    probes: verification.find((v) => v.kind === "probes") ?? null,
     typecheck: verification.find((v) => v.kind === "typecheck") ?? null,
+    // The strongest evidence there is, and the two kinds a reviewer most
+    // wants to see in the gate: a real command, and the repository's CI.
+    command: verification.find((v) => v.kind === "command") ?? null,
+    ci: verification.find((v) => v.kind === "ci") ?? null,
   });
   warnings.push(...evidenceWarnings(evidence));
 
@@ -1713,10 +1914,11 @@ export async function runPushChanges(
   const pushedDiffs = diffs.filter((d) => pushedPaths.has(d.path));
   const exclusionNote = describeExclusions(selection.excluded);
 
-  // Proof-carrying PR: whatever really ran — the in-browser type check and
-  // any behaviour probes — is appended to the pull request body, with its
-  // verdict, its age and an explicit list of what was NOT run. A reviewer
-  // reading the PR on GitHub sees the evidence without trusting a summary.
+  // Proof-carrying PR: whatever really ran — the in-browser type check, a
+  // command, the repository's CI — is appended to the pull request body,
+  // with its verdict, its age and an explicit list of what was NOT run. A
+  // reviewer reading the PR on GitHub sees the evidence without trusting a
+  // summary.
   const proof = proofSection(verification);
   const withProof = (body: string): string => (proof ? `${body}\n\n${proof}` : body);
   try {
@@ -1816,217 +2018,29 @@ export async function runPushChanges(
   }
 }
 
-// ── get_preview_feedback ─────────────────────────────────────
-
-export async function runPreviewFeedback(
-  conversationId: string,
-  args: Record<string, unknown>,
-  buildErrors: string[]
-): Promise<ToolCallResult> {
-  const started = Date.now();
-  const preview = usePreviewStore.getState();
-
-  const consoleIssues = preview.console
-    .filter((e) => e.level === "error" || e.level === "warn")
-    .slice(-15)
-    .map((e) => `[${e.level}] ${e.text}`);
-
-  const issues = [...buildErrors, ...consoleIssues];
-  const data: Record<string, unknown> = {
-    status: preview.status,
-    entry: preview.entry,
-    issueCount: issues.length,
-    issues: issues.length > 0 ? issues : ["No errors — the preview built and is running cleanly."],
-    runtimeReady: preview.runtimeReady,
-  };
-
-  return {
-    callId: "",
-    name: "get_preview_feedback",
-    ok: true,
-    data,
-    durationMs: Date.now() - started,
-    summary: issues.length > 0 ? `${issues.length} preview issue(s)` : "preview clean",
-  };
-}
-
-// ── In-preview execution tools (agent verify loop) ───────────
-
-/** Max in-preview executions per user turn (context + CPU guard) */
-const PREVIEW_EXEC_PER_TURN = 5;
-let previewExecCount = 0;
-let previewExecTurn = "";
-
-/** Called when the user sends a new message — resets the per-turn cap */
-export function resetPreviewExecCounter(conversationId: string): void {
-  if (previewExecTurn === conversationId) previewExecCount = 0;
-}
-
-function consumePreviewExecSlot(conversationId: string): string | null {
-  if (previewExecTurn !== conversationId) {
-    previewExecTurn = conversationId;
-    previewExecCount = 0;
-  }
-  if (previewExecCount >= PREVIEW_EXEC_PER_TURN) {
-    return `In-preview execution limit reached for this turn (${PREVIEW_EXEC_PER_TURN}). Summarize what you learned and continue; the limit resets on the user's next message.`;
-  }
-  previewExecCount++;
-  return null;
-}
-
-/**
- * Ensures the preview reflects the CURRENT workspace before the
- * agent verifies against it: triggers a build when the workspace
- * changed after the last build and waits (bounded) for runtime.
- */
-/** Bounded wait for an in-flight build to settle before failing the verify step */
-const BUILD_SETTLE_TIMEOUT_MS = 10_000;
-
-async function ensurePreviewFresh(): Promise<{ ok: boolean; error?: string }> {
-  // A build in flight is not a failure — the tool may run right after
-  // write_file while the debounced rebuild is still bundling. Wait
-  // bounded for it to settle, then judge by the resulting status.
-  if (usePreviewStore.getState().status === "building") {
-    const deadline = Date.now() + BUILD_SETTLE_TIMEOUT_MS;
-    while (usePreviewStore.getState().status === "building" && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
-
-  const pv = usePreviewStore.getState();
-  if (pv.status !== "ready") {
-    return { ok: false, error: "The preview has no successful build yet. Check get_preview_feedback for build errors first." };
-  }
-  if (!pv.runtimeReady) {
-    // Give the fresh iframe a short window to report ready.
-    const deadline = Date.now() + 3_000;
-    while (!usePreviewStore.getState().runtimeReady && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (!usePreviewStore.getState().runtimeReady) {
-      return { ok: false, error: "The preview runtime is still starting — retry in a moment." };
-    }
-  }
-  return { ok: true };
-}
-
-function previewToolResult(
-  conversationId: string,
-  name: "run_in_preview" | "query_preview_dom",
-  started: number,
-  outcome: { ok: boolean; result?: unknown; error?: string },
-  summary: string
-): ToolCallResult {
-  return {
-    callId: "",
-    name,
-    ok: outcome.ok,
-    data: outcome.ok ? outcome.result : { error: outcome.error },
-    durationMs: Date.now() - started,
-    summary,
-  };
-}
-
-/** run_in_preview — executes JS inside the built preview app */
-export async function runInPreview(
-  conversationId: string,
-  args: Record<string, unknown>
-): Promise<ToolCallResult> {
-  const started = Date.now();
-  const code = typeof args.code === "string" ? args.code : "";
-
-  const capErr = consumePreviewExecSlot(conversationId);
-  if (capErr) return previewToolResult(conversationId, "run_in_preview", started, { ok: false, error: capErr }, "limit reached");
-
-  // Freshness: if files changed after the last build finished, the
-  // iframe is stale — rebuild synchronously before executing.
-  const pv = usePreviewStore.getState();
-  if (pv.builtAt > 0 && wsChangedSince(pv.builtAt)) {
-    const ws = useChatStore.getState().workspaces[conversationId];
-    if (ws) await runPreviewBuild(ws);
-  }
-  const fresh = await ensurePreviewFresh();
-  if (!fresh.ok) {
-    return previewToolResult(conversationId, "run_in_preview", started, { ok: false, error: fresh.error }, "preview not ready");
-  }
-
-  const outcome = await runJsInPreview(code);
-  return previewToolResult(
-    conversationId,
-    "run_in_preview",
-    started,
-    outcome,
-    outcome.ok ? "preview eval" : "preview eval failed"
-  );
-}
-
-/** query_preview_dom — reads rendered DOM from the preview */
-export async function runQueryPreviewDom(
-  conversationId: string,
-  args: Record<string, unknown>
-): Promise<ToolCallResult> {
-  const started = Date.now();
-  const selector = typeof args.selector === "string" ? args.selector : "";
-  const mode = args.mode === "text" ? "text" : "html";
-
-  const capErr = consumePreviewExecSlot(conversationId);
-  if (capErr) return previewToolResult(conversationId, "query_preview_dom", started, { ok: false, error: capErr }, "limit reached");
-
-  const pv = usePreviewStore.getState();
-  if (pv.builtAt > 0 && wsChangedSince(pv.builtAt)) {
-    const ws = useChatStore.getState().workspaces[conversationId];
-    if (ws) await runPreviewBuild(ws);
-  }
-  const fresh = await ensurePreviewFresh();
-  if (!fresh.ok) {
-    return previewToolResult(conversationId, "query_preview_dom", started, { ok: false, error: fresh.error }, "preview not ready");
-  }
-
-  const outcome = await queryPreviewDom(selector, mode);
-  return previewToolResult(
-    conversationId,
-    "query_preview_dom",
-    started,
-    outcome,
-    outcome.ok ? selector : "dom query failed"
-  );
-}
-
-/** True when the workspace changed after the given timestamp */
-function wsChangedSince(ts: number): boolean {
-  const convId = usePreviewStore.getState().conversationId;
-  if (!convId) return false;
-  const ws = useChatStore.getState().workspaces[convId];
-  return Boolean(ws && ws.updatedAt > ts);
-}
-
 // ── Workspace management helpers (revert UI) ─────────────────
 
 export async function revertWorkspaceFile(conversationId: string, path: string): Promise<void> {
-  const ws = useChatStore.getState().workspaces[conversationId];
+  const ws = selectWorkspace(useChatStore.getState(), conversationId);
   if (!ws) return;
   const next = revertFile(ws, path);
   useChatStore.getState().setWorkspace(conversationId, next);
-  schedulePreviewBuild(next);
 }
 
 export async function revertEntireWorkspace(conversationId: string): Promise<void> {
-  const ws = useChatStore.getState().workspaces[conversationId];
+  const ws = selectWorkspace(useChatStore.getState(), conversationId);
   if (!ws) return;
   const next = revertAll(ws);
   useChatStore.getState().setWorkspace(conversationId, next);
-  schedulePreviewBuild(next);
 }
 
 /**
- * Undoes the newest agent workspace mutation (effect log, LIFO) and
- * rebuilds the preview. One click = one step back in the agent's
- * edit history.
+ * Undoes the newest agent workspace mutation (effect log, LIFO).
+ * One click = one step back in the agent's edit history.
  */
 export async function undoLastWorkspaceMutation(conversationId: string): Promise<void> {
-  const ws = useChatStore.getState().workspaces[conversationId];
+  const ws = selectWorkspace(useChatStore.getState(), conversationId);
   if (!ws) return;
   const next = undoLast(ws);
   useChatStore.getState().setWorkspace(conversationId, next);
-  schedulePreviewBuild(next);
 }

@@ -28,12 +28,9 @@ import {
   Info,
   ListTree,
   Loader2,
-  MonitorPlay,
   Plug,
-  ScanEye,
   Search,
   SquareArrowOutUpRight,
-  Terminal,
 } from "lucide-react";
 import { DiffView } from "./DiffView";
 import { MarkdownContent } from "./markdown";
@@ -69,14 +66,6 @@ function toolIcon(name: ToolName): React.ComponentType<{ className?: string }> {
       return GitBranch;
     case "push_changes":
       return GitPullRequest;
-    case "get_preview_feedback":
-      return MonitorPlay;
-    case "run_in_preview":
-      return Terminal;
-    case "query_preview_dom":
-    case "check_preview_visually":
-    case "get_preview_layout":
-      return ScanEye;
     case "delegate":
       return Bot;
     case "remember":
@@ -116,16 +105,6 @@ function toolVerb(name: ToolName): string {
       return "Created branch";
     case "push_changes":
       return "Pushed";
-    case "get_preview_feedback":
-      return "Read preview console";
-    case "run_in_preview":
-      return "Ran in preview";
-    case "query_preview_dom":
-      return "Inspected DOM";
-    case "check_preview_visually":
-      return "Looked at preview";
-    case "get_preview_layout":
-      return "Measured layout";
     case "delegate":
       return "Delegated";
     case "remember":

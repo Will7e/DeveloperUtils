@@ -69,7 +69,7 @@ describe("progress", () => {
     [
       { text: "read the router", status: "done" },
       { text: "add the route", status: "active" },
-      { text: "verify in preview" },
+      { text: "verify the build" },
     ],
     NOW
   );

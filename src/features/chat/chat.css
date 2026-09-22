@@ -3417,6 +3417,40 @@ html body .intab-tooltip.chat-ctx-card > span {
   background: var(--bg-2);
 }
 
+/*
+ * The routing escape hatch.
+ *
+ * Sits above the list because it changes what every row below it MEANS, which
+ * a control below the rows would not communicate. It has to read as a mode, not
+ * as an action: armed, it says so in the same accent the attached row uses, so
+ * the one state where a pick will move this chat is visible at a glance rather
+ * than remembered.
+ */
+.chat-repo-intent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-repo-intent:hover {
+  color: var(--text-1);
+  background: var(--bg-3);
+}
+
+.chat-repo-intent-armed {
+  color: var(--accent);
+  background: var(--bg-3);
+}
+
 /* ── Attached-repo chip ── */
 .chat-repo-chip {
   display: inline-flex;
@@ -3785,7 +3819,7 @@ html body .intab-tooltip.chat-ctx-card > span {
    AGENT — Workspace Preview, Approval Modal, Agent Layout
    ============================================================ */
 
-/* ── Split layout: chat | preview ── */
+/* ── Split layout: chat | agent panel ── */
 .chat-agent-layout {
   flex: 1;
   min-height: 0;
@@ -3813,7 +3847,7 @@ html body .intab-tooltip.chat-ctx-card > span {
   opacity: 0.4;
 }
 
-/* ── Agent panel (changes / preview) ── */
+/* ── Agent panel (changes) ── */
 .chat-agent-panel {
   display: flex;
   flex-direction: column;
@@ -3822,46 +3856,6 @@ html body .intab-tooltip.chat-ctx-card > span {
   min-width: 0;
   background: var(--ds-background-100, #0a0a0a);
   border-left: 1px solid var(--border-1);
-}
-
-.chat-panel-tabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--border-1);
-  flex-shrink: 0;
-}
-
-.chat-panel-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-3, #a1a1a1);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.chat-panel-tab:hover { background: var(--bg-hover); color: var(--text-1, #ededed); }
-.chat-panel-tab-active {
-  background: var(--bg-3);
-  color: var(--text-1, #ededed);
-  box-shadow: inset 0 0 0 1px var(--border-1);
-}
-.chat-panel-tab:focus-visible { box-shadow: var(--ds-focus-ring); outline: none; }
-
-.chat-panel-tab-count {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--ds-gray-alpha-200, rgba(255, 255, 255, 0.08));
-  color: var(--text-2, #c9c9c9);
 }
 
 /* ── Changes pane (the agent's diff) ── */
@@ -4004,17 +3998,8 @@ html body .intab-tooltip.chat-ctx-card > span {
   color: var(--text-3, #a1a1a1);
 }
 
-/* ── Preview pane ── */
-.chat-preview {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  background: var(--ds-background-100, #0a0a0a);
-  border-left: 1px solid var(--border-1);
-}
-
-.chat-preview-header {
+/* ── Changes pane header ── */
+.chat-changes-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4023,7 +4008,7 @@ html body .intab-tooltip.chat-ctx-card > span {
   flex-shrink: 0;
 }
 
-.chat-preview-title {
+.chat-changes-title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4032,195 +4017,18 @@ html body .intab-tooltip.chat-ctx-card > span {
   color: var(--text-1, #ededed);
 }
 
-.chat-preview-entry {
-  font-size: 11px;
-  color: var(--text-3, #a1a1a1);
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-preview-badge {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-1);
-  color: var(--text-3, #a1a1a1);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.chat-preview-badge-ready { color: #34d399; border-color: rgba(52, 211, 153, 0.35); }
-.chat-preview-badge-error { color: #f87171; border-color: rgba(248, 113, 113, 0.35); }
-.chat-preview-badge-building { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 35%, transparent); }
-
-/* The sandboxed fallback, stated in the pane rather than the console. It is
-   the difference between a preview that works and one that cannot, and it is
-   not something the user's code can cause or fix. */
-.chat-preview-warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 11px;
-  line-height: 1.45;
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.08);
-  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
-  flex-shrink: 0;
-}
-.chat-preview-warn strong { color: #fcd34d; font-weight: 600; }
-.chat-preview-warn svg { flex-shrink: 0; margin-top: 2px; }
-.chat-preview-warn span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-preview-err-icon { color: #f87171; }
-
-.chat-preview-actions {
+.chat-changes-actions {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
-.chat-preview-badge-count {
-  position: absolute;
-  transform: translate(10px, -8px);
-  background: #ef4444;
-  color: #fff;
-  font-size: 9px;
-  min-width: 14px;
-  height: 14px;
-  line-height: 14px;
-  text-align: center;
-  border-radius: 999px;
-  padding: 0 3px;
-}
+.spin { animation: chat-spin 1s linear infinite; }
+@keyframes chat-spin { to { transform: rotate(360deg); } }
 
-.chat-preview-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  justify-content: center;
-  background: var(--ds-background-200, #141414);
-}
-.chat-preview-body-mobile { align-items: flex-start; }
-
-.chat-preview-frame {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #fff;
-}
-.chat-preview-body-mobile .chat-preview-frame {
-  max-width: 390px;
-  margin: 12px auto 0;
-  border-radius: 18px;
-  border: 6px solid #2a2a2a;
-  height: calc(100% - 24px);
-}
-
-.chat-preview-placeholder {
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-3, #a1a1a1);
-  font-size: 12px;
-  padding: 24px;
-  text-align: center;
-}
-
-.chat-preview-drawer {
-  flex-shrink: 0;
-  max-height: 45%;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border-1);
-  background: var(--ds-background-100, #0a0a0a);
-}
-
-.chat-preview-drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2, #c7c7c7);
-  border-bottom: 1px solid var(--border-1);
-}
-
-.chat-preview-diagnostics {
-  max-height: 40%;
-  overflow: auto;
-  border-bottom: 1px solid var(--border-1);
-}
-
-.chat-preview-diag {
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-1);
-}
-.chat-preview-diag-err { border-left: 2px solid #f87171; }
-
-.chat-preview-diag-file {
-  display: block;
-  font-size: 10px;
-  color: var(--text-3, #a1a1a1);
-  margin-bottom: 2px;
-}
-
-.chat-preview-diag pre {
-  margin: 0;
-  font-size: 11px;
-  white-space: pre-wrap;
-  color: #fca5a5;
-}
-
-.chat-preview-console {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 4px 0;
-}
-
-.chat-preview-note {
-  padding: 12px;
-  font-size: 11px;
-  color: var(--text-3, #a1a1a1);
-}
-
-.chat-preview-line {
-  display: flex;
-  gap: 8px;
-  padding: 2px 12px;
-  font-size: 11px;
-  align-items: baseline;
-}
-.chat-preview-line pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  flex: 1;
-  color: var(--text-2, #c7c7c7);
-}
-.chat-preview-line-time {
-  color: var(--text-3, #737373);
-  font-size: 10px;
-  flex-shrink: 0;
-}
-.chat-preview-line-error pre { color: #fca5a5; }
-.chat-preview-line-warn pre { color: #fcd34d; }
-.chat-preview-line-system pre { color: var(--blue); }
-
-.spin { animation: chat-preview-spin 1s linear infinite; }
-@keyframes chat-preview-spin { to { transform: rotate(360deg); } }
-
-/* ── Floating open-preview button ── */
-.chat-preview-open-fab {
+/* ── Floating open-changes button ── */
+.chat-changes-open-fab {
   position: absolute;
   right: 16px;
   bottom: 96px;
@@ -4237,8 +4045,8 @@ html body .intab-tooltip.chat-ctx-card > span {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 20;
 }
-.chat-preview-open-fab:hover { border-color: var(--accent); }
-.chat-preview-open-count {
+.chat-changes-open-fab:hover { border-color: var(--accent); }
+.chat-changes-open-count {
   font-size: 10px;
   font-weight: 600;
   padding: 1px 6px;

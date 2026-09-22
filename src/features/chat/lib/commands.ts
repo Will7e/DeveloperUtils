@@ -40,7 +40,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
-import { useChatStore } from "@/stores/chat.store";
+import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { CURATED_FALLBACK_MODELS } from "../constants";
 import { REASONING_EFFORT_META, modelSupportsTools } from "./model-state";
 import { resolveToolProfile } from "./tool-profiles";
@@ -365,7 +365,10 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     group: "Agent",
     keywords: ["revert", "rollback"],
     run: async ({ conversationId }) => {
-      const ws = useChatStore.getState().workspaces[conversationId];
+      // Fail closed: after a repository switch the in-memory entry is the
+      // previous repository's, and undoing in it would silently revert edits in
+      // a repository the user is no longer looking at.
+      const ws = selectWorkspace(useChatStore.getState(), conversationId);
       if (!ws) {
         toast("No agent workspace yet — attach a repo and let the agent edit.", "info");
         return;

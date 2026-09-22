@@ -13,9 +13,9 @@
 //     share a workspace.
 //
 // Both used to be created per conversation, so opening a second chat on the
-// same repo paid for the tree again, re-downloaded every file the first chat
-// had already read, and rebuilt the preview from nothing. This module is the
-// first half: the repo-derived facts, fetched once and shared.
+// same repo paid for the tree again and re-downloaded every file the first
+// chat had already read. This module is the first half: the repo-derived
+// facts, fetched once and shared.
 //
 // It is a CACHE, deliberately: nothing here is authoritative, every function
 // falls through to GitHub on a miss, and losing everything costs speed rather
@@ -26,6 +26,7 @@
 import { getRepoTree } from "../lib/github-client";
 import type { WorkspaceTreeEntry } from "../types";
 import { readValue, writeValue } from "@/services/idb-storage.service";
+import { registerScopedResource } from "../identity/scoped-resources";
 
 /** Which repository, at which branch — the identity of a base */
 export interface RepoIdentity {
@@ -180,8 +181,8 @@ export async function getRepoBaseFile(
  * Records pristine contents another chat already fetched.
  *
  * Creates the base record when there is none: a file is read on its own
- * (read_file, a mention, a preview preload) long before anything asks for the
- * whole tree, and requiring a prior tree fetch dropped exactly the contents
+ * (read_file, a mention, a search) long before anything asks for the whole
+ * tree, and requiring a prior tree fetch dropped exactly the contents
  * this cache exists to share. The record it creates carries no tree, which is
  * what `getRepoBaseTree` checks for — so the first tree ask still fetches.
  */
@@ -218,3 +219,21 @@ export async function invalidateRepoBase(identity: RepoIdentity): Promise<void> 
     /* best-effort */
   }
 }
+
+/**
+ * Scoped by REPOSITORY, because the facts here are facts about a repository:
+ * every thread on it shares the tree and the pristine contents, which is the
+ * point of the cache. Its lifetime is a push, and a push is what `base.moved`
+ * announces — so this is the first thing that has ever actually invalidated a
+ * base at the moment it went stale, rather than relying on each reader noticing
+ * that the commit it asked for no longer matches the commit on file.
+ */
+registerScopedResource({
+  name: "repo-base.tree",
+  scope: "repo",
+  release: ({ transition }) => {
+    if (transition.type === "base.moved" && transition.ref) {
+      void invalidateRepoBase(transition.ref);
+    }
+  },
+});

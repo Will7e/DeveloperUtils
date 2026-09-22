@@ -1,12 +1,16 @@
 // ============================================================
 // In-Browser Type Checking — Planning & Diagnostic Classification
 // ============================================================
-// The preview bundles with esbuild-wasm, which STRIPS types and never
-// checks them, and the workspace has no shell, so until now the agent's
-// only build signal was type-blind: `const x: string = 42` bundled
-// cleanly and the agent had no way to know. Meanwhile its own prompt told
-// it to "call run_checks before summarising", and that tool could only
-// report that nothing ran.
+// The build path strips types and never checks them, so the agent's
+// build signal is type-blind on its own: `const x: string = 42` compiles
+// and nothing says otherwise.
+//
+// The command tiers (`run_command`, `verify_with_ci`) can now run a real
+// `tsc`, and they are authoritative when available. This module still earns
+// its place: it needs no companion, no install and no push, and it works on
+// the workspace revision in front of the user the moment a file changes —
+// which is the version of "does this even compile" that can run on every
+// turn rather than on request.
 //
 // This module is the part that can be reasoned about without a compiler:
 // which files form the program, what the workspace's own tsconfig means
@@ -19,8 +23,8 @@
 // both large and blocking. Everything here is pure and unit-tested.
 // ============================================================
 
-import { importSpecifiers } from "../preview/vfs";
-import { isNodeBuiltin, splitBareSpecifier } from "../preview/module-resolution";
+import { importSpecifiers } from "./import-scan";
+import { isNodeBuiltin, splitBareSpecifier } from "./import-scan";
 
 /** TypeScript version used when the repository does not pin one */
 export const TYPESCRIPT_FALLBACK_VERSION = "5.9.3";
@@ -226,8 +230,7 @@ export function parseTsconfig(raw: string | null | undefined): Record<string, un
 /**
  * Removes comments and trailing commas. Local copy rather than a shared
  * import because this module is loaded by a WORKER, and a worker must not
- * pull in the preview's browser-side dependency graph for a 20-line
- * scanner.
+ * pull in a browser-side dependency graph for a 20-line scanner.
  */
 export function stripJsonc(raw: string): string {
   let out = "";

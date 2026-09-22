@@ -15,6 +15,7 @@ import { EffortPicker } from "./EffortPicker";
 import { ModeToggle } from "./ModeToggle";
 import { ContextMeter } from "./ContextMeter";
 import { RepoPicker, type RepoSelection } from "./RepoPicker";
+import type { RepoPickIntent } from "../lib/repo-routing";
 import type {
   ChatMode,
   ContextBreakdown,
@@ -50,7 +51,10 @@ interface ChatHeaderProps {
   repoContext?: RepoContext;
   /** GitHub token — enables the repo picker */
   githubToken: string;
-  onRepoChange: (repo: RepoSelection | undefined) => void;
+  /** A repository was picked — routing is the page's business (lib/repo-routing) */
+  onRepoSelect: (repo: RepoSelection, intent: RepoPickIntent) => void;
+  /** The repository was removed from this chat */
+  onRepoDetach: () => void;
   /** Toggle the off-canvas sidebar drawer (narrow widths) */
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
@@ -72,7 +76,8 @@ export function ChatHeader({
   onOpenSkills,
   repoContext,
   githubToken,
-  onRepoChange,
+  onRepoSelect,
+  onRepoDetach,
   onToggleSidebar,
   isSidebarOpen,
 }: ChatHeaderProps) {
@@ -155,7 +160,8 @@ export function ChatHeader({
         <RepoPicker
           repoContext={repoContext}
           token={githubToken}
-          onChange={onRepoChange}
+          onSelect={onRepoSelect}
+          onDetach={onRepoDetach}
         />
       </div>
     </div>

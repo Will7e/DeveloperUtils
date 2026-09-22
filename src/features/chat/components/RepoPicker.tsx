@@ -1,10 +1,16 @@
 // ============================================================
-// Repo Picker — Attach a GitHub Repo to the Conversation
+// Repo Picker — Pick a GitHub Repo
 // ============================================================
 // Search-as-you-type dropdown over the user's accessible repos
-// (fetched once per session via the GitHub client). Selecting a repo
-// sets conversation.repoContext, which arms the agent tools. Shows a
-// compact chip when a repo is attached with detach + open-on-GitHub.
+// (fetched once per session via the GitHub client). Shows a compact
+// chip when a repo is attached, with detach + open-on-GitHub.
+//
+// WHAT A PICK DOES IS NOT DECIDED HERE. This component reports the pick and the
+// intent; `lib/repo-routing` decides whether that means "attach it to this
+// chat", "go to the chat that has it" or "start a new chat for it". The picker
+// used to answer that itself — always "repoint this chat" — which hijacked the
+// conversation the user was having whenever they reached for a new project, and
+// was the only way to reach a project no chat had ever used.
 
 import React from "react";
 import { Check, ChevronDown, GitBranch, Loader2, Search, SquareArrowOutUpRight, X } from "lucide-react";
@@ -14,6 +20,7 @@ import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
 import { listUserRepos, type GitHubRepo } from "../lib/github-client";
 import { describeRelativeTime, formatRelativeTime } from "../lib/relative-time";
+import type { RepoPickIntent } from "../lib/repo-routing";
 import type { RepoContext } from "../types";
 
 /** GitHub's page size here, and the point at which the list admits it is cut */
@@ -26,10 +33,19 @@ interface RepoPickerProps {
   repoContext?: RepoContext;
   /** GitHub token; picker renders nothing meaningful without one */
   token: string;
-  onChange: (repo: RepoSelection | undefined) => void;
+  /**
+   * A repository was picked.
+   *
+   * `intent` is `auto` for a plain pick (route it: go to the chat that has it,
+   * or open a new one) and `switch` when the user armed the menu's "switch this
+   * chat" control. The picker does not decide where it lands.
+   */
+  onSelect: (repo: RepoSelection, intent: RepoPickIntent) => void;
+  /** The repository was removed from this chat */
+  onDetach: () => void;
 }
 
-export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
+export function RepoPicker({ repoContext, token, onSelect, onDetach }: RepoPickerProps) {
   /**
    * This chat's unreleased work in the attached repo.
    *
@@ -55,6 +71,15 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
    * the list would be, with the way out.
    */
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  /**
+   * Armed by the user, not by the situation.
+   *
+   * Routing a pick to a new chat is the default, so the one gesture that must
+   * not be a guess — "move THIS chat to it" — is a control the user turns on
+   * deliberately. It disarms itself after one switch: a control that stays
+   * armed turns the next casual pick into the hijack this change removes.
+   */
+  const [switchInPlace, setSwitchInPlace] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   /** Keyboard cursor into `filtered`; clamped at render, never trusted */
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -138,33 +163,18 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
         repoContext.repo.toLowerCase() === repo.name.toLowerCase()
     );
 
-  /**
-   * Says where the work being left behind went.
-   *
-   * A workspace is persisted per (chat, repo@branch), so changing the repo is
-   * no longer destructive — but silence here reads as loss, and the old
-   * behaviour really did lose it. One sentence, and only when there is
-   * something to lose.
-   */
-  const announceKept = (leaving: RepoContext | undefined) => {
-    if (!leaving || pendingChanges === 0) return;
-    addToast({
-      message:
-        `${pendingChanges} changed file${pendingChanges === 1 ? "" : "s"} kept for ` +
-        `${leaving.owner}/${leaving.repo} — they come back when you re-attach it to this chat.`,
-      type: "info",
-      duration: 6000,
-    });
-  };
-
   const handleSelect = (repo: GitHubRepo) => {
-    // attachedAt is stamped by the store action on commit
-    announceKept(repoContext);
-    onChange({
-      owner: repo.owner,
-      repo: repo.name,
-      branch: repo.defaultBranch,
-    });
+    // attachedAt is stamped by the store action on commit.
+    const intent: RepoPickIntent = switchInPlace ? "switch" : "auto";
+    if (switchInPlace) setSwitchInPlace(false);
+    onSelect(
+      {
+        owner: repo.owner,
+        repo: repo.name,
+        branch: repo.defaultBranch,
+      },
+      intent
+    );
     setOpen(false);
     setQuery("");
   };
@@ -180,6 +190,10 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
    */
   const handleListKeyDown = (e: React.KeyboardEvent) => {
     if (!filtered.length) return;
+    // The model is "type in the filter, arrows move the cursor", and the filter
+    // is the only control that speaks it. Anything else in here — the switch
+    // toggle — keeps its own keys instead of having them swallowed.
+    if ((e.target as HTMLElement).tagName !== "INPUT") return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex(Math.min(active + 1, filtered.length - 1));
@@ -236,6 +250,28 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
         />
         {loading && <Loader2 className="h-3.5 w-3.5 chat-repo-spinner" />}
       </div>
+
+      {/*
+        * The escape hatch, and only when there is something to escape from:
+        * with no repository attached, attaching HERE is already the meaning of
+        * a pick, so there is no other outcome to choose between.
+        */}
+      {repoContext && (
+        <button
+          type="button"
+          className={cn("chat-repo-intent", switchInPlace && "chat-repo-intent-armed")}
+          aria-pressed={switchInPlace}
+          title={
+            switchInPlace
+              ? `The next repository you pick replaces ${repoContext.owner}/${repoContext.repo} in this chat`
+              : `Off: picking a repository opens the chat that already has it, or starts a new one. Turn this on to move THIS chat to it instead.`
+          }
+          onClick={() => setSwitchInPlace((v) => !v)}
+        >
+          {switchInPlace && <Check className="h-3 w-3" aria-hidden="true" />}
+          Switch this chat instead of opening a new one
+        </button>
+      )}
 
       <div className="chat-repo-list">
         {!loading && loadError && (
@@ -332,7 +368,7 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
       <span className="chat-repo-chip">
         <GitBranch className="h-3 w-3 chat-repo-chip-icon" aria-hidden="true" />
         <SimpleTooltip
-          content={`${repoContext.owner}/${repoContext.repo} @ ${repoContext.branch} — click to switch repository`}
+          content={`${repoContext.owner}/${repoContext.repo} @ ${repoContext.branch} — click to pick a repository`}
           side="bottom"
         >
           <button
@@ -378,10 +414,7 @@ export function RepoPicker({ repoContext, token, onChange }: RepoPickerProps) {
           <button
             type="button"
             className="chat-repo-chip-btn"
-            onClick={() => {
-              announceKept(repoContext);
-              onChange(undefined);
-            }}
+            onClick={onDetach}
             aria-label="Detach repository"
           >
             <X className="h-3 w-3" />

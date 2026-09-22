@@ -16,7 +16,7 @@
 //     fetch. That is a side effect with a real benefit, and it is the same
 //     behaviour the agent's own read_file has.
 
-import { useChatStore } from "@/stores/chat.store";
+import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import type { MentionFile } from "../lib/mentions";
 import { buildMentionBlock, extractMentions } from "../lib/mentions";
 import { flushWorkspaceSave, readFile } from "../workspace/workspace";
@@ -41,7 +41,9 @@ export async function resolveMentionContext(
 ): Promise<MentionResolution> {
   if (!conversationId) return { text, attached: [], failures: [] };
 
-  const ws = useChatStore.getState().workspaces[conversationId];
+  // Fail closed: attaching files from another repository's tree would send the
+  // model files that are not in the repository under discussion.
+  const ws = selectWorkspace(useChatStore.getState(), conversationId);
   if (!ws) return { text, attached: [], failures: [] };
 
   const known = ws.tree.map((entry) => entry.path);

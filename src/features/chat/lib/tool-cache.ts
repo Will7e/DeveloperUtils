@@ -15,6 +15,7 @@
 
 import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
 import { isToolCacheable } from "./tool-registry";
+import { registerScopedResource } from "../identity/scoped-resources";
 
 interface CacheEntry {
   result: ToolCallResult;
@@ -104,6 +105,38 @@ export function clearToolCache(): void {
   cache.clear();
   clock = 0;
 }
+
+/**
+ * Drops every entry read from one repository.
+ *
+ * The key is (owner, repo, branch, tool, args) and carries no base commit, so a
+ * push that moves the branch head leaves results describing the PARENT commit
+ * that would still be served as current — a cached file read is a read of code
+ * that is no longer there. The separator is the `|` this module's keys use, and
+ * GitHub owner/repo names cannot contain one.
+ */
+export function clearToolCacheForRepo(repo: Pick<RepoContext, "owner" | "repo">): void {
+  const prefix = `${repo.owner}|${repo.repo}|`;
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(prefix)) cache.delete(key);
+  }
+}
+
+/**
+ * Scoped by REPOSITORY, because that is what its keys are: a result read from a
+ * repository is the same result for every thread on it, and stays valid across a
+ * thread moving between repositories. What it cannot survive is the repository
+ * changing underneath it, which is what `base.moved` means.
+ */
+registerScopedResource({
+  name: "tool-cache.results",
+  scope: "repo",
+  release: ({ transition }) => {
+    if (transition.type === "base.moved" && transition.ref) {
+      clearToolCacheForRepo(transition.ref);
+    }
+  },
+});
 
 /** Current cache size (debug/telemetry) */
 export function toolCacheSize(): number {

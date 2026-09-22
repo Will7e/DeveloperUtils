@@ -827,8 +827,9 @@ function GitHubTabContent({
             <div className="settings-info-card-title">Coding agent over your repositories</div>
             <div className="settings-info-card-desc">
               Connect GitHub to attach a repository to any chat. The agent can read the code, edit a
-              local workspace with a live preview, and — only after you approve the diff — push a
-              commit to a new agent/* branch and open a pull request. Your token is encrypted at rest
+              local workspace, run your project's own checks through the companion, and — only after
+              you approve the diff — push a commit to a new agent/* branch and open a pull request.
+              Your token is encrypted at rest
               and sent only to api.github.com. Fine-grained PATs need Contents: read &amp; write and
               Pull requests: read &amp; write; the OAuth flow already carries full repo scope.
             </div>
@@ -851,8 +852,8 @@ function GitHubTabContent({
                 </span>
               </div>
               <span className="settings-sublabel">
-                Workspace edits preview live; GitHub writes always go through your approval · detach
-                repos any time from the chat header
+                Workspace edits land in the Changes panel; GitHub writes always go through your
+                approval · detach repos any time from the chat header
               </span>
             </div>
             <div className="settings-control">

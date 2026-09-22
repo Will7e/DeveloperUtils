@@ -3,7 +3,7 @@
 // ============================================================
 // A long agent turn with no visible plan is indistinguishable from a hung
 // one. This renders the model's own checklist next to the composer, where
-// the user is already looking, so "step 3 of 7 · verify in preview" answers
+// the user is already looking, so "step 3 of 7 · verify the build" answers
 // the question they are actually asking the whole time.
 //
 // It stays small on purpose: one line per step, collapsed once every step

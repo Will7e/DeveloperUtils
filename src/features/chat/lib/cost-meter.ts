@@ -4,8 +4,8 @@
 // A single "conversation spend" number is the wrong shape for this
 // product. InTab deliberately runs MORE THAN ONE model per conversation:
 // a nested research agent on the cheapest free tool-capable model, a
-// vision model to look at the preview, an escalated model when the
-// selected one stalls. The interesting question is no longer "how much
+// delegate on a cheap model, an escalated model when the selected one
+// stalls. The interesting question is no longer "how much
 // has this cost" but "what did I spend it on, and was the cheap model
 // doing the work" — because that is the entire economic argument for a
 // harness that arbitrages models.

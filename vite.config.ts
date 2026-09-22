@@ -3,13 +3,11 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { apiProxyPlugin } from "./vite-plugin-api-proxy";
-import { previewHostPlugin } from "./src/features/chat/preview/host/vite-plugin-preview-host";
+import { apiSearchPlugin } from "./vite-plugin-api-search";
 
 // https://vite.dev/config/
 export default defineConfig({
-  // previewHostPlugin serves previews from their own origin in dev; see
-  // src/features/chat/preview/host/preview-host.ts for why that matters.
-  plugins: [react(), tailwindcss(), apiProxyPlugin(), previewHostPlugin()],
+  plugins: [react(), tailwindcss(), apiProxyPlugin(), apiSearchPlugin()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

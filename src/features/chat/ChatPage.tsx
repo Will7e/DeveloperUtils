@@ -8,7 +8,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileDiff } from "lucide-react";
-import { useChatStore, selectActiveConversation } from "@/stores/chat.store";
+import { useChatStore, selectActiveConversation, selectWorkspace } from "@/stores/chat.store";
 import type { ConversationSeed } from "@/stores/chat.store";
 import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
 import { flushWorkspaceSave } from "./workspace/workspace";
@@ -29,15 +29,14 @@ import { resolveSlashInput } from "./lib/slash";
 import { useAppStore } from "@/stores/app.store";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatHeader } from "./components/ChatHeader";
+import type { RepoSelection } from "./components/RepoPicker";
+import { planRepoPick, type RepoPickIntent } from "./lib/repo-routing";
 import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
 import { resolveMentionContext } from "./services/mention-context";
 import { PlanStrip } from "./components/PlanStrip";
-import { PreviewPane } from "./preview/PreviewPane";
-import { usePreviewBridge } from "./preview/preview-bridge";
-import { isAgentPanelVisible } from "./preview/preview.store";
 import { ChangesPane } from "./components/ChangesPane";
 import { collectChangeSet } from "./lib/change-set";
 import { modelSupportsImages } from "./services/chat-runner";
@@ -103,9 +102,8 @@ export function ChatPage() {
   );
 
   // Agent workspace: ensures the workspace exists on repo attach and
-  // exposes the attachment state for the preview toggle.
+  // exposes the attachment state for the agent panel.
   const { repoAttached } = useWorkspaceStoreSlice();
-  usePreviewBridge();
 
   // Auto-open the agent panel on attach: derive from the repo context so
   // no effect-based setState is needed. Once closed manually it stays
@@ -113,16 +111,12 @@ export function ChatPage() {
   // button brings it back.
   const attachedAt = activeConversation?.repoContext?.attachedAt ?? 0;
   const [closedForAttachment, setClosedForAttachment] = useState<number | null>(null);
-  const panelVisible = isAgentPanelVisible({ repoAttached, attachedAt, closedForAttachment });
-
-  // The panel opens on the DIFF, not the rendered page: what an agent did
-  // (which files moved, and how) is the question you have to answer before
-  // trusting a change set, and it is the one a preview cannot answer. The
-  // live preview stays one click away for when the question is "what does
-  // it look like".
-  const [panelTab, setPanelTab] = useState<"changes" | "preview">("changes");
-  const activeWorkspace = useChatStore((s) =>
-    activeConversationId ? s.workspaces[activeConversationId] : undefined
+  const panelVisible = Boolean(repoAttached) && closedForAttachment !== attachedAt;
+  // Fail closed: the change set in this panel must be the change set of the
+  // repository the panel is about. After a switch, the in-memory entry is the
+  // one the thread just left.
+  const activeWorkspace = useChatStore(
+    (s) => selectWorkspace(s, activeConversationId) ?? undefined
   );
   const changeSet = useMemo(() => collectChangeSet(activeWorkspace), [activeWorkspace]);
 
@@ -437,6 +431,97 @@ export function ChatPage() {
     setSidebarOpen(false);
   };
 
+  /**
+   * A repository was picked in the header.
+   *
+   * WHERE it lands is decided by `planRepoPick`, and the reason it is decided
+   * anywhere but here is that this used to have exactly one outcome — repoint
+   * the chat you are in — which meant reaching for a new project cost you the
+   * conversation you were having, and a project no chat had ever used was
+   * unreachable except that way. Each outcome says out loud what it did, because
+   * the interesting part of a routed pick is the chat you are NOT in any more.
+   */
+  const handleRepoPick = (repo: RepoSelection, intent: RepoPickIntent) => {
+    const state = useChatStore.getState();
+    const current = state.conversations.find((c) => c.id === state.activeConversationId) ?? null;
+    const routing = planRepoPick({
+      pick: repo,
+      intent,
+      current: current
+        ? {
+            id: current.id,
+            title: current.title,
+            repoContext: current.repoContext,
+            updatedAt: current.updatedAt,
+          }
+        : null,
+      conversations: state.conversations.map((c) => ({
+        id: c.id,
+        title: c.title,
+        repoContext: c.repoContext,
+        updatedAt: c.updatedAt,
+      })),
+    });
+
+    const withRepo: RepoContext = { ...repo, attachedAt: Date.now() };
+    const name = `${repo.owner}/${repo.repo}`;
+
+    switch (routing.action) {
+      case "none":
+        return;
+
+      case "attach":
+      case "switch": {
+        // No chat on screen (the store can be empty): one gets made here, with
+        // the repository already on it, rather than attaching to nothing.
+        if (!current || !state.activeConversationId) {
+          handleNewChat({ repo: withRepo });
+          return;
+        }
+        const leaving = current.repoContext;
+        const kept = current.pendingChanges ?? 0;
+        state.setConversationRepo(current.id, withRepo);
+        // Silence here reads as loss, and the old behaviour really did lose it —
+        // the workspace is kept per (chat, repo), so say where it went.
+        if (leaving && kept > 0) {
+          useAppStore.getState().addToast({
+            message:
+              `${kept} changed file${kept === 1 ? "" : "s"} kept for ` +
+              `${leaving.owner}/${leaving.repo} — they come back when you re-attach it to this chat.`,
+            type: "info",
+            duration: 6000,
+          });
+        }
+        return;
+      }
+
+      case "open-chat":
+        state.selectConversation(routing.conversationId);
+        setSidebarOpen(false);
+        useAppStore.getState().addToast({
+          message: `"${routing.title}" already works on ${name} — opened it instead of starting another.`,
+          type: "info",
+          duration: 5000,
+        });
+        return;
+
+      case "new-chat":
+        handleNewChat({ repo: withRepo });
+        useAppStore.getState().addToast({
+          message: `Started a new chat on ${name}. Your previous chat is still open in the sidebar.`,
+          type: "info",
+          duration: 5000,
+        });
+        return;
+    }
+  };
+
+  const handleRepoDetach = () => {
+    const state = useChatStore.getState();
+    if (!state.activeConversationId) return;
+    state.setConversationRepo(state.activeConversationId, undefined);
+  };
+
   const handleDeleteConversation = (id: string) => {
     useChatStore.getState().deleteConversation(id);
     // Deleting the last conversation leaves the store empty — spin
@@ -524,14 +609,8 @@ export function ChatPage() {
           onOpenSkills={() => useChatStore.getState().setSettingsOpen(true, "skills")}
           repoContext={activeConversation?.repoContext}
           githubToken={settings.github?.token ?? ""}
-          onRepoChange={(repo) => {
-            if (!activeConversationId) return;
-            // Store action accepts the selection and stamps attachedAt
-            useChatStore.getState().setConversationRepo(
-              activeConversationId,
-              repo as RepoContext | undefined
-            );
-          }}
+          onRepoSelect={handleRepoPick}
+          onRepoDetach={handleRepoDetach}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
           isSidebarOpen={sidebarOpen}
         />
@@ -580,43 +659,12 @@ export function ChatPage() {
               <Separator className="chat-agent-resize-handle" />
               <Panel defaultSize={45} minSize={25}>
                 <div className="chat-agent-panel">
-                  <div className="chat-panel-tabs" role="tablist" aria-label="Agent panel">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={panelTab === "changes"}
-                      className={`chat-panel-tab ${panelTab === "changes" ? "chat-panel-tab-active" : ""}`}
-                      onClick={() => setPanelTab("changes")}
-                    >
-                      Changes
-                      {!changeSet.empty && (
-                        <span className="chat-panel-tab-count">{changeSet.fileCount}</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={panelTab === "preview"}
-                      className={`chat-panel-tab ${panelTab === "preview" ? "chat-panel-tab-active" : ""}`}
-                      onClick={() => setPanelTab("preview")}
-                    >
-                      Preview
-                    </button>
-                  </div>
-                  {panelTab === "changes" ? (
-                    <ChangesPane
-                      conversationId={activeConversationId}
-                      onClose={() => {
-                        if (attachedAt) setClosedForAttachment(attachedAt);
-                      }}
-                    />
-                  ) : (
-                    <PreviewPane
-                      onClose={() => {
-                        if (attachedAt) setClosedForAttachment(attachedAt);
-                      }}
-                    />
-                  )}
+                  <ChangesPane
+                    conversationId={activeConversationId}
+                    onClose={() => {
+                      if (attachedAt) setClosedForAttachment(attachedAt);
+                    }}
+                  />
                 </div>
               </Panel>
             </Group>
@@ -664,20 +712,17 @@ export function ChatPage() {
             {repoAttached && !panelVisible && (
               <button
                 type="button"
-                className="chat-preview-open-fab"
-                onClick={() => {
-                  setPanelTab(changeSet.empty ? "preview" : "changes");
-                  setClosedForAttachment(null);
-                }}
+                className="chat-changes-open-fab"
+                onClick={() => setClosedForAttachment(null)}
                 title={
                   changeSet.empty
-                    ? "Show live preview"
+                    ? "Show agent changes"
                     : `Show ${changeSet.fileCount} changed file${changeSet.fileCount === 1 ? "" : "s"}`
                 }
               >
                 <FileDiff className="h-4 w-4" />
-                {changeSet.empty ? "Preview" : "Changes"}
-                {!changeSet.empty && <span className="chat-preview-open-count">{changeSet.fileCount}</span>}
+                Changes
+                {!changeSet.empty && <span className="chat-changes-open-count">{changeSet.fileCount}</span>}
               </button>
             )}
           </>

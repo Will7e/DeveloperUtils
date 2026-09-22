@@ -275,7 +275,7 @@ export class HostTurnController {
         await this.streamOneAttempt(turn, candidate);
         // Stream completed without throwing. A completion that asked
         // for tools ends the host turn here — tool EXECUTION lives in
-        // the page (workspace, preview, push gate), and the page's
+        // the page (workspace, verification, push gate), and the page's
         // agent loop starts the next host round with the results.
         const winner = turn.winnerModelId ?? candidate.modelId;
         if (turn.toolCalls.length > 0) {

@@ -17,8 +17,8 @@
 // (MUTATIONS_MAX) and persisted inside WorkspaceState by the
 // existing debounced IDB save — no new storage layer.
 //
-// Pure functions over WorkspaceState; callers wire the store +
-// preview rebuild (same contract as the rest of workspace.ts).
+// Pure functions over WorkspaceState; callers wire the store and the
+// persistence flush (same contract as the rest of workspace.ts).
 
 import { generateId } from "@/lib/utils";
 import type {

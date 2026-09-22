@@ -8,12 +8,14 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  RETIRED_BUILTIN_SKILL_IDS,
   buildEffectiveSystemPrompt,
   buildSkillIndex,
   findSkill,
   globToRegExp,
   matchSkills,
   parseSkillFile,
+  reconcileBuiltins,
   serializeSkillFile,
   skillFromParsed,
 } from "./skills";
@@ -176,6 +178,123 @@ describe("skill files", () => {
     expect(made.enabled).toBe(false);
     expect(made.triggers).toEqual(["t"]);
     expect(made.globs).toBeUndefined();
+  });
+});
+
+describe("reconcileBuiltins — what the settings modal ends up showing", () => {
+  // This had no tests, and that is exactly how a retirement gap survived:
+  // the function only ever ADDED, so removing a builtin from the shipped
+  // list changed nothing for anyone who had already opened the app — which
+  // is everyone. It is the single function that decides what a user sees.
+  const retired = RETIRED_BUILTIN_SKILL_IDS[0]!;
+  const retiredSkill = {
+    id: retired,
+    name: "Retired",
+    description: "gone",
+    content: "old instructions",
+    enabled: false,
+    builtin: true,
+  };
+  const userSkill = {
+    id: "user-1",
+    name: "Mine",
+    description: "mine",
+    content: "my own",
+    enabled: true,
+  };
+
+  it("returns null when there is nothing to change", () => {
+    // The store reads null as "do not write", so this is a persistence guard.
+    expect(reconcileBuiltins(BUILTIN_SKILLS.map((s) => ({ ...s })))).toBeNull();
+  });
+
+  it("adds a builtin that is missing locally", () => {
+    const result = reconcileBuiltins([])!;
+    expect(result.length).toBe(BUILTIN_SKILLS.length);
+  });
+
+  it("REMOVES a retired builtin the user never touched", () => {
+    const result = reconcileBuiltins([retiredSkill])!;
+    expect(result.some((s) => s.id === retired)).toBe(false);
+  });
+
+  it("keeps a retired builtin the user explicitly ENABLED", () => {
+    // Deleting something a user switched on is the harness overruling their
+    // choice, which is worse than one stale index line.
+    const result = reconcileBuiltins([{ ...retiredSkill, enabled: true }]);
+    expect(result === null || result.some((s) => s.id === retired)).toBe(true);
+  });
+
+  it("keeps a retired builtin the user EDITED, because that text is theirs", () => {
+    const result = reconcileBuiltins([{ ...retiredSkill, updated: true }]);
+    expect(result === null || result.some((s) => s.id === retired)).toBe(true);
+  });
+
+  it("never touches a skill the user wrote", () => {
+    const result = reconcileBuiltins([{ ...userSkill, id: retired }]);
+    // Same id, but not a builtin: not ours to remove.
+    expect(result === null || result.some((s) => s.id === retired)).toBe(true);
+  });
+
+  it("keeps every user skill alongside the shipped ones", () => {
+    const result = reconcileBuiltins([userSkill])!;
+    expect(result.some((s) => s.id === "user-1")).toBe(true);
+  });
+
+  it("has no retired id left in the shipped set", () => {
+    // Consistency guard: re-adding a retired id would ship a skill that is
+    // immediately deleted on load.
+    for (const id of RETIRED_BUILTIN_SKILL_IDS) {
+      expect(BUILTIN_SKILLS.some((s) => s.id === id), id).toBe(false);
+    }
+  });
+
+  it("ships a tightened set: every remaining builtin is about this agent's job", () => {
+    // Four generic prompt modules and three duplicates were retired. The
+    // count is pinned so a future "just add a skill" change has to argue
+    // with a test rather than slip in.
+    //
+    // 7 → 8: Research Outside The Repo. It earns the line by the same rule
+    // the retirements were made under — it is a job this agent does with a
+    // tool it has (fetch_url), and the tool needs a WHEN: a model that does
+    // not know to check a dependency's docs recalls them instead, which is
+    // the failure the tool was added to remove.
+    expect(BUILTIN_SKILLS.length).toBe(8);
+  });
+});
+
+describe("the shipped verification skill", () => {
+  // The tiers exist (`run_command`, `verify_with_ci`) and the audit enforces
+  // them, but a tool the model does not know WHEN to reach for is a tool it
+  // will not use. The skill is the part that turns availability into habit,
+  // so its discoverability is pinned rather than assumed.
+  const skill = BUILTIN_SKILLS.find((s) => s.id === "builtin-verification-discipline");
+
+  it("ships as a builtin, off by default so it costs nothing until loaded", () => {
+    expect(skill).toBeTruthy();
+    expect(skill!.enabled).toBe(false);
+    expect(skill!.content.trim().length).toBeGreaterThan(200);
+  });
+
+  it("is discovered by the words a user actually types", () => {
+    // "Still broken" is the moment the discipline matters most, and it is
+    // not the word "verify".
+    for (const phrase of ["verify this", "still broken", "run the tests", "npm test", "it fails"]) {
+      expect(matchSkills(phrase, [skill!]).length, phrase).toBe(1);
+    }
+  });
+
+  it("is offered in the index so the model knows it exists", () => {
+    expect(buildSkillIndex([skill!])).toContain("Verification Discipline");
+  });
+
+  it("names every tier, so the model picks one instead of guessing", () => {
+    for (const tool of ["run_checks", "run_command", "verify_with_ci"]) {
+      expect(skill!.content).toContain(tool);
+    }
+    // And the two rules that stop a summary from lying.
+    expect(skill!.content).toContain("UNVERIFIED");
+    expect(skill!.content).toContain("authoritativelyGreen");
   });
 });
 

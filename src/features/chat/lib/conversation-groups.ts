@@ -91,6 +91,40 @@ function changesOf(conversation: ChatConversation): number {
   return Number.isFinite(count) && count > 0 ? count : 0;
 }
 
+/**
+ * What a row says besides its title and age.
+ *
+ * Extracted because the component's first version computed this inline as
+ * `(showBranch || conv.pendingChanges) && <div>` — and `undefined || 0` is `0`,
+ * which React renders. Every new chat in a repo therefore showed a bare `0`
+ * under its title: the guard was doing double duty as a boolean and as a
+ * number, and it was neither. Numbers are returned here so the caller can be
+ * explicit about it, and the shape is testable without a DOM.
+ */
+export function conversationRowMeta(
+  group: ConversationGroup,
+  conversation: ChatConversation
+): { branch: string | null; changed: number } {
+  const identity = conversationRepoIdentity(conversation);
+  return {
+    // Only when this repo's threads are not all on one branch: otherwise the
+    // header already says it, and a repeated chip is noise.
+    branch: group.branches.length > 1 ? identity?.branch || null : null,
+    changed: changesOf(conversation),
+  };
+}
+
+/**
+ * Whether a row has anything to show at all.
+ *
+ * A boolean, never a count — see conversationRowMeta for the `0` this exists to
+ * prevent from reaching the DOM.
+ */
+export function hasRowMeta(group: ConversationGroup, conversation: ChatConversation): boolean {
+  const meta = conversationRowMeta(group, conversation);
+  return Boolean(meta.branch) || meta.changed > 0;
+}
+
 /** Pinned first, then most recent — the same rule at both levels */
 function byPinThenRecency(a: ChatConversation, b: ChatConversation): number {
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;

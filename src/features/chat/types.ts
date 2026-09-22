@@ -75,20 +75,18 @@ export type ToolName =
   | "get_workspace_diff"
   | "create_working_branch"
   | "push_changes"
-  | "get_preview_feedback"
-  | "run_in_preview"
-  | "query_preview_dom"
   | "run_tool_program"
   | "read_skill"
   | "remember"
   | "delegate"
   | "run_checks"
-  | "verify_behavior"
   | "update_plan"
-  | "get_preview_layout"
-  | "check_preview_visually"
   | "list_mcp_tools"
-  | "call_mcp_tool";
+  | "call_mcp_tool"
+  | "run_command"
+  | "verify_with_ci"
+  | "search_web"
+  | "fetch_url";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -400,7 +398,7 @@ export interface PendingPush {
   warnings?: PushWarning[];
   /**
    * What was actually executed against this workspace revision — the
-   * in-browser type check and any behaviour probes — with their age and
+   * in-browser type check and any real command runs — with their age and
    * whether they still describe this code. Kept separate from the
    * warnings because passing evidence is not a warning.
    */
@@ -416,9 +414,7 @@ export interface PushWarning {
     /** The agent's summary claims something the turn's evidence does not support */
     | "evidence"
     /** Checks this repository declares that nothing in this workspace can run */
-    | "checks"
-    /** Behaviour probes or the type check ran and contradicted this diff */
-    | "probes";
+    | "checks";
   message: string;
 }
 
@@ -530,10 +526,12 @@ export interface ChatSettings {
   /** Max agent tool-loop iterations per user message (coding-agent mode) */
   agentMaxIterations: number;
   /**
-   * Optional external checks runner (see lib/verify-contract.ts). When
-   * set, `run_checks` POSTs the repository's declared commands here and
-   * returns real results. Empty = no shell anywhere, which the harness
-   * then states plainly instead of guessing.
+   * Optional external checks runner (see lib/verify-contract.ts). When set,
+   * `run_checks` POSTs the repository's declared commands here and returns
+   * real results. Empty means no runner is configured — in which case the
+   * command tiers are `run_command` (the local companion, on the user's
+   * machine) and `verify_with_ci` (the repository's own workflow), and the
+   * harness says which checks it could not run rather than guessing.
    */
   checksEndpoint?: string;
   /**

@@ -11,7 +11,6 @@ import {
   evidenceWarnings,
   extractClaimedPaths,
   ranVerification,
-  ranVisualVerification,
 } from "./evidence-audit";
 
 const CHANGED = ["src/App.tsx", "src/util/format.ts"];
@@ -65,11 +64,11 @@ describe("auditClaims — file claims", () => {
 });
 
 describe("auditClaims — verification claims", () => {
-  it("flags a test-suite claim, because it can never be true here", () => {
+  it("flags a test-suite claim nothing ran", () => {
     const findings = auditClaims({
       claim: "All tests pass. Added src/App.tsx.",
       changedPaths: CHANGED,
-      toolsUsed: ["read_file", "edit_file", "run_in_preview"],
+      toolsUsed: ["read_file", "edit_file"],
     });
     expect(findings.map((f) => f.code)).toEqual(["unverified-claim"]);
     expect(findings[0]!.evidence).toEqual(["All tests pass"]);
@@ -83,7 +82,7 @@ describe("auditClaims — verification claims", () => {
     expect(findings.map((f) => f.code)).toEqual(["unverified-claim"]);
   });
 
-  it("flags a build claim when nothing verified the preview", () => {
+  it("flags a build claim when nothing ran it", () => {
     const findings = auditClaims({
       claim: "The build passes.",
       changedPaths: CHANGED,
@@ -92,11 +91,12 @@ describe("auditClaims — verification claims", () => {
     expect(findings.map((f) => f.code)).toEqual(["unverified-claim"]);
   });
 
-  it("accepts a build claim the preview actually confirmed", () => {
+  it("accepts a build claim a real command backs", () => {
     const findings = auditClaims({
       claim: "The build passes now.",
       changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "get_preview_feedback"],
+      toolsUsed: ["edit_file", "run_command"],
+      command: { status: "fresh-pass", summary: "`npm run build` exited 0 in 3.1s" },
     });
     expect(findings).toHaveLength(0);
   });
@@ -111,92 +111,40 @@ describe("auditClaims — verification claims", () => {
 });
 
 describe("ranVerification", () => {
-  it("only counts the tools that can actually observe a running app", () => {
+  it("only counts the tools that actually execute something", () => {
     expect(ranVerification(["read_file", "edit_file"])).toBe(false);
-    expect(ranVerification(["query_preview_dom"])).toBe(true);
-    expect(ranVerification(["get_preview_layout"])).toBe(true);
-    expect(ranVerification(["check_preview_visually"])).toBe(true);
+    expect(ranVerification(["run_command"])).toBe(true);
+    expect(ranVerification(["verify_with_ci"])).toBe(true);
     expect(ranVerification(undefined)).toBe(false);
-  });
-
-  it("keeps the visual set narrower than the verification set", () => {
-    // A DOM query or a geometry map cannot see colour, contrast or paint
-    // order, so neither counts as having LOOKED at the page.
-    expect(ranVisualVerification(["query_preview_dom"])).toBe(false);
-    expect(ranVisualVerification(["get_preview_layout"])).toBe(false);
-    expect(ranVisualVerification(["check_preview_visually"])).toBe(true);
-    expect(ranVisualVerification(undefined)).toBe(false);
-  });
-});
-
-describe("auditClaims — visual claims", () => {
-  it("flags a rendering claim nothing looked at", () => {
-    const findings = auditClaims({
-      claim: "The header now renders correctly on narrow screens.",
-      changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "query_preview_dom"],
-    });
-    expect(findings.map((f) => f.code)).toEqual(["unverified-claim"]);
-    expect(findings[0]!.message).toMatch(/rendered pixels|check_preview_visually/);
-  });
-
-  it("accepts a rendering claim a visual check backed", () => {
-    const findings = auditClaims({
-      claim: "The header now renders correctly on narrow screens.",
-      changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "check_preview_visually"],
-    });
-    expect(findings).toHaveLength(0);
-  });
-
-  it("catches the softer ways a model says the same thing", () => {
-    for (const claim of [
-      "That looks right now.",
-      "The card is styled correctly.",
-      "Visually verified the new dialog.",
-      "The page renders cleanly.",
-    ]) {
-      const findings = auditClaims({ claim, changedPaths: CHANGED, toolsUsed: ["edit_file"] });
-      expect(findings.length, claim).toBeGreaterThan(0);
-    }
-  });
-
-  it("stays quiet about layout work that makes no rendering claim", () => {
-    const findings = auditClaims({
-      claim: "Replaced the flex row with a grid and updated the breakpoint in src/App.tsx.",
-      changedPaths: CHANGED,
-      toolsUsed: ["edit_file"],
-    });
-    expect(findings).toHaveLength(0);
   });
 });
 
 describe("claims weighed against real verification", () => {
-  const failedProbes = {
+  const failedCommand = {
     status: "fresh-fail" as const,
-    summary: "1/3 probes passed",
-    details: ['counter increments: text of "#n" is "0" but expected "1"'],
+    summary: "`npm test` exited 1 in 900ms",
+    details: ["FAIL src/a.test.ts > adds numbers"],
   };
 
-  it("flags a summary that contradicts failing probes, quoting them", () => {
+  it("flags a summary that contradicts a failing command, quoting it", () => {
     const findings = auditClaims({
       claim: "Added the increment button in src/App.tsx and the counter works now.",
       changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "verify_behavior"],
-      probes: failedProbes,
+      toolsUsed: ["edit_file", "run_command"],
+      command: failedCommand,
     });
     const contradicted = findings.filter((f) => f.code === "contradicted-claim");
     expect(contradicted).toHaveLength(1);
     expect(contradicted[0]!.message).toMatch(/FAILED/);
-    expect(contradicted[0]!.message).toContain('expected "1"');
+    expect(contradicted[0]!.message).toContain("FAIL src/a.test.ts");
   });
 
-  it("is quiet when nothing asserts an outcome, even if probes failed", () => {
+  it("is quiet when nothing asserts an outcome, even if the command failed", () => {
     const findings = auditClaims({
       claim: "Updated src/App.tsx to use the new hook.",
       changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "verify_behavior"],
-      probes: failedProbes,
+      toolsUsed: ["edit_file", "run_command"],
+      command: failedCommand,
     });
     expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
   });
@@ -216,25 +164,113 @@ describe("claims weighed against real verification", () => {
     const findings = auditClaims({
       claim: "The login flow works now — src/App.tsx handles the redirect.",
       changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "verify_behavior"],
-      probes: { status: "stale", summary: "4/4 probes passed" },
+      toolsUsed: ["edit_file", "run_command"],
+      command: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
     });
     expect(findings.map((f) => f.code)).toContain("unverified-claim");
     expect(findings.some((f) => /describes older code/.test(f.message))).toBe(true);
   });
 
-  it("accepts a fresh passing probe run as backing for an outcome claim", () => {
+  it("accepts a fresh passing command as backing for an outcome claim", () => {
     const findings = auditClaims({
       claim: "The counter works now — src/App.tsx increments on click.",
       changedPaths: CHANGED,
-      toolsUsed: ["edit_file", "verify_behavior"],
-      probes: { status: "fresh-pass", summary: "3/3 probes passed" },
+      toolsUsed: ["edit_file", "run_command"],
+      command: { status: "fresh-pass", summary: "`npm test` exited 0 in 812ms" },
     });
     expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
   });
+});
 
-  it("counts verify_behavior as verification", () => {
-    expect(ranVerification(["verify_behavior"])).toBe(true);
+describe("auditClaims — real execution changes what is provable", () => {
+  const COMMAND_PASS = { status: "fresh-pass" as const, summary: "`npm test` exited 0 in 812ms" };
+  const COMMAND_FAIL = {
+    status: "fresh-fail" as const,
+    summary: "`npm test` exited 1 in 900ms",
+    details: ["FAIL src/a.test.ts > adds numbers"],
+  };
+
+  it("does not flag a test claim that a real command backs", () => {
+    // The rule used to be unconditional because the workspace genuinely had
+    // no shell. It has one now (run_command, verify_with_ci), so flagging a
+    // passing test run would be a false alarm — and a false alarm is how a
+    // reviewer learns to ignore the audit.
+    const findings = auditClaims({
+      claim: "All tests pass. Fixed src/App.tsx.",
+      changedPaths: CHANGED,
+      toolsUsed: ["run_command"],
+      command: COMMAND_PASS,
+    });
+    expect(findings.filter((f) => f.code === "unverified-claim")).toHaveLength(0);
+  });
+
+  it("still flags a test claim with nothing behind it, and names the tiers that could", () => {
+    const finding = auditClaims({ claim: "All tests pass.", changedPaths: CHANGED }).find(
+      (f) => f.code === "unverified-claim"
+    );
+    expect(finding).toBeTruthy();
+    expect(finding!.message).toContain("run_command");
+    expect(finding!.message).toContain("verify_with_ci");
+    // The old wording asserted a shell was impossible here, which is now false.
+    expect(finding!.message).not.toContain("no shell");
+  });
+
+  it("counts a real command, and CI, as verification", () => {
+    expect(ranVerification(["run_command"])).toBe(true);
+    expect(ranVerification(["verify_with_ci"])).toBe(true);
+  });
+
+  it("contradicts the summary when the command FAILED", () => {
+    const contradicted = auditClaims({
+      claim: "Fixed the parser and all tests pass.",
+      changedPaths: CHANGED,
+      toolsUsed: ["run_command"],
+      command: COMMAND_FAIL,
+    }).find((f) => f.code === "contradicted-claim");
+    expect(contradicted).toBeTruthy();
+    expect(contradicted!.message).toContain("A command run in the working tree");
+    expect(contradicted!.evidence[0]).toContain("FAIL");
+  });
+
+  it("contradicts the summary when CI failed", () => {
+    const findings = auditClaims({
+      claim: "All tests pass.",
+      changedPaths: CHANGED,
+      toolsUsed: ["verify_with_ci"],
+      ci: { status: "fresh-fail", summary: "Verify — failed", details: ["run #42 failed"] },
+    });
+    expect(findings.some((f) => f.code === "contradicted-claim")).toBe(true);
+  });
+
+  it("counts BOTH failures when the command and CI both failed", () => {
+    const contradicted = auditClaims({
+      claim: "All tests pass.",
+      changedPaths: CHANGED,
+      toolsUsed: ["run_command", "verify_with_ci"],
+      command: COMMAND_FAIL,
+      ci: { status: "fresh-fail", summary: "Verify — failed" },
+    }).find((f) => f.code === "contradicted-claim");
+    expect(contradicted!.message).toContain("1 other result(s) also failed");
+  });
+
+  it("treats a pass that predates the last edit as stale, not as proof", () => {
+    const finding = auditClaims({
+      claim: "All tests pass.",
+      changedPaths: CHANGED,
+      toolsUsed: ["run_command"],
+      command: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
+    }).find((f) => f.code === "unverified-claim");
+    expect(finding).toBeTruthy();
+    expect(finding!.message).toContain("before the last edit");
+  });
+
+  it("stays quiet for an honest summary that claims no outcome", () => {
+    expect(
+      auditClaims({
+        claim: "Updated src/App.tsx to pass the new prop through.",
+        changedPaths: CHANGED,
+      })
+    ).toEqual([]);
   });
 });
 

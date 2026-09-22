@@ -1,14 +1,21 @@
 // ============================================================
-// Workspace Bootstrap — Attach-Time Workspace + Preview Startup
+// Workspace Bootstrap — Attach-Time Binding + Workspace
 // ============================================================
-// Called from ChatPage when a conversation has a repo attached:
-// ensures the IDB-backed workspace exists (creating it on first
-// attach) and kicks the first preview build so the pane shows the
-// pristine app immediately.
+// Called from ChatPage when a conversation has a repo attached.
+//
+// The order of the two steps below is the whole point. The BINDING is declared
+// first and the workspace is built second, so every artifact that follows —
+// the working copy, the change set, the recorded evidence — is created already
+// knowing which repository it belongs to. Building first and binding afterwards
+// is how a workspace came to exist in memory with no record of what it was a
+// copy of, and the read sites that followed had to guess.
+//
+// This function is also the one place a repository switch lands, because it is
+// driven by the ATTACHMENT (see hooks/useWorkspace.ts), not by a boolean that
+// cannot tell one repository from another.
 
 import { useChatStore } from "@/stores/chat.store";
-import { usePreviewStore } from "../preview/preview.store";
-import { runPreviewBuild, detectEntry, isPreviewSupported } from "../preview/preview-runtime";
+import { pinBase, setAttachment } from "../identity/bindings";
 
 /** True when the workspace has any changes worth pushing */
 export function workspaceHasChanges(conversationId: string): boolean {
@@ -18,29 +25,24 @@ export function workspaceHasChanges(conversationId: string): boolean {
 }
 
 /**
- * Ensures a workspace exists for the conversation's attached repo
- * and starts the initial preview build. Safe to call repeatedly.
+ * Ensures a workspace exists for the conversation's attached repo.
+ * Safe to call repeatedly.
  */
 export async function ensureWorkspaceReady(conversationId: string): Promise<void> {
   const state = useChatStore.getState();
   const conv = state.conversations.find((c) => c.id === conversationId);
-  if (!conv?.repoContext || !state.settings.github.token) return;
+  const repo = conv?.repoContext;
+  if (!repo || !state.settings.github.token) return;
+
+  // 1. Declare the binding. Idempotent for the same repository, so re-attaching
+  //    the repository a thread is already on evicts nothing.
+  await setAttachment(conversationId, repo);
 
   const ws = await state.ensureWorkspace(conversationId);
   if (!ws) return;
 
-  // Only auto-build when an entry actually exists (avoids a
-  // permanent "error" pane on API/backend repos with no UI)
-  const preview = usePreviewStore.getState();
-  if (preview.conversationId !== conversationId) {
-    preview.setConversation(conversationId);
-  }
-  if (isPreviewSupported() && detectEntry(ws)) {
-    void runPreviewBuild(ws);
-  } else if (!detectEntry(ws)) {
-    // Owned, like every other preview result: a repo with no UI (an API, a
-    // backend) says "idle" for ITS thread, and does not blank the badge of a
-    // thread that has a perfectly good app on screen.
-    preview.setStatus("idle", conversationId);
-  }
+  // 2. Record the revision the working copy was created from. A different base
+  //    under the same attachment is a `base.moved`, which invalidates evidence
+  //    and build sessions without touching the working copy.
+  await pinBase(conversationId, repo, ws.baseCommitSha);
 }

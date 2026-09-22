@@ -54,11 +54,14 @@ export const UNTRUSTED_TOOLS: ReadonlySet<string> = new Set([
   // written by whoever runs the server, not by this app.
   "list_mcp_tools",
   "call_mcp_tool",
+  // Search results and fetched pages are authored by whoever controls those
+  // hosts — the likeliest of all these routes to carry instructions aimed at
+  // the model, because a URL and its title can be chosen to say exactly the
+  // wrong thing. A hostile page can rank for the query the agent just typed.
+  "search_web",
+  "fetch_url",
   // A delegated helper's report quotes repository content…
   "delegate",
-  // …and a vision check describes text RENDERED by the page, which is
-  // another route for the same instructions to arrive as prose.
-  "check_preview_visually",
 ]);
 
 export function isUntrustedTool(name: string): boolean {

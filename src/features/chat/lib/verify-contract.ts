@@ -282,10 +282,19 @@ export function unrunChecksStatement(checks: DeclaredCheck[]): string {
       "State what you checked by other means, and say plainly that nothing was executed."
     );
   }
+  // This line used to read "NONE of them can be executed in this workspace —
+  // there is no shell". It was true, and it was self-defeating: the tool the
+  // model calls to find out what to run was telling it that running anything
+  // was impossible, so it never tried, and every summary was prose. There ARE
+  // tiers that run these now, and naming them here is what turns a declared
+  // check into an executed one.
   return [
-    `This repository declares ${checks.length} check(s). NONE of them can be executed in this workspace — there is no shell:`,
+    `This repository declares ${checks.length} check(s). Declaring a check is not running it — none of these has been executed yet:`,
     ...checks.map((c) => `- ${c.label} → \`${c.command}\``),
-    "Say explicitly which of these you did NOT run, and hand the user the commands above.",
+    "Run them with `run_command` (a real working tree on the user's machine; needs the local companion) or delegate to " +
+      "the repository's own CI with `verify_with_ci` (the tier that covers Python, Rust, Docker and service-backed projects, " +
+      "once the branch is pushed).",
+    "Until one of those returns a passing result, say explicitly which of these you did NOT run, and hand the user the commands above.",
   ].join("\n");
 }
 

@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   NO_REPO_GROUP_KEY,
   conversationMatchesQuery,
+  conversationRowMeta,
   groupConversationsByRepository,
+  hasRowMeta,
 } from "./conversation-groups";
 import type { ChatConversation } from "../types";
 
@@ -175,6 +177,49 @@ describe("groupConversationsByRepository", () => {
       conversation({ id: "b", repoContext: onRepo("acme", "web"), pendingChanges: 0 }),
     ]);
     expect(groups[0]!.pendingChanges).toBe(0);
+  });
+});
+
+describe("conversationRowMeta", () => {
+  // The reported bug: a bare `0` under every new chat in a repo. The row's
+  // guard was `(showBranch || conv.pendingChanges) && <div>`, and `undefined ||
+  // 0` is `0`, which React renders. These pin the values that caused it.
+  it("reports nothing to show for a fresh chat on a single-branch repo", () => {
+    const groups = groupConversationsByRepository([
+      conversation({ id: "fresh", repoContext: onRepo("acme", "web") }),
+    ]);
+    const group = groups[0]!;
+    const row = conversationRowMeta(group, group.conversations[0]!);
+    expect(row).toEqual({ branch: null, changed: 0 });
+    expect(hasRowMeta(group, group.conversations[0]!)).toBe(false);
+  });
+
+  it("shows the branch only when the repo's threads disagree on one", () => {
+    const groups = groupConversationsByRepository([
+      conversation({ id: "a", repoContext: onRepo("acme", "web", "main") }),
+      conversation({ id: "b", repoContext: onRepo("acme", "web", "feat/x") }),
+    ]);
+    const group = groups[0]!;
+    const first = group.conversations.find((c) => c.id === "a")!;
+    expect(conversationRowMeta(group, first).branch).toBe("main");
+    expect(hasRowMeta(group, first)).toBe(true);
+
+    const single = groupConversationsByRepository([
+      conversation({ id: "a", repoContext: onRepo("acme", "web", "main") }),
+    ])[0]!;
+    expect(conversationRowMeta(single, single.conversations[0]!).branch).toBeNull();
+  });
+
+  it("shows the changed count on the thread that holds the work", () => {
+    const groups = groupConversationsByRepository([
+      conversation({ id: "a", repoContext: onRepo("acme", "web"), pendingChanges: 3 }),
+    ]);
+    const group = groups[0]!;
+    expect(conversationRowMeta(group, group.conversations[0]!)).toEqual({
+      branch: null,
+      changed: 3,
+    });
+    expect(hasRowMeta(group, group.conversations[0]!)).toBe(true);
   });
 });
 

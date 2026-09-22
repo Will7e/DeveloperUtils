@@ -37,6 +37,18 @@ function classify(status: number): GitHubError["code"] | undefined {
 
 const PROXY_PREFIX = "/api/proxy?url=";
 
+/**
+ * Largest file worth pulling through the Blob API when the Contents API
+ * declines to return it (anything over 1 MB).
+ *
+ * Base64 is 4/3 of the byte size, so bytes stop at 6 MiB — past that the file
+ * would be fetched and transported only to be rejected for exceeding a cap
+ * that was predictable before the request.
+ */
+export const GITHUB_BLOB_FALLBACK_MAX_BYTES = 6 * 1024 * 1024;
+
+import { registerScopedResource } from "../identity/scoped-resources";
+
 /** Small in-memory caches (session-scoped, invalidated by ref param) */
 let repoListCacheState: { repos: GitHubRepo[]; at: number } | null = null;
 const treeCache = new Map<string, GitHubTreeEntry[]>();
@@ -47,6 +59,35 @@ function clearTreeCache(): void {
   treeCache.clear();
   treeCacheStamps.clear();
 }
+
+/**
+ * Forgets the cached tree of one repository.
+ *
+ * The entries live for five minutes, keyed by `owner/repo@ref` — a fact about a
+ * REPOSITORY at a REF, so a push is what makes them wrong. Reading a tree five
+ * minutes stale is how a file created by the push looked absent, and a deleted
+ * one looked present, to anything that reads the tree without also checking the
+ * commit it was read at.
+ */
+export function clearTreeCacheForRepo(repo: { owner: string; repo: string }): void {
+  const prefix = `${repo.owner}/${repo.repo}@`;
+  for (const key of [...treeCache.keys()]) {
+    if (key.startsWith(prefix)) treeCache.delete(key);
+  }
+  for (const key of [...treeCacheStamps.keys()]) {
+    if (key.startsWith(prefix)) treeCacheStamps.delete(key);
+  }
+}
+
+registerScopedResource({
+  name: "github-client.tree",
+  scope: "repo",
+  release: ({ transition }) => {
+    if (transition.type === "base.moved" && transition.ref) {
+      clearTreeCacheForRepo(transition.ref);
+    }
+  },
+});
 
 interface GitHubApiErrorBody {
   message?: string;
@@ -177,9 +218,8 @@ export interface GitHubFileContent {
    * or null when it sent none — files over its 1 MB limit.
    *
    * Kept because a caller may want a file's BYTES while never wanting its
-   * text: the preview inlines images, fonts and media from here, and a
-   * lossy text decode of an image is the bug that produced `Expected ";"
-   * but found "\x14"`.
+   * text, and a lossy text decode of an image is the bug that produced
+   * `Expected ";" but found "\x14"`.
    */
   base64: string | null;
 }
@@ -322,11 +362,17 @@ export async function readFileContent(
   // the newlines gone, and that is the form a base64 decoder wants.
   const payload = raw.replace(/\s+/g, "");
   const isBinaryHint = json.encoding !== "base64" || raw === "";
+  const resolvedPath = json.path ?? path;
 
-  // The Contents API returns content:null for files >1MB — flag it.
+  // The Contents API returns content:null for files >1MB. The bytes still
+  // exist on GitHub and the Blob API will hand them over, so ask it instead
+  // of reporting a file we know is present as unloadable — which is all
+  // "over the API's size limit" ever meant to whoever read the message.
   if (raw === "" && size > 0) {
+    const viaBlob = await readBlobFallback(token, owner, repo, resolvedPath, sha, size);
+    if (viaBlob) return viaBlob;
     return {
-      path: json.path ?? path,
+      path: resolvedPath,
       text: null,
       size,
       sha,
@@ -337,9 +383,26 @@ export async function readFileContent(
     };
   }
 
+  // A zero-byte file is a legitimately EMPTY text file, not a binary one. The
+  // API sends encoding:"base64" with a zero-length payload, and every caller
+  // downstream reads `text: null` as "could not be loaded" — so calling an
+  // empty file binary makes it permanently unloadable.
+  if (raw === "" && json.encoding === "base64") {
+    return {
+      path: resolvedPath,
+      text: "",
+      size,
+      sha,
+      encoding: "base64",
+      truncated: false,
+      isBinary: false,
+      base64: "",
+    };
+  }
+
   if (isBinaryHint) {
     return {
-      path: json.path ?? path,
+      path: resolvedPath,
       text: null,
       size,
       sha,
@@ -350,14 +413,35 @@ export async function readFileContent(
     };
   }
 
-  let decoded: string;
+  return decodeBase64File(resolvedPath, size, sha, payload);
+}
+
+/**
+ * One base64 payload → a file, decoding the text when the bytes ARE text.
+ *
+ * Not UTF-8 is not a failure: there is no text, but there ARE bytes — which is
+ * what a caller inlining an image, a font or a clip needs.
+ */
+function decodeBase64File(
+  path: string,
+  size: number,
+  sha: string,
+  payload: string
+): GitHubFileContent {
   try {
-    decoded = decodeBase64Utf8(payload);
-  } catch {
-    // Not UTF-8. There is no text, but there ARE bytes — which is what a
-    // caller that wants to inline an image, a font or a clip needs.
     return {
-      path: json.path ?? path,
+      path,
+      text: decodeBase64Utf8(payload),
+      size,
+      sha,
+      encoding: "base64",
+      truncated: false,
+      isBinary: false,
+      base64: payload,
+    };
+  } catch {
+    return {
+      path,
       text: null,
       size,
       sha,
@@ -367,17 +451,37 @@ export async function readFileContent(
       base64: payload,
     };
   }
+}
 
-  return {
-    path: json.path ?? path,
-    text: decoded,
-    size,
-    sha,
-    encoding: "base64",
-    truncated: false,
-    isBinary: false,
-    base64: payload,
-  };
+/**
+ * The same file, from the Blob API.
+ *
+ * `GET /repos/{owner}/{repo}/git/blobs/{sha}` returns base64 for anything up to
+ * 100 MB, which is exactly the gap the Contents API leaves at 1 MB.
+ *
+ * Returns null whenever the bytes are not worth having — too big, no sha, or
+ * the request itself failed — so the caller keeps its existing "not loaded"
+ * report. A fallback must not become a new failure mode.
+ */
+async function readBlobFallback(
+  token: string,
+  owner: string,
+  repo: string,
+  path: string,
+  sha: string,
+  size: number
+): Promise<GitHubFileContent | null> {
+  if (!sha || size > GITHUB_BLOB_FALLBACK_MAX_BYTES) return null;
+  try {
+    const res = await githubFetch(`/repos/${owner}/${repo}/git/blobs/${sha}`, token);
+    const json = (await res.json()) as { content?: string; encoding?: string };
+    if (json.encoding !== "base64") return null;
+    const payload = (json.content ?? "").replace(/\s+/g, "");
+    if (!payload) return null;
+    return decodeBase64File(path, size, sha, payload);
+  } catch {
+    return null;
+  }
 }
 
 /** Code search scoped to one repo (requires an authenticated token) */
@@ -419,8 +523,8 @@ export async function searchCodeInRepo(
  *
  * Strict on purpose — this is what makes `isBinary` mean something. The
  * lenient decoder it replaces never threw, so a committed `.webp` was
- * returned as "text": the agent's read_file showed it mojibake, and the
- * preview bundler parsed the image's bytes as JavaScript
+ * returned as "text": the agent's read_file showed it mojibake, and code
+ * that trusted "text" parsed the image's bytes as JavaScript
  * (`Expected ";" but found "\x14"`). A NUL byte is treated as binary too:
  * it is valid UTF-8, and no source file has one.
  */

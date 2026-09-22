@@ -1,17 +1,25 @@
 // ============================================================
 // Evidence Audit — Does the Agent's Story Match the Diff?
 // ============================================================
-// There is no shell in this workspace. The agent can edit files and it
-// can verify a web app through the preview, but it CANNOT run a test
-// suite, a linter, or a type-checker. A model that does not internalise
-// that will happily write "all tests pass" — and a reviewer, reading a
-// confident summary above a large diff, will believe it.
+// A summary is prose until it is checked against what actually happened. The
+// agent can edit files, run the project's own commands on the user's machine
+// (`run_command`) and dispatch the repository's CI (`verify_with_ci`) — and a
+// model that does not
+// internalise which of those it did will happily write "all tests pass"
+// after none of them ran. A reviewer, reading a confident summary above a
+// large diff, will believe it.
 //
 // This module is the cheap, honest counterweight: it compares what the
-// final message CLAIMS against what actually happened in the turn
-// (the changed paths, the tools that ran, whether anything was verified
-// in the preview) and reports the gaps to the human at the approval
-// gate.
+// final message CLAIMS against what actually happened in the turn — the
+// changed paths, the tools that ran, and the evidence the verification
+// ledger holds — and reports the gaps to the human at the approval gate.
+//
+// It is evidence-based, not assumption-based, and that distinction was a
+// real bug: this file used to flag every "all tests pass" as impossible
+// because the workspace genuinely had no shell. Once one existed, the same
+// rule fired on honest, passing test runs. An audit that cries wolf about
+// good evidence trains the reviewer to ignore it, so the rule now asks
+// whether anything backs the claim.
 //
 // Deliberately conservative. A false accusation ("you claimed a file you
 // never touched") destroys trust in the gate faster than a missed one,
@@ -22,32 +30,36 @@
 import type { PushWarning } from "../types";
 
 /** The standing truth every agent prompt carries about verification */
+/**
+ * The standing verification note, injected into every turn.
+ *
+ * It used to read "This workspace has no shell: you cannot run test suites,
+ * linters, type-checkers, or build scripts" — true when written, and by the
+ * time it was false it had become the single most expensive line in the
+ * product: injected on every turn, it told the agent that the execution
+ * tiers did not exist, so it never reached for them.
+ *
+ * What survives is the half that is always true — do not imply a check you
+ * did not run — plus the tiers that can now actually run one.
+ */
 export const VERIFICATION_LIMIT_NOTE =
-  "This workspace has no shell: you cannot run test suites, linters, type-checkers, or build scripts. " +
-  "Never imply such a check passed. Say explicitly which checks you did NOT run — an honest gap is " +
-  "worth far more than a claim the reviewer will discover is false.";
+  "Prove it, or say so. `run_command` runs the project's real commands (install, build, test, lint, " +
+  "typecheck) in a working tree on the user's machine, and `verify_with_ci` dispatches the repository's own " +
+  "GitHub Actions workflow on the pushed branch — use them before claiming a change works. A non-zero exit " +
+  "code IS a failure, and a CI run that skipped, did not finish, or did not pass is not a pass. " +
+  "If neither tier is available, say explicitly which checks you did NOT run: an honest gap is worth far " +
+  "more than a claim the reviewer will discover is false. Evidence also goes stale — if you edited files " +
+  "after a run, that result describes older code.";
 
 /** Tools that constitute real verification inside this workspace */
 export const VERIFICATION_TOOLS: ReadonlySet<string> = new Set([
-  "get_preview_feedback",
-  "run_in_preview",
-  "query_preview_dom",
-  "get_preview_layout",
-  "check_preview_visually",
-  "verify_behavior",
+  // Real execution. `run_command` runs the project's own commands in a
+  // working tree on the user's machine; `verify_with_ci` runs the
+  // repository's own workflow. Both produce the evidence a claim needs, so
+  // a claim they substantiate is not an unsupported one.
+  "run_command",
+  "verify_with_ci",
 ]);
-
-/**
- * Tools that actually LOOKED at the rendered page.
- *
- * Deliberately narrower than VERIFICATION_TOOLS: a DOM query proves an
- * element exists and the layout map proves where its box is, but neither
- * can see white-on-white text, a collapsed button, or an icon font that
- * fell back to boxes. A claim about how the UI *looks* therefore needs a
- * tool that saw pixels. Keeping the two sets apart is the entire reason
- * `check_preview_visually` exists as a separate call.
- */
-export const VISUAL_TOOLS: ReadonlySet<string> = new Set(["check_preview_visually"]);
 
 export type EvidenceCode =
   | "unbacked-file-claim"
@@ -81,43 +93,47 @@ export interface EvidenceAuditInput {
   changedPaths: string[];
   /** Tool names that ran during this turn */
   toolsUsed?: string[];
-  /** Behaviour probes, when any ran against this revision */
-  probes?: VerificationFact | null;
   /** The in-browser type check, when it ran against this revision */
   typecheck?: VerificationFact | null;
+  /** A command run through the local companion, when one ran */
+  command?: VerificationFact | null;
+  /** The repository's own CI, when a run was watched to a conclusion */
+  ci?: VerificationFact | null;
 }
 
 /** Verbs that assert an outcome, used to spot a contradicted summary */
 const OUTCOME_ASSERTION =
-  /\b(?:works?|working|works\s+now|functions?|functional|passes?|passing|succeeds?|succeeded|verified|fixed|no\s+(?:longer\s+)?(?:issue|problem|error)s?|all\s+good|done|complete[d]?|correct(?:ly)?)\b/i;
+  /\b(?:works?|working|works\s+now|functions?|functional|pass(?:es|ed)?|passing|succeeds?|succeeded|verified|fixed|no\s+(?:longer\s+)?(?:issue|problem|error)s?|all\s+good|done|complete[d]?|correct(?:ly)?)\b/i;
 
 /** Verbs that turn a sentence into a change claim */
 const CHANGE_VERB =
   /\b(?:add|added|adds|change|changed|changes|update|updated|updates|modify|modified|modifies|create|created|creates|fix|fixed|fixes|delete|deleted|deletes|remove|removed|removes|rename|renamed|renames|refactor|refactored|refactors|implement|implemented|implements|introduce|introduced|introduces|migrate|migrated|migrates|replace|replaced|replaces|edit|edited|edits|write|wrote|written)\b/i;
 
 /**
- * Claims that are IMPOSSIBLE to substantiate in this workspace: there is
- * no shell, so nothing here can run a test suite, a type-checker or a
- * linter. Flagged unconditionally — no tool could have made them true.
+ * Claims that a command-line check RAN and passed.
+ *
+ * This used to be flagged unconditionally, and correctly so: there was no
+ * shell, so "all tests pass" was impossible to substantiate and saying so
+ * was always right. There IS a shell now — `run_command` on the user's own
+ * machine, and `verify_with_ci` for the repository's workflow — so the
+ * unconditional rule became a false alarm on a genuinely passing test run.
+ * An audit that cries wolf about good evidence teaches the reviewer to
+ * ignore it, which costs more than the finding was ever worth.
+ *
+ * The rule is therefore evidence-based: the claim is unsupported when
+ * nothing backs it, and silent when something does.
  */
-const IMPOSSIBLE_CLAIM =
+const EXECUTED_CHECK_CLAIM =
   /\b(?:all\s+tests?\s+(?:pass(?:e[sd])?|are\s+green|succeed|succeeded)|tests?\s+(?:pass(?:e[sd])?|are\s+green|succeed|succeeded|green)|test\s+suite\s+(?:pass(?:e[sd])?|is\s+green)|type[- ]?check(?:s|ed|ing)?\s+(?:pass(?:e[sd])?|clean|succeeds?(?:ed)?)|lints?\s+(?:clean|passed)|(?:ran|ran\s+the|executed)\s+(?:the\s+)?tests?|(?:jest|vitest|pytest|mocha|cypress)\s+(?:pass(?:e[sd])?|green))\b/i;
 
 /**
- * Claims the PREVIEW can substantiate (it really does build and run the
- * app) — flagged only when no verification tool ran in the turn, which
- * means the model is describing an expected outcome as an observed one.
+ * Claims that only real execution can substantiate (a build that ran, a
+ * change that was checked) — flagged when no verification tool ran in the
+ * turn, which means the model is describing an expected outcome as an
+ * observed one.
  */
 const UNVERIFIED_CLAIM =
   /\b(?:build\s+(?:pass(?:e[sd])?|succeeds?(?:ed)?|is\s+green|clean)|compiles?\s+(?:cleanly|successfully|without)|i\s+verified|i\s+checked|confirmed\s+working|manually\s+tested|verified\s+(?:working|that\s+it\s+works))\b/i;
-
-/**
- * Claims about how the page LOOKS. Only a visual check can substantiate
- * these — a passing DOM assertion says nothing about contrast, colour, or
- * whether an element is painted behind something else.
- */
-const VISUAL_CLAIM =
-  /\b(?:renders?\s+(?:correctly|properly|cleanly|as\s+expected|fine)|looks?\s+(?:correct|right|good|great|fine|clean)|visually\s+(?:verified|checked|confirmed)|styled\s+correctly)\b/i;
 
 /** A path-looking token: has a separator, or a known source extension */
 const PATH_TOKEN =
@@ -166,12 +182,6 @@ export function ranVerification(toolsUsed: string[] | undefined): boolean {
   return toolsUsed.some((t) => VERIFICATION_TOOLS.has(t));
 }
 
-/** True when a tool in this turn actually saw the rendered page */
-export function ranVisualVerification(toolsUsed: string[] | undefined): boolean {
-  if (!toolsUsed?.length) return false;
-  return toolsUsed.some((t) => VISUAL_TOOLS.has(t));
-}
-
 /**
  * Audits one final message. Returns findings only — formatting and where
  * they surface (approval gate, transcript, turn log) is the caller's job.
@@ -199,78 +209,90 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
     });
   }
 
-  // ── 2. Checks that are impossible in this workspace ──
-  const impossible = IMPOSSIBLE_CLAIM.exec(claim);
-  if (impossible) {
+  // ── 2. A check the summary says ran, with nothing that ran it ──
+  const executed = EXECUTED_CHECK_CLAIM.exec(claim);
+  const command = input.command ?? null;
+  const ci = input.ci ?? null;
+  const executionEvidence = [command, ci].filter((fact): fact is VerificationFact => fact !== null);
+  if (executed && executionEvidence.length === 0) {
     findings.push({
       code: "unverified-claim",
       message:
-        `The summary claims a check that cannot run here ("${impossible[0]}"). ` +
-        "This workspace has no shell: test suites, type-checkers and linters are not available. " +
-        "Treat that part of the summary as unverified.",
-      evidence: [impossible[0]],
+        `The summary claims a command-line check ran ("${executed[0]}") and nothing in this turn shows for it. ` +
+        "A test suite, type check or linter is not something this workspace can conclude on its own: run it with " +
+        "`run_command` (in a real working tree, on the user's machine), or verify the pushed branch with " +
+        "`verify_with_ci`. Until one of those runs, treat that part of the summary as unverified.",
+      evidence: [executed[0]],
     });
   }
 
-  // ── 3. Preview-verifiable claims with nothing verifying them ──
+  // ── 3. Claims with nothing verifying them ──
   const expected = UNVERIFIED_CLAIM.exec(claim);
   if (expected && !ranVerification(input.toolsUsed)) {
     findings.push({
       code: "unverified-claim",
       message:
         `The summary asserts an outcome nothing checked ("${expected[0]}"). ` +
-        "No preview build, DOM query or in-preview run happened in this turn, so this is an " +
+        "No command run or CI check happened in this turn, so this is an " +
         "expectation rather than an observation.",
       evidence: [expected[0]],
     });
   }
 
-  // ── 4. Claims about how the page LOOKS, with nothing having looked ──
-  const visual = VISUAL_CLAIM.exec(claim);
-  if (visual && !ranVisualVerification(input.toolsUsed)) {
-    findings.push({
-      code: "unverified-claim",
-      message:
-        `The summary describes how the page renders ("${visual[0]}"), but nothing looked at the rendered pixels: ` +
-        "no visual check ran in this turn. A DOM query or a geometry map cannot see colour, contrast or paint order — " +
-        "run check_preview_visually, or drop the claim.",
-      evidence: [visual[0]],
-    });
-  }
-
-  // ── 5. Verification that ran and says the opposite ──
+  // ── 4. Verification that ran and says the opposite ──
   // The only case where a summary is contradicted by hard evidence rather
-  // than merely unsupported. Failing probes are quoted verbatim: the model
+  // than merely unsupported. Failing results are quoted verbatim: the model
   // cannot argue with its own output, and the reviewer needs the detail.
-  const probes = input.probes ?? null;
   const typecheck = input.typecheck ?? null;
-  const contradicts = probes?.status === "fresh-fail" || typecheck?.status === "fresh-fail";
-  if (contradicts && OUTCOME_ASSERTION.test(claim)) {
-    const source = probes?.status === "fresh-fail" ? "Behaviour probes" : "The in-browser type check";
-    const failed = probes?.status === "fresh-fail" ? probes : typecheck;
-    const shown = (failed?.details ?? []).slice(0, 3);
+  const failing: { source: string; fact: VerificationFact }[] = [];
+  if (typecheck?.status === "fresh-fail") {
+    failing.push({ source: "The in-browser type check", fact: typecheck });
+  }
+  // A real command or CI run failing is the strongest contradiction there
+  // is: it is the project's own definition of green, and it said no.
+  if (command?.status === "fresh-fail") {
+    failing.push({ source: "A command run in the working tree", fact: command });
+  }
+  if (ci?.status === "fresh-fail") {
+    failing.push({ source: "The repository's CI", fact: ci });
+  }
+  if (failing.length > 0 && OUTCOME_ASSERTION.test(claim)) {
+    const worst = failing[0]!;
+    const shown = (worst.fact.details ?? []).slice(0, 3);
     findings.push({
       code: "contradicted-claim",
       message:
-        `${source} ran against this exact workspace revision and FAILED (${failed?.summary ?? "no summary"}), ` +
+        `${worst.source} ran against this exact workspace revision and FAILED (${worst.fact.summary}), ` +
         `while the summary describes the change as working.` +
+        (failing.length > 1
+          ? ` ${failing.length - 1} other result(s) also failed: ${failing.slice(1).map((f) => `${f.source} — ${f.fact.summary}`).join("; ")}.`
+          : "") +
         (shown.length > 0 ? ` First failures — ${shown.join(" | ")}` : ""),
-      evidence: shown.length > 0 ? shown : [failed?.summary ?? "failed"],
+      evidence: shown.length > 0 ? shown : [worst.fact.summary],
     });
   }
 
-  // ── 6. A pass that no longer describes this code ──
-  // "Probes passed" is true but useless once the files have changed. The
+  // ── 5. A pass that no longer describes this code ──
+  // "Tests passed" is true but useless once the files have changed. The
   // distinction matters because it is exactly the sentence a model writes
   // after fixing something without re-running anything.
-  if ((probes?.status === "stale" || typecheck?.status === "stale") && OUTCOME_ASSERTION.test(claim)) {
-    const which = probes?.status === "stale" ? "behaviour probes" : "the in-browser type check";
+  const stale: { source: string; summary: string }[] = [];
+  if (typecheck?.status === "stale") {
+    stale.push({ source: "the in-browser type check", summary: typecheck.summary });
+  }
+  // The commonest version of this: the tests DID pass, and then three more
+  // edits happened. "Tests pass" is then true and worthless.
+  if (command?.status === "stale") stale.push({ source: "a command run", summary: command.summary });
+  if (ci?.status === "stale") stale.push({ source: "the repository's CI", summary: ci.summary });
+  if (stale.length > 0 && OUTCOME_ASSERTION.test(claim)) {
+    const worst = stale[0]!;
     findings.push({
       code: "unverified-claim",
       message:
-        `The summary leans on ${which}, which ran before the last edit to the workspace — it describes older code, ` +
-        "not this diff. Re-run it, or say plainly that the current revision was not verified.",
-      evidence: [probes?.status === "stale" ? (probes?.summary ?? "") : (typecheck?.summary ?? "")].filter(Boolean),
+        `The summary leans on ${worst.source}, which ran before the last edit to the workspace — it describes older code, ` +
+        "not this diff. Re-run it, or say plainly that the current revision was not verified." +
+        (stale.length > 1 ? ` (Also stale: ${stale.slice(1).map((s) => s.source).join(", ")}.)` : ""),
+      evidence: [worst.summary].filter(Boolean),
     });
   }
 

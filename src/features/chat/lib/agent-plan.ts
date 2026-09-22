@@ -127,7 +127,7 @@ export function planProgress(plan: AgentPlan | undefined | null): PlanProgress {
   };
 }
 
-/** "Step 3 of 7 · wiring the preview" — the one line a header can show. */
+/** "Step 3 of 7 · wiring the route" — the one line a header can show. */
 export function planProgressLine(plan: AgentPlan | undefined | null): string {
   const steps = plan?.steps ?? [];
   const { total, done, active, next } = planProgress(plan);

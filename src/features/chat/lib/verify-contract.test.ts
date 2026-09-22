@@ -141,13 +141,26 @@ describe("mergeChecks", () => {
 });
 
 describe("unrunChecksStatement", () => {
-  it("names every command and says plainly that none ran", () => {
+  it("names every command and says plainly that none has run", () => {
     const statement = unrunChecksStatement(
       checksFromPackageJson('{"scripts":{"test":"vitest","lint":"eslint ."}}')
     );
-    expect(statement).toContain("NONE of them can be executed");
+    expect(statement).toContain("Declaring a check is not running it");
     expect(statement).toContain("npm run test");
     expect(statement).toContain("npm run lint");
+  });
+
+  it("points at the tiers that CAN run them", () => {
+    // This statement used to say the checks were impossible to execute here.
+    // The tool that tells the model what to run was telling it that running
+    // anything was impossible, so nothing ever ran and every summary was
+    // prose. Naming the tiers is what makes the declaration actionable.
+    const statement = unrunChecksStatement(
+      checksFromPackageJson('{"scripts":{"test":"vitest"}}')
+    );
+    expect(statement).toContain("run_command");
+    expect(statement).toContain("verify_with_ci");
+    expect(statement).not.toContain("no shell");
   });
 
   it("is honest when the repo declares nothing", () => {

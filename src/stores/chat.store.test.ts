@@ -30,10 +30,16 @@ vi.mock("@/features/chat/lib/github-write", () => ({
   }),
 }));
 
-import { useChatStore } from "./chat.store";
+import { currentWorkspace, selectWorkspace, useChatStore } from "./chat.store";
 import { visibleMessages } from "@/features/chat/types";
 import type { RepoContext, WorkspaceState, WorkspaceFile } from "@/features/chat/types";
 import { persistWorkspace } from "@/features/chat/workspace/workspace";
+import {
+  clearAttachment,
+  resetBindings,
+  setAttachment,
+} from "@/features/chat/identity/bindings";
+import type { RepoRef } from "@/features/chat/identity/identity";
 
 const WEB: RepoContext = { owner: "acme", repo: "web", branch: "main", attachedAt: 1 };
 
@@ -135,8 +141,8 @@ describe("workspace summary in the chat list", () => {
 
 describe("createConversation — what a new chat inherits", () => {
   it("starts in the same repository as the chat it came from", () => {
-    // The expensive context (tree, file reads, preview build) is per REPO,
-    // and re-attaching it for every new chat made "new chat" a project reset.
+    // The expensive context (tree, file reads) is per REPO, and re-attaching
+    // it for every new chat made "new chat" a project reset.
     const first = store().createConversation("model-a", { repo: WEB });
     store().selectConversation(first);
 
@@ -283,5 +289,96 @@ describe("composer drafts", () => {
   it("ignores a write with no conversation to attach it to", () => {
     store().setComposerDraft("", "orphan");
     expect(store().composerDrafts[""]).toBeUndefined();
+  });
+});
+
+// ============================================================
+// Reading A Workspace — Fail Closed
+// ============================================================
+// `workspaces[threadId]` answers "what did this thread last have in memory",
+// and for the few hundred milliseconds after a repository switch the honest
+// answer is the repository it just left. Every caller of that map meant to ask
+// "what is this thread working on NOW", and got the wrong repository's code.
+//
+// The accessor below is what they use instead. This is the one that matters most
+// for writes: an edit that lands in the wrong working copy is invisible, is
+// pushed nowhere, and looks to the user like the agent silently did nothing.
+
+describe("selectWorkspace — a working copy, or nothing", () => {
+  const WEB: RepoRef = { owner: "acme", repo: "web", branch: "main" };
+  const API: RepoRef = { owner: "acme", repo: "api", branch: "main" };
+
+  function workspaceFor(
+    conversationId: string,
+    ref: RepoRef,
+    updatedAt = 1
+  ): WorkspaceState {
+    return {
+      conversationId,
+      owner: ref.owner,
+      repo: ref.repo,
+      branch: ref.branch,
+      baseCommitSha: "sha",
+      workingBranch: null,
+      tree: [],
+      files: {},
+      updatedAt,
+    };
+  }
+
+  beforeEach(() => {
+    resetBindings();
+  });
+
+  it("hands back the workspace of the repository the thread is attached to", async () => {
+    const id = store().createConversation("model-a");
+    await setAttachment(id, WEB);
+    store().setWorkspace(id, workspaceFor(id, WEB));
+
+    expect(selectWorkspace(store(), id)?.repo).toBe("web");
+    expect(currentWorkspace(id)?.repo).toBe("web");
+  });
+
+  it("refuses the working copy left over from the repository the thread just left", async () => {
+    // The reported symptom, at the level where it does damage. The new
+    // repository's working copy does not exist yet, so the ONLY acceptable
+    // answers are "nothing" or a freshly derived one — never the old one.
+    const id = store().createConversation("model-a");
+    await setAttachment(id, WEB);
+    store().setWorkspace(id, workspaceFor(id, WEB));
+
+    await setAttachment(id, API);
+    expect(selectWorkspace(store(), id)).toBeNull();
+    // It is still in memory, so nothing was thrown away — it is simply not
+    // readable as this thread's current working copy.
+    expect(store().workspaces[id]?.repo).toBe("web");
+  });
+
+  it("refuses every workspace for a thread with nothing attached", async () => {
+    // A thread that detached still has its last working copy in memory. Reading
+    // it would let a tool edit a repository the user is no longer on.
+    const id = store().createConversation("model-a");
+    await setAttachment(id, WEB);
+    store().setWorkspace(id, workspaceFor(id, WEB));
+    await clearAttachment(id);
+
+    expect(selectWorkspace(store(), id)).toBeNull();
+    expect(currentWorkspace(id)).toBeNull();
+  });
+
+  it("fails closed for an unknown thread and for no thread at all", () => {
+    expect(selectWorkspace(store(), "never-heard-of-it")).toBeNull();
+    expect(selectWorkspace(store(), "")).toBeNull();
+    expect(currentWorkspace(null)).toBeNull();
+  });
+
+  it("refuses a workspace whose repository fields do not match its binding", async () => {
+    // Defence in depth: even with the binding attached, a workspace that says it
+    // is a copy of something else is not this thread's working copy.
+    const id = store().createConversation("model-a");
+    await setAttachment(id, WEB);
+    store().setWorkspace(id, workspaceFor(id, API));
+
+    expect(selectWorkspace(store(), id)).toBeNull();
   });
 });
