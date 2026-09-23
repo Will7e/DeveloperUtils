@@ -38,6 +38,8 @@ import "../lib/tool-cache";
 import "../lib/verification-ledger";
 import "../workspace/repo-base";
 import "../workspace/workspace";
+import "../services/ask-user";
+import "../lib/repo-instructions";
 
 const CHAT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -75,6 +77,7 @@ const REGISTERED: Record<string, string> = {
   "lib/github-client.ts:treeCacheStamps": "github-client.tree",
   "lib/tool-cache.ts:cache": "tool-cache.results",
   "lib/verification-ledger.ts:ledger": "verification-ledger.events",
+  "services/ask-user.ts:waiters": "ask-user.parked-questions",
 };
 
 /**
@@ -138,8 +141,10 @@ describe("scoped-resource registry", () => {
     // and the source tree are checked against each other rather than each
     // against somebody's memory.
     expect(registeredResources().map((r) => r.name).sort()).toEqual([
+      "ask-user.parked-questions",
       "github-client.tree",
       "repo-base.tree",
+      "repo.instructions",
       "tool-cache.results",
       "verification-ledger.events",
       "workspace.pending-saves",

@@ -241,6 +241,24 @@ describe("reconcileBuiltins — what the settings modal ends up showing", () => 
     expect(result.some((s) => s.id === "user-1")).toBe(true);
   });
 
+  it("adopts a changed shipped default for a builtin the user never touched", () => {
+    // A skill the product promotes to on-by-default has to reach the
+    // installs that already exist, or the decision only applies to people
+    // who had never opened the app.
+    const stored = BUILTIN_SKILLS.map((s) => ({ ...s, enabled: false }));
+    const result = reconcileBuiltins(stored)!;
+    for (const shipped of BUILTIN_SKILLS) {
+      expect(result.find((r) => r.id === shipped.id)!.enabled, shipped.id).toBe(shipped.enabled);
+    }
+  });
+
+  it("never overrules a user who switched a builtin off", () => {
+    // `updated` is stamped on ANY patch to a builtin, a plain toggle
+    // included, so a switched-off skill is a choice and stays switched off.
+    const stored = BUILTIN_SKILLS.map((s) => ({ ...s, enabled: false, updated: true }));
+    expect(reconcileBuiltins(stored)).toBeNull();
+  });
+
   it("has no retired id left in the shipped set", () => {
     // Consistency guard: re-adding a retired id would ship a skill that is
     // immediately deleted on load.
@@ -259,7 +277,22 @@ describe("reconcileBuiltins — what the settings modal ends up showing", () => 
     // tool it has (fetch_url), and the tool needs a WHEN: a model that does
     // not know to check a dependency's docs recalls them instead, which is
     // the failure the tool was added to remove.
-    expect(BUILTIN_SKILLS.length).toBe(8);
+    // 8 → 9: Finish The Job. Same rule, applied to the loop itself: the
+    // agent that stops with its own plan half open is the failure the
+    // completion gate (lib/completion-gate.ts) exists to catch, and the
+    // harness needs the model working with it rather than against it.
+    //
+    // 9 → 16: the workstation's own features, one skill per app tool
+    // (run_code, format_code, compare_data, diff_text, search_library,
+    // http_request/http_write, create_diagram, open_in_tool). They clear the
+    // same bar the retirements were made under, and clear it harder: each is
+    // a job this agent does with a tool it has, the tool needs a WHEN, and
+    // "what a green result does not prove" is exactly the judgement a model
+    // supplies wrongly on its own — the failure mode is a confident "tests
+    // pass" derived from a snippet that exited 0. They are also the only
+    // skills that apply in a chat with no repository attached, which is now
+    // the configuration where the app tools are the whole surface.
+    expect(BUILTIN_SKILLS.length).toBe(16);
   });
 });
 
@@ -270,9 +303,13 @@ describe("the shipped verification skill", () => {
   // so its discoverability is pinned rather than assumed.
   const skill = BUILTIN_SKILLS.find((s) => s.id === "builtin-verification-discipline");
 
-  it("ships as a builtin, off by default so it costs nothing until loaded", () => {
+  it("ships as a builtin, ON by default — the contract is not a lookup", () => {
+    // It used to be off, on the theory that the model would load it when a
+    // task looked like verification work. The theory lost: a model that
+    // has to remember to load the honesty rules is a model that asserts
+    // instead of verifying, which is the failure the skill describes.
     expect(skill).toBeTruthy();
-    expect(skill!.enabled).toBe(false);
+    expect(skill!.enabled).toBe(true);
     expect(skill!.content.trim().length).toBeGreaterThan(200);
   });
 
@@ -284,8 +321,12 @@ describe("the shipped verification skill", () => {
     }
   });
 
-  it("is offered in the index so the model knows it exists", () => {
-    expect(buildSkillIndex([skill!])).toContain("Verification Discipline");
+  it("is injected as an active body, not left for the model to look up", () => {
+    // The index exists for the skills that are NOT loaded. An enabled skill
+    // rides in the prompt itself, so it must not ALSO sit in the index
+    // advertising a body the model would then fetch a second time.
+    expect(buildEffectiveSystemPrompt("", [skill!])).toContain("Verification Discipline");
+    expect(buildSkillIndex([skill!])).toBeNull();
   });
 
   it("names every tier, so the model picks one instead of guessing", () => {
@@ -311,11 +352,46 @@ describe("shipped task-shaped builtins", () => {
     }
   });
 
-  it("every builtin is discoverable through the index", () => {
+  it("every builtin reaches the model, active or loadable", () => {
+    const prompt = buildEffectiveSystemPrompt("base", BUILTIN_SKILLS);
     const index = buildSkillIndex(BUILTIN_SKILLS);
     expect(index).not.toBeNull();
     for (const s of BUILTIN_SKILLS) {
-      expect(index).toContain(s.name);
+      // Enabled skills are injected as a body; loadable ones are advertised
+      // in the index. A shipped skill in NEITHER is a skill nobody can use,
+      // which is the bug this replaced test could no longer see once the
+      // first builtins shipped enabled.
+      const reachable = s.enabled
+        ? prompt.includes(`### Skill: ${s.name}`)
+        : index!.includes(s.name);
+      expect(reachable, s.id).toBe(true);
+    }
+  });
+});
+
+describe("the shipped persistence skill", () => {
+  const skill = BUILTIN_SKILLS.find((s) => s.id === "builtin-persistence-discipline");
+
+  it("ships ON: finishing the job is not a setting the model has to find", () => {
+    expect(skill).toBeTruthy();
+    expect(skill!.enabled).toBe(true);
+    expect(skill!.content.trim().length).toBeLessThan(1_500);
+  });
+
+  it("states the contract: finish, keep the plan honest, stop only for a reason", () => {
+    for (const phrase of [
+      "not done when you stop talking",
+      "update_plan",
+      "FAILED",
+      "Stop early only for a real reason",
+    ]) {
+      expect(skill!.content, phrase).toContain(phrase);
+    }
+  });
+
+  it("is discovered by the words a frustrated user types", () => {
+    for (const phrase of ["continue", "keep going", "you stopped", "finish the job"]) {
+      expect(matchSkills(phrase, [skill!]).length, phrase).toBe(1);
     }
   });
 });

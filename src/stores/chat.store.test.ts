@@ -35,6 +35,7 @@ import { visibleMessages } from "@/features/chat/types";
 import type { RepoContext, WorkspaceState, WorkspaceFile } from "@/features/chat/types";
 import { persistWorkspace } from "@/features/chat/workspace/workspace";
 import {
+  bindingIdOf,
   clearAttachment,
   resetBindings,
   setAttachment,
@@ -222,12 +223,16 @@ describe("clearConversationContext", () => {
   });
 
   it("drops the rolling summary that described the cleared history", () => {
-    store().applyCompaction(conversationId, {
-      text: "Earlier: the user said first, the assistant said second.",
-      coversCount: 0,
-      createdAt: Date.now(),
-      freedTokens: 42,
-    });
+    store().applyCompaction(
+      conversationId,
+      {
+        text: "Earlier: the user said first, the assistant said second.",
+        coversCount: 0,
+        createdAt: Date.now(),
+        freedTokens: 42,
+      },
+      []
+    );
     expect(store().conversations.find((c) => c.id === conversationId)?.summary).toBeTruthy();
 
     store().clearConversationContext(conversationId);
@@ -240,6 +245,53 @@ describe("clearConversationContext", () => {
     const other = messagesOf(otherId);
     expect(visibleMessages(other)).toHaveLength(1);
     expect(other[0]!.hidden ?? false).toBe(false);
+  });
+});
+
+describe("applyCompaction", () => {
+  const summary = (coversCount: number) => ({
+    text: "ledger",
+    coversCount,
+    createdAt: 1,
+    freedTokens: 10,
+  });
+
+  it("removes exactly the messages it was given, by id", () => {
+    store().addMessage(conversationId, { role: "user", content: "third" });
+    const [first, second, third] = messagesOf(conversationId);
+
+    store().applyCompaction(conversationId, summary(2), [first!.id, second!.id]);
+
+    const after = messagesOf(conversationId);
+    expect(after.map((m) => m.id)).toEqual([third!.id]);
+    // The store stamps the record it writes; the fold's fields are what
+    // this contract is about.
+    expect(store().conversations.find((c) => c.id === conversationId)?.summary).toMatchObject(
+      summary(2)
+    );
+  });
+
+  it("keeps cleared history the fold never covered", () => {
+    // /clear hides rows instead of deleting them; a later compaction must
+    // not destroy them, whatever their position in the array.
+    store().clearConversationContext(conversationId);
+    store().addMessage(conversationId, { role: "user", content: "after the clear" });
+    const clearedIds = messagesOf(conversationId)
+      .filter((m) => m.hidden)
+      .map((m) => m.id);
+    const live = messagesOf(conversationId).find((m) => !m.hidden)!;
+
+    store().applyCompaction(conversationId, summary(4), [live.id]);
+
+    const after = messagesOf(conversationId);
+    expect(after.map((m) => m.id)).toEqual(clearedIds);
+    expect(after.every((m) => m.hidden === true)).toBe(true);
+  });
+
+  it("changes nothing but the summary when given no ids", () => {
+    const before = messagesOf(conversationId);
+    store().applyCompaction(conversationId, summary(0), []);
+    expect(messagesOf(conversationId).map((m) => m.id)).toEqual(before.map((m) => m.id));
   });
 });
 
@@ -372,6 +424,27 @@ describe("selectWorkspace — a working copy, or nothing", () => {
     expect(currentWorkspace(null)).toBeNull();
   });
 
+  it("ignores stream deltas that belong to no live stream", () => {
+    // Both streaming buffers are single fields, not per-conversation, so an
+    // append that does not check who is streaming writes one conversation's
+    // tokens into whatever message is committed next. Reasoning text used to
+    // be appended unconditionally while content was guarded — a delta from a
+    // finished turn could appear as the reasoning of the answer you are
+    // reading now.
+    store().endStreaming(false);
+    store().appendStreamingReasoning("reasoning from a stream that is over");
+    store().appendStreamingContent("content from a stream that is over");
+
+    expect(store().streamingReasoning).toBe("");
+    expect(store().streamingContent).toBe("");
+
+    const id = store().createConversation("model-a");
+    store().beginStreaming(id);
+    store().appendStreamingReasoning("thinking…");
+    expect(store().streamingReasoning).toBe("thinking…");
+    store().endStreaming(false);
+  });
+
   it("refuses a workspace whose repository fields do not match its binding", async () => {
     // Defence in depth: even with the binding attached, a workspace that says it
     // is a copy of something else is not this thread's working copy.
@@ -380,5 +453,107 @@ describe("selectWorkspace — a working copy, or nothing", () => {
     store().setWorkspace(id, workspaceFor(id, API));
 
     expect(selectWorkspace(store(), id)).toBeNull();
+  });
+});
+
+// A repository switch is a change of JOB, and two things on the conversation
+// describe the job that was just left: the plan (whose steps name files in it,
+// and which the completion gate reads as unfinished work) and the suggested
+// next steps. Both used to survive the move.
+
+describe("a repository switch clears the job that was left behind", () => {
+  const WEB: RepoContext = { owner: "acme", repo: "web", branch: "main", attachedAt: 1 };
+  const API: RepoContext = { owner: "acme", repo: "api", branch: "main", attachedAt: 2 };
+
+  beforeEach(() => {
+    resetBindings();
+  });
+
+  it("drops the plan and the suggestions when the repository changes", () => {
+    const id = store().createConversation("model-a");
+    store().setConversationRepo(id, WEB);
+    store().setConversationPlan(id, {
+      steps: [{ id: "s1", text: "wire the auth route", status: "active" }],
+      updatedAt: 1,
+      complete: false,
+    });
+    store().setSuggestions(id, [{ label: "Add tests", prompt: "Add tests for it." }]);
+
+    store().setConversationRepo(id, API);
+
+    const conv = store().conversations.find((c) => c.id === id);
+    expect(conv?.plan).toBeUndefined();
+    expect(conv?.suggestions).toBeUndefined();
+  });
+
+  it("records the era boundary, and what it moved off", () => {
+    // The per-row stamp cannot date rows written before it shipped, so the
+    // conversation has to say when the current era began. A chat that moved
+    // BEFORE the upgrade has no stamped rows at all, and this is the only
+    // thing that keeps the old checkout's file bodies out of its next request.
+    const id = store().createConversation("model-a");
+    store().setConversationRepo(id, WEB);
+    store().setConversationRepo(id, API);
+
+    const conv = store().conversations.find((c) => c.id === id);
+    expect(conv?.bindingMove?.from).toBe("acme/web@main");
+    expect(typeof conv?.bindingMove?.at).toBe("number");
+  });
+
+  it("leaves the era boundary alone when the same repository is re-attached", () => {
+    // Re-attaching is not a move, so the rows above stay this repository's own
+    // facts rather than being dated into a previous era and withheld.
+    const id = store().createConversation("model-a");
+    store().setConversationRepo(id, WEB);
+    store().setConversationRepo(id, API);
+    const afterMove = store().conversations.find((c) => c.id === id)?.bindingMove;
+
+    store().setConversationRepo(id, { ...API, attachedAt: 99 });
+
+    expect(store().conversations.find((c) => c.id === id)?.bindingMove).toEqual(afterMove);
+  });
+
+  it("keeps them when the same repository is re-attached", () => {
+    // Re-attaching the same repository is not a move, and evicting a plan the
+    // user is watching would be the "why did it reset" report all over again.
+    const id = store().createConversation("model-a");
+    store().setConversationRepo(id, WEB);
+    store().setConversationPlan(id, {
+      steps: [{ id: "s1", text: "wire the auth route", status: "active" }],
+      updatedAt: 1,
+      complete: false,
+    });
+
+    store().setConversationRepo(id, { ...WEB, attachedAt: 99 });
+
+    expect(store().conversations.find((c) => c.id === id)?.plan?.steps).toHaveLength(1);
+  });
+
+  it("stamps every committed message with the binding it was produced under", async () => {
+    // The stamp is what makes the repository boundary possible in the request
+    // (context/binding-scope.ts): without provenance on the row, a later
+    // request cannot tell the previous checkout's file bodies from this one's.
+    const id = store().createConversation("model-a");
+    store().setConversationRepo(id, WEB);
+    await setAttachment(id, { owner: WEB.owner, repo: WEB.repo, branch: WEB.branch });
+
+    store().addMessage(id, { role: "user", content: "hi" });
+    store().commitToolCallsMessage(id, [
+      { id: "c1", name: "read_file", arguments: '{"path":"a.ts"}' },
+    ]);
+    store().commitToolResult(
+      id,
+      { callId: "c1", name: "read_file", ok: true, data: {}, durationMs: 1 },
+      '{"content":"body"}'
+    );
+
+    const [user, callRow, resultRow] = store().conversations.find((c) => c.id === id)!.messages;
+    const expected = bindingIdOf(id);
+    expect(user?.bindingId).toBe(expected);
+    expect(callRow?.bindingId).toBe(expected);
+    expect(resultRow?.bindingId).toBe(expected);
+    // …and it is the REPOSITORY, not just "attached": a switch gives a
+    // different stamp, which is the whole point.
+    expect(expected).toContain("acme/web@main");
   });
 });

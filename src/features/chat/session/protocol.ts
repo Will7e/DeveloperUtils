@@ -7,13 +7,28 @@
 // then live deltas. Everything is plain structured-clone data —
 // no functions, no class instances.
 //
+// The host owns ONE TURN PER CONVERSATION, and as many streams at
+// once as the user has conversations running. That is why the
+// snapshot is a question about a conversation rather than a peek at
+// "the" turn, and why it carries the requestId of the ATTACH that
+// asked: with several turns in flight, adopting the wrong one would
+// render another chat's answer in this transcript.
+//
 // Versioned: HOST_PROTOCOL_VERSION. The client refuses to talk to
 // a host speaking an incompatible version (mismatched bundles after
 // a deploy with two tabs open).
 
 import type { TurnLogEntry } from "./turn-log";
 
-export const HOST_PROTOCOL_VERSION = 1;
+/**
+ * 2 — the host became multi-turn (per-conversation admission, snapshot
+ *     and status), which changed the ATTACH request and the SNAPSHOT and
+ *     STATUS replies. A v1 page talking to a v2 host would ask for "the"
+ *     turn and could adopt another conversation's stream, so the version
+ *     bump is what makes the mixed-deploy case fall back safely instead
+ *     of silently.
+ */
+export const HOST_PROTOCOL_VERSION = 2;
 
 // ── Requests: page → host ───────────────────────────────────
 
@@ -53,12 +68,19 @@ export interface HostStartTurnPayload {
 
 export type HostRequest =
   | { type: "HELLO"; protocolVersion: number }
-  | { type: "ATTACH" }
+  /**
+   * Asks for a conversation's turn replay. `conversationId` narrows the
+   * question to one chat; without it the host answers with its newest
+   * live turn. `requestId` is echoed on the SNAPSHOT reply, so a page
+   * that asked about conversation C cannot be satisfied by conversation
+   * D's stream — or by a snapshot still in flight from a previous ask.
+   */
+  | { type: "ATTACH"; requestId?: string; conversationId?: string }
   | { type: "DETACH" }
   | { type: "START_TURN"; payload: HostStartTurnPayload }
   | { type: "ABORT_TURN"; turnId: string }
   | { type: "HEARTBEAT" }
-  | { type: "STATUS" };
+  | { type: "STATUS"; conversationId?: string };
 
 // ── Events: host → page ─────────────────────────────────────
 
@@ -127,16 +149,28 @@ export interface HostSnapshot {
 export type HostEvent =
   | { type: "HELLO_ACK"; protocolVersion: number; workerId: string }
   | { type: "PROTOCOL_MISMATCH"; hostVersion: number }
-  /** Replay state — sent on HELLO/ATTACH (never as a start acknowledgement) */
-  | { type: "SNAPSHOT"; snapshot: HostSnapshot }
+  /** Replay state — the answer to an ATTACH, echoing the asker's requestId */
+  | { type: "SNAPSHOT"; snapshot: HostSnapshot; requestId?: string }
   /** Correlated acknowledgement of a START_TURN that this port won */
   | { type: "TURN_STARTED"; turnId: string; snapshot: HostSnapshot }
-  /** START_TURN refused: another conversation owns the host */
+  /**
+   * START_TURN refused. No longer means "another conversation is
+   * streaming" — that is now allowed — but "this conversation already
+   * owns a live turn the host did not replace" (a duplicate turn id).
+   * Retained rather than removed so a page never has to interpret an
+   * unexplained silence as either success or failure.
+   */
   | { type: "TURN_BUSY"; snapshot: HostSnapshot }
   | { type: "DELTA"; delta: HostDelta }
   | { type: "TOOL_CALLS"; payload: HostToolCalls }
   | { type: "USAGE"; turnId: string; modelId: string; usage: HostUsage }
-  | { type: "STATUS"; turnStatus: HostTurnStatus; turnId: string | null }
+  | {
+      type: "STATUS";
+      turnStatus: HostTurnStatus;
+      turnId: string | null;
+      /** Live turns in the host, across every conversation */
+      liveTurns?: number;
+    }
   | { type: "END"; payload: HostEndPayload }
   /**
    * The host's own turn-log entry, mirrored to the page so one
@@ -145,6 +179,14 @@ export type HostEvent =
    * orphan aborts). Additive: old pages ignore it.
    */
   | { type: "LOG"; entry: TurnLogEntry };
+
+/**
+ * No SNAPSHOT is sent on HELLO any more, and that is deliberate: HELLO
+ * is a protocol handshake with no conversation attached, so any snapshot
+ * it carried was a guess — and with several turns live it would be an
+ * ambiguous one. A page that wants replay names its conversation with
+ * ATTACH, which is also the only place `requestId` can be correlated.
+ */
 
 // ── Shared helpers ──────────────────────────────────────────
 

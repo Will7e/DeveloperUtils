@@ -38,6 +38,29 @@ function classify(status: number): GitHubError["code"] | undefined {
 const PROXY_PREFIX = "/api/proxy?url=";
 
 /**
+ * Reports a credential GitHub refused (401), so the app can clear a session it
+ * can no longer use.
+ *
+ * A listener rather than a store import, because this module is deliberately
+ * store-free: it is the transport. Without the report, a revoked token kept
+ * the header and settings tab saying "Connected" for as long as the app stayed
+ * open — every repository call failing underneath it.
+ */
+type GitHubCredentialRefusedListener = (message: string) => void;
+
+let credentialRefusedListener: GitHubCredentialRefusedListener | null = null;
+
+export function onGitHubCredentialRefused(
+  listener: GitHubCredentialRefusedListener | null
+): void {
+  credentialRefusedListener = listener;
+}
+
+/** What the app shows once GitHub refuses the stored token. */
+export const GITHUB_CREDENTIAL_REFUSED_NOTE =
+  "GitHub no longer accepts your saved token — reconnect it in Settings › GitHub.";
+
+/**
  * Largest file worth pulling through the Blob API when the Contents API
  * declines to return it (anything over 1 MB).
  *
@@ -175,6 +198,9 @@ export async function githubFetch(
         "forbidden"
       );
     }
+    // The credential is dead, and the code that owns the session has to hear
+    // it from here: this is the one place that sees the 401 for every caller.
+    if (res.status === 401) credentialRefusedListener?.(GITHUB_CREDENTIAL_REFUSED_NOTE);
     throw new GitHubError(
       messages[res.status] ?? detail ?? `GitHub request failed (HTTP ${res.status}).`,
       res.status,

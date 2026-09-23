@@ -22,9 +22,9 @@ import {
   resumeInterruptedTurn,
   commitPartialReply,
 } from "./services/chat-runner";
-import { getConversationContext, composeSystemPrompt } from "./context/engine";
+import { activeBindingIdOf, getConversationContext, composeSystemPrompt } from "./context/engine";
 import { buildEffectiveSystemPrompt } from "./lib/skills";
-import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID } from "./lib/commands";
+import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID, runCommandById } from "./lib/commands";
 import { resolveSlashInput } from "./lib/slash";
 import { useAppStore } from "@/stores/app.store";
 import { ChatSidebar } from "./components/ChatSidebar";
@@ -35,7 +35,9 @@ import { MessageList } from "./components/MessageList";
 import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
+import { HttpApprovalModal } from "./components/HttpApprovalModal";
 import { resolveMentionContext } from "./services/mention-context";
+import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
 import { ChangesPane } from "./components/ChangesPane";
 import { collectChangeSet } from "./lib/change-set";
@@ -44,7 +46,7 @@ import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
 import { isTurnUnrecoverable } from "./session/turn-engine";
 import { availableEfforts, modelSupportsTools } from "./lib/model-state";
-import { resolveToolProfile } from "./lib/tool-profiles";
+import { resolveToolSurface } from "./lib/tool-profiles";
 import { DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "./constants";
 import type {
   ChatAttachment,
@@ -168,6 +170,18 @@ export function ChatPage() {
     return useChatStore.persist.onFinishHydration(ensureConversation);
   }, []);
 
+  // A stored token is not a live session. The chat header and the settings tab
+  // both derive "connected" from the presence of that string, so a token
+  // GitHub has already stopped accepting kept them saying "Connected" for as
+  // long as the app stayed open. Validated once per load (after hydration, or
+  // there would be no token to read yet), then watched for the 401s that any
+  // later call can produce.
+  useEffect(() => {
+    const start = () => watchGitHubSession();
+    if (useChatStore.persist.hasHydrated()) start();
+    return useChatStore.persist.onFinishHydration(start);
+  }, []);
+
   // Resume a turn that was streaming when the page reloaded. The
   // persisted pendingTurn marker + trailing user message identify the
   // lost response; resumeInterruptedTurn validates and re-streams
@@ -278,7 +292,16 @@ export function ChatPage() {
   }, []);
 
   const modelId = activeConversation?.model ?? settings.defaultModel;
-  const modelInfo = useMemo(() => resolveModelInfo(modelId), [modelId]);
+  // The fetched list first, then the synchronous cache. `resolveModelInfo`
+  // alone was memoized on `[modelId]`, so the catalog arriving mid-session
+  // never invalidated it: the header kept the cold-start answer ("this model
+  // declares nothing") until you switched models, which is why the reasoning
+  // control appeared sometimes and not others. Same lookup the settings modal
+  // already does.
+  const modelInfo = useMemo(
+    () => models.find((m) => m.id === modelId) ?? resolveModelInfo(modelId),
+    [modelId, models]
+  );
   const modelName = useMemo(
     () => modelDisplayName(modelId, models),
     [modelId, models]
@@ -297,16 +320,23 @@ export function ChatPage() {
     const base =
       activeConversation?.systemPrompt?.trim() || settings.systemPrompt.trim() || "";
     const withSkills = buildEffectiveSystemPrompt(base, settings.skills ?? []);
-    return composeSystemPrompt(withSkills, activeConversation?.summary);
+    return composeSystemPrompt(
+      withSkills,
+      activeConversation?.summary,
+      activeConversation ? activeBindingIdOf(activeConversation) : undefined
+    );
   }, [activeConversation?.systemPrompt, activeConversation?.summary, settings.systemPrompt, settings.skills]);
 
   // The tool schemas this conversation would actually send next turn —
   // the meter must charge for them, exactly as the runner does, or it
-  // reports a window several thousand tokens emptier than the truth.
+  // reports a window several thousand tokens emptier than the truth. That
+  // means the SAME surface rule as turn-prep: app tools in every
+  // tool-capable chat, repo tools only with a repository + token.
   const contextTools = useMemo(() => {
-    if (!activeConversation?.repoContext || !settings.github.token) return undefined;
     if (!modelSupportsTools(modelInfo)) return undefined;
-    return resolveToolProfile(mode, modelInfo).tools;
+    const repoAttached = Boolean(activeConversation?.repoContext && settings.github.token);
+    const tools = resolveToolSurface(mode, modelInfo, { repoAttached }).tools;
+    return tools.length > 0 ? tools : undefined;
   }, [activeConversation?.repoContext, settings.github.token, modelInfo, mode]);
 
   const context = useMemo(
@@ -324,7 +354,10 @@ export function ChatPage() {
   const runCommand = React.useCallback(
     (command: ChatCommand, arg: string) => {
       if (!activeConversationId) return;
-      const outcome = command.run({
+      // Through the registry's single executor: sendUserMessage runs the
+      // same function, so the two paths cannot drift in how a command
+      // behaves (they did — one applied a returned draft, one dropped it).
+      const outcome = runCommandById(command.id, {
         conversationId: activeConversationId,
         arg,
         models,
@@ -632,6 +665,12 @@ export function ChatPage() {
                     }
                     onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
                   />
+
+                  {/* The plan is the agent's contract with the user and the
+                      completion gate reads it — opening the Changes panel is
+                      no reason to hide it. */}
+                  <PlanStrip conversationId={activeConversationId} />
+
                   <Composer
                     value={draft}
                     onChange={setDraft}
@@ -653,6 +692,14 @@ export function ChatPage() {
                     activeModelId={modelId}
                     onRunCommand={handleRunCommand}
                     onModelChange={handleModelChange}
+                    mentionPaths={mentionPaths}
+                    suggestions={activeConversation?.suggestions}
+                    onSuggestion={handleSuggestion}
+                    queued={activeConversation?.queued}
+                    onRemoveQueued={(id) =>
+                      activeConversationId &&
+                      useChatStore.getState().removeQueuedMessage(activeConversationId, id)
+                    }
                   />
                 </div>
               </Panel>
@@ -708,6 +755,13 @@ export function ChatPage() {
               onRunCommand={handleRunCommand}
               onModelChange={handleModelChange}
               mentionPaths={mentionPaths}
+              suggestions={activeConversation?.suggestions}
+              onSuggestion={handleSuggestion}
+              queued={activeConversation?.queued}
+              onRemoveQueued={(id) =>
+                activeConversationId &&
+                useChatStore.getState().removeQueuedMessage(activeConversationId, id)
+              }
             />
             {repoAttached && !panelVisible && (
               <button
@@ -730,6 +784,11 @@ export function ChatPage() {
       </main>
 
       <PushApprovalModal />
+
+      {/* The gate for the agent's external writes. A dialog rather than a
+          tool argument, because "may I POST this?" is answered by looking at
+          the request, not by trusting the model's summary of it. */}
+      <HttpApprovalModal />
 
       <ChatSettingsModal
         open={settingsOpen}

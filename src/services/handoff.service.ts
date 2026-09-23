@@ -46,6 +46,17 @@ export const HANDOFF_ROUTES: Record<HandoffTarget, string> = {
 };
 
 export const HANDOFF_EVENT = "intab:handoff";
+/**
+ * Navigation-ONLY signal.
+ *
+ * `requestHandoff` both applies a payload and asks the bridge to navigate,
+ * which assumes the caller could not apply it. The chat agent can: it applies
+ * the payload directly (services/handoff-bridge) so it can report whether the
+ * tool actually loaded anything, and then fires this to move the user to the
+ * tool it just filled. Re-dispatching the full handoff would apply the payload
+ * a second time — a duplicate tab, a second diagram.
+ */
+export const HANDOFF_NAVIGATE_EVENT = "intab:handoff-navigate";
 const HANDOFF_STORAGE_KEY = "intab_dashboard_handoff";
 
 const CHAT_DRAFT_EVENT = "intab:chat-draft";
@@ -79,6 +90,15 @@ export function clearStoredHandoff(): void {
     sessionStorage.removeItem(HANDOFF_STORAGE_KEY);
   } catch {
     /* ignore */
+  }
+}
+
+/** Asks the bridge to navigate to a target without re-applying anything. */
+export function requestHandoffRoute(target: HandoffTarget): void {
+  try {
+    window.dispatchEvent(new CustomEvent<HandoffTarget>(HANDOFF_NAVIGATE_EVENT, { detail: target }));
+  } catch {
+    /* no window (tests) — navigation is a nicety, not the result */
   }
 }
 

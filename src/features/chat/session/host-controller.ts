@@ -2,16 +2,28 @@
 // Host Controller — Stream Ownership Inside the Session Host
 // ============================================================
 // Runs the model stream in the SharedWorker so it survives page
-// reloads. One active turn at a time. Responsibilities:
+// reloads. ONE TURN PER CONVERSATION, and one stream per turn: the
+// host is the app's multiplexer, so a second chat does not have to
+// wait for the first, and never has to fall back to a page-local
+// stream that dies with its tab.
 //
+// Responsibilities:
+//
+//  - admit turns per conversation (a second start for a conversation
+//    that is already streaming replaces its turn — the reload path),
+//    so unrelated conversations never block one another.
 //  - walk the client-supplied candidate list on retryable
 //    provider/network failures (retryable errors → next candidate;
 //    key/credit errors → surface immediately).
 //  - fan out deltas/tool-calls/usage to every attached page, plus a
-//    replayable snapshot for late attachers.
+//    replayable snapshot PER CONVERSATION for late attachers.
 //  - orphan guard: if all pages detach (reload), grace-wait; if no
-//    page re-attaches, abort the stream so a zombie stream can't
-//    keep a paid model (or a free daily cap) burning.
+//    page re-attaches, abort that stream so a zombie stream can't
+//    keep a paid model (or a free daily cap) burning. The guard is
+//    per turn, because "the app is gone" and "this conversation has
+//    no renderer" are different questions — a turn survives its page
+//    navigating away by design, and is only reaped when nothing is
+//    left to adopt it.
 //
 // The page owns model selection, so the candidate list is normally a
 // single entry: the model the user actually chose. Provider-level
@@ -27,10 +39,11 @@ import {
 } from "../constants";
 import { streamChat, OpenRouterError } from "../lib/openrouter-client";
 import type { UsageInfo } from "../types";
-import type {
-  HostCandidate,
-  HostEndReason,
-  HostStartTurnPayload,
+import {
+  HOST_PROTOCOL_VERSION,
+  type HostCandidate,
+  type HostEndReason,
+  type HostStartTurnPayload,
 } from "./protocol";
 import { logTurnEvent } from "./turn-log";
 
@@ -84,6 +97,8 @@ export interface ActiveTurn {
   winnerModelId: string | null;
   /** Last retryable-attempt error, surfaced if the list runs dry */
   lastError?: string;
+  /** Per-turn orphan grace timer (armed only while no page is attached) */
+  orphanTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const SNAPSHOT_MAX_CHARS = 200_000;
@@ -94,8 +109,12 @@ const SNAPSHOT_MAX_CHARS = 200_000;
  * testable (unit tests inject a fake sink + fake stream fn).
  */
 export class HostTurnController {
-  private active: ActiveTurn | null = null;
-  private orphanTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Live turns by turn id. A conversation has at most one (enforced in
+   * `startTurn`), and unrelated conversations never touch each other's
+   * entries — which is the whole point of the map.
+   */
+  private readonly turns = new Map<string, ActiveTurn>();
 
   constructor(
     private readonly sink: HostEventSink,
@@ -103,8 +122,34 @@ export class HostTurnController {
     private readonly startStream: ((params: Parameters<typeof streamChat>[0]) => Promise<void>) = streamChat
   ) {}
 
+  /** Newest live turn — what a caller with no conversation in mind means */
   get currentTurn(): Readonly<ActiveTurn> | null {
-    return this.active;
+    return this.newest();
+  }
+
+  /** The live turn for one conversation, if that chat is streaming */
+  turnFor(conversationId: string): Readonly<ActiveTurn> | null {
+    for (const turn of this.turns.values()) {
+      if (turn.conversationId === conversationId) return turn;
+    }
+    return null;
+  }
+
+  turnById(turnId: string): Readonly<ActiveTurn> | null {
+    return this.turns.get(turnId) ?? null;
+  }
+
+  /** How many conversations are streaming right now */
+  get liveTurnCount(): number {
+    return this.turns.size;
+  }
+
+  private newest(): ActiveTurn | null {
+    let best: ActiveTurn | null = null;
+    for (const turn of this.turns.values()) {
+      if (!best || turn.startedAt >= best.startedAt) best = turn;
+    }
+    return best;
   }
 
   private emit(event: unknown): void {
@@ -113,11 +158,17 @@ export class HostTurnController {
 
   // ── Turn lifecycle ─────────────────────────────────────────
 
-  /** Starts a turn (no-op when one is already active) */
-  startTurn(payload: HostStartTurnPayload): void {
-    if (this.active) return;
-    this.clearOrphanTimer();
-    this.active = {
+  /**
+   * Admits a turn and returns whether it was taken.
+   *
+   * Refused only when THIS conversation already has a live turn, or when
+   * the turn id is already in flight. A different conversation is always
+   * admitted: concurrency is the feature, not an accident.
+   */
+  startTurn(payload: HostStartTurnPayload): boolean {
+    if (this.turnFor(payload.conversationId)) return false;
+    if (this.turnById(payload.turnId)) return false;
+    const turn: ActiveTurn = {
       turnId: payload.turnId,
       conversationId: payload.conversationId,
       startedAt: Date.now(),
@@ -138,15 +189,18 @@ export class HostTurnController {
       toolCalls: [],
       usage: null,
       winnerModelId: null,
+      orphanTimer: null,
     };
+    this.turns.set(turn.turnId, turn);
     logTurnEvent({
       turnId: payload.turnId,
       conversationId: payload.conversationId,
       phase: "turn-start",
-      detail: `${payload.candidates.length} candidate(s)`,
+      detail: `${payload.candidates.length} candidate(s) · ${this.turns.size} live`,
     });
     // Fire-and-forget: the turn ends via endTurn() when the loop resolves
-    void this.runTurnLoop();
+    void this.runTurnLoop(turn);
+    return true;
   }
 
   /**
@@ -159,8 +213,11 @@ export class HostTurnController {
    * payload, fresh loop.
    */
   replaceTurn(payload: HostStartTurnPayload): void {
-    const current = this.active;
-    if (!current || current.conversationId !== payload.conversationId) return;
+    const current = this.turnFor(payload.conversationId);
+    if (!current) {
+      this.startTurn(payload);
+      return;
+    }
     current.controller.abort();
     logTurnEvent({
       turnId: current.turnId,
@@ -168,25 +225,43 @@ export class HostTurnController {
       phase: "abort",
       detail: "replaced by re-sent turn after reload",
     });
-    this.active = null;
+    // Removed here rather than left to the aborted loop's endTurn, so the
+    // conversation's slot is free the instant the replacement starts.
+    this.clearOrphanTimer(current);
+    this.turns.delete(current.turnId);
     this.startTurn(payload);
   }
 
+  /**
+   * Aborts ONE turn by id. Other conversations keep streaming — an abort
+   * is the user's stop button, and pressing it in one chat must not stop
+   * the work they left running in another.
+   */
   abortTurn(turnId: string): void {
-    if (this.active?.turnId !== turnId) return;
-    this.active.controller.abort();
-    logTurnEvent({ turnId, conversationId: this.active.conversationId, phase: "abort" });
+    const turn = this.turns.get(turnId);
+    if (!turn) return;
+    turn.controller.abort();
+    logTurnEvent({ turnId, conversationId: turn.conversationId, phase: "abort" });
   }
 
   /**
    * Snapshot for a (re)attaching page: buffered content, reasoning,
    * tool calls, and the seq boundary for delta replay.
    */
-  snapshot() {
-    const a = this.active;
+  /**
+   * Snapshot for a (re)attaching page: buffered content, reasoning,
+   * tool calls, and the seq boundary for delta replay.
+   *
+   * `conversationId` selects WHICH turn to describe. It is not optional
+   * in spirit — a page adopting conversation C must be given C's stream —
+   * but a caller that omits it gets the newest live turn, which is what
+   * the single-turn host always meant.
+   */
+  snapshot(conversationId?: string) {
+    const a = conversationId ? this.turnFor(conversationId) : this.newest();
     if (!a) {
       return {
-        protocolVersion: 1,
+        protocolVersion: HOST_PROTOCOL_VERSION,
         turnId: null,
         status: "ended" as const,
         conversationId: null,
@@ -197,7 +272,7 @@ export class HostTurnController {
       };
     }
     return {
-      protocolVersion: 1,
+      protocolVersion: HOST_PROTOCOL_VERSION,
       turnId: a.turnId,
       status: a.status,
       conversationId: a.conversationId,
@@ -208,46 +283,55 @@ export class HostTurnController {
     };
   }
 
-  status() {
-    return { hasTurn: this.active !== null, turnId: this.active?.turnId ?? null };
+  status(conversationId?: string) {
+    const turn = conversationId ? this.turnFor(conversationId) : this.currentTurn;
+    return {
+      hasTurn: turn !== null,
+      turnId: turn?.turnId ?? null,
+      liveTurns: this.turns.size,
+    };
   }
 
-  /** Page count changed — arm/disarm the orphan guard */
+  /** Page count changed — arm/disarm every turn's orphan guard */
   setPageCount(count: number): void {
-    if (count > 0) {
-      this.clearOrphanTimer();
-    } else if (this.active) {
-      this.armOrphanGuard();
+    for (const turn of this.turns.values()) {
+      if (count > 0) this.clearOrphanTimer(turn);
+      else this.armOrphanGuard(turn);
     }
   }
 
-  private armOrphanGuard(): void {
-    this.clearOrphanTimer();
-    this.orphanTimer = setTimeout(() => {
-      if (this.active && this.sink.pageCount === 0) {
-        logTurnEvent({
-          turnId: this.active.turnId,
-          conversationId: this.active.conversationId,
-          phase: "orphan-abort",
-        });
-        this.active.controller.abort();
-      }
+  private armOrphanGuard(turn: ActiveTurn): void {
+    this.clearOrphanTimer(turn);
+    turn.orphanTimer = setTimeout(() => {
+      // Re-check at expiry: the turn may have ended, or a page may have
+      // attached, in the grace window.
+      if (this.turns.get(turn.turnId) !== turn) return;
+      if (this.sink.pageCount > 0) return;
+      logTurnEvent({
+        turnId: turn.turnId,
+        conversationId: turn.conversationId,
+        phase: "orphan-abort",
+      });
+      turn.controller.abort();
     }, HOST_ORPHAN_GRACE_MS);
   }
 
-  private clearOrphanTimer(): void {
-    if (this.orphanTimer !== null) {
-      clearTimeout(this.orphanTimer);
-      this.orphanTimer = null;
+  private clearOrphanTimer(turn: ActiveTurn): void {
+    if (turn.orphanTimer !== null) {
+      clearTimeout(turn.orphanTimer);
+      turn.orphanTimer = null;
     }
   }
 
   // ── The turn loop (candidate walk) ─────────────────────────
 
-  private async runTurnLoop(): Promise<void> {
-    const turn = this.active;
-    if (!turn) return;
-
+  /**
+   * The candidate walk for ONE turn. It takes the turn as an argument
+   * rather than reading shared state: with several conversations
+   * streaming, "the active turn" is exactly the variable that must not
+   * exist, or one loop's decisions land on another's stream.
+   */
+  private async runTurnLoop(turn: ActiveTurn): Promise<void> {
     const startedAt = Date.now();
     // Bounded walk: without a cap a dead provider list means minutes
     // of silent retrying before the turn says anything.
@@ -416,7 +500,11 @@ export class HostTurnController {
         latencyMs: startedAt ? Date.now() - startedAt : undefined,
       },
     });
-    if (this.active === turn) this.active = null;
+    this.clearOrphanTimer(turn);
+    // Only ever removes its OWN entry: a replacement turn for the same
+    // conversation has already taken the slot, and must not be evicted by
+    // the aborted turn it replaced.
+    if (this.turns.get(turn.turnId) === turn) this.turns.delete(turn.turnId);
   }
 }
 

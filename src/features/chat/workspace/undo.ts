@@ -21,6 +21,7 @@
 // persistence flush (same contract as the rest of workspace.ts).
 
 import { generateId } from "@/lib/utils";
+import { nextRevision } from "../identity/revision";
 import type {
   WorkspaceFile,
   WorkspaceFileStatus,
@@ -165,7 +166,10 @@ function restoreBefore(
       updatedAt: now,
     };
   }
-  return { ...ws, files, updatedAt: now };
+  // Undoing restores code, so it moves the revision — and it must move it
+  // strictly, since an undo usually follows the mutation it reverses by
+  // less than a millisecond's worth of clock (identity/revision.ts).
+  return { ...ws, files, updatedAt: nextRevision(ws.updatedAt) };
 }
 
 /**
@@ -192,12 +196,13 @@ export function undoLast(ws: WorkspaceState): WorkspaceState {
   const now = Date.now();
   if (last.before?.dropped === true) {
     // No restorable inverse; drop the dead record so undo reaches
-    // the next restorable mutation.
-    return { ...ws, mutations: mutations.slice(0, -1), updatedAt: now };
+    // the next restorable mutation. Nothing was restored, so this is
+    // bookkeeping and the revision stays where it is.
+    return { ...ws, mutations: mutations.slice(0, -1) };
   }
   const carry = last.before?.status === "deleted" ? carriedContent(ws, last.path) : undefined;
   const next = restoreBefore(ws, last, now, carry);
-  return { ...next, mutations: mutations.slice(0, -1), updatedAt: now };
+  return { ...next, mutations: mutations.slice(0, -1) };
 }
 
 /**
@@ -219,7 +224,7 @@ export function rewindTo(ws: WorkspaceState, mutationId: string): WorkspaceState
     const carry = m.before?.status === "deleted" ? carriedContent(next, m.path) : undefined;
     next = restoreBefore(next, m, now, carry);
   }
-  return { ...next, mutations: mutations.slice(0, targetIdx + 1), updatedAt: now };
+  return { ...next, mutations: mutations.slice(0, targetIdx + 1) };
 }
 
 /**
@@ -229,7 +234,9 @@ export function rewindTo(ws: WorkspaceState, mutationId: string): WorkspaceState
  */
 export function clearMutationLog(ws: WorkspaceState): WorkspaceState {
   if (!ws.mutations?.length) return ws;
-  return { ...ws, mutations: [], updatedAt: Date.now() };
+  // Dropping the log is bookkeeping: the code is untouched, so the
+  // revision is too (workspace.ts `markPushed` does the same on a push).
+  return { ...ws, mutations: [] };
 }
 
 /** True when the file state differs from what the mutation recorded */

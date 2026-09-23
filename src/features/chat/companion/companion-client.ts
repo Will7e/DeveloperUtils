@@ -69,6 +69,15 @@ export type CompanionExecResult =
 export interface CompanionDeps {
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * The turn's abort signal, so Stop reaches the request itself.
+   *
+   * Without it the loop only checked for an abort BETWEEN tools, and a
+   * command may legitimately run for ten minutes — so pressing Stop during
+   * `npm install` left the turn visibly working on a command the user had
+   * just cancelled.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -186,6 +195,7 @@ export async function runOnCompanion(
       doFetch(`${request.origin}/v1/exec`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-companion-token": request.token },
+        ...(deps.signal ? { signal: deps.signal } : {}),
         body: JSON.stringify({
           type: "EXEC",
           id: `exec-${Date.now().toString(36)}`,
@@ -203,6 +213,7 @@ export async function runOnCompanion(
       deps.timeoutMs ?? 15 * 60_000
     );
   } catch (err) {
+    if (deps.signal?.aborted) return { ok: false, error: STOPPED_BY_USER };
     return { ok: false, error: `Could not reach the companion: ${err instanceof Error ? err.message : String(err)}` };
   }
 
@@ -230,6 +241,7 @@ export async function materializeOnCompanion(
       doFetch(`${request.origin}/v1/materialize`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-companion-token": request.token },
+        ...(deps.signal ? { signal: deps.signal } : {}),
         body: JSON.stringify({
           type: "MATERIALIZE",
           id: `mat-${Date.now().toString(36)}`,
@@ -251,9 +263,19 @@ export async function materializeOnCompanion(
     if (!payload.root) return { ok: false, error: payload.error ?? "The companion wrote no tree." };
     return { ok: true, root: payload.root, written: payload.written ?? 0, partial: payload.partial ?? true };
   } catch (err) {
+    if (deps.signal?.aborted) return { ok: false, error: STOPPED_BY_USER };
     return { ok: false, error: `Could not reach the companion: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
+
+/**
+ * The user pressed Stop, so nothing ran to completion.
+ *
+ * Said in the words of the person who did it, rather than as a transport
+ * failure: "could not reach the companion" would send the agent looking for
+ * a daemon that is running fine.
+ */
+export const STOPPED_BY_USER = "Stopped by the user before it finished — nothing was verified.";
 
 /** A fetch that cannot hang forever, since a dead daemon has no socket timeout. */
 async function withTimeout(promise: Promise<Response>, ms: number): Promise<Response> {

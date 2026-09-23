@@ -242,18 +242,52 @@ describe("SessionHostClient.startTurn", () => {
 });
 
 describe("SessionHostClient.fetchSnapshot", () => {
-  it("requests an ATTACH and returns the host snapshot", async () => {
+  it("asks about a conversation and returns the snapshot that answers it", async () => {
     const { client, port } = await connected((msg, p) => {
       if (msg.type !== "ATTACH") return;
       p.emit({
         type: "SNAPSHOT",
+        // The host echoes the asker's requestId.
+        requestId: msg.requestId,
         snapshot: snapshot({ turnId: "live", conversationId: "conv1", status: "streaming" }),
       });
     });
 
-    const snap = await client.fetchSnapshot();
-    expect(port.posted.some((m) => m.type === "ATTACH")).toBe(true);
+    const snap = await client.fetchSnapshot("conv1");
+    const attach = port.posted.find((m) => m.type === "ATTACH") as
+      | { type: "ATTACH"; requestId?: string; conversationId?: string }
+      | undefined;
+    expect(attach?.conversationId).toBe("conv1");
+    expect(attach?.requestId).toBeTruthy();
     expect(snap?.turnId).toBe("live");
+    client.dispose();
+  });
+
+  it("ignores a snapshot that answers a different (or older) ask", async () => {
+    const { client } = await connected((msg, p) => {
+      if (msg.type !== "ATTACH") return;
+      // Another page's reply, then a stale reply to an earlier ATTACH.
+      // With several conversations streaming, neither of these is an
+      // answer to the question this page asked — and accepting one would
+      // adopt a stream that belongs to somebody else's chat.
+      p.emit({
+        type: "SNAPSHOT",
+        snapshot: snapshot({ turnId: "someone-else", conversationId: "conv9", status: "streaming" }),
+      });
+      p.emit({
+        type: "SNAPSHOT",
+        requestId: "attach_from_a_previous_ask",
+        snapshot: snapshot({ turnId: "stale", conversationId: "conv1", status: "streaming" }),
+      });
+      p.emit({
+        type: "SNAPSHOT",
+        requestId: msg.requestId,
+        snapshot: snapshot({ turnId: "mine", conversationId: "conv1", status: "streaming" }),
+      });
+    });
+
+    const snap = await client.fetchSnapshot("conv1");
+    expect(snap?.turnId).toBe("mine");
     client.dispose();
   });
 

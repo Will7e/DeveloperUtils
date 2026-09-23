@@ -486,7 +486,11 @@ function SettingsModalInner({
                     <label className="settings-label" htmlFor="chat-temp-slider">
                       Temperature
                     </label>
-                    <span className="settings-sublabel">Lower is precise · higher is creative</span>
+                    <span className="settings-sublabel">
+                      Lower is precise · higher is creative. Applies to writing:
+                      rounds that edit code or run commands use the harness's own
+                      low temperature.
+                    </span>
                   </div>
                   <div className="settings-control">
                     <input
@@ -503,57 +507,6 @@ function SettingsModalInner({
                   </div>
                 </div>
 
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label" htmlFor="chat-agent-iterations">
-                      Agent iteration cap
-                    </label>
-                    <span className="settings-sublabel">
-                      Max tool-loop turns per coding-agent task (8–50)
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <input
-                      id="chat-agent-iterations"
-                      type="range"
-                      min={8}
-                      max={50}
-                      step={1}
-                      value={settings.agentMaxIterations}
-                      onChange={(e) =>
-                        onUpdate({ agentMaxIterations: parseInt(e.target.value, 10) || 24 })
-                      }
-                      className="settings-slider"
-                    />
-                    <span className="settings-value">{settings.agentMaxIterations}</span>
-                  </div>
-                </div>
-
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label" htmlFor="chat-checks-endpoint">
-                      Checks runner
-                    </label>
-                    <span className="settings-sublabel">
-                      Optional HTTPS endpoint that executes a repository's own
-                      test / lint / typecheck commands (the `run_checks` tool).
-                      Leave empty and the agent will report which checks exist
-                      and state plainly that it could not run them.
-                    </span>
-                  </div>
-                  <div className="settings-control settings-control-wide">
-                    <input
-                      id="chat-checks-endpoint"
-                      type="text"
-                      value={settings.checksEndpoint ?? ""}
-                      onChange={(e) => onUpdate({ checksEndpoint: e.target.value })}
-                      placeholder="https://checks.example.com/run"
-                      className="settings-input"
-                      spellCheck={false}
-                    />
-                  </div>
-                </div>
-
                 <McpServersEditor settings={settings} onUpdate={onUpdate} />
 
                 <div className="settings-row">
@@ -563,10 +516,11 @@ function SettingsModalInner({
                     </label>
                     <span className="settings-sublabel">
                       When the selected model repeats the same failing tool call,
-                      the rest of that turn continues on a capably stronger model
-                      (announced in the transcript, and attributed on the reply
-                      and in the spend breakdown). Never changes the model saved
-                      on the conversation.
+                      the rest of that turn continues on a model the catalog rates
+                      above it — announced in the transcript, and attributed on
+                      the reply and in the spend breakdown. Off by choice only:
+                      a switch can cost more per token. Never changes the model
+                      saved on the conversation.
                     </span>
                   </div>
                   <div className="settings-control">
@@ -575,30 +529,6 @@ function SettingsModalInner({
                       size="sm"
                       checked={settings.autoEscalate !== false}
                       onCheckedChange={(checked) => onUpdate({ autoEscalate: checked })}
-                    />
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-info">
-                    <label className="settings-label" htmlFor="chat-escalation-model">
-                      Escalation model
-                    </label>
-                    <span className="settings-sublabel">
-                      Leave empty to let the harness choose the cheapest model the
-                      catalog knows to be stronger (capped at $20 per million
-                      output tokens). Name a model id to decide it yourself —
-                      switching to it is then announced the same way.
-                    </span>
-                  </div>
-                  <div className="settings-control settings-control-wide">
-                    <input
-                      id="chat-escalation-model"
-                      type="text"
-                      value={settings.escalationModel ?? ""}
-                      onChange={(e) => onUpdate({ escalationModel: e.target.value })}
-                      placeholder={settings.defaultModel ? `${settings.defaultModel} (default)` : "provider/model-id"}
-                      className="settings-input"
-                      spellCheck={false}
                     />
                   </div>
                 </div>

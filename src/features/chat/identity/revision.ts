@@ -75,6 +75,25 @@ export function isSameRevision(
 }
 
 /**
+ * The revision a working copy moves TO when its code changes.
+ *
+ * `Date.now()` alone is not enough, because the counter has to be strictly
+ * monotonic to answer the only question asked of it: "did the code move since
+ * this proof?" Two edits inside one millisecond — a write and its fix, or an
+ * agent's write plus the delete that follows — stamp the SAME number, so the
+ * second edit leaves the first one's evidence reading as fresh and a passing
+ * run about code that no longer exists survives to the push gate.
+ *
+ * So the wall clock is a floor, not the value: time going backwards (a
+ * corrected clock, a restored backup) and a clock that has not ticked both
+ * still produce a number greater than the revision being replaced.
+ */
+export function nextRevision(previous: number): number {
+  const wall = Date.now();
+  return Number.isFinite(previous) && previous >= wall ? previous + 1 : wall;
+}
+
+/**
  * True when the two describe the same code, ignoring the revision counter.
  *
  * Used where a move of the counter is not a move of the code: a no-op write

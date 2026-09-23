@@ -7,7 +7,7 @@
 // ============================================================
 
 import { describe, it, expect } from "vitest";
-import { isSameCode, isSameRevision, revisionOf, type Revision } from "./revision";
+import { isSameCode, isSameRevision, nextRevision, revisionOf, type Revision } from "./revision";
 
 const A: Revision = {
   bindingId: "thread-1::william/DeveloperUtils@main",
@@ -59,6 +59,29 @@ describe("isSameRevision", () => {
     expect(isSameRevision(null, A)).toBe(false);
     expect(isSameRevision(A, null)).toBe(false);
     expect(isSameRevision(null, null)).toBe(false);
+  });
+});
+
+describe("nextRevision", () => {
+  it("moves forward when the clock does", () => {
+    const at = Date.now();
+    expect(nextRevision(at - 5_000)).toBeGreaterThanOrEqual(at);
+  });
+
+  it("still moves forward when the clock does not", () => {
+    // Two edits in the same millisecond are an agent writing a file and
+    // then fixing it. Equal counters would leave the FIRST edit's failing
+    // run looking like proof about the fixed code.
+    const now = Date.now();
+    expect(nextRevision(now)).toBe(now + 1);
+    expect(nextRevision(now + 1)).toBe(now + 2);
+  });
+
+  it("does not go backwards when the clock does", () => {
+    // A corrected clock or a restored backup must not hand evidence back
+    // to a revision that has already been replaced.
+    const future = Date.now() + 60_000;
+    expect(nextRevision(future)).toBe(future + 1);
   });
 });
 

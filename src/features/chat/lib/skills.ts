@@ -41,6 +41,9 @@ export const RETIRED_BUILTIN_SKILL_IDS: readonly string[] = [
   "builtin-api-designer",
 ];
 
+/** The shipped builtins by id — the source of every default adopted below */
+const SHIPPED_BY_ID = new Map(BUILTIN_SKILLS.map((s) => [s.id, s]));
+
 /** One index line per loadable skill: name, description, triggers, globs */
 export function buildSkillIndex(skills: ChatSkill[]): string | null {
   const loadable = skills
@@ -299,6 +302,7 @@ export function skillFromParsed(parsed: ParsedSkillFile): ChatSkill {
  *  - adds any builtin missing locally (new version shipped one)
  *  - restores deleted builtins
  *  - removes RETIRED builtins the user never touched
+ *  - adopts a CHANGED shipped default (enabled) for builtins they never touched
  *  - never touches edited builtins (`updated: true`) or user skills
  * Returns the same array reference when nothing changed.
  *
@@ -307,6 +311,15 @@ export function skillFromParsed(parsed: ParsedSkillFile): ChatSkill {
  * a user explicitly switched on would be the harness overruling a choice
  * they made, which is a worse outcome than one stale index line; an edited
  * builtin is their text, and their text is never ours to delete.
+ *
+ * Promoting is narrow for the same reason, and it is the other half of the
+ * same question: a skill the product decides everyone should have has to
+ * reach the installs that already exist, or the decision only applies to
+ * people who never used the app. `updated` is what makes that safe, and it
+ * is a real signal rather than a guess — the store stamps it on ANY patch to
+ * a builtin, including a plain toggle, so a user who switched a skill off
+ * has it and a user who never saw the setting does not. A choice they made
+ * survives; a default they never saw does not.
  */
 export function reconcileBuiltins(stored: ChatSkill[] | undefined): ChatSkill[] | null {
   const list = Array.isArray(stored) ? stored : [];
@@ -327,6 +340,18 @@ export function reconcileBuiltins(stored: ChatSkill[] | undefined): ChatSkill[] 
       next.push({ ...builtin });
       changed = true;
     }
+  }
+
+  // Adopt a changed shipped default, but only for a builtin the user has
+  // never touched — see the note above: `updated !== true` means they never
+  // opened a setting for it, so nothing of theirs is being overruled.
+  for (let i = 0; i < next.length; i++) {
+    const skill = next[i]!;
+    if (skill.builtin !== true || skill.updated === true) continue;
+    const shipped = SHIPPED_BY_ID.get(skill.id);
+    if (!shipped || shipped.enabled === skill.enabled) continue;
+    next[i] = { ...skill, enabled: shipped.enabled };
+    changed = true;
   }
 
   // Same reference when nothing changed: the store treats that as "no write",

@@ -12,9 +12,19 @@
 // an empty checklist is noise.
 
 import React from "react";
-import { Check, ChevronDown, ChevronRight, Circle, Loader2, ListChecks } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Hammer,
+  Loader2,
+  ListChecks,
+} from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { planProgress, planProgressLine } from "../lib/agent-plan";
+import { approvePlan } from "../services/chat-runner";
+import { isTurnRunning } from "../session/turn-engine";
 import type { PlanStep } from "../types";
 
 const STEP_ICON: Record<PlanStep["status"], React.ReactNode> = {
@@ -37,6 +47,16 @@ export const PlanStrip = React.memo(function PlanStrip({
   const plan = useChatStore((s) =>
     conversationId ? s.conversations.find((c) => c.id === conversationId)?.plan : undefined
   );
+  // Plan mode makes this strip the deliverable rather than a progress
+  // indicator, so it also carries the handshake that turns the plan into
+  // work (see `approvePlan`). Read separately so ticking a step does not
+  // re-render on the mode.
+  const planMode = useChatStore((s) => {
+    if (!conversationId) return false;
+    const conv = s.conversations.find((c) => c.id === conversationId);
+    return (conv?.mode ?? s.settings.defaultMode) === "plan";
+  });
+  const isStreaming = useChatStore((s) => s.isStreaming);
   // A plan the user collapsed stays collapsed as its steps tick over; a
   // NEW plan opens itself, because that is the moment it matters. Doing it
   // during render (React's documented adjust-state-when-input-changes
@@ -89,6 +109,26 @@ export const PlanStrip = React.memo(function PlanStrip({
             </li>
           ))}
         </ol>
+      )}
+
+      {/* The one control in this strip. A proposed plan whose only way
+          forward is "switch mode, then retype an instruction" makes the
+          plan itself decorative — approving it is what authorizes the
+          edits, and it says so in the transcript. */}
+      {planMode && conversationId && !collapsed && !isStreaming && !isTurnRunning() && (
+        <div className="chat-plan-actions">
+          <button
+            type="button"
+            className="chat-plan-approve"
+            onClick={() => approvePlan(conversationId)}
+          >
+            <Hammer className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Approve &amp; build</span>
+          </button>
+          <span className="chat-plan-approve-hint">
+            Switches this chat to Build mode and starts the work
+          </span>
+        </div>
       )}
     </section>
   );

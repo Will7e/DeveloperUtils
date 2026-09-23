@@ -43,19 +43,20 @@ import { useAppStore } from "@/stores/app.store";
 import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { CURATED_FALLBACK_MODELS } from "../constants";
 import { REASONING_EFFORT_META, modelSupportsTools } from "./model-state";
-import { resolveToolProfile } from "./tool-profiles";
+import { resolveToolSurface } from "./tool-profiles";
 import { downloadConversation } from "../services/export-conversation";
 import { resolveModelInfo } from "./model-catalog";
 import { runCompactCommand } from "../services/compaction";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { canUndo } from "../workspace/undo";
 import { TOOL_REGISTRY } from "./tool-registry";
-import { getConversationContext, composeSystemPrompt } from "../context/engine";
+import { activeBindingIdOf, getConversationContext, composeSystemPrompt } from "../context/engine";
 import { buildEffectiveSystemPrompt } from "./skills";
 import { isTurnRunning, stopTurn } from "../session/turn-engine";
 import { getTurnLog, formatTurnLog } from "../session/turn-log";
 import { sessionHost } from "../session/session-client";
 import { rankCommandSpecs } from "./slash";
+import { buildScorecard, formatScorecard } from "./scorecard";
 import type {
   ChatMode,
   ContextBreakdown,
@@ -200,7 +201,7 @@ function effectiveSystemPrompt(conversationId: string): string {
   if (!conv) return "";
   const base = conv.systemPrompt?.trim() || store.settings.systemPrompt.trim() || "";
   const composed = buildEffectiveSystemPrompt(base, store.settings.skills ?? []);
-  return composeSystemPrompt(composed, conv.summary) ?? "";
+  return composeSystemPrompt(composed, conv.summary, activeBindingIdOf(conv)) ?? "";
 }
 
 function activeConversation(conversationId: string) {
@@ -211,15 +212,19 @@ function activeConversation(conversationId: string) {
  * Tool definitions the next turn of this conversation would carry —
  * the same condition the runner checks, so /context and /status charge
  * for exactly the schemas that will ride the request.
+ *
+ * Three callers must agree on this rule (here, ChatPage's meter, and
+ * turn-prep). It is expressed once, in resolveToolSurface.
  */
 function contextToolsFor(conversationId: string): ToolDefinition[] | undefined {
   const store = useChatStore.getState();
   const conv = activeConversation(conversationId);
-  if (!conv?.repoContext || !store.settings.github.token) return undefined;
   const { model, mode } = currentModelState();
   const info = resolveModelInfo(model);
   if (!modelSupportsTools(info)) return undefined;
-  return resolveToolProfile(mode, info).tools;
+  const repoAttached = Boolean(conv?.repoContext && store.settings.github.token);
+  const tools = resolveToolSurface(mode, info, { repoAttached }).tools;
+  return tools.length > 0 ? tools : undefined;
 }
 
 /** Reasoning-effort aliases users actually type */
@@ -426,12 +431,28 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
         info.lastPromptTokens != null
           ? `last request: ${info.lastPromptTokens.toLocaleString()} tok exact`
           : "last request: none",
-        conv?.summary ? `summary covers ${conv.summary.coversCount}` : null,
+        // coversCount is cumulative (see ConversationSummary): this is the
+        // memory the ledger currently stands for, not the last fold's size.
+        conv?.summary
+          ? `summary covers ${conv.summary.coversCount} messages (${formatTokenCount(conv.summary.freedTokens)} folded)`
+          : null,
         `messages: ${conv?.messages.filter((m) => !m.hidden).length ?? 0}`,
         conv?.pendingTurn ? "pending turn marker SET" : null,
         conv?.repoContext ? `repo: ${conv.repoContext.owner}/${conv.repoContext.repo}` : null,
       ].filter(Boolean);
       toast(parts.join(" · "), "info");
+    },
+  },
+  {
+    id: "scorecard",
+    description: "How this agent is doing: turns, rounds, handoffs, questions",
+    icon: Gauge,
+    group: "Agent",
+    keywords: ["metrics", "quality", "stats", "premature", "handoff", "score"],
+    run: () => {
+      const store = useChatStore.getState();
+      const card = buildScorecard(store.conversations, getTurnLog());
+      toast(formatScorecard(card), "info", true);
     },
   },
   {
@@ -657,7 +678,15 @@ export function commandsFor(query: string, ctx: { isStreaming: boolean }): ChatC
   return ranked;
 }
 
-/** Runs a command by id with the given argument (typed-input path) */
+/**
+ * Runs a command by id with the given argument — the ONE executor every
+ * entry path uses (the composer's menu and Enter, ChatPage's handleSend,
+ * and sendUserMessage's choke point). Keeping execution here is what makes
+ * "the same token means the same thing" true: previously ChatPage ran
+ * `command.run` itself and sendUserMessage ran it again inline, which is
+ * exactly how one path came to apply a command's returned draft while the
+ * other silently dropped it.
+ */
 export async function runCommandById(
   id: string,
   ctx: ChatCommandContext

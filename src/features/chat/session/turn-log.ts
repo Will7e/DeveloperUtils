@@ -15,6 +15,7 @@ export type TurnLogPhase =
   | "race-decided"
   | "stream-end"
   | "tool-phase"
+  | "completion-gate"
   | "resume"
   | "orphan-abort"
   | "reroute"

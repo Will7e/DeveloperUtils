@@ -34,6 +34,14 @@ export type ResumeAction =
   | "restream-after-partial"
   /** Continue the agent tool loop from stored tool messages */
   | "continue-tool-loop"
+  /**
+   * The turn is PARKED on an `ask_user` question, not lost. Nothing to
+   * replay: the card is already rendered from the persisted question, and
+   * answering it commits the result and restarts the loop (chat-runner's
+   * `answerQuestion`). Treating this as a dangling tool call instead would
+   * drop the question and make the model ask it a second time.
+   */
+  | "await-answer"
   /** Keep the marker (host may still own the turn — dual safety) */
   | "keep"
   /** Clear the marker; nothing recoverable */
@@ -53,6 +61,8 @@ export interface ResumePlan {
    * payload must end with tool results — never mid-pair).
    */
   trimToCallId?: string;
+  /** For "await-answer": the unanswered `ask_user` call */
+  questionCallId?: string;
   /** Human-readable reason (turn log / diagnostics) */
   reason: string;
 }
@@ -89,11 +99,13 @@ function isPartialReply(last: ChatMessage): boolean {
  *                 the function looks at the visible tail)
  * @param pendingTurn the persisted marker ({startedAt}), when present
  * @param now current epoch ms (injectable for tests)
+ * @param pendingQuestion the conversation's parked question, when present
  */
 export function planResume(
   messages: ChatMessage[],
   pendingTurn: { startedAt: number } | undefined,
-  now: number = Date.now()
+  now: number = Date.now(),
+  pendingQuestion?: { callId: string }
 ): ResumePlan {
   if (!pendingTurn) return { action: "keep", reason: "no pending marker" };
 
@@ -126,7 +138,22 @@ export function planResume(
     };
   }
 
-  // 3) Tool-calls message at the tail → interrupted before any
+  // 3) Parked on a question the user has not answered. This outranks the
+  //    dangling-call rules below: the call is not orphaned, it is WAITING,
+  //    and restarting the loop would discard the question instead of
+  //    resuming it.
+  if (
+    pendingQuestion &&
+    last.toolCalls?.calls.some((c) => c.id === pendingQuestion.callId)
+  ) {
+    return {
+      action: "await-answer",
+      questionCallId: pendingQuestion.callId,
+      reason: "turn parked on an unanswered question",
+    };
+  }
+
+  // 4) Tool-calls message at the tail → interrupted before any
   //    results committed. Results must pair with requests; drop the
   //    dangling calls so the wire payload stays model-valid.
   if (last.toolCalls) {
@@ -137,7 +164,7 @@ export function planResume(
     };
   }
 
-  // 4) Committed partial reply (pagehide flush) → keep it visible,
+  // 5) Committed partial reply (pagehide flush) → keep it visible,
   //    re-stream the same turn for the full answer.
   if (isPartialReply(last)) {
     return {
@@ -147,7 +174,7 @@ export function planResume(
     };
   }
 
-  // 5) Plain committed assistant reply that does NOT carry the
+  // 6) Plain committed assistant reply that does NOT carry the
   //    partial marker: the turn actually completed but the END
   //    event/clear was lost (host finished after reload). Done —
   //    just clean the marker.
@@ -155,7 +182,7 @@ export function planResume(
     return { action: "cleanup", reason: "turn completed before the marker cleared" };
   }
 
-  // 6) Error-only tail: retryable by the user, not automatically.
+  // 7) Error-only tail: retryable by the user, not automatically.
   return { action: "needs-user-action", reason: "tail is an error notice" };
 }
 

@@ -19,7 +19,12 @@ import { runTurn, getSessionState } from "./turn-engine";
 import { LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
 import { getTurnLog, resetTurnLog } from "./turn-log";
 import { useChatStore } from "@/stores/chat.store";
-import { AGENT_ITERATIONS_DEFAULT } from "../constants";
+import { AGENT_COMPLETION_NUDGES } from "../constants";
+import { normalizePlan } from "../lib/agent-plan";
+import { clearVerification, recordVerification } from "../lib/verification-ledger";
+import { createWorkspace } from "../workspace/workspace";
+import { resetBindings, setAttachment } from "../identity/bindings";
+import type { RepoRef } from "../identity/identity";
 import type {
   HostEvent,
   HostSnapshot,
@@ -392,7 +397,7 @@ describe("turn engine — tool-use checkpoints", () => {
     "keeps working past the iteration cap instead of stopping mid-task",
     { timeout: 5000 },
     async () => {
-      store().updateSettings({ agentMaxIterations: 1, autoEscalate: false });
+      store().updateSettings({ autoEscalate: false });
       // Two tool rounds, then the model is finished.
       const source = repeatingCallSource(2, {
         id: "call_1",
@@ -405,6 +410,9 @@ describe("turn engine — tool-use checkpoints", () => {
         resolveSource: async () => source,
         createFallbackSource: () => source,
         inactivityTimeoutMs: 60,
+        // The cap is the harness's, so a test shortens it here rather than
+        // through a setting — nothing a user can persist may do this.
+        maxIterations: 1,
       });
 
       // The cap of 1 is a checkpoint: the turn ran the model three
@@ -415,7 +423,7 @@ describe("turn engine — tool-use checkpoints", () => {
       // …and the extra rounds are on the record, not silent.
       const autoContinued = getTurnLog().filter((e) => /auto-continuing/.test(e.detail ?? ""));
       expect(autoContinued).toHaveLength(2);
-      store().updateSettings({ agentMaxIterations: AGENT_ITERATIONS_DEFAULT, autoEscalate: true });
+      store().updateSettings({ autoEscalate: true });
     }
   );
 
@@ -423,7 +431,7 @@ describe("turn engine — tool-use checkpoints", () => {
     "asks the user to continue only once the continuation budget is spent",
     { timeout: 5000 },
     async () => {
-      store().updateSettings({ agentMaxIterations: 1, autoEscalate: false });
+      store().updateSettings({ autoEscalate: false });
       // A model that never stops calling tools — the shape that used to
       // end every large task with "Ask me to continue".
       const source = repeatingCallSource(99, {
@@ -437,13 +445,14 @@ describe("turn engine — tool-use checkpoints", () => {
         resolveSource: async () => source,
         createFallbackSource: () => source,
         inactivityTimeoutMs: 60,
+        maxIterations: 1,
       });
 
       // Three cap-sized batches in total: the cap, then the bounded
       // automatic continuations. A runaway loop costs a bounded budget.
       expect(source.starts).toHaveLength(3);
       expect(assistantMessages().some((m) => /tool-use limit/i.test(m.content))).toBe(true);
-      store().updateSettings({ agentMaxIterations: AGENT_ITERATIONS_DEFAULT, autoEscalate: true });
+      store().updateSettings({ autoEscalate: true });
     }
   );
 });
@@ -565,4 +574,129 @@ describe("turn engine — single flight", () => {
     await inFlight;
     expect(secondStarts).toBe(0);
   });
+});
+
+describe("turn engine — the completion gate", () => {
+  /** A plan the agent published and then walked away from */
+  function openPlan() {
+    return normalizePlan(
+      [
+        { text: "read the router", status: "done" },
+        { text: "wire the new route", status: "active" },
+        { text: "update the docs", status: "pending" },
+      ],
+      Date.now()
+    );
+  }
+
+  /** Drives one turn against a model that always stops with a plain reply */
+  async function runStoppingTurn(prepare: () => PreparedTurn | Promise<PreparedTurn>) {
+    const source = replySource("Now I'll wire the route.");
+    await runTurn(conversationId, {
+      prepare: async () => prepare(),
+      resolveSource: async () => source,
+      createFallbackSource: () => source,
+      inactivityTimeoutMs: 60,
+    });
+    return source;
+  }
+
+  afterEach(() => {
+    clearVerification(conversationId);
+    resetBindings();
+  });
+
+  it(
+    "keeps working when the agent's own plan still has steps open",
+    { timeout: 5000 },
+    async () => {
+      store().setConversationPlan(conversationId, openPlan());
+
+      const source = await runStoppingTurn(preparedTurnWithTools);
+
+      // The model stopped three times; the harness continued twice and
+      // then handed back, so the turn cost a bounded number of rounds.
+      expect(source.starts).toHaveLength(1 + AGENT_COMPLETION_NUDGES);
+
+      // Every gate decision is on the record: the continuations granted,
+      // then the hand-off that spent the budget.
+      const gated = getTurnLog().filter((e) => e.phase === "completion-gate");
+      expect(gated).toHaveLength(AGENT_COMPLETION_NUDGES + 1);
+      expect(gated[0]!.detail).toContain("wire the new route");
+      expect(gated[0]!.detail).toContain("continuing 1/");
+      expect(gated[gated.length - 1]!.detail).toMatch(/budget is spent/);
+
+      // The model is told what is open, and how to stop deliberately.
+      const nudge = assistantMessages().find((m) => m.content.includes("Still outstanding"));
+      expect(nudge).toBeTruthy();
+      expect(nudge!.content).toContain("update_plan");
+
+      // Out of continuations: the notice names the unkept promise rather
+      // than a generic checkpoint.
+      const messages = assistantMessages();
+      const last = messages[messages.length - 1]!;
+      expect(last.content).toMatch(/out of automatic continuations/);
+      expect(last.content).toContain("wire the new route");
+    }
+  );
+
+  it(
+    "stops on the model's own terms once every step is done",
+    { timeout: 5000 },
+    async () => {
+      store().setConversationPlan(
+        conversationId,
+        normalizePlan([{ text: "wire the new route", status: "done" }], Date.now())
+      );
+
+      const source = await runStoppingTurn(preparedTurnWithTools);
+
+      expect(source.starts).toHaveLength(1);
+      expect(getTurnLog().some((e) => e.phase === "completion-gate")).toBe(false);
+    }
+  );
+
+  it(
+    "refuses to finish over a failure recorded against this exact revision",
+    { timeout: 5000 },
+    async () => {
+      // A real working copy on a real repository: without it there is no
+      // revision for evidence to be fresh against, which is the point.
+      const ref: RepoRef = { owner: "acme", repo: "widgets", branch: "main" };
+      await setAttachment(conversationId, ref);
+      const ws = createWorkspace(conversationId, ref.owner, ref.repo, ref.branch, "sha1");
+      store().setWorkspace(conversationId, ws);
+      recordVerification(conversationId, {
+        kind: "command",
+        at: Date.now(),
+        workspaceUpdatedAt: ws.updatedAt,
+        ok: false,
+        summary: "`npm test` exited 1 in 900ms",
+        details: ["FAIL src/a.test.ts > adds"],
+      });
+
+      const source = await runStoppingTurn(preparedTurnWithTools);
+
+      expect(source.starts).toHaveLength(1 + AGENT_COMPLETION_NUDGES);
+      const gated = getTurnLog().filter((e) => e.phase === "completion-gate");
+      expect(gated[0]!.detail).toContain("npm test");
+      expect(gated[0]!.detail).toContain("FAIL src/a.test.ts");
+    }
+  );
+
+  it(
+    "never gates a round that carried no write tools",
+    { timeout: 5000 },
+    async () => {
+      // The plan is open, but this round could not edit anything: in plan
+      // mode and in chat mode the prose IS the answer, and nagging there
+      // is how a gate teaches the model to ignore it.
+      store().setConversationPlan(conversationId, openPlan());
+
+      const source = await runStoppingTurn(preparedTurn);
+
+      expect(source.starts).toHaveLength(1);
+      expect(getTurnLog().some((e) => e.phase === "completion-gate")).toBe(false);
+    }
+  );
 });

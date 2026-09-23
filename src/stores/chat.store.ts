@@ -12,6 +12,8 @@ import { createEncryptedStorage } from "@/services/encrypted-storage.service";
 import { generateId } from "@/lib/utils";
 import type {
   AgentPlan,
+  AgentQuestion,
+  AgentSuggestion,
   ChatAttachment,
   ChatConversation,
   ChatMessage,
@@ -19,8 +21,11 @@ import type {
   ChatSettings,
   ChatSkill,
   ConversationSummary,
+  HttpApprovalDecision,
+  PendingHttpRequest,
   PendingPush,
   PushDecision,
+  QueuedUserMessage,
   ReasoningEffort,
   RepoContext,
   ToolCallRequest,
@@ -118,6 +123,21 @@ export interface ChatStoreState {
     resolve: (decision: PushDecision) => void;
     conversationId: string;
   } | null;
+  /**
+   * External write awaiting the user's approval (one at a time, app-wide).
+   *
+   * A separate gate from the push one rather than a shared "pending action"
+   * slot: they answer different questions ("may I ship this diff?" vs "may I
+   * send this request?"), and a single slot would let one silently replace
+   * the other's dialog — resolving the push promise from the HTTP modal is a
+   * bug with no visible symptom.
+   */
+  pendingHttp: PendingHttpRequest | null;
+  /** Resolve callbacks for the HTTP write gate */
+  httpGate: {
+    resolve: (decision: HttpApprovalDecision) => void;
+    conversationId: string;
+  } | null;
 
   // ── Workspace actions ──
   setWorkspace: (conversationId: string, ws: WorkspaceState) => void;
@@ -134,6 +154,10 @@ export interface ChatStoreState {
     excludePaths?: string[]
   ) => void;
   clearPendingPush: () => void;
+  /** Opens the HTTP write gate; resolves when the user decides */
+  requestHttpApproval: (pending: PendingHttpRequest) => Promise<HttpApprovalDecision>;
+  resolveHttpApproval: (approved: boolean, note?: string) => void;
+  clearPendingHttp: () => void;
 
   // ── Conversation actions ──
   /**
@@ -157,8 +181,39 @@ export interface ChatStoreState {
   setConversationRepo: (id: string, repo: RepoContext | undefined) => void;
   /** Replaces the agent's living plan for this conversation */
   setConversationPlan: (id: string, plan: AgentPlan | undefined) => void;
-  /** Replaces the oldest `summary.coversCount` messages with the rolling summary */
-  applyCompaction: (conversationId: string, summary: ConversationSummary) => void;
+  /**
+   * Sets (or clears, with `undefined`) the question this conversation's turn
+   * is parked on. Persisted, because a reload has to render the same card
+   * and the answer has to resume the loop (see services/ask-user.ts).
+   */
+  setPendingQuestion: (conversationId: string, question: AgentQuestion | undefined) => void;
+  /** Replaces the clickable next steps offered by the last turn */
+  setSuggestions: (conversationId: string, suggestions: AgentSuggestion[] | undefined) => void;
+  /**
+   * Queues a message the user sent while the turn was running. It is
+   * delivered at the next round boundary (never dropped, never interleaved
+   * into a tool result the model has not read yet).
+   */
+  enqueueUserMessage: (
+    conversationId: string,
+    message: { text: string; attachments?: ChatAttachment[] }
+  ) => string;
+  removeQueuedMessage: (conversationId: string, id: string) => void;
+  /** Takes the oldest queued message, removing it (undefined when empty) */
+  shiftQueuedMessage: (conversationId: string) => QueuedUserMessage | undefined;
+  /**
+   * Commits a compaction: the folded messages are removed and the rolling
+   * summary replaces their memory. Removal is BY ID, not by count —
+   * hidden rows (cleared history, soft-deleted regenerations) can sit
+   * anywhere in the array and must survive: "/clear" promises nothing is
+   * destroyed, and `summary.coversCount` is cumulative, so slicing by it
+   * would cut the wrong messages.
+   */
+  applyCompaction: (
+    conversationId: string,
+    summary: ConversationSummary,
+    removedMessageIds: readonly string[]
+  ) => void;
   /**
    * Clears what the model sees for a conversation (/clear): every
    * stored message is soft-hidden and the rolling summary dropped.
@@ -249,6 +304,33 @@ function touchConversation(conv: ChatConversation): ChatConversation {
   return { ...conv, updatedAt: Date.now() };
 }
 
+/**
+ * Every message is stamped with the binding it was produced under.
+ *
+ * One choke point, deliberately: the transcript outlives the repository it
+ * describes, and a request built from it is replayed under a system prompt
+ * that names whatever is attached NOW. Without the stamp there is no way to
+ * tell the rows apart afterwards (see context/binding-scope.ts), so this is
+ * written where a row BECOMES a row rather than at the four call sites that
+ * build them.
+ *
+ * The stamp is written LAST and wins over anything the caller passed, because
+ * a message that could nominate its own repository is exactly the artifact the
+ * binding discipline exists to prevent.
+ */
+function stampBinding(
+  conversationId: string,
+  message: Omit<ChatMessage, "id" | "timestamp">,
+  id: string
+): ChatMessage {
+  return {
+    ...message,
+    id,
+    timestamp: Date.now(),
+    bindingId: bindingIdOf(conversationId),
+  };
+}
+
 function mapConversation(
   conversations: ChatConversation[],
   id: string,
@@ -284,6 +366,8 @@ export const useChatStore = create<ChatStoreState>()(
       workspaces: {},
       pendingPush: null,
       pushGate: null,
+      pendingHttp: null,
+      httpGate: null,
 
       // ── Composer ──
       // Write-through, in the same store as the threads themselves: reading
@@ -430,6 +514,32 @@ export const useChatStore = create<ChatStoreState>()(
           if (s.pushGate) s.pushGate.resolve({ approved: false });
           return { pendingPush: null, pushGate: null };
         }),
+
+      requestHttpApproval: (pending) =>
+        new Promise((resolve) => {
+          set({
+            pendingHttp: pending,
+            httpGate: {
+              conversationId: pending.conversationId,
+              resolve: (decision) => resolve(decision),
+            },
+          });
+        }),
+
+      resolveHttpApproval: (approved, note) =>
+        set((s) => {
+          const gate = s.httpGate;
+          if (gate) gate.resolve({ approved, ...(note ? { note } : {}) });
+          return { httpGate: null, pendingHttp: null };
+        }),
+
+      clearPendingHttp: () =>
+        set((s) => {
+          // Same defensive resolve as the push gate: an unmounted modal must
+          // not leave the awaiting http_write hanging forever.
+          if (s.httpGate) s.httpGate.resolve({ approved: false, note: "the request dialog was closed without a decision" });
+          return { pendingHttp: null, httpGate: null };
+        }),
       createConversation: (model, seed) => {
         const id = generateId();
         const state = get();
@@ -566,13 +676,32 @@ export const useChatStore = create<ChatStoreState>()(
 
       setConversationRepo: (id, repo) => {
         set((s) => ({
-          conversations: mapConversation(s.conversations, id, (c) =>
-            // Stamp attachedAt here (impure Date.now stays out of render)
-            touchConversation({
+          conversations: mapConversation(s.conversations, id, (c) => {
+            // A DIFFERENT repository is a different job. The plan is a promise
+            // about files in the repository being left, the suggested next
+            // steps describe work on it, and the completion gate reads the
+            // plan — so leaving them in place is how a thread spends its next
+            // turn chasing the previous repository's steps (and reporting them
+            // as unfinished work). Re-attaching the SAME repository keeps
+            // everything: nothing changed.
+            const moved = attachmentIdOf(c.repoContext) !== attachmentIdOf(repo);
+            return touchConversation({
               ...c,
+              // Stamp attachedAt here (impure Date.now stays out of render)
               repoContext: repo ? { ...repo, attachedAt: Date.now() } : undefined,
-            })
-          ),
+              ...(moved
+                ? {
+                    plan: undefined,
+                    suggestions: undefined,
+                    // The era boundary the request reads to date the rows that
+                    // carry no binding stamp of their own. Recorded HERE, on the
+                    // same `moved` check that clears the plan, so the two can
+                    // never disagree about what counted as a move.
+                    bindingMove: { at: Date.now(), from: attachmentIdOf(c.repoContext) },
+                  }
+                : {}),
+            });
+          })
         }));
         // `repoContext` is the PERSISTED PROJECTION of the thread's binding, so
         // the binding is declared in the same call that writes it. Leaving that
@@ -591,18 +720,78 @@ export const useChatStore = create<ChatStoreState>()(
           conversations: mapConversation(s.conversations, id, (c) => ({ ...c, plan })),
         })),
 
-      applyCompaction: (conversationId, summary) =>
+      setPendingQuestion: (conversationId, question) =>
         set((s) => ({
           conversations: mapConversation(s.conversations, conversationId, (c) =>
-            touchConversation({
-              ...c,
-              // Drop the folded messages — the summary carries their
-              // memory. coversCount was snapped to a user boundary,
-              // so the kept tail still starts with a user turn.
-              messages: c.messages.slice(summary.coversCount),
-              summary,
-            })
+            // Bookkeeping, not activity: a question must not reorder the
+            // chat list or move updatedAt under the user's cursor.
+            c.pendingQuestion === question ? c : { ...c, pendingQuestion: question }
           ),
+        })),
+
+      setSuggestions: (conversationId, suggestions) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) => ({
+            ...c,
+            suggestions: suggestions && suggestions.length > 0 ? suggestions : undefined,
+          })),
+        })),
+
+      enqueueUserMessage: (conversationId, message) => {
+        const id = generateId();
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) => ({
+            ...c,
+            queued: [...(c.queued ?? []), { id, ...message, queuedAt: Date.now() }],
+          })),
+        }));
+        return id;
+      },
+
+      removeQueuedMessage: (conversationId, id) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
+            c.queued?.some((q) => q.id === id)
+              ? { ...c, queued: c.queued.filter((q) => q.id !== id) }
+              : c
+          ),
+        })),
+
+      // Read-and-remove in one step, so two callers can never deliver the
+      // same queued message twice (the engine's round boundary and its
+      // post-turn restart both call this).
+      shiftQueuedMessage: (conversationId) => {
+        const conv = get().conversations.find((c) => c.id === conversationId);
+        const next = conv?.queued?.[0];
+        if (!conv || !next) return undefined;
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) => ({
+            ...c,
+            queued: (c.queued ?? []).slice(1),
+          })),
+        }));
+        return next;
+      },
+
+      applyCompaction: (conversationId, summary, removedMessageIds) =>
+        set((s) => ({
+          conversations: mapConversation(s.conversations, conversationId, (c) => {
+            // The folded messages leave the stored transcript — the
+            // summary carries their memory — while hidden rows stay put
+            // (the fold never covered them, and /clear must remain
+            // non-destructive).
+            const removed = new Set(removedMessageIds);
+            const messages =
+              removed.size > 0 ? c.messages.filter((m) => !removed.has(m.id)) : c.messages;
+            // The notes describe what was read and written HERE, so they are
+            // stamped with the repository they are about: composeSystemPrompt
+            // adds the caveat when that is not the one the thread is on now.
+            return touchConversation({
+              ...c,
+              messages,
+              summary: { ...summary, bindingId: bindingIdOf(conversationId) },
+            });
+          })
         })),
 
       clearConversationContext: (conversationId) =>
@@ -626,7 +815,7 @@ export const useChatStore = create<ChatStoreState>()(
           conversations: mapConversation(s.conversations, conversationId, (c) =>
             touchConversation({
               ...c,
-              messages: [...c.messages, { ...message, id, timestamp: Date.now() }],
+              messages: [...c.messages, stampBinding(conversationId, message, id)],
             })
           ),
         }));
@@ -721,8 +910,17 @@ export const useChatStore = create<ChatStoreState>()(
             : s
         ),
 
+      // Guarded like `appendStreamingContent` above: this field is not
+      // per-conversation, so an unguarded append lets a delta belonging to
+      // one stream land in another conversation's message — reasoning text
+      // from the last chat you had open, attached to the answer you are
+      // reading now.
       appendStreamingReasoning: (chunk) =>
-        set((s) => ({ streamingReasoning: s.streamingReasoning + chunk })),
+        set((s) =>
+          s.isStreaming && s.streamingConversationId
+            ? { streamingReasoning: s.streamingReasoning + chunk }
+            : s
+        ),
 
       commitStreamingMessage: (meta) => {
         const { streamingConversationId, streamingContent, streamingReasoning } = get();
@@ -735,14 +933,16 @@ export const useChatStore = create<ChatStoreState>()(
               ...c,
               messages: [
                 ...c.messages,
-                {
-                  id,
-                  role: "assistant",
-                  content: s.streamingContent,
-                  timestamp: Date.now(),
-                  reasoning: reasoning || undefined,
-                  ...meta,
-                },
+                stampBinding(
+                  streamingConversationId,
+                  {
+                    role: "assistant",
+                    content: s.streamingContent,
+                    reasoning: reasoning || undefined,
+                    ...meta,
+                  },
+                  id
+                ),
               ],
             })
           ),
@@ -760,15 +960,13 @@ export const useChatStore = create<ChatStoreState>()(
               ...c,
               messages: [
                 ...c.messages,
-                {
-                  id,
+                stampBinding(conversationId, {
                   role: "assistant",
                   content: meta?.content ?? "",
-                  timestamp: Date.now(),
                   reasoning: meta?.reasoning || undefined,
                   model: meta?.model,
                   toolCalls: { kind: "tool_calls", calls },
-                },
+                }, id),
               ],
             })
           ),
@@ -783,11 +981,9 @@ export const useChatStore = create<ChatStoreState>()(
               ...c,
               messages: [
                 ...c.messages,
-                {
-                  id: generateId(),
+                stampBinding(conversationId, {
                   role: "user",
                   content: "",
-                  timestamp: Date.now(),
                   toolResult: {
                     kind: "tool_result",
                     callId: result.callId,
@@ -800,7 +996,7 @@ export const useChatStore = create<ChatStoreState>()(
                     // into the diff that step produced.
                     change: result.uiChange,
                   },
-                },
+                }, generateId()),
               ],
             })
           ),
@@ -824,12 +1020,7 @@ export const useChatStore = create<ChatStoreState>()(
               ...c,
               messages: [
                 ...c.messages,
-                {
-                  id,
-                  role: "assistant",
-                  timestamp: Date.now(),
-                  ...message,
-                },
+                stampBinding(conversationId, { role: "assistant", ...message }, id),
               ],
             })
           ),
@@ -903,14 +1094,20 @@ export const useChatStore = create<ChatStoreState>()(
           const now = Date.now();
           let changed = false;
           const conversations = s.conversations.map((c) => {
-            if (
-              c.pendingTurn &&
-              now - c.pendingTurn.startedAt > PENDING_TURN_MAX_AGE_MS
-            ) {
-              changed = true;
-              return { ...c, pendingTurn: undefined };
-            }
-            return c;
+            const staleTurn =
+              c.pendingTurn && now - c.pendingTurn.startedAt > PENDING_TURN_MAX_AGE_MS;
+            // A question that outlived its turn is stale too: nobody is
+            // parked on it, and leaving it on screen advertises an answer
+            // that would restart a turn from a day-old context.
+            const staleQuestion =
+              c.pendingQuestion && now - c.pendingQuestion.askedAt > PENDING_TURN_MAX_AGE_MS;
+            if (!staleTurn && !staleQuestion) return c;
+            changed = true;
+            return {
+              ...c,
+              pendingTurn: staleTurn ? undefined : c.pendingTurn,
+              pendingQuestion: staleQuestion ? undefined : c.pendingQuestion,
+            };
           });
           return changed ? { conversations } : s;
         }),
@@ -964,6 +1161,8 @@ export const useChatStore = create<ChatStoreState>()(
           workspaces: {},
           pendingPush: null,
           pushGate: null,
+          pendingHttp: null,
+          httpGate: null,
         };
       },
     }

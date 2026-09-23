@@ -37,17 +37,35 @@ export function modelDisplayName(modelId?: string, models?: ModelInfo[]): string
 
 /**
  * Resolves model metadata (context length, pricing, capabilities) for
- * a real OpenRouter model id. Everything resolves through the live
- * catalog; the curated list covers the offline/first-run window.
+ * a real OpenRouter model id. The live catalog is the truth; the curated
+ * list covers the offline/first-run window.
+ *
+ * "The live catalog is the truth" is the part that used to be false for the
+ * six curated ids: `if (curated?.contextLength) return curated` returned the
+ * hand-written stub the moment the id matched, and every curated stub is a
+ * bare name + context length with NO `supportedParameters` and NO
+ * `reasoning` block. So for exactly those models the app never learned what
+ * they could do — the reasoning control stayed hidden and no reasoning key
+ * was ever sent, however clearly the fetched catalog described the model.
+ * Whatever the catalog declares now wins, field by field, with the stub
+ * filling only the fields the live entry omits.
  */
 export function resolveModelInfo(modelId?: string): ModelInfo | undefined {
   if (!modelId) return undefined;
   const curated = CURATED_FALLBACK_MODELS.find((m) => m.id === modelId);
-  if (curated?.contextLength) return curated;
+  const live = (modelCatalogCache.models ?? []).find((m) => m.id === modelId);
 
-  // Check the fetched catalog cache synchronously if already loaded
-  const cached = (modelCatalogCache.models ?? []).find((m) => m.id === modelId);
-  return cached ?? curated;
+  // Cold start, or a model the catalog does not list: the stub is all there is.
+  if (!live) return curated;
+
+  const merged: ModelInfo = { ...curated, ...live };
+  // `{...curated, ...live}` lets an explicitly-undefined live field erase a
+  // curated one; the context window is the field that matters, and a model
+  // without one cannot be budgeted at all.
+  if (merged.contextLength == null && curated?.contextLength != null) {
+    merged.contextLength = curated.contextLength;
+  }
+  return merged;
 }
 
 /** Fetches and memoizes the live model catalog (best-effort) */

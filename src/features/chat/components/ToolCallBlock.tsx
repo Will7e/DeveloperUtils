@@ -13,6 +13,9 @@
 
 import React from "react";
 import {
+  AlignLeft,
+  ArrowLeftRight,
+  BookOpen,
   Bot,
   Brain,
   CheckCheck,
@@ -25,11 +28,15 @@ import {
   FolderTree,
   GitBranch,
   GitPullRequest,
+  Globe,
   Info,
   ListTree,
   Loader2,
+  Play,
   Plug,
   Search,
+  Send,
+  Shapes,
   SquareArrowOutUpRight,
 } from "lucide-react";
 import { DiffView } from "./DiffView";
@@ -73,6 +80,25 @@ function toolIcon(name: ToolName): React.ComponentType<{ className?: string }> {
     case "list_mcp_tools":
     case "call_mcp_tool":
       return Plug;
+    // ── This app's own tools ──
+    case "run_code":
+      return Play;
+    case "format_code":
+      return AlignLeft;
+    case "compare_data":
+      return ArrowLeftRight;
+    case "diff_text":
+      return FileDiff;
+    case "search_library":
+      return BookOpen;
+    case "http_request":
+      return Globe;
+    case "http_write":
+      return Send;
+    case "create_diagram":
+      return Shapes;
+    case "open_in_tool":
+      return SquareArrowOutUpRight;
     default:
       return Info;
   }
@@ -115,6 +141,25 @@ function toolVerb(name: ToolName): string {
       return "Listed MCP tools";
     case "call_mcp_tool":
       return "Called MCP tool";
+    // ── This app's own tools ──
+    case "run_code":
+      return "Ran code";
+    case "format_code":
+      return "Formatted";
+    case "compare_data":
+      return "Compared";
+    case "diff_text":
+      return "Diffed";
+    case "search_library":
+      return "Searched reference";
+    case "http_request":
+      return "Requested";
+    case "http_write":
+      return "Sent request";
+    case "create_diagram":
+      return "Drew diagram";
+    case "open_in_tool":
+      return "Opened in tool";
     default:
       return name;
   }

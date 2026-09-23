@@ -21,7 +21,7 @@
 //     resurrect a mutating tool.
 
 import type { ChatMode, ModelInfo, ToolDefinition } from "../types";
-import { AGENT_TOOLS, PLAN_MODE_TOOLS } from "./tool-registry";
+import { AGENT_TOOLS, PLAN_MODE_TOOLS, isRepoFreeTool } from "./tool-registry";
 
 export type ToolProfileId = "full" | "lean";
 
@@ -57,6 +57,29 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "edit_file",
   "get_workspace_diff",
   "push_changes",
+  // Asking is the cheapest good move a weak model can make, and the one it
+  // is least likely to attempt: it guesses, or it narrates the uncertainty.
+  // One flat schema, and the payoff is avoiding several wrong edits.
+  "ask_user",
+  "suggest_next",
+  // ── App tools ──
+  // Listed in REGISTRY order, like everything else here (the app block sits
+  // after the write tools in the registry). A weak model is the one that
+  // most needs a computation CHECKED rather than guessed at, and these are
+  // the flattest calls in the whole surface: a language and a snippet, a
+  // language and some text, one query. They also work in a chat with no
+  // repository, which is where a model that cannot call anything would
+  // otherwise fall back to recall.
+  //
+  // `http_write` and `create_diagram` are deliberately NOT here: one asks
+  // the user to approve an external write, the other builds a nested
+  // node/edge structure — exactly the two shapes a small model gets wrong.
+  "run_code",
+  "format_code",
+  "compare_data",
+  "diff_text",
+  "search_library",
+  "http_request",
 ];
 
 /** Below this context length a model gets the lean surface */
@@ -85,6 +108,28 @@ export const TOOL_PROFILE_NOTES: Record<ToolProfileId, string> = {
     "- Read narrow windows (read_file with startLine/endLine) rather than whole large files.",
     "- To change an existing file, use edit_file with the exact text you read. write_file replaces the WHOLE file and deletes anything you did not reproduce.",
     "- Do not build tool programs or hand work to a helper agent — those tools are not available to you.",
+    "- If a call fails, read the error and change the arguments. Repeating the same call will be refused.",
+  ].join("\n"),
+};
+
+/**
+ * Note for a repo-free turn.
+ *
+ * The full profile's note is empty anyway; the lean one needs a variant
+ * because its existing text tells the model how to change a FILE, and a
+ * conversation with no repository attached has no files to change — advice
+ * about tools it does not have is exactly the instruction-budget waste this
+ * profile exists to avoid.
+ */
+export const REPO_FREE_PROFILE_NOTES: Record<ToolProfileId, string> = {
+  full: "",
+  lean: [
+    "# Working within your tool budget",
+    "",
+    "Keep the loop small and literal:",
+    "- One tool call at a time, with the arguments the schema asks for.",
+    "- No repository is attached, so there are no project files to read or edit. The tools you have run and check things: run_code executes a snippet, format_code tidies text, compare_data and diff_text compare two inputs, search_library reads the ServiceNow reference, and fetch_url/search_web read the public web.",
+    "- Prefer running a snippet to reasoning about what it prints.",
     "- If a call fails, read the error and change the arguments. Repeating the same call will be refused.",
   ].join("\n"),
 };
@@ -127,5 +172,39 @@ export function resolveToolProfile(
     id,
     tools: allowed ? allTools.filter((t) => allowed.includes(t.function.name)) : allTools,
     note: TOOL_PROFILE_NOTES[id],
+  };
+}
+
+/**
+ * The tool surface for one turn, given whether a repository is attached.
+ *
+ * This is the rule the whole app-tools change turns on, in one place:
+ *
+ *   • attached  → the profile's surface as before, which now also contains
+ *                 the app tools (they are registry entries like any other);
+ *   • detached  → THE APP TOOLS ONLY.
+ *
+ * Why detached is not "no tools": the repository tools are all reads and
+ * writes of a checkout, so without one they are unusable rather than
+ * optional — `read_file` with no repo has nothing to read. The app tools
+ * are the opposite: the code runner, the formatter, the comparators and the
+ * reference need nothing but their arguments. Withholding them because no
+ * GitHub repository is connected was the single largest capability the
+ * agent was missing in its most common configuration.
+ *
+ * Filtering happens AFTER the profile and the mode narrowing, so a lean
+ * model gets the lean app subset and Plan mode still loses `http_write`.
+ */
+export function resolveToolSurface(
+  mode: ChatMode,
+  info: ModelInfo | undefined,
+  options: { repoAttached: boolean }
+): ToolProfile {
+  const base = resolveToolProfile(mode, info);
+  if (options.repoAttached) return base;
+  return {
+    ...base,
+    tools: base.tools.filter((t) => isRepoFreeTool(t.function.name)),
+    note: REPO_FREE_PROFILE_NOTES[base.id],
   };
 }

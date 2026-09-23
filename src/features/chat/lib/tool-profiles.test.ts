@@ -3,8 +3,13 @@
 // ============================================================
 
 import { describe, it, expect } from "vitest";
-import { LEAN_TOOL_NAMES, needsLeanProfile, resolveToolProfile } from "./tool-profiles";
-import { getToolMeta } from "./tool-registry";
+import {
+  LEAN_TOOL_NAMES,
+  needsLeanProfile,
+  resolveToolProfile,
+  resolveToolSurface,
+} from "./tool-profiles";
+import { TOOL_REGISTRY, getToolMeta, isRepoFreeTool } from "./tool-registry";
 import type { ModelInfo } from "../types";
 
 const full: ModelInfo = { id: "big", name: "Big", contextLength: 200_000, isFree: false };
@@ -89,5 +94,75 @@ describe("resolveToolProfile", () => {
     // list_repo_files is first in the registry and first in the lean list
     expect(names[0]).toBe("list_repo_files");
     expect(ordered).toEqual(names);
+  });
+
+  it("withholds the app tools a weak model would misuse", () => {
+    const names = resolveToolProfile("build", small).tools.map((t) => t.function.name);
+    expect(names).toContain("run_code");
+    expect(names).toContain("search_library");
+    // One asks the user to approve an external write; the other builds a
+    // nested node/edge structure — both shapes a small model gets wrong.
+    expect(names).not.toContain("http_write");
+    expect(names).not.toContain("create_diagram");
+  });
+});
+
+describe("resolveToolSurface", () => {
+  it("keeps the whole profile surface when a repository is attached", () => {
+    const attached = resolveToolSurface("build", full, { repoAttached: true });
+    const bare = resolveToolProfile("build", full);
+    expect(attached.tools).toEqual(bare.tools);
+    expect(attached.tools.map((t) => t.function.name)).toContain("read_file");
+  });
+
+  it("offers the app tools — and only those — with no repository", () => {
+    const surface = resolveToolSurface("build", full, { repoAttached: false });
+    const names = surface.tools.map((t) => t.function.name);
+
+    // The compiler does not care whether GitHub is connected.
+    for (const name of [
+      "run_code",
+      "format_code",
+      "compare_data",
+      "diff_text",
+      "search_library",
+      "http_request",
+      "http_write",
+      "create_diagram",
+      "open_in_tool",
+    ]) {
+      expect(names, name).toContain(name);
+    }
+    // …and a tool that reads a checkout has nothing to read.
+    for (const name of ["list_repo_files", "read_file", "write_file", "edit_file", "push_changes"]) {
+      expect(names, name).not.toContain(name);
+    }
+    // The web pair and the skill loader never needed a repository.
+    expect(names).toContain("search_web");
+    expect(names).toContain("fetch_url");
+    expect(names).toContain("read_skill");
+  });
+
+  it("still narrows a repo-free turn by profile and by mode", () => {
+    const lean = resolveToolSurface("build", small, { repoAttached: false });
+    expect(lean.tools.map((t) => t.function.name)).not.toContain("create_diagram");
+    expect(lean.note).toMatch(/No repository is attached/);
+
+    const plan = resolveToolSurface("plan", full, { repoAttached: false });
+    const planNames = plan.tools.map((t) => t.function.name);
+    expect(planNames).toContain("run_code");
+    // Plan mode still loses the only mutating app tool.
+    expect(planNames).not.toContain("http_write");
+  });
+
+  it("agrees with the registry about which tools need no repository", () => {
+    // The filter is derived from the registry, so this is a drift guard: a
+    // tool whose availability changed without the flag being updated would
+    // slip out of a repo-free turn (or into one) silently.
+    const surface = resolveToolSurface("build", full, { repoAttached: false });
+    const names = new Set(surface.tools.map((t) => t.function.name));
+    for (const tool of TOOL_REGISTRY) {
+      expect(names.has(tool.name), tool.name).toBe(isRepoFreeTool(tool.name));
+    }
   });
 });

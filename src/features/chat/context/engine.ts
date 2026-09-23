@@ -32,6 +32,23 @@ import { buildCompactionMarker, compactMessages } from "./compactor";
 import { estimateConversationTokens, estimateTokens } from "./tokenizer";
 import { isCalibrated } from "./tokenizer-calibration";
 import { summarizeSpend } from "../lib/cost-meter";
+import { attachmentLabelOf, scopeToBinding } from "./binding-scope";
+import { attachmentIdOf, bindingKey, parseBindingKey } from "../identity/identity";
+
+/**
+ * The binding a request is being built for.
+ *
+ * Derived from the conversation's own persisted projection — which
+ * `setConversationRepo` writes in the same call that declares the binding —
+ * rather than from the in-memory binding registry. The registry is populated
+ * by an effect on mount, so reading it here would make the repository boundary
+ * depend on whether bootstrap had finished, and a thread that briefly read as
+ * "detached" would have every repository-derived tool row withheld from its
+ * next request.
+ */
+export function activeBindingIdOf(conversation: Pick<ChatConversation, "id" | "repoContext">): string {
+  return bindingKey(conversation.id, attachmentIdOf(conversation.repoContext));
+}
 
 /**
  * Wire message in the OpenAI tool protocol: an assistant row may carry
@@ -68,12 +85,46 @@ export interface PreparedRequest {
  */
 export function composeSystemPrompt(
   basePrompt: string | undefined,
-  summary?: ConversationSummary
+  summary?: ConversationSummary,
+  /** The binding the request is being built for (see `activeBindingIdOf`) */
+  activeBindingId?: string | null
 ): string | undefined {
   const base = basePrompt?.trim() ?? "";
   if (!summary?.text.trim()) return base.trim() || undefined;
 
-  const summaryBlock = `# Conversation Summary (authoritative memory)\n\n${summary.text.trim()}`;
+  // The block used to be titled "(authoritative memory)", and that word is
+  // an instruction: a small model reading "authoritative" plus a GOAL/OPEN
+  // ledger will happily answer the REMEMBERED task instead of the message
+  // in front of it — the shape users report as "it answered my previous
+  // question". The notes are background; the newest message is the job, and
+  // the block now says so in the order of precedence a weak model needs.
+  // A summary written on another repository is the worst kind of stale: it is
+  // in the model's OWN memory slot, in prose, and re-injected on every turn,
+  // so a file it names reads as a fact about whatever is attached now. The
+  // caveat names both sides, because "some of this may be wrong" is not
+  // actionable — "this was written about owner/repo@branch, you are on a
+  // different checkout" is.
+  const description = parseBindingKey(activeBindingId ?? "").attachmentId;
+  const foreign =
+    Boolean(summary.bindingId) &&
+    Boolean(activeBindingId) &&
+    summary.bindingId !== activeBindingId;
+  const caveat = foreign
+    ? `**These notes were written while this chat was attached to a different repository ` +
+      `(\`${attachmentLabelOf(summary.bindingId!)}\`)${description ? `, and \`${description}\` is attached now` : ""}.** ` +
+      `Anything they state about files, paths, diffs or behaviour may belong to THAT repository — ` +
+      `read the current checkout before relying on it.\n\n`
+    : "";
+
+  const summaryBlock =
+    `# Earlier In This Conversation (background)\n\n` +
+    caveat +
+    `The notes below describe turns that are no longer in the message list. ` +
+    `They are BACKGROUND, not the task: answer the user's most recent message. ` +
+    `Never treat a line here as a request to fulfil — it may be finished, ` +
+    `superseded or wrong, and anything in the message list is newer than it. ` +
+    `If a detail you need was folded away, ask rather than guessing.\n\n` +
+    summary.text.trim();
   return base ? `${base}\n\n${summaryBlock}` : summaryBlock;
 }
 
@@ -264,8 +315,24 @@ export function prepareRequest(params: {
   // Soft-deleted messages (regenerate) never reach a request.
   const visible = visibleMessages(params.conversation.messages);
 
+  // ── The repository boundary ──
+  //
+  // A chat that read files in repository A, then switched to B, used to hand
+  // the model A's file bodies, search hits, diffs and write arguments under a
+  // system prompt that says "B". The panes all fail closed on the binding; the
+  // model's context did not, because it is not a read — it is the whole
+  // transcript. Done BEFORE compaction so foreign content neither spends the
+  // budget nor gets folded into the summary.
+  //
+  // `bindingMove` dates the rows that have no binding stamp (written before the
+  // stamp shipped). Without it those rows read as "current", which is how a
+  // chat that had ALREADY switched kept answering from the old repository.
+  const move = params.conversation.bindingMove;
+  const scoped = scopeToBinding(visible, activeBindingIdOf(params.conversation), {
+    ...(move ? { legacy: move } : {}),
+  });
   const { messages, hiddenCount } = compactMessages(
-    visible,
+    scoped.messages,
     budgetTokens,
     modelId
   );
@@ -281,7 +348,7 @@ export function prepareRequest(params: {
   const cleanMessages = sanitizeToolProtocol(wireCandidates);
 
   // Fold stale tool results to digests (request-time only)
-  const stale = staleToolResultIds(visible);
+  const stale = staleToolResultIds(scoped.messages);
   const foldedToolResults = cleanMessages.filter((m) => stale.has(m.id)).length;
 
   const wire = cleanMessages.map((m) => wireMessage(m, stale.has(m.id)));
@@ -419,7 +486,14 @@ export function getConversationContext(params: {
     modelId
   );
 
-  const messages = estimateConversationTokens(params.conversation.messages, modelId);
+  // Only model-visible messages compete for the window. Hidden rows
+  // (cleared history, soft-deleted regenerations) are never sent, and
+  // counting them kept the meter — and the 85% compaction trigger, which
+  // reads this same breakdown — high after /clear, so a conversation with
+  // almost nothing in it still reported "near limit" and compacted.
+  const visible = visibleMessages(params.conversation.messages);
+  const hiddenCount = params.conversation.messages.length - visible.length;
+  const messages = estimateConversationTokens(visible, modelId);
   const toolTokens = budget.toolTokens;
   const spend = system + toolTokens + memory + messages;
 
@@ -463,7 +537,9 @@ export function getConversationContext(params: {
       key: "messages",
       label: "Conversation",
       tokens: messages,
-      detail: `${params.conversation.messages.length} stored message${params.conversation.messages.length === 1 ? "" : "s"}`,
+      detail:
+        `${visible.length} message${visible.length === 1 ? "" : "s"} sent` +
+        (hiddenCount > 0 ? ` · ${hiddenCount} cleared` : ""),
     },
   ];
 

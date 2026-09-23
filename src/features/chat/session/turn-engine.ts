@@ -21,7 +21,7 @@
 // flags), and a turn is single-flight: a second run while running is
 // refused rather than interleaved.
 
-import { useChatStore } from "@/stores/chat.store";
+import { useChatStore, selectWorkspace } from "@/stores/chat.store";
 import {
   prepareTurn,
   resolveModelState,
@@ -30,7 +30,13 @@ import {
 } from "../services/turn-prep";
 import { executeToolCall, serializeToolResult, parseToolArguments } from "../lib/tools";
 import { lookupToolCache, storeToolCache, toolCacheKey } from "../lib/tool-cache";
-import { validateToolCall, getToolMeta, isPlanSafeTool, isValidToolName } from "../lib/tool-registry";
+import {
+  validateToolCall,
+  getToolMeta,
+  isPlanSafeTool,
+  isRepoFreeTool,
+  isValidToolName,
+} from "../lib/tool-registry";
 import {
   callSignature,
   extractTextToolCalls,
@@ -51,12 +57,15 @@ import {
   type EscalationOptions,
   type EscalationTargetChoice,
 } from "../lib/escalation";
+import { evaluateCompletion, type CompletionVerdict } from "../lib/completion-gate";
+import { continuationExhaustedNotice, TOOL_LIMIT_NOTICE } from "../lib/harness-notices";
+import { verificationEvidence } from "../lib/verification-ledger";
 import { recordUsageCalibration } from "../context/tokenizer-calibration";
 import { estimateTokens, estimateToolSchemaTokens } from "../context/tokenizer";
 import {
   AGENT_AUTO_CONTINUATIONS,
-  AGENT_MAX_ITERATIONS,
-  AGENT_ITERATIONS_MAX,
+  AGENT_COMPLETION_NUDGES,
+  AGENT_ITERATIONS,
   CURATED_FALLBACK_MODELS,
   DEFAULT_CHAT_MODE,
   DEFAULT_REASONING_EFFORT,
@@ -81,6 +90,8 @@ import {
   runWorkspaceDiff,
   runWriteFile,
 } from "../services/agent-actions";
+import { runAppTool } from "../services/app-actions";
+import { runAskUser, runSuggestNext, settlePendingQuestion } from "../services/ask-user";
 import { sessionHost } from "./session-client";
 import { HostTurnSource, LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
 import { logTurnEvent } from "./turn-log";
@@ -94,6 +105,7 @@ import type {
 import type {
   ChatMode,
   ReasoningEffort,
+  RepoContext,
   ToolCallRequest,
   ToolCallResult,
   ToolName,
@@ -170,6 +182,12 @@ const session: TurnSessionState = {
 /** Identical executions allowed before the ledger takes over */
 const REPEAT_MAX_EXECUTIONS = 2;
 /**
+ * Stand-in repo for the read tools that need none (see the read pass in
+ * executeToolPhase). Only ever handed to tools the registry marks `repoFree`,
+ * and none of them reads a field off it.
+ */
+const EMPTY_REPO_CONTEXT: RepoContext = { owner: "", repo: "", branch: "", attachedAt: 0 };
+/**
  * In-place retries for a round that died with NOTHING rendered.
  *
  * A dropped stream with nothing on screen is not a loss the user should
@@ -223,6 +241,15 @@ export interface EngineDeps {
     fromModel: string,
     opts?: EscalationOptions
   ) => EscalationTargetChoice | null;
+  /**
+   * Rounds (model calls) allowed per batch of the tool loop. Defaults to
+   * the harness bound (AGENT_ITERATIONS) — a test or eval can shorten it,
+   * and nothing a user can set may.
+   *
+   * It was a settings slider, and a user who lowered it got an agent that
+   * stopped mid-task: the exact complaint the loop is supposed to answer.
+   */
+  maxIterations?: number;
 }
 
 async function defaultResolveSource(): Promise<TurnSource> {
@@ -275,12 +302,9 @@ function isEventForTurn(event: HostEvent, turnId: string): boolean {
   }
 }
 
-function maxIterations(): number {
-  const configured = useChatStore.getState().settings.agentMaxIterations;
-  return Math.max(
-    1,
-    Math.min(AGENT_ITERATIONS_MAX, Math.round(configured) || AGENT_MAX_ITERATIONS)
-  );
+function maxIterations(deps: EngineDeps): number {
+  const configured = deps.maxIterations ?? AGENT_ITERATIONS;
+  return Math.max(1, Math.round(configured) || AGENT_ITERATIONS);
 }
 
 /** Model attribution for the tool-phase transcript entry */
@@ -314,6 +338,48 @@ function withRecoveryNote(meta: { content: string; reasoning: string; model: str
 }
 
 /** Runs tasks with bounded concurrency; results drain in submit order */
+/**
+ * Delivers messages the user sent while this turn was running.
+ *
+ * They are delivered at a ROUND BOUNDARY and nowhere else, for two reasons:
+ * a round is the only point where the wire payload ends on a clean turn
+ * boundary, and a message slipped in mid-round would sit in front of tool
+ * results the model has not read yet — answering an instruction with
+ * information it did not have when the instruction was written. Delivering
+ * here also means the model reads it as the next user turn, which is exactly
+ * what it would have been had the user waited for the reply.
+ *
+ * Returns how many were delivered. Exported because the send path calls it
+ * too: a queued message is OLDER than whatever is being sent now, and a
+ * transcript that shows them in the other order misrepresents the
+ * conversation to the model reading it.
+ */
+export function deliverQueuedMessages(conversationId: string): number {
+  const store = useChatStore.getState();
+  let delivered = 0;
+  for (;;) {
+    const next = store.shiftQueuedMessage(conversationId);
+    if (!next) break;
+    store.addMessage(conversationId, {
+      role: "user",
+      content: next.text,
+      ...(next.attachments && next.attachments.length > 0
+        ? { attachments: next.attachments }
+        : {}),
+    });
+    delivered += 1;
+  }
+  if (delivered > 0) {
+    logTurnEvent({
+      turnId: null,
+      conversationId,
+      phase: "resume",
+      detail: `delivered ${delivered} message(s) queued while the turn ran`,
+    });
+  }
+  return delivered;
+}
+
 async function runOrderedPool<T>(
   tasks: Array<{ run: () => Promise<T>; onSettled: (result: T) => void }>,
   limit: number,
@@ -562,34 +628,46 @@ function commitRender(
 
 // ── Agent tools (page-side execution between rounds) ────────
 
+/**
+ * Plan-mode hard guard, shared by every executor path.
+ *
+ * Plan mode never RECEIVES the mutating tool definitions, so a call for one
+ * is either a hallucination or a stale transcript echoing an old Build turn
+ * — refuse it here as well, because a model visibly trying to edit is
+ * exactly the failure mode Plan mode exists to prevent. `http_write` is the
+ * app tool this catches today: it is withheld from a plan turn, and this is
+ * what stops a plan turn from sending it anyway.
+ */
+function planModeRefusal(conversationId: string, name: ToolName): ToolCallResult | null {
+  if (isPlanSafeTool(name)) return null;
+  const conversation = useChatStore
+    .getState()
+    .conversations.find((c) => c.id === conversationId);
+  if (resolveModelState(conversation).mode !== "plan") return null;
+  return {
+    callId: "",
+    name,
+    ok: false,
+    data: {
+      error:
+        `Tool "${name}" is unavailable in Plan mode. Analyze and propose a plan instead; ` +
+        `the user must switch to Build mode before anything outside this conversation can change.`,
+    },
+    durationMs: 0,
+    summary: "blocked in plan mode",
+  };
+}
+
 /** Routes coding-agent bridge tools (write/ship/verify) to executors */
 async function runBridgeTool(
   conversationId: string,
   name: ToolName,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  opts: { callId?: string; signal?: AbortSignal } = {}
 ): Promise<ToolCallResult> {
-  // Plan-mode hard guard. Plan mode never RECEIVES the mutating tool
-  // definitions, so a call for one is either a hallucination or a
-  // stale transcript echoing an old Build turn — refuse it here as
-  // well, because the model visibly trying to edit is exactly the
-  // failure mode Plan mode exists to prevent.
-  const conversation = useChatStore
-    .getState()
-    .conversations.find((c) => c.id === conversationId);
-  if (resolveModelState(conversation).mode === "plan" && !isPlanSafeTool(name)) {
-    return {
-      callId: "",
-      name,
-      ok: false,
-      data: {
-        error:
-          `Tool "${name}" is unavailable in Plan mode. Analyze and propose a plan instead; ` +
-          `the user must switch to Build mode before any file can be changed.`,
-      },
-      durationMs: 0,
-      summary: "blocked in plan mode",
-    };
-  }
+  const { signal } = opts;
+  const refused = planModeRefusal(conversationId, name);
+  if (refused) return refused;
 
   switch (name) {
     case "write_file":
@@ -609,7 +687,7 @@ async function runBridgeTool(
     case "create_working_branch":
       return runCreateWorkingBranch(conversationId, args);
     case "push_changes":
-      return runPushChanges(conversationId, args);
+      return runPushChanges(conversationId, args, signal);
     case "run_checks":
       return runRunChecks(conversationId, args);
     case "update_plan":
@@ -617,11 +695,18 @@ async function runBridgeTool(
     case "list_mcp_tools":
       return runListMcpTools(conversationId, args);
     case "call_mcp_tool":
-      return runCallMcpTool(conversationId, args);
+      return runCallMcpTool(conversationId, args, signal);
     case "run_command":
-      return runShellCommand(conversationId, args);
+      return runShellCommand(conversationId, args, signal);
     case "verify_with_ci":
-      return runCiVerification(conversationId, args);
+      return runCiVerification(conversationId, args, signal);
+    // The two harness-interaction tools. `ask_user` parks this call until
+    // the user answers (it needs the call id to pair the answer with its
+    // request); `suggest_next` publishes chips and returns immediately.
+    case "ask_user":
+      return runAskUser(conversationId, args, { callId: opts.callId ?? "", signal });
+    case "suggest_next":
+      return runSuggestNext(conversationId, args);
     default: {
       // Registry-consistency guard: a tool marked kind:"bridge" must
       // have a case here.
@@ -768,38 +853,114 @@ async function executeToolPhase(
   });
   drainOrdered();
 
-  if (pending.length > 0 && repoContext) {
-    const isBridge = (p: PendingTool) => getToolMeta(p.call.name)?.kind === "bridge";
+  if (pending.length > 0) {
+    const kindOf = (p: PendingTool) => getToolMeta(p.call.name)?.kind;
     const settle = (p: PendingTool) => (result: ToolCallResult) => {
       record(p.call, result);
       results.set(p.idx, result);
       drainOrdered();
     };
 
-    // Writes first, one at a time, in submission order. Every bridge
-    // tool is a read-modify-write on the same workspace snapshot, so
-    // running them concurrently made the last write win and silently
-    // discard its siblings' files. Sequential execution also makes
-    // `push_changes` observe the edits that preceded it in the same
-    // model turn.
-    const bridgeTools = pending.filter(isBridge);
-    for (const p of bridgeTools) {
-      if (session.abort?.signal.aborted) return;
+    /**
+     * A repo tool called with no repository attached.
+     *
+     * The surface is not built to offer one (turn-prep filters a repo-free
+     * turn down to `isRepoFreeTool`), so reaching this is a stale transcript
+     * or a hallucinated call. It gets a precise answer rather than the
+     * generic unknown-tool text, because the fix is attach a repo — and a
+     * model told WHY can say so instead of retrying.
+     */
+    const needsRepo = (p: PendingTool): ToolCallResult => ({
+      callId: p.call.id,
+      name: p.call.name,
+      ok: false,
+      data: {
+        error:
+          `"${p.call.name}" needs an attached repository, and this conversation has none. ` +
+          "Attach one with the repo picker in the chat header, or use the tools that work " +
+          "without a checkout (run_code, format_code, compare_data, diff_text, search_library, " +
+          "search_web, fetch_url).",
+      },
+      durationMs: 0,
+      summary: "no repository attached",
+    });
+
+    // ── Sequential pass: app tools AND repo bridge tools, in submission order ──
+    //
+    // Two kinds execute one at a time and are therefore handled in ONE pass,
+    // because the order between them is meaningful: "write the file, then run
+    // the snippet" only means what it says if the write lands first.
+    //
+    //   • a bridge tool is a read-modify-write on the same workspace
+    //     snapshot, so running them concurrently made the last write win and
+    //     silently discard its siblings' files;
+    //   • an app tool owns a shared resource — the compiler service holds ONE
+    //     active worker per engine (a second run_code would clobber the
+    //     first) and http_write blocks the turn on a user's decision.
+    //
+    // The abort signal goes INTO the tool, not just between tools. The check
+    // above only fires once the previous tool has returned, and `run_command`
+    // may hold the turn for ten minutes, `verify_with_ci` for fifteen and
+    // run_code for a minute, so without it Stop was a button that did nothing
+    // visible during exactly the waits a user wants to end.
+    const sequential = pending.filter((p) => {
+      const kind = kindOf(p);
+      return kind === "app" || kind === "bridge";
+    });
+    for (const p of sequential) {
+      const kind = kindOf(p);
+      // A bridge tool normally needs a working copy to read or write. The
+      // ones the registry flags `repoFree` do not — asking the user a
+      // question is the clearest case, and it is most needed precisely in a
+      // chat where no repository was ever attached.
+      if (kind === "bridge" && !repoContext && !isRepoFreeTool(p.call.name)) {
+        settle(p)(needsRepo(p));
+        continue;
+      }
+      const signal = session.abort?.signal;
+      if (signal?.aborted) return;
       const args = parseToolArguments(p.call.arguments);
-      const result = await runBridgeTool(conversationId, p.call.name, args);
+      const result =
+        kind === "app"
+          ? await runAppTool(conversationId, p.call.name, args, signal)
+          : await runBridgeTool(conversationId, p.call.name, args, {
+              callId: p.call.id,
+              signal,
+            });
       settle(p)({ ...result, callId: p.call.id });
+      // A tool that ended because the user stopped it must not be followed
+      // by the next one in the same round: continuing to execute a list of
+      // commands after Stop is the opposite of what was asked for.
+      if (signal?.aborted) return;
     }
 
-    // Reads (and batched read programs) then fan out — they are
-    // independent and hit the network.
-    const readTools = pending.filter((p) => !isBridge(p));
-    if (readTools.length > 0) {
+    // ── Reads (and batched read programs) then fan out ──
+    // Independent and network-bound, so they run with bounded concurrency.
+    // A repo-free conversation keeps the few read tools flagged `repoFree`
+    // (the web pair and the skill loader); the rest — all reads OF a
+    // repository — are answered with the precise reason instead of being
+    // dropped silently.
+    const readTools = pending.filter((p) => {
+      const kind = kindOf(p);
+      return kind !== "app" && kind !== "bridge";
+    });
+    const runnableReads = repoContext
+      ? readTools
+      : readTools.filter((p) => isRepoFreeTool(p.call.name));
+    for (const p of readTools) {
+      if (!runnableReads.includes(p)) settle(p)(needsRepo(p));
+    }
+    if (runnableReads.length > 0) {
+      // The repo-free read tools never touch these fields (the web pair and
+      // read_skill take no repo), so an empty stand-in is honest here rather
+      // than a lie: nothing downstream can read it.
+      const repoForReads = repoContext ?? EMPTY_REPO_CONTEXT;
       await runOrderedPool(
-        readTools.map((p) => ({
+        runnableReads.map((p) => ({
           run: () =>
             executeToolCall(p.call, {
               token: settings.github.token,
-              repo: repoContext,
+              repo: repoForReads,
               signal: session.abort?.signal,
               conversationId,
             }).then((result) => {
@@ -836,9 +997,13 @@ function maybeEscalate(conversationId: string, fromModel: string, deps: EngineDe
   // The model that got stuck is the one this turn is running on — which
   // may already be an escalated model, in which case nothing else to try.
   const from = session.modelOverride ?? fromModel;
+  // No `preferred`: the target is the harness's pick (the cheapest model
+  // the catalog knows to be stronger). A user-set model id here was a
+  // question they could not answer — what they need is the consent that
+  // `autoEscalate` gives, not a vote on which model the catalog rates above
+  // the one that just stalled.
   const choice = deps.pickEscalation(from, {
     enabled: store.settings.autoEscalate,
-    preferred: store.settings.escalationModel,
     needTools: true,
   });
   session.escalated = true;
@@ -876,6 +1041,12 @@ interface RoundResult {
   committed: boolean;
   /** Present on a lost round, so the loss can be explained if it sticks */
   outcome?: RenderOutcome;
+  /**
+   * True when this round ran WITH the agent's write tools, which is the
+   * completion gate's precondition: a reply that could not edit anything
+   * cannot have left an edit half-finished.
+   */
+  agentTools?: boolean;
 }
 
 async function runRound(
@@ -890,6 +1061,11 @@ async function runRound(
 
   const turn: PreparedTurn = prepared;
   const turnId = createTurnId();
+  // Read-only rounds (chat mode, plan mode) can never leave work open, so
+  // the gate is told what the round actually carried. Compiled from the
+  // same tools the model was sent — never from what it claims it did.
+  const agentTools =
+    turn.mode === "build" && Array.isArray(turn.tools) && turn.tools.length > 0;
   session.turnId = turnId;
   // Recorded on every committed message so the transcript shows the
   // state a reply was produced under.
@@ -1027,7 +1203,7 @@ async function runRound(
     return { kind: "tools", committed: Boolean(committedId) };
   }
   if (outcome.reason === "done" || outcome.reason === "aborted") {
-    return { kind: "done", committed: Boolean(committedId) };
+    return { kind: "done", committed: Boolean(committedId), agentTools };
   }
   return { kind: "exhausted", committed: Boolean(committedId) };
 }
@@ -1042,6 +1218,42 @@ interface RoundRunner {
   localFallbacks: number;
   /** Rounds that died with nothing rendered and were retried in place */
   lostRetries: number;
+  /**
+   * Completion continuations spent this turn (lib/completion-gate.ts).
+   * Lives on the runner, not the batch, because it is a property of the
+   * TURN: five batches must not each get their own allowance.
+   */
+  completionNudges: number;
+}
+
+/**
+ * Reads the two sources that can contradict a stop — the agent's own plan
+ * and the evidence recorded against the revision in the workspace — and
+ * decides whether the turn is really over.
+ *
+ * Read here rather than threaded through the engine so that a conversation
+ * with no workspace attached simply has no evidence to answer with, and so
+ * that the gate always sees the CURRENT revision instead of the one that
+ * existed when the round started.
+ */
+function completionVerdictFor(conversationId: string, agentTools: boolean): CompletionVerdict {
+  const state = useChatStore.getState();
+  const conversation = state.conversations.find((c) => c.id === conversationId);
+  const workspace = selectWorkspace(state, conversationId);
+  return evaluateCompletion({
+    plan: conversation?.plan,
+    evidence: verificationEvidence(conversationId, {
+      // No workspace means no revision any evidence could describe: -1 can
+      // never equal a recorded revision, so nothing reads as fresh.
+      workspaceUpdatedAt: workspace?.updatedAt ?? -1,
+    }),
+    agentTools,
+    // The stop is the user's, not the model's — a stop always wins.
+    aborted: Boolean(session.abort?.signal.aborted),
+    // A turn parked on a question is waiting, not finished — and it is
+    // certainly not unfinished work to be nudged about.
+    pendingQuestion: Boolean(conversation?.pendingQuestion),
+  });
 }
 
 /**
@@ -1059,8 +1271,16 @@ async function runBatch(
   runner: RoundRunner,
   cap: number
 ): Promise<boolean> {
-  for (let iteration = 0; iteration < cap; iteration++) {
+  // `completionNudges` extends the bound as it is granted: a nudge only
+  // ever follows a round the model ended itself, so a runaway TOOL loop
+  // still stops at exactly `cap`, while stopping with the work open buys
+  // the round it needs to finish it.
+  for (let iteration = 0; iteration < cap + runner.completionNudges; iteration++) {
     if (session.abort?.signal.aborted) return true;
+
+    // Anything the user typed while the previous round ran becomes part of
+    // the conversation HERE, at the boundary between two rounds.
+    deliverQueuedMessages(conversationId);
 
     const result = await runRound(conversationId, runner.source, deps);
 
@@ -1112,7 +1332,50 @@ async function runBatch(
       return true;
     }
 
-    if (result.kind === "done" || result.kind === "exhausted") return true;
+    if (result.kind === "exhausted") return true;
+
+    if (result.kind === "done") {
+      // Stopping is a checkpoint, not an answer. The model's closing
+      // sentence is the weakest evidence in the system, and this harness
+      // already holds stronger: the plan it published, and what actually
+      // ran against the code in the workspace. Continue when those say
+      // the work is open, so a multi-step task does not end on "now I'll
+      // wire the route".
+      const verdict = completionVerdictFor(conversationId, result.agentTools === true);
+      if (verdict.complete) return true;
+
+      if (runner.completionNudges < AGENT_COMPLETION_NUDGES) {
+        runner.completionNudges += 1;
+        useChatStore.getState().addMessage(conversationId, {
+          role: "assistant",
+          content: verdict.nudge,
+        });
+        logTurnEvent({
+          turnId: null,
+          conversationId,
+          phase: "completion-gate",
+          detail:
+            `unfinished — ${verdict.summary} ` +
+            `(continuing ${runner.completionNudges}/${AGENT_COMPLETION_NUDGES})`,
+        });
+        continue;
+      }
+
+      // Out of continuations. Name what is still open instead of the
+      // generic checkpoint notice: the user is being asked to take over,
+      // and which promise is unkept is the useful half of that.
+      useChatStore.getState().addMessage(conversationId, {
+        role: "assistant",
+        content: continuationExhaustedNotice(verdict.summary),
+      });
+      logTurnEvent({
+        turnId: null,
+        conversationId,
+        phase: "completion-gate",
+        detail: `unfinished and the continuation budget is spent — ${verdict.summary}`,
+      });
+      return true;
+    }
 
     // Tool calls → execute them here, then loop with results in the transcript.
     const calls = session.toolCalls;
@@ -1170,11 +1433,12 @@ async function runBatch(
  * honest answer rather than a chore.
  */
 async function runRounds(conversationId: string, deps: EngineDeps): Promise<void> {
-  const cap = maxIterations();
+  const cap = maxIterations(deps);
   const runner: RoundRunner = {
     source: await deps.resolveSource(),
     localFallbacks: 0,
     lostRetries: 0,
+    completionNudges: 0,
   };
   session.source = runner.source;
 
@@ -1194,9 +1458,7 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
 
   useChatStore.getState().addMessage(conversationId, {
     role: "assistant",
-    content:
-      "Reached the tool-use limit for this turn and the automatic continuations are spent. " +
-      "Ask me to continue and I'll pick up where I left off.",
+    content: TOOL_LIMIT_NOTICE,
   });
 }
 
@@ -1204,8 +1466,8 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
 
 /**
  * Runs one user turn to completion. Single-flight: a second call
- * while a turn is running is refused (the caller's message stays in
- * the transcript and the user can resend).
+ * while a turn is running is refused (its message is QUEUED by the runner
+ * and delivered at the next round boundary, or as the next turn).
  */
 export async function runTurn(
   conversationId: string,
@@ -1218,6 +1480,9 @@ export async function runTurn(
   session.phase = "running";
   session.conversationId = conversationId;
   session.abort = new AbortController();
+  // Held locally because the finally clears the session field: whether the
+  // turn was STOPPED is still the question the tail of this function asks.
+  const abort = session.abort;
   session.toolCalls = [];
   session.inToolPhase = false;
   session.callLedger = new Map();
@@ -1264,8 +1529,41 @@ export async function runTurn(
     session.callLedger = new Map();
     session.recoveredTextCalls = false;
     session.recoveredNote = null;
+    // Safety net: a question whose turn is over has nobody left to answer
+    // it, and a waiter that outlives its turn would swallow the next answer
+    // into a promise nothing is awaiting. On the reload path there is no
+    // waiter, so the persisted question survives untouched for the card.
+    settlePendingQuestion(conversationId, null);
     useChatStore.getState().clearPendingTurn(conversationId);
   }
+
+  // Messages the user sent while this turn ran are their NEXT instruction,
+  // not part of this one, so they start their own turn rather than sitting
+  // in the queue until something else happens. A stop is the exception:
+  // "stop" means stop, and the queued text stays in the composer where it
+  // can be sent, edited or dropped.
+  if (!abort.signal.aborted) startQueuedTurn(conversationId);
+}
+
+/**
+ * Starts a turn on anything the user queued while the previous one ran.
+ *
+ * Split out so both exits can use it and neither can double-deliver: the
+ * queue is drained with an atomic take, and the transcript is the only
+ * place the message ends up.
+ */
+function startQueuedTurn(conversationId: string): void {
+  const conversation = useChatStore
+    .getState()
+    .conversations.find((c) => c.id === conversationId);
+  if (!conversation) return;
+  // A parked question is an open question: sending a new prompt instead of
+  // answering it would throw away the model's tool results.
+  if (conversation.pendingQuestion) return;
+  if ((conversation.queued?.length ?? 0) === 0) return;
+  if (deliverQueuedMessages(conversationId) === 0) return;
+  useChatStore.getState().markPendingTurn(conversationId);
+  void runTurn(conversationId);
 }
 
 /**
@@ -1296,7 +1594,11 @@ export async function adoptTurn(
   });
   let snapshot: HostSnapshot | null;
   try {
-    snapshot = await sessionHost.fetchSnapshot();
+    // Scoped to THIS conversation: the host streams one turn per
+    // conversation, so an unscoped ask could hand back another chat's
+    // turn — which the guard below would reject, silently skipping a
+    // resume that was actually available.
+    snapshot = await sessionHost.fetchSnapshot(conversationId);
   } finally {
     buffering = false;
     unsubscribePrebuffer();

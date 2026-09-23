@@ -205,6 +205,25 @@ describe("waitForRun", () => {
     expect(Math.max(...waited)).toBeLessThanOrEqual(250);
   });
 
+  it("gives the wait up when the user stops the turn", async () => {
+    // A CI wait is up to fifteen minutes of polling, so Stop has to reach
+    // it — and it must come back as "stopped", never as a verdict, because
+    // a verdict would be recorded as evidence about this revision.
+    const calls = stubFetch(() => json(rawRun({ id: 7, status: "in_progress", conclusion: null })));
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await waitForRun(
+      { token: "t", owner: "acme", repo: "web", run: queued },
+      { sleep: async () => {}, signal: controller.signal }
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/stopped by the user/i);
+    // Nothing was even asked of GitHub: an aborted wait is over before it starts.
+    expect(calls).toHaveLength(0);
+  });
+
   it("reports a timeout as still running, never as a failure", async () => {
     stubFetch(() => json(rawRun({ id: 7, status: "in_progress", conclusion: null })));
     let clock = 0;

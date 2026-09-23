@@ -1,0 +1,185 @@
+// ============================================================
+// Completion Gate — is the work actually done when the model stops?
+// ============================================================
+// The harness had exactly one definition of "finished": the model
+// stopped asking for tools. That is a definition of "stopped", not of
+// "done", and it is why a multi-step task ends on the sentence "now
+// I'll wire the route" with nothing wired. The model's own words are
+// the weakest possible evidence, and we already keep better evidence
+// than it does:
+//
+//   • the plan the agent published (lib/agent-plan.ts), where every
+//     step it has not finished is written down in its own words; and
+//   • the verification ledger (lib/verification-ledger.ts), which
+//     records what actually RAN, and only calls an entry fresh when
+//     the revision it describes is still the current one.
+//
+// So the gate asks a narrow question, and only of those two sources:
+//
+//   1. PLAN UNFINISHED — the agent left a step open that it never
+//      marked done. It made a promise to the user and to itself.
+//   2. CHECK FAILING — a real command or CI run FAILED against the code
+//      that is in the workspace right now. Not "no check was run";
+//      absence of evidence is not a reason to keep working, or every
+//      one-line rename would be nagged for a build. A check that ran
+//      and said no is a reason, because the agent edited past its own
+//      failing proof.
+//
+// Everything else is complete. Gating anything more — a stale pass, a
+// missing check, a heuristic read of the closing sentence — would turn
+// the gate into a nudge the model learns to ignore, which is worse
+// than no gate at all.
+//
+// Two rules keep this honest rather than nagging:
+//
+//   * It never overrides a user. An aborted turn, plan mode (where a
+//     written plan IS the deliverable) and chat mode are all complete
+//     by definition, and the caller passes `aborted` for the same
+//     reason a stop button must win.
+//   * Its budget is the caller's (`AGENT_COMPLETION_NUDGES`), and the
+//     model always has an exit: calling `ask_user` (which parks the turn on
+//     a question the user can answer with one click), or clearing its plan,
+//     both end the gate's interest. The gate is a checkpoint, not a
+//     treadmill.
+//
+// Pure by design: no stores, no clock, no I/O — the plan, the evidence
+// and the stop are all inputs, so every rule here is unit-tested
+// without a turn engine.
+
+import type { AgentPlan } from "../types";
+import { planProgress } from "./agent-plan";
+import { COMPLETION_NUDGE_PREFIX } from "./harness-notices";
+import { VERIFICATION_KIND_LABEL, type VerificationEvidence } from "./verification-ledger";
+
+/** Why the work is not finished, in the order the model sees it. */
+export type IncompleteReason =
+  | {
+      kind: "plan-unfinished";
+      /** 1-based position of the first step that is not done */
+      stepIndex: number;
+      stepCount: number;
+      step: string;
+    }
+  | {
+      kind: "check-failing";
+      label: string;
+      summary: string;
+      /** First failure lines, already capped by the producer */
+      details: string[];
+    };
+
+export interface CompletionInput {
+  /** The agent's published plan for this conversation, when it has one */
+  plan?: AgentPlan;
+  /**
+   * Evidence for this conversation at the CURRENT workspace revision.
+   * Stale entries are ignored here rather than filtered by the caller,
+   * so a caller that forgets cannot make a stale pass look current.
+   */
+  evidence: VerificationEvidence[];
+  /**
+   * True when the round that just ended actually carried the agent's
+   * write tools. Without them there is no work to finish: a prose reply
+   * in chat mode, or a plan in plan mode, is the whole answer.
+   */
+  agentTools: boolean;
+  /** True when the user stopped this turn — a stop always wins */
+  aborted: boolean;
+  /**
+   * True when the turn is parked on an `ask_user` question.
+   *
+   * Waiting is not stopping, and it is emphatically not unfinished work to
+   * be nudged about: the model did the thing the nudge asks for (it asked)
+   * and the next move belongs to the user. Without this rule a parked turn
+   * would be told its work was still open while the answer it needs is on
+   * screen, which is how a loop learns to guess instead of asking.
+   */
+  pendingQuestion?: boolean;
+}
+
+export type CompletionVerdict =
+  | { complete: true }
+  | { complete: false; reasons: IncompleteReason[]; nudge: string; summary: string };
+
+/** One line per reason: the same words in the nudge and in the notice. */
+export function describeReason(reason: IncompleteReason): string {
+  if (reason.kind === "plan-unfinished") {
+    return `your plan step ${reason.stepIndex} of ${reason.stepCount} is still open — "${reason.step}"`;
+  }
+  const failures =
+    reason.details.length > 0 ? ` (first failures: ${reason.details.slice(0, 3).join(" | ")})` : "";
+  return `${reason.label} ran against the current code and FAILED — ${reason.summary}${failures}`;
+}
+
+/**
+ * Model-facing continuation instruction. It names the reasons instead of
+ * repeating the task, because the model has to act on the gap rather
+ * than re-plan the whole job, and it states the two ways out so the
+ * loop cannot become a treadmill.
+ */
+export function completionNudge(reasons: IncompleteReason[]): string {
+  return [
+    // Shared with the scorecard, which counts these: a metric that matches a
+    // sentence the harness no longer writes reports zero forever.
+    COMPLETION_NUDGE_PREFIX,
+    "",
+    "Still outstanding:",
+    ...reasons.map((r) => `- ${describeReason(r)}`),
+    "",
+    "Continue with the next unfinished step. If the remaining work needs a decision only I can make, call `ask_user` with the concrete options and the turn will wait for my answer — do not end the turn on a question in prose, and do not guess. If a recorded failure is expected or outside what I asked for, say so in one line, and clear the plan with `update_plan` (or mark the step done) so the stop is deliberate rather than a leftover.",
+  ].join("\n");
+}
+
+/** User-facing one-liner for the turn log and the final notice. */
+export function completionSummary(reasons: IncompleteReason[]): string {
+  return reasons.map(describeReason).join("; ");
+}
+
+/**
+ * Decides whether a turn that stopped has actually finished.
+ *
+ * Complete means: the user stopped it, the turn had no write tools, or
+ * neither of the two evidence sources above says otherwise.
+ */
+export function evaluateCompletion(input: CompletionInput): CompletionVerdict {
+  if (input.aborted || !input.agentTools || input.pendingQuestion) return { complete: true };
+
+  const reasons: IncompleteReason[] = [];
+
+  // 1. The agent's own checklist. `total > done` is the whole test; a
+  //    plan it never published (undefined, or cleared to empty) makes no
+  //    claim, and a plan whose steps are all done is a completed promise
+  //    even when verification has nothing to say.
+  const progress = planProgress(input.plan);
+  if (progress.total > 0 && progress.done < progress.total) {
+    const open =
+      progress.active ?? progress.next ?? input.plan!.steps.find((s) => s.status !== "done")!;
+    reasons.push({
+      kind: "plan-unfinished",
+      stepIndex: input.plan!.steps.findIndex((s) => s.id === open.id) + 1,
+      stepCount: progress.total,
+      step: open.text,
+    });
+  }
+
+  // 2. Real evidence that contradicts the current code. `fresh-fail` is
+  //    already revision-checked by the ledger, so any entry that reaches
+  //    here describes the code in the workspace now.
+  for (const entry of input.evidence) {
+    if (entry.status !== "fresh-fail") continue;
+    reasons.push({
+      kind: "check-failing",
+      label: VERIFICATION_KIND_LABEL[entry.kind],
+      summary: entry.summary,
+      details: entry.details ?? [],
+    });
+  }
+
+  if (reasons.length === 0) return { complete: true };
+  return {
+    complete: false,
+    reasons,
+    nudge: completionNudge(reasons),
+    summary: completionSummary(reasons),
+  };
+}

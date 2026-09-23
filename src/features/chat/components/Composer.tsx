@@ -26,10 +26,12 @@
 import React, { useRef, useState } from "react";
 import {
   ArrowUp,
+  Clock,
   FileText,
   ImagePlus,
   Paperclip,
   Slash,
+  Sparkles,
   Square,
   TriangleAlert,
   X,
@@ -39,12 +41,19 @@ import { useFileDrop } from "@/hooks/useFileDrop";
 import { DropOverlay } from "@/hooks/DropOverlay";
 import { useAppStore } from "@/stores/app.store";
 import { importChatFiles, MAX_ATTACHMENTS } from "../lib/attachments";
-import { CHAT_COMMAND_BY_ID, commandsFor, type ChatCommand } from "../lib/commands";
+import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID, commandsFor, type ChatCommand } from "../lib/commands";
+import { resolveSlashInput } from "../lib/slash";
 import { CommandMenu, type CommandMenuMode } from "./CommandMenu";
 import { MentionMenu } from "./MentionMenu";
 import { applyMention, findMentionQuery, rankMentionCandidates } from "../lib/mentions";
 import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
-import type { ChatAttachment, ChatMode, ModelInfo } from "../types";
+import type {
+  AgentSuggestion,
+  ChatAttachment,
+  ChatMode,
+  ModelInfo,
+  QueuedUserMessage,
+} from "../types";
 
 /** Draft-level attachment state lives in ChatPage as ChatAttachment[] */
 
@@ -96,6 +105,20 @@ interface ComposerProps {
    * simply means no mention menu — the token stays plain text.
    */
   mentionPaths?: string[];
+  /**
+   * Clickable next steps the agent offered (`suggest_next`). They render
+   * above the input because that is where the NEXT message comes from.
+   */
+  suggestions?: AgentSuggestion[];
+  /** Sends one offered next step */
+  onSuggestion?: (prompt: string) => void;
+  /**
+   * Messages sent while the reply in progress was still running. They are
+   * waiting for the next round boundary, so they are shown as queued rather
+   * than as sent — with a way to take one back before it is delivered.
+   */
+  queued?: QueuedUserMessage[];
+  onRemoveQueued?: (id: string) => void;
 }
 
 export function Composer({
@@ -118,6 +141,10 @@ export function Composer({
   onRunCommand,
   onModelChange,
   mentionPaths = [],
+  suggestions = [],
+  onSuggestion,
+  queued = [],
+  onRemoveQueued,
 }: ComposerProps) {
   const innerRef = React.useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -140,11 +167,14 @@ export function Composer({
     [inputRef]
   );
 
+  const heightForWidth = React.useRef(0);
+
   const grow = React.useCallback(() => {
     const el = innerRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    heightForWidth.current = el.clientWidth;
   }, []);
 
   // Auto-grow as the value changes and when window resizing reflows
@@ -158,19 +188,51 @@ export function Composer({
     return () => window.removeEventListener("resize", grow);
   }, [grow]);
 
+  /**
+   * Auto-grow when the BOX resizes, which a window listener cannot see.
+   *
+   * Opening the Changes panel (and dragging its split handle) narrows this
+   * container without a window resize event, so the height computed for the
+   * old width survived: the same draft that fitted in two lines was then
+   * clipped behind an inner scrollbar, and widening again left the box
+   * standing taller than its content. Only a change of WIDTH recomputes the
+   * height — the observer also fires for the heights this function sets, and
+   * reacting to those would be a loop.
+   */
+  React.useEffect(() => {
+    const el = innerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth !== heightForWidth.current) grow();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [grow]);
+
   const hasImages = attachments.length > 0;
-  const canSend = (value.trim().length > 0 || hasImages) && !isStreaming && !disabled;
+  // A draft IS sendable while this conversation is replying: it is queued
+  // and delivered at the next round boundary (the runner decides that; the
+  // button must not lie about it, which is what `!isStreaming` did here).
+  // `disabled` still means a stream owns the page in ANOTHER conversation.
+  const canSend = (value.trim().length > 0 || hasImages) && !disabled;
 
   // ── Slash command menu state ──
-  // Two related flags, deliberately separate:
-  //  · isSlashDraft — the draft starts with "/". While true, Enter
-  //    and Tab belong to the menu and NEVER send the text.
+  // Three related flags, deliberately separate:
+  //  · isSlashDraft — the draft starts with "/".
+  //  · slashIsProse — the draft starts with "/" and is a SENTENCE, not a
+  //    command attempt: an unknown token that carries arguments
+  //    ("/usr/bin/env is broken", a path, a quoted line). The resolver
+  //    calls this a message, so the composer must let it be sent —
+  //    swallowing Enter for it made the only way out of a slash draft a
+  //    mouse click on Send.
   //  · menuVisible — the list is on screen. Escape hides the list but
   //    leaves the guard (and the text) in place, so Escape can't turn
   //    a half-typed command into a sent message.
   const isSlashDraft = value.startsWith("/") && !disabled;
   const [menuDismissed, setMenuDismissed] = useState(false);
-  const menuVisible = isSlashDraft && !menuDismissed;
+  const slashIsProse =
+    isSlashDraft && resolveSlashInput(value, CHAT_COMMANDS).kind === "message";
+  const menuVisible = isSlashDraft && !menuDismissed && !slashIsProse;
 
   const afterSlash = isSlashDraft ? value.slice(1) : "";
   const spaceIdx = afterSlash.indexOf(" ");
@@ -392,10 +454,12 @@ export function Composer({
       }
     }
 
-    if (isSlashDraft) {
-      // The guard that matters: while the draft is a slash draft, a
+    if (isSlashDraft && !slashIsProse) {
+      // The guard that matters: while the draft is a command attempt, a
       // bare Enter never sends it. Unmatched commands keep their text
-      // (and the menu explains), instead of becoming a prompt.
+      // (and the menu explains), instead of becoming a prompt. A draft the
+      // resolver reads as prose is excluded — it falls through to the
+      // ordinary Enter-to-send path below.
       if (e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
         return;
@@ -438,7 +502,8 @@ export function Composer({
 
   const placeholderText = disabled
     ? "Generating a response in another chat…"
-    : placeholder ?? "Message models… (Enter to send · Shift+Enter newline · / for commands)";
+    : (placeholder ??
+      "Message models… (Enter to send · Shift+Enter newline · / for commands)");
 
   return (
     <div
@@ -498,6 +563,45 @@ export function Composer({
         </div>
       )}
 
+      {/* Next steps the agent offered, and anything the user sent mid-turn.
+          Both sit ABOVE the input because both are about the next message:
+          one chip sends one, and a queued message is already on its way. */}
+      {suggestions.length > 0 && (
+        <div className="chat-suggest-row" role="group" aria-label="Suggested next steps">
+          {suggestions.map((s) => (
+            <button
+              key={`${s.label}:${s.prompt}`}
+              type="button"
+              className="chat-suggest-chip"
+              onClick={() => onSuggestion?.(s.prompt)}
+              title={s.prompt}
+            >
+              <Sparkles className="h-3 w-3" aria-hidden="true" />
+              <span>{s.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {queued.length > 0 && (
+        <div className="chat-queued-row" role="status" aria-label="Messages queued for the next step">
+          {queued.map((q) => (
+            <span key={q.id} className="chat-queued-chip" title={q.text}>
+              <Clock className="h-3 w-3" aria-hidden="true" />
+              <span className="chat-queued-text">{q.text}</span>
+              <button
+                type="button"
+                className="chat-queued-remove"
+                onClick={() => onRemoveQueued?.(q.id)}
+                aria-label="Remove queued message"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className={`chat-composer ${isStreaming ? "chat-composer-streaming" : ""}`}>
         <SimpleTooltip content="Attach images" side="top">
           <button
@@ -544,7 +648,10 @@ export function Composer({
           }
         />
 
-        {isStreaming ? (
+        {/* Stop and Send are NOT alternatives: while a turn runs the user
+            needs both — stop what is happening, or say something about it
+            without waiting for it to finish. */}
+        {isStreaming && (
           <SimpleTooltip content="Stop generating" side="top">
             <button
               type="button"
@@ -555,19 +662,22 @@ export function Composer({
               <Square className="h-3.5 w-3.5" />
             </button>
           </SimpleTooltip>
-        ) : (
-          <SimpleTooltip content="Send message" shortcut="↵" side="top">
-            <button
-              type="button"
-              className="chat-composer-send"
-              onClick={onSend}
-              disabled={!canSend}
-              aria-label="Send message"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
-          </SimpleTooltip>
         )}
+        <SimpleTooltip
+          content={isStreaming ? "Queue for the next step" : "Send message"}
+          shortcut="↵"
+          side="top"
+        >
+          <button
+            type="button"
+            className="chat-composer-send"
+            onClick={onSend}
+            disabled={!canSend}
+            aria-label={isStreaming ? "Queue message" : "Send message"}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </SimpleTooltip>
       </div>
 
       {mentionVisible && (
@@ -610,7 +720,7 @@ export function Composer({
           {disabled
             ? "You can keep browsing — sending resumes when the other chat finishes."
             : isStreaming
-              ? "Replying… type / and press Enter for /stop · /status · /context"
+              ? "Replying… send to queue it for the next step · /stop ends the turn"
               : mode === "plan"
                 ? "Type / for commands · /build switches back to editing"
                 : "Type / for commands · /help lists them all · Responses may be inaccurate — verify important information."}

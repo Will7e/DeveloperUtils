@@ -10,15 +10,19 @@
 
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
-import { AGENT_ITERATIONS_MAX, AGENT_MAX_ITERATIONS } from "../constants";
+import { AGENT_ITERATIONS } from "../constants";
 import { visibleMessages } from "../types";
 import type { ChatMessage } from "../types";
-import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID } from "../lib/commands";
+import { serializeToolResult } from "../lib/tools";
+import { answerSummary, questionResultPayload, sanitizeAnswer } from "../lib/agent-question";
+import { settlePendingQuestion } from "./ask-user";
+import { CHAT_COMMANDS, runCommandById } from "../lib/commands";
 import { resolveSlashInput } from "../lib/slash";
 import { getCachedModelCatalog } from "../lib/model-catalog";
 import { sessionHost } from "../session/session-client";
 import {
   adoptTurn,
+  deliverQueuedMessages,
   isTurnRunning,
   isTurnUnrecoverable,
   runTurn,
@@ -59,9 +63,6 @@ export function sendUserMessage(
   if (!trimmed && !hasAttachments) return;
 
   const store = useChatStore.getState();
-  // `isTurnRunning` closes the window between a send and the engine's
-  // first streaming update, where `isStreaming` is still false.
-  if (store.isStreaming || isTurnRunning()) return;
 
   // ── Slash input is a command, never a prompt ──
   // The composer resolves commands before calling here, but this is
@@ -79,17 +80,53 @@ export function sendUserMessage(
     return;
   }
   if (resolution.kind === "command") {
-    const command = CHAT_COMMAND_BY_ID.get(resolution.id);
-    if (command) {
-      const live = useChatStore.getState();
-      const outcome = command.run({
-        conversationId,
-        arg: resolution.arg,
-        models: getCachedModelCatalog() ?? [],
-        isStreaming: live.isStreaming && live.streamingConversationId === conversationId,
-      });
-      void Promise.resolve(outcome);
+    const live = useChatStore.getState();
+    // Same executor the composer's menu uses (lib/commands.runCommandById),
+    // so a command cannot behave differently depending on how it was
+    // submitted — the two paths used to run `command.run` separately, which
+    // is how one came to apply a returned draft while the other dropped it.
+    void runCommandById(resolution.id, {
+      conversationId,
+      arg: resolution.arg,
+      models: getCachedModelCatalog() ?? [],
+      isStreaming: live.isStreaming && live.streamingConversationId === conversationId,
+    }).then((outcome) => {
+      // An explicit draft (/help reopens the command menu) is honored here
+      // too. Only an explicit one: this entry point is not the composer, so
+      // it must never blank text the user is still typing.
+      if (outcome && typeof outcome === "object" && typeof outcome.draft === "string") {
+        useChatStore.getState().setComposerDraft(conversationId, outcome.draft);
+      }
+    });
+    return;
+  }
+
+  // ── A turn is already running ──
+  //
+  // This used to be a silent `return`: the message was thrown away and the
+  // user was left believing they had sent it. Neither extreme is right —
+  // interleaving it into the round in flight would put an instruction in
+  // front of tool results the model has not read yet — so it is QUEUED and
+  // delivered at the next round boundary (session/turn-engine.ts).
+  //
+  // The one exception is a turn parked on a question: there, the user's
+  // words ARE the answer, and typing them is the natural way to give it.
+  if (store.isStreaming || isTurnRunning()) {
+    const live = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+    if (live?.pendingQuestion) {
+      answerQuestion(conversationId, { note: trimmed });
+      return;
     }
+    store.enqueueUserMessage(conversationId, {
+      text: trimmed,
+      ...(hasAttachments ? { attachments } : {}),
+    });
+    store.setSuggestions(conversationId, undefined);
+    useAppStore.getState().addToast({
+      message: "Queued — sent at the next step of the reply in progress.",
+      type: "info",
+      duration: 3500,
+    });
     return;
   }
 
@@ -108,6 +145,14 @@ export function sendUserMessage(
   }
 
   const titleSource = trimmed || attachments?.[0]?.name || "New Chat";
+
+  // Chips from the previous turn described a moment that has passed.
+  store.setSuggestions(conversationId, undefined);
+
+  // Anything still queued (a turn that was stopped before it could deliver
+  // them) is OLDER than this message, so it goes into the transcript first —
+  // the model must read the conversation in the order it happened.
+  deliverQueuedMessages(conversationId);
 
   store.addMessage(conversationId, {
     role: "user",
@@ -133,6 +178,100 @@ export function sendUserMessage(
 /** Aborts the in-flight turn (partial output is preserved) */
 export function stopChatStream(): void {
   stopTurn();
+}
+
+/**
+ * What clicking "Approve & build" sends.
+ *
+ * A sentence rather than a hidden flag on purpose: the instruction rides the
+ * transcript like any other user turn, so the model reads an approval where
+ * it would otherwise read an unexplained mode change, and the user can see
+ * exactly what they authorized.
+ */
+export const PLAN_APPROVAL_MESSAGE =
+  "The plan above is approved. Implement it now, in order: start with the first step, verify as you go, " +
+  "and keep the plan updated with `update_plan` as steps land.";
+
+/**
+ * Authorizes a plan: switches the conversation to Build and starts the work.
+ *
+ * Plan mode's whole point is that the mode GATES the mutating tools, so the
+ * approval has to flip the mode BEFORE the turn is prepared — a turn started
+ * in plan mode would be sent a read-only surface and could not implement the
+ * very plan the user just approved. That is what makes this an authorization
+ * rather than a display: the button is the moment the plan becomes work.
+ */
+export function approvePlan(conversationId: string): void {
+  const store = useChatStore.getState();
+  store.setConversationMode(conversationId, "build");
+  sendUserMessage(conversationId, PLAN_APPROVAL_MESSAGE);
+}
+
+/** What the user handed back for a parked question */
+export interface QuestionAnswerInput {
+  /** Labels of the options they clicked (filtered to what was offered) */
+  selected?: string[];
+  /** What they typed, when they typed instead of clicking */
+  note?: string;
+}
+
+/**
+ * Answers the question this conversation's turn is parked on.
+ *
+ * Two paths, one transcript. With a live turn the waiter resolves, the
+ * `ask_user` call finishes with an ordinary result, and the loop continues
+ * in place — tool results, plan and all. With no live turn (the page was
+ * reloaded while the question was on screen) the call is still dangling in
+ * the transcript, so the answer is committed as ITS result and the loop is
+ * restarted from stored history: the model reads the same exchange either
+ * way, and a question that survived a reload is not answered twice.
+ *
+ * The answer is filtered against the options the question actually offered
+ * (`sanitizeAnswer`): a stale card must not be able to decide with a label
+ * the model never proposed.
+ */
+export function answerQuestion(conversationId: string, input: QuestionAnswerInput): void {
+  const store = useChatStore.getState();
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  const question = conversation?.pendingQuestion;
+  if (!question) return;
+
+  const answer = sanitizeAnswer(question, input);
+  // The chips described the world before this decision.
+  store.setSuggestions(conversationId, undefined);
+
+  if (settlePendingQuestion(conversationId, answer)) return;
+
+  store.setPendingQuestion(conversationId, undefined);
+
+  const payload = questionResultPayload(question, answer);
+  const dangling = conversation?.messages.some(
+    (m) => !m.hidden && m.toolCalls?.calls.some((c) => c.id === question.callId)
+  );
+
+  if (dangling) {
+    const result = {
+      callId: question.callId,
+      name: "ask_user" as const,
+      ok: true,
+      data: payload,
+      durationMs: 0,
+      summary: answerSummary(answer),
+    };
+    useChatStore.getState().commitToolResult(conversationId, result, serializeToolResult(result));
+  } else {
+    // The call is gone from the transcript, so there is nothing to pair a
+    // result with and a bare tool_result would be an orphan the wire
+    // payload cannot carry. The user's answer still has to reach the model,
+    // so it goes as the message it would have been.
+    useChatStore.getState().addMessage(conversationId, {
+      role: "user",
+      content: `Answer to your question "${question.header}": ${answerSummary(answer)}`,
+    });
+  }
+
+  useChatStore.getState().markPendingTurn(conversationId);
+  void runTurn(conversationId);
 }
 
 /**
@@ -215,7 +354,7 @@ export async function resumeInterruptedTurn(conversationId: string): Promise<boo
     const live = useChatStore.getState().conversations.find((c) => c.id === conversationId);
     if (!live?.pendingTurn) return false;
 
-    const plan = planResume(live.messages, live.pendingTurn);
+    const plan = planResume(live.messages, live.pendingTurn, Date.now(), live.pendingQuestion);
     logTurnEvent({
       turnId: null,
       conversationId,
@@ -232,6 +371,13 @@ export async function resumeInterruptedTurn(conversationId: string): Promise<boo
       case "keep":
         // Recoverable by the user (error tail) — keep the marker so the
         // explicit Resume affordance stays available.
+        return false;
+
+      case "await-answer":
+        // The turn is waiting, not broken. The question card is already on
+        // screen from persisted state, and answering it is what restarts
+        // the loop — so there is nothing to replay here, and re-running the
+        // round would throw the question away instead of resuming it.
         return false;
 
       case "continue-tool-loop": {
@@ -352,4 +498,4 @@ export { downloadConversation, exportConversationToMarkdown } from "./export-con
 // Re-exported so callers can pre-connect the host without importing
 // the session layer directly.
 export { sessionHost };
-export { AGENT_MAX_ITERATIONS, AGENT_ITERATIONS_MAX };
+export { AGENT_ITERATIONS };

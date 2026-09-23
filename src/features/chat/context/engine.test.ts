@@ -263,6 +263,35 @@ describe("prepareRequest", () => {
     expect(withTools.budget.available).toBeLessThan(without.budget.available);
   });
 
+  it("keeps the newest message the task, not the folded memory", () => {
+    // The block used to be titled "(authoritative memory)", which is an
+    // instruction: a weak model reading a GOAL/OPEN ledger labelled
+    // authoritative answers the REMEMBERED task instead of the message in
+    // front of it. Precedence has to be stated, and stated the way a small
+    // model reads it — background, newest message wins, do not guess.
+    const summary = {
+      text: "GOAL: wire the deploy poller.\nOPEN: confirm the retry backoff.",
+      coversCount: 12,
+      createdAt: 1,
+      freedTokens: 900,
+    };
+
+    const prompt = composeSystemPrompt("You are a careful engineer.", summary)!;
+
+    expect(prompt).toContain("GOAL: wire the deploy poller.");
+    expect(prompt).toMatch(/most recent message/i);
+    expect(prompt).toMatch(/background/i);
+    expect(prompt).not.toMatch(/authoritative/i);
+  });
+
+  it("says nothing at all when there is no summary text", () => {
+    const summary = { text: "   ", coversCount: 3, createdAt: 1, freedTokens: 0 };
+
+    // An empty summary must not become an empty "Earlier in this
+    // conversation" block, which only tells the model something is missing.
+    expect(composeSystemPrompt("base", summary)).toBe("base");
+  });
+
   it("does not mutate the conversation it reads", () => {
     const conv = conversation();
     const snapshot = JSON.stringify(conv);

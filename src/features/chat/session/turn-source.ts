@@ -53,9 +53,15 @@ export class HostTurnSource implements TurnSource {
     this.client.abortTurn(turnId);
   }
 
-  /** Current host snapshot (adoption of a live turn after reload) */
-  fetchSnapshot(): Promise<HostSnapshot | null> {
-    return this.client.fetchSnapshot();
+  /**
+   * Current host snapshot (adoption of a live turn after reload).
+   *
+   * Scoped to the conversation being adopted: the host streams one turn
+   * per conversation, so asking for "the" snapshot with several live
+   * would be how a page adopts somebody else's stream.
+   */
+  fetchSnapshot(conversationId?: string): Promise<HostSnapshot | null> {
+    return this.client.fetchSnapshot(conversationId);
   }
 }
 
@@ -95,7 +101,9 @@ export class LocalTurnSource implements TurnSource {
 
   async startTurn(payload: HostStartTurnPayload): Promise<StartOutcome> {
     this.controller.startTurn(payload);
-    return { kind: "started", snapshot: this.controller.snapshot() };
+    // Scoped to this conversation, like the host's ack: a page must never
+    // receive a snapshot of a turn it did not start.
+    return { kind: "started", snapshot: this.controller.snapshot(payload.conversationId) };
   }
 
   subscribe(listener: (event: HostEvent) => void): () => void {

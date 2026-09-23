@@ -81,12 +81,31 @@ export type ToolName =
   | "delegate"
   | "run_checks"
   | "update_plan"
+  // ── Harness-interaction tools: the two things an agent needs from the
+  //    person it works for. `ask_user` parks the turn on a structured
+  //    question instead of guessing; `suggest_next` hands back clickable
+  //    next steps instead of ending in prose the user must retype.
+  | "ask_user"
+  | "suggest_next"
   | "list_mcp_tools"
   | "call_mcp_tool"
   | "run_command"
   | "verify_with_ci"
   | "search_web"
-  | "fetch_url";
+  | "fetch_url"
+  // ── App tools: the workstation's own features (lib/app-tools.ts,
+  //    services/app-actions.ts). They need no repository and no token —
+  //    the compiler, formatter, comparators, diff engine, ServiceNow
+  //    reference, DrawFlows canvas and the tool handoff are all local.
+  | "run_code"
+  | "format_code"
+  | "compare_data"
+  | "diff_text"
+  | "search_library"
+  | "http_request"
+  | "http_write"
+  | "create_diagram"
+  | "open_in_tool";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -199,6 +218,21 @@ export interface ChatMessage {
    * resume planner (complete the answer rather than duplicate it).
    */
   resumedPartial?: boolean;
+  /**
+   * The thread-on-repository this row was produced under (see
+   * identity/identity.ts).
+   *
+   * Stamped at commit, because a transcript outlives its repository: after a
+   * switch, the tool rows above are the PREVIOUS checkout's file bodies,
+   * search hits and write arguments, and the request would replay all of them
+   * under a system prompt that names the new repository. Context/binding-scope
+   * reads this to withhold the rows that belong somewhere else.
+   *
+   * Absent means "unknown" (a row written before this shipped), which is NOT
+   * the same as "the current binding": unknown rows are kept, because for a
+   * chat that never left its repository they are that repository's facts.
+   */
+  bindingId?: string;
 }
 
 /**
@@ -209,6 +243,22 @@ export interface ChatMessage {
  */
 export function visibleMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((m) => !m.hidden);
+}
+
+/**
+ * True when this message starts a new transcript turn — a user message
+ * that is not an agent protocol row.
+ *
+ * The distinction matters wherever history is CUT (compaction, request
+ * truncation). Tool results are stored as `role: "user"` rows carrying a
+ * `toolResult` payload (the wire protocol is applied at request time), so
+ * a role check alone reports a tool result as a turn boundary — cutting
+ * there folds the assistant's `tool_calls` row away and leaves its result
+ * orphaned in the kept tail. Every module that asks "is this a user
+ * turn?" has to ask it the same way; this is that one place.
+ */
+export function isTranscriptBoundary(message: ChatMessage | undefined): boolean {
+  return message?.role === "user" && message.toolResult === undefined;
 }
 
 export function isToolMessage(message: ChatMessage): boolean {
@@ -234,6 +284,24 @@ export interface ChatConversation {
   /** GitHub repo attached to this conversation (enables agent tools) */
   repoContext?: RepoContext;
   /**
+   * The last time this thread's REPOSITORY CHANGED — when the current era
+   * began, and what was attached before it.
+   *
+   * Written by `setConversationRepo` on the same `moved` check that clears the
+   * plan, so it cannot drift from what actually counts as a move. It exists
+   * because the per-row binding stamp cannot date the rows that were written
+   * before it shipped: those rows carry no provenance, and "unknown" was
+   * treated as "current", which left a chat that had already switched before
+   * the upgrade replaying the old repository's file bodies to the model —
+   * precisely the reported symptom, on a chat the fix could not otherwise
+   * reach (context/binding-scope.ts).
+   *
+   * `at` is the era boundary; `from` is the attachment left behind when there
+   * was one (`owner/repo@branch`, or null for a chat that had none), which is
+   * what the boundary note names.
+   */
+  bindingMove?: { at: number; from: string | null };
+  /**
    * A turn was started but its outcome (reply, error, or abort) is not
    * yet committed to the transcript. Persisted so a page reload can
    * detect the lost in-flight response and resume it.
@@ -256,6 +324,22 @@ export interface ChatConversation {
    * long agent runs feel like a black box.
    */
   plan?: AgentPlan;
+  /**
+   * The structured question this conversation's turn is parked on, if any
+   * (see `ask_user`). Persisted: after a reload the card renders again and
+   * the answer resumes the interrupted tool loop.
+   */
+  pendingQuestion?: AgentQuestion;
+  /**
+   * Clickable next steps offered by the last turn (`suggest_next`), shown
+   * above the composer while the turn is idle. Cleared by the next send.
+   */
+  suggestions?: AgentSuggestion[];
+  /**
+   * Messages the user sent mid-turn, waiting for the next round boundary
+   * (see QueuedUserMessage). Persisted so a reload does not swallow them.
+   */
+  queued?: QueuedUserMessage[];
   /**
    * How many files this conversation's workspace has changed, for the
    * conversation list.
@@ -286,10 +370,81 @@ export interface AgentPlan {
   complete: boolean;
 }
 
+/** One selectable answer on an `ask_user` question */
+export interface AgentQuestionOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * A structured question the agent is parked on.
+ *
+ * It lives on the conversation rather than in the transcript because it is
+ * STATE, not a message: the turn is still open, the answer resumes it, and a
+ * reload has to find the question again exactly where it was. The transcript
+ * carries the other half of the pair (the `ask_user` call and, once it
+ * exists, its result) so the model sees the exchange as a normal tool round.
+ */
+export interface AgentQuestion {
+  /** Short title for the card, e.g. "Auth strategy" */
+  header: string;
+  /** One sentence naming the decision and what depends on it */
+  question: string;
+  options: AgentQuestionOption[];
+  /** True when more than one option may be chosen */
+  multiSelect?: boolean;
+  /** The tool call this question belongs to (pairs it with its result) */
+  callId: string;
+  askedAt: number;
+}
+
+/** What the user chose. Always free text, optionally with options picked. */
+export interface AgentQuestionAnswer {
+  /** Labels of the options the user picked (empty when they only typed) */
+  selected: string[];
+  /** The user's own words, when they typed instead of (or as well as) picking */
+  note?: string;
+  answeredAt: number;
+}
+
+/** A clickable next step offered by `suggest_next` */
+export interface AgentSuggestion {
+  /** Chip text (imperative, a few words) */
+  label: string;
+  /** The instruction sent when the chip is clicked — self-contained */
+  prompt: string;
+}
+
+/**
+ * A message the user sent while the turn was still running.
+ *
+ * It is queued rather than dropped (which is what used to happen) or
+ * interleaved into the round in flight (which would put a stale instruction
+ * in front of a tool result the model has not seen yet). The engine delivers
+ * it at the next round boundary, so the model reads it as the next user turn
+ * — the same thing it would have been had the user waited.
+ */
+export interface QueuedUserMessage {
+  id: string;
+  text: string;
+  attachments?: ChatAttachment[];
+  queuedAt: number;
+}
+
 /** Rolling conversation summary — persisted compaction state */
 export interface ConversationSummary {
   /** Prose summary produced by the model (plain text, no markdown headers) */
   text: string;
+  /**
+   * The thread-on-repository the folded turns were spent on.
+   *
+   * A summary names files, decisions and failures in plain prose, and it is
+   * re-injected into the system prompt on EVERY later turn. Written on
+   * repository A and read on B, it tells the model about A's code with the
+   * authority of its own memory (context/engine.ts adds the caveat when it
+   * differs from the current binding).
+   */
+  bindingId?: string;
   /** Number of original messages folded into `text` (and prior summaries) */
   coversCount: number;
   /** When this summary was generated */
@@ -348,6 +503,20 @@ export interface WorkspaceState {
    * when absent (older persisted workspaces).
    */
   mutations?: import("./workspace/undo").WorkspaceMutation[];
+  /**
+   * The REVISION of the working copy: it moves when the code moves.
+   *
+   * Load-bearing, because the verification ledger reads it as "which
+   * version was proven" (lib/verification-ledger.ts). So it may only be
+   * stamped by something that changes what the repository would contain —
+   * a write, a delete, a revert, an undo — and never by bookkeeping.
+   *
+   * Reading a file to fix it used to bump this, which made the failing
+   * test the agent was about to repair read as "stale, recorded against
+   * old code" the moment it looked at the file. That is the exact answer
+   * the ledger exists to give correctly: a run against bytes that have
+   * not changed is still a run against the current bytes.
+   */
   updatedAt: number;
 }
 
@@ -431,6 +600,34 @@ export interface PushDecision {
    * trusted: a stale modal must not be able to decide what ships.
    */
   excludePaths?: string[];
+}
+
+/**
+ * An HTTP request that changes something on an external service, awaiting
+ * the user's approval — shown in the HttpApprovalModal.
+ *
+ * This gate exists because the difference between the agent reading an API
+ * and the agent writing to one is the difference between research and an
+ * irreversible action taken on the user's behalf. The dialog shows the
+ * method, the URL, the headers (credential-shaped values masked) and the
+ * body, plus the model's own one-line `why`, so the decision is made on a
+ * description of the request rather than on the model's confidence about it.
+ */
+export interface PendingHttpRequest {
+  conversationId: string;
+  createdAt: number;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+  /** The model's one line on what this request is meant to accomplish */
+  why?: string;
+}
+
+/** The user's decision at the HTTP write gate */
+export interface HttpApprovalDecision {
+  approved: boolean;
+  note?: string;
 }
 
 /** Result of the approved GitHub push chain */
@@ -523,17 +720,6 @@ export interface ChatSettings {
    * text content always syncs.
    */
   syncImageAttachments: boolean;
-  /** Max agent tool-loop iterations per user message (coding-agent mode) */
-  agentMaxIterations: number;
-  /**
-   * Optional external checks runner (see lib/verify-contract.ts). When set,
-   * `run_checks` POSTs the repository's declared commands here and returns
-   * real results. Empty means no runner is configured — in which case the
-   * command tiers are `run_command` (the local companion, on the user's
-   * machine) and `verify_with_ci` (the repository's own workflow), and the
-   * harness says which checks it could not run rather than guessing.
-   */
-  checksEndpoint?: string;
   /**
    * Connected MCP servers (browser-native streamable HTTP — no local
    * daemon). Their tools are reachable through list_mcp_tools /
@@ -547,14 +733,15 @@ export interface ChatSettings {
    * the provider refuses the request — continue it on a capably stronger
    * model instead of giving up. Default on; every switch is announced in
    * the transcript and attributed on the reply. See lib/escalation.ts.
+   *
+   * The one escalation knob that stays a preference, because a switch can
+   * spend money on a pricier model: this is consent, not tuning. WHICH
+   * model it switches to is the harness's call (the cheapest model the
+   * catalog knows to be stronger, within the automatic budget) — asking a
+   * user to type a model id to describe their own failure mode was never a
+   * choice they were equipped to make.
    */
   autoEscalate?: boolean;
-  /**
-   * Explicit escalation target. Empty = choose automatically (the
-   * cheapest capably stronger model the catalog knows about, within the
-   * automatic budget).
-   */
-  escalationModel?: string;
 }
 
 /** Reasoning capability metadata advertised by the OpenRouter catalog */

@@ -38,6 +38,12 @@ export interface CiClientDeps {
   pollIntervalMs?: number;
   maxPollIntervalMs?: number;
   onPoll?: (run: CiRun, elapsedMs: number) => void;
+  /**
+   * The turn's abort signal. A CI wait pools up to fifteen minutes of
+   * polling, and a Stop that only took effect after the verdict would be a
+   * Stop that did nothing (see companion-client's CompanionDeps).
+   */
+  signal?: AbortSignal;
 }
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -198,11 +204,19 @@ export async function waitForRun(
   let interval = initial;
 
   for (;;) {
+    if (deps.signal?.aborted) {
+      // Not a verdict: no run happened against this revision, so nothing
+      // may be recorded as verified in either direction.
+      return { ok: false, error: "Stopped by the user while waiting for CI — the run was left to finish on GitHub." };
+    }
     if (run.status === "completed") return { ok: true, run, verdict: interpretCiRun(run, now() - started) };
     if (now() - started >= maxWait) {
       return { ok: true, run, verdict: interpretCiRun(run, now() - started) };
     }
     await sleep(interval);
+    if (deps.signal?.aborted) {
+      return { ok: false, error: "Stopped by the user while waiting for CI — the run was left to finish on GitHub." };
+    }
     interval = Math.min(Math.round(interval * 1.5), cap);
     try {
       const next = await fetchRun({

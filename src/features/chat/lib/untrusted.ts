@@ -62,6 +62,15 @@ export const UNTRUSTED_TOOLS: ReadonlySet<string> = new Set([
   "fetch_url",
   // A delegated helper's report quotes repository content…
   "delegate",
+  // App tools that carry text authored elsewhere. The HTTP pair returns an
+  // endpoint's response verbatim — a JSON error object, an HTML error page,
+  // a banner — and `search_library` returns documentation and example code
+  // for ServiceNow APIs. Both are exactly the shape an injection rides in
+  // on: copy-pasteable code whose comments tell the model what to do next.
+  // The app AUTHORS neither of them.
+  "http_request",
+  "http_write",
+  "search_library",
 ]);
 
 export function isUntrustedTool(name: string): boolean {

@@ -34,6 +34,18 @@ export type StartOutcome =
 type EventListener = (event: HostEvent) => void;
 
 /**
+ * Correlates a SNAPSHOT reply with the ATTACH that asked for it. With
+ * several conversations streaming, "the next snapshot to arrive" is not
+ * an answer to any particular question — it could be another page's turn,
+ * or one still in flight from an earlier ask.
+ */
+let attachSeq = 0;
+function createAttachRequestId(): string {
+  attachSeq += 1;
+  return `attach_${Date.now().toString(36)}_${attachSeq.toString(36)}`;
+}
+
+/**
  * Page-side handle on the session host. One per app. Reconnects the
  * underlying port after worker replacement (deploy with two tabs).
  */
@@ -133,13 +145,30 @@ export class SessionHostClient {
     };
   }
 
-  /** Resolves with the current host snapshot (turn replay) */
-  async fetchSnapshot(): Promise<HostSnapshot | null> {
+  /**
+   * Resolves with the replay state of one conversation's live turn.
+   *
+   * `conversationId` is what makes this the right answer rather than a
+   * plausible one: the host holds a turn per conversation, so a page
+   * adopting conversation C that accepted D's snapshot would render
+   * another chat's answer in C. The requestId echo closes the same hole
+   * for replies that arrive a beat late; without a conversationId (the
+   * single-turn case) the host answers with its newest live turn.
+   */
+  async fetchSnapshot(conversationId?: string): Promise<HostSnapshot | null> {
     if (!this.available) return null;
-    const promise = this.waitFor((e) => e.type === "SNAPSHOT", 5_000)
+    const requestId = createAttachRequestId();
+    const promise = this.waitFor(
+      (e) => e.type === "SNAPSHOT" && e.requestId === requestId,
+      5_000
+    )
       .then((e) => (e.type === "SNAPSHOT" ? e.snapshot : null))
       .catch(() => null);
-    this.post({ type: "ATTACH" });
+    this.post({
+      type: "ATTACH",
+      requestId,
+      ...(conversationId ? { conversationId } : {}),
+    });
     return promise;
   }
 
@@ -175,8 +204,8 @@ export class SessionHostClient {
    * "probe" wrapper: the engine treats a busy host as "retry
    * in-page", so nobody needs to poll one.)
    */
-  status(): void {
-    this.post({ type: "STATUS" });
+  status(conversationId?: string): void {
+    this.post(conversationId ? { type: "STATUS", conversationId } : { type: "STATUS" });
   }
 
   /** Cleanly detaches this page's port */

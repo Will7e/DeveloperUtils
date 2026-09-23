@@ -52,7 +52,15 @@ export class McpError extends Error {
   constructor(
     message: string,
     /** Machine hint for the UI/log */
-    public readonly kind: "config" | "network" | "cors" | "protocol" | "server" | "timeout"
+    public readonly kind:
+      | "config"
+      | "network"
+      | "cors"
+      | "protocol"
+      | "server"
+      | "timeout"
+      /** The user stopped the turn; not a server fault */
+      | "cancelled"
   ) {
     super(message);
     this.name = "McpError";
@@ -281,6 +289,16 @@ export interface McpSession {
 export interface McpClientDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * The turn's abort signal, so Stop reaches an MCP call.
+   *
+   * Without it a stalled server held the turn for the full timeout with the
+   * stop button apparently doing nothing — MCP calls are the one external
+   * request the agent makes that a user can plausibly be waiting on when they
+   * press it. The internal timeout keeps its own controller; this is linked
+   * INTO it, so both the deadline and the user end the same request.
+   */
+  signal?: AbortSignal;
 }
 
 let requestSeq = 1000;
@@ -310,6 +328,12 @@ async function sendRequest(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? MCP_TIMEOUT_MS);
+  const external = deps.signal;
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener("abort", onExternalAbort, { once: true });
+  }
   try {
     const response = await doFetch(session.server.url, {
       method: "POST",
@@ -334,9 +358,19 @@ async function sendRequest(
     const message = parseJsonRpcBody(text, response.headers?.get?.("content-type") ?? "");
     return unwrapJsonRpc(message, method);
   } catch (err) {
+    // "Stopped by the user" and "the server is too slow" are different
+    // answers, and reporting the second when the first is true would send the
+    // agent (and the user) looking for a server problem that does not exist.
+    if (external?.aborted) {
+      throw new McpError(
+        `Stopped by the user while calling the MCP server ${session.server.name}.`,
+        "cancelled"
+      );
+    }
     throw diagnoseFetchFailure(err, session.server.url);
   } finally {
     clearTimeout(timer);
+    external?.removeEventListener("abort", onExternalAbort);
   }
 }
 

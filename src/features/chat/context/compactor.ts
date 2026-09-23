@@ -6,7 +6,7 @@
 // earlier context was elided. Designed with a seam for LLM
 // summarization to replace blind truncation later.
 
-import type { ChatMessage } from "../types";
+import { isTranscriptBoundary, type ChatMessage } from "../types";
 import { estimateMessageTokens } from "./tokenizer";
 
 export interface CompactionResult {
@@ -51,9 +51,12 @@ export function compactMessages(
     cutIndex = messages.length - 1;
   }
 
-  // Snap to a user-role boundary so requests start with "user",
-  // which every provider requires.
-  while (cutIndex < messages.length - 1 && messages[cutIndex]?.role !== "user") {
+  // Snap to a transcript boundary so requests start with "user", which
+  // every provider requires — and so a cut never lands between an
+  // assistant's tool_calls row and the tool result answering it. Tool
+  // results are stored as role "user" rows, so a role check alone would
+  // accept them as a boundary and strand the export.
+  while (cutIndex < messages.length - 1 && !isTranscriptBoundary(messages[cutIndex])) {
     cutIndex++;
   }
 

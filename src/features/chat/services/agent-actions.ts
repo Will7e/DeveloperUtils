@@ -65,6 +65,7 @@ import {
   companionCredentials,
   probeCompanion,
   runOnCompanion,
+  STOPPED_BY_USER,
 } from "../companion/companion-client";
 import { describeRejections, planMaterialization } from "../companion/materialize-plan";
 import { readFileContent } from "../lib/github-client";
@@ -784,9 +785,23 @@ export async function runListMcpTools(
 /** Calls one tool on one connected MCP server */
 export async function runCallMcpTool(
   _conversationId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ToolCallResult> {
   const started = Date.now();
+  // Checked before the request and again after it: an MCP server can sit on a
+  // call for the better part of a minute, and a stopped turn must not be
+  // reported as a tool that ran.
+  if (signal?.aborted) {
+    return {
+      callId: "",
+      name: "call_mcp_tool",
+      ok: false,
+      data: { error: STOPPED_BY_USER, cancelled: true },
+      durationMs: 0,
+      summary: "stopped by the user",
+    };
+  }
   const servers = useChatStore.getState().settings.mcpServers;
   const serverRef = typeof args.server === "string" ? args.server.trim() : "";
   const toolName = typeof args.tool === "string" ? args.tool.trim() : "";
@@ -816,7 +831,17 @@ export async function runCallMcpTool(
     );
   }
 
-  const outcome = await callServerTool(server, toolName, toolArgs);
+  const outcome = await callServerTool(server, toolName, toolArgs, { signal });
+  if (signal?.aborted) {
+    return {
+      callId: "",
+      name: "call_mcp_tool",
+      ok: false,
+      data: { error: STOPPED_BY_USER, cancelled: true },
+      durationMs: Date.now() - started,
+      summary: "stopped by the user",
+    };
+  }
   if (!outcome.ok && outcome.error) return fail(outcome.error);
 
   return {
@@ -874,7 +899,8 @@ function failureLines(outcome: { stdout: string; stderr: string }): string[] {
  */
 export async function runShellCommand(
   conversationId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ToolCallResult> {
   const started = Date.now();
   const command = typeof args.command === "string" ? args.command.trim() : "";
@@ -889,6 +915,11 @@ export async function runShellCommand(
   });
 
   if (!command) return fail("Pass a `command` to run.", "no command");
+  // The user's Stop is checked before the command starts and again before
+  // anything is recorded: this tool can run for ten minutes, and a result
+  // that says "stopped" while the ledger says "verified" would be the one
+  // lie this whole flow exists to prevent.
+  if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
   if (command.length > 2_000) {
     return fail("That command line is too long for the user to review before it runs.", "too long");
   }
@@ -979,9 +1010,10 @@ export async function runShellCommand(
     deletes: plan.deletes,
     ...(repo ? { repo } : {}),
     ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
-  });
+  }, signal ? { signal } : {});
 
   if (!result.ok) return fail(`The command was not run: ${result.error}`, "not run — unverified");
+  if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
 
   const outcome = result.outcome;
   const passed = outcome.exitCode === 0;
@@ -1074,7 +1106,8 @@ const CI_TOOL_WAIT_MS = 5 * 60_000;
  */
 export async function runCiVerification(
   conversationId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ToolCallResult> {
   const started = Date.now();
   const workflowPath = typeof args.workflow === "string" ? args.workflow.trim() : "";
@@ -1086,6 +1119,8 @@ export async function runCiVerification(
     durationMs: Date.now() - started,
     summary,
   });
+
+  if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
 
   const ws = await latestWorkspace(conversationId);
   if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
@@ -1176,7 +1211,10 @@ export async function runCiVerification(
   const requestedWait = typeof args.maxWaitMs === "number" ? args.maxWaitMs : CI_TOOL_WAIT_MS;
   const waited = await waitForRun(
     { token, owner: ws.owner, repo: ws.repo, run },
-    { maxWaitMs: Math.min(Math.max(requestedWait, 10_000), CI_MAX_WAIT_MS) }
+    {
+      maxWaitMs: Math.min(Math.max(requestedWait, 10_000), CI_MAX_WAIT_MS),
+      ...(signal ? { signal } : {}),
+    }
   );
   if (!waited.ok) return fail(`Watching the CI run failed: ${waited.error}`, "ci error");
 
@@ -1314,22 +1352,22 @@ async function runLocalTypecheck(
 
 /**
  * Reports the repository's declared verification checks, and executes
- * them ONLY when the user has configured a runner.
+ * them when this BUILD has a runner configured for it.
  *
- * The uncomfortable truth this tool exists to make usable: there is no
- * shell here. An agent without this tool says "all tests pass" and is
- * believed. An agent with it can say "this repo declares four checks, I
- * ran none of them, here are the commands" — which is checkable. When a
- * runner IS configured the declared commands are executed there (the
- * only place in the product where that can happen) and real results come
- * back.
+ * The uncomfortable truth this tool exists to make usable: an agent without
+ * it says "all tests pass" and is believed. With it, the agent can say
+ * "this repo declares four checks, I ran none of them, here are the
+ * commands" — which is checkable. When a runner IS configured
+ * (`VITE_CHECKS_ENDPOINT`, chosen by whoever builds the app) the declared
+ * commands are executed there and real results come back; otherwise the
+ * local typecheck still runs, and the tiers that need a machine — the
+ * companion, CI — are the ones the agent is told to use.
  */
 export async function runRunChecks(
   conversationId: string,
   args: Record<string, unknown>
 ): Promise<ToolCallResult> {
   const started = Date.now();
-  const store = useChatStore.getState();
   const ws = await latestWorkspace(conversationId);
   if (!ws) {
     return {
@@ -1345,10 +1383,12 @@ export async function runRunChecks(
   const { checks, notes } = await discoverChecks(conversationId);
   const statement = unrunChecksStatement(checks);
   const wantsRun = args.run === true;
-  const endpoint =
-    store.settings.checksEndpoint?.trim() ||
-    (import.meta.env?.VITE_CHECKS_ENDPOINT as string | undefined)?.trim() ||
-    "";
+  // Configured by whoever BUILDING the app, not by the person using it: an
+  // external checks runner is deployment plumbing, and a text field in Chat
+  // settings asked a user to describe their own CI infrastructure. The two
+  // tiers everyone actually has are `run_command` (the local companion,
+  // on their machine) and `verify_with_ci` (the repository's own workflow).
+  const endpoint = (import.meta.env?.VITE_CHECKS_ENDPOINT as string | undefined)?.trim() || "";
 
   // ── No runner configured: run what CAN run here, report the rest ──
   if (!wantsRun || !endpoint) {
@@ -1682,9 +1722,20 @@ export async function runRemember(
 
 export async function runPushChanges(
   conversationId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<ToolCallResult> {
   const started = Date.now();
+  if (signal?.aborted) {
+    return {
+      callId: "",
+      name: "push_changes",
+      ok: false,
+      data: { error: STOPPED_BY_USER, cancelled: true },
+      durationMs: 0,
+      summary: "stopped by the user",
+    };
+  }
   const fail = (error: string): ToolCallResult => ({
     callId: "",
     name: "push_changes",
@@ -1852,6 +1903,15 @@ export async function runPushChanges(
   }
 
   // ── Open the gate: pause the agent loop until the user decides ──
+  //
+  // The gate is a WAIT, and a wait has to be cancellable: without this, Stop
+  // during an approval dialog left the modal on screen and the turn parked
+  // behind it. Aborting resolves the gate as a rejection (the modal closes),
+  // and the result below says STOPPED rather than "rejected" — the model must
+  // not read a user's stop as a decision about the change set.
+  const onAbort = () =>
+    useChatStore.getState().resolvePushApproval(false, STOPPED_BY_USER);
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
   const decision = await store.requestPushApproval({
     conversationId,
     createdAt: Date.now(),
@@ -1869,6 +1929,20 @@ export async function runPushChanges(
     ...(verification.length > 0 ? { verification: verificationLines(verification) } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
   });
+  if (signal) signal.removeEventListener("abort", onAbort);
+
+  // The user stopped the turn while the gate was open. Reported as a stop, not
+  // as a rejection: the change set was never judged.
+  if (signal?.aborted) {
+    return {
+      callId: "",
+      name: "push_changes",
+      ok: false,
+      data: { status: "cancelled", error: STOPPED_BY_USER, cancelled: true },
+      durationMs: Date.now() - started,
+      summary: "stopped by the user",
+    };
+  }
 
   if (!decision.approved) {
     return {

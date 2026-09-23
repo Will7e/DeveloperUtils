@@ -19,6 +19,7 @@ import { ArrowDown, Brain, RefreshCw, WifiOff } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
+import { QuestionCard } from "./QuestionCard";
 import { visibleMessages } from "../types";
 import type { ChatMessage, ConversationSummary } from "../types";
 import { resumeUserTurn } from "../services/chat-runner";
@@ -275,6 +276,12 @@ export function MessageList({
               onRegenerate={onRegenerate}
             />
           ))}
+
+          {/* A parked turn's question sits at the END of the transcript,
+              where the user is already looking, and the answer is one click.
+              It renders from the conversation rather than from a prop so a
+              reload brings back the same question the turn is waiting on. */}
+          {activeId && <QuestionCard conversationId={activeId} />}
 
           {showStreamingBubble && (
             <MessageItem

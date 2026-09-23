@@ -17,6 +17,7 @@ import {
 } from "../constants";
 import { recordDelete, recordWrite } from "./undo";
 import { readFileContent } from "../lib/github-client";
+import { nextRevision } from "../identity/revision";
 import {
   getRepoBaseFile,
   getRepoBaseTree,
@@ -88,7 +89,10 @@ export async function hydrateTree(
 ): Promise<WorkspaceState> {
   if (ws.tree.length > 0) return ws;
   const { tree } = await getRepoBaseTree(identityOf(ws), token, ws.baseCommitSha);
-  return { ...ws, tree, updatedAt: Date.now() };
+  // Listing the tree is not an edit: `updatedAt` is the revision the
+  // verification ledger compares against (types.ts, WorkspaceState), so a
+  // hydrate must leave it exactly where it was.
+  return { ...ws, tree };
 }
 
 /** The repository a workspace is a working copy of */
@@ -349,7 +353,6 @@ export function mergeFetchedFile(
   const next: WorkspaceState = {
     ...ws,
     files: { ...ws.files, [path]: wf },
-    updatedAt: Date.now(),
   };
   scheduleSave(ws.conversationId, next);
   return { ws: next, ok: true };
@@ -375,6 +378,10 @@ export function writeFile(
 ): { ws: WorkspaceState; ok: boolean; error?: string } {
   const existing = ws.files[path];
   const now = Date.now();
+  // Every branch of this function changes a file, so they all move the
+  // revision — strictly, so two writes inside one millisecond cannot leave
+  // the first one's evidence looking current (identity/revision.ts).
+  const revision = nextRevision(ws.updatedAt);
 
   // Capture the BEFORE state for the effect log (undo). Recorded
   // below only when the write actually changes the file.
@@ -408,7 +415,7 @@ export function writeFile(
       ...ws,
       files: { ...ws.files, [path]: wf },
       tree: upsertTreeEntry(ws.tree, path),
-      updatedAt: now,
+      updatedAt: revision,
     };
     const next = recordWrite(ws, path, before, mutated, `created ${path}`);
     scheduleSave(ws.conversationId, next);
@@ -422,7 +429,7 @@ export function writeFile(
     const mutated: WorkspaceState = {
       ...ws,
       files: { ...ws.files, [path]: wf },
-      updatedAt: now,
+      updatedAt: revision,
     };
     const next = recordWrite(ws, path, before, mutated, `wrote ${path}`);
     scheduleSave(ws.conversationId, next);
@@ -441,7 +448,7 @@ export function writeFile(
   const mutated: WorkspaceState = {
     ...ws,
     files: { ...ws.files, [path]: wf },
-    updatedAt: now,
+    updatedAt: revision,
   };
   const next = recordWrite(ws, path, before, mutated, `wrote ${path}`);
   scheduleSave(ws.conversationId, next);
@@ -471,7 +478,7 @@ export function deleteFile(ws: WorkspaceState, path: string): { ws: WorkspaceSta
   const mutated: WorkspaceState = {
     ...ws,
     files: { ...ws.files, [path]: wf },
-    updatedAt: Date.now(),
+    updatedAt: nextRevision(ws.updatedAt),
   };
   const next = recordDelete(ws, path, deletionBefore, mutated, `deleted ${path}`);
   scheduleSave(ws.conversationId, next);
@@ -499,7 +506,7 @@ export function revertFile(ws: WorkspaceState, path: string): WorkspaceState {
     ...ws,
     files,
     mutations: (ws.mutations ?? []).filter((m) => m.path !== path),
-    updatedAt: Date.now(),
+    updatedAt: nextRevision(ws.updatedAt),
   };
   scheduleSave(ws.conversationId, cleared);
   return cleared;
@@ -512,7 +519,7 @@ export function revertAll(ws: WorkspaceState): WorkspaceState {
     if (f.status === "added") continue;
     files[path] = { ...f, content: f.baseContent, status: "unchanged", updatedAt: Date.now() };
   }
-  const next: WorkspaceState = { ...ws, files, mutations: [], updatedAt: Date.now() };
+  const next: WorkspaceState = { ...ws, files, mutations: [], updatedAt: nextRevision(ws.updatedAt) };
   scheduleSave(ws.conversationId, next);
   return next;
 }
@@ -549,7 +556,12 @@ export function markPushed(
   // from here on, except for excluded files: their change is still
   // pending, so their history has to stay rewindable.
   const mutations = (ws.mutations ?? []).filter((m) => stillPending.has(m.path));
-  return { ...ws, files, baseCommitSha: commitSha, mutations, updatedAt: Date.now() };
+  // The base moved, so the revision is expressed by `baseCommitSha` now —
+  // the bytes on disk are the ones that were just pushed. Bumping the
+  // counter here would retire evidence about EXACTLY those bytes, and the
+  // binding release (binding.moved / base-moved) already says that proof
+  // recorded against the old base no longer applies.
+  return { ...ws, files, baseCommitSha: commitSha, mutations };
 }
 
 // ── Push snapshots ───────────────────────────────────────────

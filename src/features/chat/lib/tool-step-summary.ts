@@ -77,6 +77,30 @@ export function summarizeToolStep(payload: ToolResultPayload | null): ToolStepSu
     facts.push(`${lineDelta > 0 ? "+" : "−"}${size} line${size === 1 ? "" : "s"}`);
   }
 
+  // ── App tools ──
+  // A run, a comparison or a lookup changes no file, so without these the
+  // row is a bare verb and the user has to open it to learn anything. Each
+  // fact answers "what happened?" in a glance: which language ran and
+  // whether it exited clean, how many hits came back, how big the board is,
+  // which tool was opened.
+  const language = typeof payload.language === "string" ? payload.language : null;
+  const exitCode = num(payload.exitCode);
+  if (language && exitCode !== null) facts.push(`${language} exit ${exitCode}`);
+  else if (language) facts.push(language);
+
+  if (Array.isArray(payload.matches)) {
+    const total = num(payload.totalMatches) ?? payload.matches.length;
+    facts.push(`${total} match${total === 1 ? "" : "es"}`);
+  }
+
+  const nodes = num(payload.nodes);
+  const edges = num(payload.edges);
+  if (nodes !== null && edges !== null) facts.push(`${nodes} nodes`);
+
+  if (typeof payload.target === "string" && payload.opened === true) {
+    facts.push(String(payload.target));
+  }
+
   const error = typeof payload.error === "string" ? payload.error.trim() : "";
 
   return {

@@ -23,6 +23,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { prepareRequest } from "../context/engine";
 import { toolResultDigestText } from "../context/engine";
 import { runTurn, getSessionState } from "../session/turn-engine";
+import { answerQuestion, sendUserMessage, stopChatStream } from "../services/chat-runner";
 import { LocalTurnSource } from "../session/turn-source";
 import { resetTurnLog } from "../session/turn-log";
 import { useChatStore } from "@/stores/chat.store";
@@ -236,7 +237,7 @@ describe("promise: a runaway agent loop terminates and says why", () => {
   beforeEach(() => {
     resetTurnLog();
     conversationId = store().createConversation("model-a");
-    store().updateSettings({ apiKey: "sk-test", agentMaxIterations: 3 });
+    store().updateSettings({ apiKey: "sk-test" });
   });
 
   afterEach(() => {
@@ -273,6 +274,9 @@ describe("promise: a runaway agent loop terminates and says why", () => {
       resolveSource: async () => source,
       createFallbackSource: () => source,
       inactivityTimeoutMs: 60,
+      // The cap is the harness's (AGENT_ITERATIONS); an eval shortens it
+      // through the engine's own seam, since no setting can.
+      maxIterations: 3,
     });
 
     expect(rounds).toBe(3 * (1 + AGENT_AUTO_CONTINUATIONS));
@@ -326,5 +330,180 @@ describe("promise: nothing dangerous or unsupported reaches Approve silently", (
       toolsUsed: ["read_file", "edit_file"],
     });
     expect(findings).toHaveLength(0);
+  });
+});
+
+// ── 6. Asking, and being steered mid-turn ───────────────────
+
+describe("promise: the agent asks instead of guessing, and a running turn stays steerable", () => {
+  let conversationId = "";
+  const store = () => useChatStore.getState();
+
+  const ASK_CALL = {
+    id: "call_ask",
+    name: "ask_user" as ToolName,
+    arguments: JSON.stringify({
+      header: "Strategy",
+      question: "Which approach should I take?",
+      options: [{ label: "A" }, { label: "B" }],
+    }),
+  };
+
+  const READ_CALL = {
+    id: "call_read",
+    name: "read_file" as ToolName,
+    arguments: JSON.stringify({ path: "src/a.ts" }),
+  };
+
+  /** The live transcript — what every request is built from */
+  const transcript = (): ChatMessage[] =>
+    store().conversations.find((c) => c.id === conversationId)?.messages ?? [];
+
+  const userTexts = (): string[] =>
+    transcript()
+      .filter((m) => m.role === "user" && !m.toolResult && !m.toolCalls)
+      .map((m) => m.content);
+
+  const preparedTurn = (): PreparedTurn => ({
+    modelId: "model-a",
+    mode: "build",
+    effort: "medium",
+    systemPrompt: "sys",
+    temperature: 0.7,
+    messages: [{ role: "user", content: "go" }],
+    tools: [{ type: "function", function: { name: "read_file" } }],
+    sentTokens: 10,
+    candidates: [{ modelId: "model-a" }],
+  });
+
+  async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("timed out waiting for the harness");
+  }
+
+  beforeEach(() => {
+    resetTurnLog();
+    conversationId = store().createConversation("model-a");
+    store().updateSettings({ apiKey: "sk-test" });
+  });
+
+  afterEach(() => {
+    expect(getSessionState().phase).toBe("idle");
+  });
+
+  it("parks on the question and continues from the answer", async () => {
+    let rounds = 0;
+    const source = new LocalTurnSource(async (params) => {
+      rounds += 1;
+      if (rounds === 1) {
+        params.onToolCalls?.([ASK_CALL]);
+        return;
+      }
+      params.onChunk?.("Starting with A.");
+    });
+
+    const turn = runTurn(conversationId, {
+      prepare: async () => preparedTurn(),
+      resolveSource: async () => source,
+      createFallbackSource: () => source,
+      inactivityTimeoutMs: 60,
+    });
+
+    await waitFor(() => Boolean(store().conversations.find((c) => c.id === conversationId)?.pendingQuestion));
+    expect(rounds).toBe(1);
+
+    answerQuestion(conversationId, { selected: ["A"] });
+    await turn;
+
+    // The answer came back as an ordinary tool result, and the turn continued
+    // in place: no second user prompt, no lost tool results.
+    expect(rounds).toBe(2);
+    expect(
+      transcript().some((m) => m.toolResult?.name === "ask_user" && m.toolResult.ok)
+    ).toBe(true);
+    expect(transcript().some((m) => m.content === "Starting with A.")).toBe(true);
+    expect(transcript().some((m) => m.content.includes("harness is continuing"))).toBe(false);
+    expect(store().conversations.find((c) => c.id === conversationId)?.pendingQuestion).toBeUndefined();
+  });
+
+  it("settles a parked question when the user stops the turn", async () => {
+    let rounds = 0;
+    const source = new LocalTurnSource(async (params) => {
+      rounds += 1;
+      params.onToolCalls?.([ASK_CALL]);
+    });
+
+    const turn = runTurn(conversationId, {
+      prepare: async () => preparedTurn(),
+      resolveSource: async () => source,
+      createFallbackSource: () => source,
+      inactivityTimeoutMs: 60,
+    });
+
+    await waitFor(() => Boolean(store().conversations.find((c) => c.id === conversationId)?.pendingQuestion));
+    stopChatStream();
+    await turn;
+
+    // A stop is not an answer: the result says cancelled, the card is gone,
+    // and the model is told not to assume anything.
+    const result = transcript().find((m) => m.toolResult?.name === "ask_user")?.toolResult;
+    expect(result?.ok).toBe(false);
+    expect(result?.content).toContain("cancelled");
+    expect(store().conversations.find((c) => c.id === conversationId)?.pendingQuestion).toBeUndefined();
+    expect(rounds).toBe(1);
+  });
+
+  it("delivers a message sent mid-turn at the next round boundary, exactly once", async () => {
+    let rounds = 0;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seenByPrepare: string[][] = [];
+
+    const source = new LocalTurnSource(async (params) => {
+      rounds += 1;
+      if (rounds === 1) {
+        params.onToolCalls?.([READ_CALL]);
+        // Holds round 1 open so the user has a real window to type into.
+        await held;
+        return;
+      }
+      params.onChunk?.("done");
+    });
+
+    const turn = runTurn(conversationId, {
+      prepare: async () => {
+        seenByPrepare.push(userTexts());
+        return preparedTurn();
+      },
+      resolveSource: async () => source,
+      createFallbackSource: () => source,
+      inactivityTimeoutMs: 60,
+    });
+
+    await waitFor(() => rounds === 1);
+    sendUserMessage(conversationId, "also update the docs");
+
+    // It is not sent yet, and it is not lost: it is queued, visibly.
+    expect(userTexts()).not.toContain("also update the docs");
+    expect(
+      store().conversations.find((c) => c.id === conversationId)?.queued?.map((q) => q.text)
+    ).toEqual(["also update the docs"]);
+
+    release();
+    await turn;
+
+    // Delivered at the boundary: the SECOND request carries it, the first
+    // did not (so it never sat in front of results the model had not read),
+    // and the queue is empty afterwards.
+    expect(seenByPrepare[0]).not.toContain("also update the docs");
+    expect(seenByPrepare[1]).toContain("also update the docs");
+    expect(userTexts().filter((t) => t === "also update the docs")).toHaveLength(1);
+    expect(store().conversations.find((c) => c.id === conversationId)?.queued).toEqual([]);
   });
 });
