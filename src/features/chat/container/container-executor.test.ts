@@ -160,6 +160,89 @@ describe("runInContainer — installing before judging", () => {
     expect(result.error).toMatch(/stopped/i);
   });
 
+  it("removes the files the next revision deletes, rather than leaving them in the tree", async () => {
+    // `mount()` ADDS. Applying a revision by mounting the new tree over the old
+    // filesystem therefore leaves every deleted file in the workspace — and a
+    // suite can pass because of a file the change removed, under a claim that
+    // the tree is the revision.
+    const removed: string[] = [];
+    const spawn = vi.fn(async (command: string, args: string[]) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      if (line.includes("npm ci")) return fakeProcess("added 12 packages", 0);
+      return fakeProcess("2 passed", 0);
+    });
+    adoptRuntimeForTest({
+      ...runtimeWith(spawn),
+      fs: {
+        mkdir: vi.fn(async () => {}),
+        rm: vi.fn(async (path: string) => {
+          removed.push(path);
+        }),
+      },
+    });
+
+    const before = planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: "{}" },
+        { path: "src/old.ts", content: "export const old = 1;" },
+      ],
+      changes: [],
+    });
+    const first = await runInContainer({ command: "npm test", plan: before, revision: 1 });
+    expect(first.ok).toBe(true);
+
+    const after = planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: "{}" },
+      ],
+      changes: [],
+    });
+    const second = await runInContainer({ command: "npm test", plan: after, revision: 2 });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(removed).toContain("src/old.ts");
+    expect(second.outcome.notes.join(" ")).toMatch(/deletes were removed from the workspace/);
+  });
+
+  it("says so when the runtime will not remove a deleted file", async () => {
+    // The failure mode this guards is silence: a tree that still holds a file the
+    // revision deleted, with nothing in the result saying the run happened
+    // against code that no longer exists.
+    const spawn = vi.fn(async (command: string, args: string[]) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      if (line.includes("npm ci")) return fakeProcess("added 12 packages", 0);
+      return fakeProcess("2 passed", 0);
+    });
+    adoptRuntimeForTest(runtimeWith(spawn)); // no `fs`: nothing can be removed
+
+    const before = planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: "{}" },
+        { path: "src/old.ts", content: "export const old = 1;" },
+      ],
+      changes: [],
+    });
+    await runInContainer({ command: "npm test", plan: before, revision: 1 });
+
+    const after = planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: "{}" },
+      ],
+      changes: [],
+    });
+    const second = await runInContainer({ command: "npm test", plan: after, revision: 2 });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.outcome.notes.join(" ")).toMatch(/STILL IN the workspace/);
+    expect(second.outcome.notes.join(" ")).toMatch(/unproven/);
+  });
+
   it("refuses an empty tree instead of booting for nothing", async () => {
     adoptRuntimeForTest(runtimeWith(vi.fn()));
     const empty = planMount({ base: [{ path: "logo.png", content: "x" }], changes: [] });

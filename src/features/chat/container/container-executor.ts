@@ -308,7 +308,7 @@ export async function prepareWorkspace(
         `${removal.failed.length} file(s) this revision deletes are STILL IN the workspace because the runtime would not remove them (${removal.failed
           .slice(0, 4)
           .map((entry) => `${entry.path}: ${entry.error}`)
-          .join("; ")}${removal.failed.length > 4 ? "; …" : ""}). Treat a pass that depends on one of them as unproven."
+          .join("; ")}${removal.failed.length > 4 ? "; …" : ""}). Treat a pass that depends on one of them as unproven.`
       );
     }
   }

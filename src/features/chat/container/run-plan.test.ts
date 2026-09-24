@@ -11,6 +11,7 @@ import {
   MAX_PLANNED_CHECKS,
   capOutput,
   describeRunPlan,
+  normalizePackageManager,
   planInstall,
   planRun,
   stepsOf,
@@ -19,6 +20,46 @@ import {
 const PKG = JSON.stringify({
   name: "demo",
   scripts: { test: "vitest run", build: "vite build", dev: "vite", lint: "eslint ." },
+});
+
+describe("import manager normalization — a pinned manager is still that manager", () => {
+  it("strips a version, keeps a scope", () => {
+    expect(normalizePackageManager("pnpm@9.15.0")).toBe("pnpm");
+    expect(normalizePackageManager("yarn@4.1.1")).toBe("yarn");
+    expect(normalizePackageManager("PNPM")).toBe("pnpm");
+    expect(normalizePackageManager("pnpm")).toBe("pnpm");
+    expect(normalizePackageManager("@yarnpkg/cli@4.1.1")).toBe("@yarnpkg/cli");
+    expect(normalizePackageManager("  ")).toBeNull();
+    expect(normalizePackageManager(null)).toBeNull();
+  });
+
+  it("installs through the manager the manifest pins, not through npm", () => {
+    // The form corepack requires is the PINNED one, so a comparison against
+    // "pnpm" alone missed every manifest that follows the recommendation — and
+    // the result was `npm install` in a pnpm repository, under a note claiming
+    // the lockfile's versions were installed.
+    const pnpm = planInstall({
+      packageManager: "pnpm@9.15.0",
+      lockfiles: ["pnpm-lock.yaml"],
+      hasPackageJson: true,
+    });
+    expect(pnpm.step?.command).toBe("pnpm install --frozen-lockfile");
+
+    const yarn = planInstall({
+      packageManager: "yarn@4.1.1",
+      lockfiles: [],
+      hasPackageJson: true,
+    });
+    expect(yarn.step?.command).toBe("yarn install");
+    expect(yarn.note).toMatch(/resolve now/);
+
+    const bun = planInstall({
+      packageManager: "bun@1.1.0",
+      lockfiles: ["bun.lockb"],
+      hasPackageJson: true,
+    });
+    expect(bun.step?.command).toBe("bun install --frozen-lockfile");
+  });
 });
 
 describe("planInstall — the tree the repository declares, or a note saying otherwise", () => {
