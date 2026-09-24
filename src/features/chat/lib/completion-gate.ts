@@ -252,8 +252,14 @@ function untestedChangeReason(input: CompletionInput): IncompleteReason | null {
     .map((c) => c.path);
   if (source.length === 0) return null;
 
+  // Either tier counts: a browser workspace and the user's machine are both
+  // "the suite ran here", and the reason this gate fires is that the SUITE is
+  // green, not that a particular transport produced it.
   const green = input.evidence.find(
-    (e) => e.status === "fresh-pass" && e.kind === "command" && TEST_COMMAND_RE.test(e.summary)
+    (e) =>
+      e.status === "fresh-pass" &&
+      (e.kind === "command" || e.kind === "workspace") &&
+      TEST_COMMAND_RE.test(e.summary)
   );
   if (!green) return null;
 

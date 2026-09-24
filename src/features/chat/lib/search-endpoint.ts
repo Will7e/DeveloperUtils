@@ -68,6 +68,14 @@ export interface SearchEndpointDeps {
   clientKey: string;
   /** Caller Origin, checked against the allowlist */
   origin?: string | null;
+  /**
+   * The Host the request arrived on (its own origin), used to recognise a
+   * same-origin call. Without it the allowlist can only name the domains
+   * written into this file, so an app deployed on any other domain answers
+   * 403 to itself — with the provider key correctly configured, which is why
+   * that failure reads as "search is broken".
+   */
+  host?: string | null;
   /** Injectable for tests */
   fetchImpl?: typeof fetch;
 }
@@ -98,14 +106,43 @@ export function resetSearchRateLimit(): void {
 }
 
 /**
+ * The hostname of an Origin or Host value, lowercased and port-free.
+ * "" when the value is absent or unparseable, so a missing header can never
+ * be mistaken for a match.
+ */
+function hostnameOf(value: string | null | undefined): string {
+  if (!value || !value.trim()) return "";
+  const raw = value.trim();
+  try {
+    return new URL(raw.includes("://") ? raw : `http://${raw}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Origins allowed to call this endpoint. It is POST-only and same-origin
  * from the app, so an allowlist costs nothing and stops a third-party page
  * from spending the user's search quota.
+ *
+ * SAME-ORIGIN IS CHECKED FIRST, against the Host the request actually
+ * arrived on. That is the load-bearing test, because "the app calls itself"
+ * is the whole contract — and a hard-coded domain list only happens to
+ * express it for the two names the vendor deploys to. Any other domain (a
+ * custom production domain, a self-hosted copy, a preview alias) made the
+ * app's own search 403 while the provider key was fine, which is the most
+ * confusing possible shape of "search does not work".
  */
-export function isAllowedSearchOrigin(origin: string | null | undefined, env: Record<string, string | undefined>): boolean {
+export function isAllowedSearchOrigin(
+  origin: string | null | undefined,
+  env: Record<string, string | undefined>,
+  requestHost?: string | null,
+): boolean {
   if (!origin) return true; // Non-browser client (no Origin header)
   try {
     const host = new URL(origin).hostname.toLowerCase();
+    const ownHost = hostnameOf(requestHost).replace(/^www\./, "");
+    if (ownHost && host.replace(/^www\./, "") === ownHost) return true;
     const vercelHosts = [env.VERCEL_PROJECT_PRODUCTION_URL, env.VERCEL_URL]
       .filter((v): v is string => Boolean(v))
       .map((v) => v.replace(/^www\./, "").toLowerCase());
@@ -163,8 +200,18 @@ export async function handleSearchRequest(
   rawLimit: unknown,
   deps: SearchEndpointDeps,
 ): Promise<SearchEndpointResponse> {
-  if (!isAllowedSearchOrigin(deps.origin, deps.env)) {
-    return { status: 403, body: { code: "FORBIDDEN_ORIGIN", error: "This origin may not use the search endpoint." } };
+  if (!isAllowedSearchOrigin(deps.origin, deps.env, deps.host)) {
+    return {
+      status: 403,
+      body: {
+        code: "FORBIDDEN_ORIGIN",
+        // Stated as what it is, because it is NOT a configuration problem the
+        // user can fix by adding a key: the call reached the endpoint and was
+        // refused for WHO sent it.
+        error:
+          "This origin may not use the search endpoint. It accepts same-origin calls from the app itself only, so a request from another page (or a proxy that rewrote Origin) is refused.",
+      },
+    };
   }
 
   const query = typeof rawQuery === "string" ? rawQuery.trim() : "";

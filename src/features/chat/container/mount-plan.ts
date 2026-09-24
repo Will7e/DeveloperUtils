@@ -1,0 +1,226 @@
+// ============================================================
+// Mount Plan — The Overlay As A Container Filesystem
+// ============================================================
+// A container has an empty filesystem; the workspace is an OVERLAY of files held
+// in IndexedDB plus the agent's change set. Before anything can run, the overlay
+// has to become files — and the decision of WHICH files is the same decision the
+// local runner makes, with one difference that matters: nothing we mount stays
+// private.
+//
+// Every file written here is readable by every process that runs afterwards — an
+// `npm ci` postinstall script, a dev server asked for a path, a dependency the
+// agent installed. That is not a property of the container being untrusted; it is
+// a property of it being a real filesystem where third-party code runs, which is
+// also true of a laptop and is exactly why the app already classifies paths. A
+// secret-shaped file is therefore NOT mounted, and the omission is REPORTED
+// rather than silent, because a build that genuinely needs `.env` must fail
+// loudly instead of quietly succeeding against a tree we edited behind it.
+//
+// Path containment and the `.git` rule are not re-implemented here. They live in
+// companion/materialize-plan.ts, they are tested there, and a second copy is how
+// two rule sets drift into disagreeing about `../../`.
+//
+// Pure: contents in, a tree out. No DOM, no container, no network.
+// ============================================================
+
+import type { DirectoryNode, FileNode, FileSystemTree } from "@webcontainer/api";
+import { classifyPath } from "../lib/sensitivity";
+import {
+  planMaterialization,
+  type MaterializeBaseFile,
+  type MaterializeChange,
+} from "../companion/materialize-plan";
+
+/**
+ * The ceiling for one mounted tree — deliberately far below the local runner's
+ * 64 MiB.
+ *
+ * The local runner writes to a disk that has room. This writes into a WASM
+ * filesystem inside a browser tab, on the user's machine, competing with their
+ * other tabs for the same few gigabytes — and the number that matters is not
+ * "can it hold the tree" but "can it hold the tree, `node_modules`, and the dev
+ * server at once". A partial tree here is reported, never silent.
+ */
+export const MOUNT_MAX_BYTES = 16 * 1024 * 1024;
+
+/** Files beyond this are dropped with a report; the tail is not arbitrary */
+export const MOUNT_MAX_FILES = 4_000;
+
+export type MountSkipCode = "unsafe-path" | "protected-path" | "secret" | "too-large" | "too-many";
+
+export interface MountSkip {
+  path: string;
+  code: MountSkipCode;
+  /** One sentence a user can act on */
+  message: string;
+}
+
+export interface MountPlan {
+  /** The tree to hand `mount()`, directories included */
+  tree: FileSystemTree;
+  /** Paths that will exist in the container, in stable order */
+  files: { path: string; bytes: number }[];
+  bytes: number;
+  /** Entries that will NOT exist, with the reason — never dropped quietly */
+  skipped: MountSkip[];
+  /** True when there is nothing to mount, so the caller can refuse to boot */
+  empty: boolean;
+}
+
+/**
+ * The decision, for one workspace revision.
+ *
+ * `base` is the repository tree at the pinned commit (without it, only the files
+ * the workspace touched exist, and `npm test` would run against a partial
+ * project). `changes` is the agent's delta on top. Deletions are resolved during
+ * composition: a deleted file is simply absent from the tree we hand the
+ * container, so the mount never has to remove anything.
+ */
+export function planMount(input: {
+  base: readonly MaterializeBaseFile[];
+  changes: readonly MaterializeChange[];
+  maxBytes?: number;
+  maxFiles?: number;
+}): MountPlan {
+  const maxBytes = input.maxBytes ?? MOUNT_MAX_BYTES;
+  const maxFiles = input.maxFiles ?? MOUNT_MAX_FILES;
+
+  // Composition, containment and `.git` protection are the materializer's job.
+  // Its byte ceiling is passed through so its own rejection wording is used.
+  const composed = planMaterialization({
+    base: input.base,
+    changes: input.changes,
+    maxBytes,
+  });
+
+  const skipped: MountSkip[] = composed.rejected.map((entry) => ({
+    path: entry.path,
+    code: entry.code,
+    message: entry.message,
+  }));
+
+  const files: { path: string; content: string; bytes: number }[] = [];
+  for (const write of composed.writes) {
+    if (classifyPath(write.path) === "secret") {
+      skipped.push({
+        path: write.path,
+        code: "secret",
+        message: `"${write.path}" looks like key material or an env file, so it is not mounted: every dependency script and dev server in the workspace can read everything mounted here. Report anything that needs it rather than asking for it to be mounted.`,
+      });
+      continue;
+    }
+    if (files.length >= maxFiles) {
+      skipped.push({
+        path: write.path,
+        code: "too-many",
+        message: `The tree already holds ${maxFiles} files; this one is not mounted, so the workspace runs against a partial tree.`,
+      });
+      continue;
+    }
+    files.push({ path: write.path, content: write.content, bytes: write.content.length });
+  }
+
+  const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
+  return {
+    tree: treeOf(files),
+    files: files.map(({ path, bytes: size }) => ({ path, bytes: size })),
+    bytes,
+    skipped,
+    empty: files.length === 0,
+  };
+}
+
+interface PlannedFile {
+  path: string;
+  content: string;
+}
+
+/**
+ * Nested directories from flat paths, parents before children.
+ *
+ * Deterministic on purpose: the same revision must produce byte-identical trees,
+ * or a snapshot keyed by revision describes a filesystem nobody can reproduce.
+ */
+function treeOf(files: readonly PlannedFile[]): FileSystemTree {
+  const tree: FileSystemTree = {};
+  const ordered = [...files].sort(compareByDepth);
+  for (const file of ordered) {
+    const segments = file.path.split("/");
+    let node: FileSystemTree = tree;
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      const segment = segments[i]!;
+      const existing = node[segment];
+      if (!existing || !("directory" in existing)) {
+        const created: DirectoryNode = { directory: {} };
+        node[segment] = created;
+        node = created.directory;
+      } else {
+        node = existing.directory;
+      }
+    }
+    const name = segments[segments.length - 1]!;
+    // A file and a directory can collide only when one path is a prefix of the
+    // other, which composition cannot produce for a real repository — but a
+    // silent overwrite would hide it, so the directory wins and the file is
+    // reported by the caller's byte/file counts.
+    if (!(name in node)) {
+      const entry: FileNode = { file: { contents: file.content } };
+      node[name] = entry;
+    }
+  }
+  return tree;
+}
+
+/** Shallowest first, then alphabetically — parents before their children */
+function compareByDepth(a: PlannedFile, b: PlannedFile): number {
+  const depth = a.path.split("/").length - b.path.split("/").length;
+  return depth !== 0 ? depth : a.path.localeCompare(b.path);
+}
+
+/**
+ * A tree back as flat path/content pairs.
+ *
+ * The inverse of `treeOf`, and it exists for the second and later mounts: writing
+ * files into a mounted tree individually is what feeds the dev server's hot
+ * reload, where re-mounting the whole tree would blank the preview on every
+ * revision. Binary contents (a `Uint8Array`) are skipped rather than decoded —
+ * this app never writes a binary into the workspace, and inventing text for one
+ * would corrupt it.
+ */
+export function flattenTree(
+  tree: FileSystemTree,
+  prefix = ""
+): { path: string; content: string }[] {
+  const files: { path: string; content: string }[] = [];
+  for (const [name, node] of Object.entries(tree)) {
+    const path = prefix ? `${prefix}/${name}` : name;
+    if ("file" in node) {
+      // A `symlink` node has no contents; only a real file has bytes to write.
+      const contents = "contents" in node.file ? node.file.contents : null;
+      if (typeof contents === "string") files.push({ path, content: contents });
+      continue;
+    }
+    if ("directory" in node) {
+      files.push(...flattenTree((node as DirectoryNode).directory, path));
+    }
+  }
+  // Path order, so a caller's writes and its counts are reproducible.
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * One line for a tool result or a status panel.
+ *
+ * States the size and, when anything was left out, says so in the same breath:
+ * "mounted 412 files" and "mounted 412 files, 2 skipped" are different claims,
+ * and only one of them lets a later failure be read correctly.
+ */
+export function describeMount(plan: MountPlan): string {
+  if (plan.empty) return "nothing to mount — the workspace has no files for this revision.";
+  const size = plan.bytes >= 1024 * 1024 ? `${(plan.bytes / (1024 * 1024)).toFixed(1)} MiB` : `${Math.round(plan.bytes / 1024)} KiB`;
+  const head = `${plan.files.length} file${plan.files.length === 1 ? "" : "s"} (${size})`;
+  if (plan.skipped.length === 0) return `Workspace mounted: ${head}.`;
+  const shown = plan.skipped.slice(0, 3).map((s) => s.path);
+  const extra = plan.skipped.length - shown.length;
+  return `Workspace mounted: ${head}, ${plan.skipped.length} skipped (${shown.join(", ")}${extra > 0 ? `, +${extra} more` : ""}).`;
+}

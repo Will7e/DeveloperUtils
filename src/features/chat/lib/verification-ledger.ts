@@ -24,18 +24,24 @@ import { registerScopedResource } from "../identity/scoped-resources";
  * The kinds of evidence this product can actually produce.
  *
  * `typecheck` runs inside the browser over the workspace's own sources.
- * `command` and `ci` are stronger: a real command in a real working tree on
- * the user's machine (`run_command`), and the repository's own workflow on
- * the pushed branch (`verify_with_ci`). They belong in the same ledger
- * because the question a reviewer asks is the same one — what was proven,
- * about which revision — and because the strongest evidence available should
- * not be the only evidence nothing records.
+ * `workspace` runs the project's OWN commands — install, test, build — in a
+ * browser workspace in this tab, and `command` runs them in a real working tree
+ * on the user's machine through the companion. They are separate kinds on
+ * purpose: the same `npm test` proves subtly different things in each (a tab's
+ * Linux-ish runtime with its own Node versus the user's own environment), a
+ * reviewer is entitled to know which one produced the green, and the two can
+ * disagree. `ci` is the repository's own workflow on the pushed branch
+ * (`verify_with_ci`) and stays authoritative. They belong in the same ledger
+ * because the question a reviewer asks is the same one — what was proven, about
+ * which revision — and because the strongest evidence available should not be
+ * the only evidence nothing records.
  */
-export type VerificationKind = "typecheck" | "command" | "ci";
+export type VerificationKind = "typecheck" | "workspace" | "command" | "ci";
 
 /** Display order: cheapest/most local first, most authoritative last. */
 export const VERIFICATION_ORDER: readonly VerificationKind[] = [
   "typecheck",
+  "workspace",
   "command",
   "ci",
 ];
@@ -243,6 +249,7 @@ export function formatAge(ms: number): string {
 
 export const VERIFICATION_KIND_LABEL: Record<VerificationKind, string> = {
   typecheck: "Type check (in-browser, over the workspace sources)",
+  workspace: "Command (run in a browser workspace in this tab)",
   command: "Command (run in a working tree on your machine)",
   ci: "GitHub Actions (the repository's own workflow)",
 };
@@ -300,10 +307,16 @@ export function proofSection(evidence: VerificationEvidence[]): string | null {
   // underneath a passing `npm test` is worse than no proof section at all.
   const ran = new Set(evidence.map((e) => e.kind));
   const unrun: string[] = [];
-  if (!ran.has("command")) unrun.push("Test suite, linter and build commands");
+  // A browser-workspace run and a run on the user's machine both answer "did the
+  // suite pass", which is the claim this caveat is about — so one line covers
+  // the pair, and it only appears when NEITHER tier ran.
+  if (!ran.has("command") && !ran.has("workspace")) unrun.push("Test suite, linter and build commands");
   if (!ran.has("ci")) unrun.push("The repository's CI on this branch");
   if (!ran.has("typecheck")) unrun.push("The workspace type check");
-  const heading = ran.has("command") || ran.has("ci") ? "### Verification" : "### In-browser verification";
+  const heading =
+    ran.has("command") || ran.has("ci") || ran.has("workspace")
+      ? "### Verification"
+      : "### In-browser verification";
   return [
     heading,
     "",

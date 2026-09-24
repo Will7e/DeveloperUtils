@@ -99,6 +99,13 @@ export async function searchWeb(
     });
   } catch (err) {
     if (options.signal?.aborted) return { ok: false, error: "Aborted by the user.", setupRequired: false };
+    // No route at all is an OBSERVED fact about this environment, not a
+    // transient failure: the endpoint runs on the deployed app and (locally)
+    // only while the dev server that serves /api/search is up. Recording it
+    // lets the next turn's note say the one thing that stops a hallucinated
+    // URL — "ask the user instead" — rather than staying silent while the
+    // agent tries again.
+    noteCapability("webSearch", "down");
     return {
       ok: false,
       error:
@@ -113,6 +120,7 @@ export async function searchWeb(
     body = (await res.json()) as SearchEndpointBody;
   } catch {
     // A dev server that has no such route answers with the SPA's HTML.
+    noteCapability("webSearch", "down");
     return {
       ok: false,
       error: `The search endpoint returned a non-JSON response (HTTP ${res.status}), so it is probably not wired up in this environment.`,
@@ -123,6 +131,22 @@ export async function searchWeb(
   if (res.status === 503 && body.code === "SEARCH_NOT_CONFIGURED") {
     noteCapability("webSearch", "down");
     return { ok: false, error: setupMessage(body), setupRequired: true };
+  }
+
+  if (res.status === 403 && body.code === "FORBIDDEN_ORIGIN") {
+    // Same class of fact as the two above: the endpoint answered, and it will
+    // answer the same way for the rest of this session, so a retry costs a
+    // round. The cause is deployment-side (who the caller appears to be), never
+    // the key — which is exactly why it must not be reported as "not
+    // configured".
+    noteCapability("webSearch", "down");
+    return {
+      ok: false,
+      error:
+        `${body.error ?? "Search was refused for this origin."} The provider key is not the problem — ` +
+        "this is the request's origin, so say you cannot reach the web here and ask for the URL instead of inventing one.",
+      setupRequired: false,
+    };
   }
 
   if (!res.ok) {

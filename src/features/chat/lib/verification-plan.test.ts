@@ -260,3 +260,49 @@ describe("representativeEvidence — the age a badge shows belongs to its claim"
     expect(representativeEvidence([])).toBeUndefined();
   });
 });
+
+describe("planVerification — the browser workspace tier", () => {
+  // The tier that needs no pairing, and the one the matrix used to be blind to:
+  // with no companion the plan offered a type check as the strongest thing
+  // reachable, while the app could in fact run the project's own suite in the
+  // tab. Under-offering is the safe direction to be wrong in, and it is still
+  // wrong — it turns a runnable verification into UNVERIFIED.
+
+  it("is reachable with no companion at all", () => {
+    const plan = planVerification({ ...BASE, companion: "down", workspace: "up" });
+    const step = plan.steps.find((s) => s.tier === "workspace");
+    expect(step?.available).toBe(true);
+    expect(step?.tool).toBe("run_command");
+    expect(plan.recommended?.tier).toBe("workspace");
+  });
+
+  it("yields to the user's own machine when a companion is paired", () => {
+    const plan = planVerification({ ...BASE, companion: "up", workspace: "up" });
+    const order = plan.steps.map((s) => s.tier);
+    expect(order.indexOf("command")).toBeLessThan(order.indexOf("workspace"));
+    expect(order.indexOf("workspace")).toBeLessThan(order.indexOf("typecheck"));
+    expect(plan.recommended?.tier).toBe("command");
+  });
+
+  it("says WHY when the page cannot host one, rather than staying silent", () => {
+    const plan = planVerification({ ...BASE, companion: "down", workspace: "down" });
+    const step = plan.steps.find((s) => s.tier === "workspace");
+    expect(step?.available).toBe(false);
+    expect(step?.blockedBy).toMatch(/not cross-origin isolated/);
+  });
+
+  it("never offers a tier whose support has not been checked", () => {
+    // `unknown` is not `up`: a tier promised on a guess is how a model reports a
+    // command it never ran.
+    const plan = planVerification({ ...BASE, companion: "down", workspace: "unknown" });
+    const step = plan.steps.find((s) => s.tier === "workspace");
+    expect(step?.available).toBe(false);
+    expect(step?.blockedBy).toMatch(/has not been checked/);
+    expect(plan.recommended?.tier).toBe("typecheck");
+  });
+
+  it("names the workspace tier in the plan block so the model can say where it ran", () => {
+    const plan = planVerification({ ...BASE, companion: "down", workspace: "up" });
+    expect(plan.summary).toContain("browser workspace");
+  });
+});

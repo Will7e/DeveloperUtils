@@ -62,6 +62,21 @@ function clientKey(req: Request): string {
 }
 
 /**
+ * The hostname of an Origin or Host value, lowercased and port-free.
+ * "" when the value is absent or unparseable, so a missing header can never
+ * be mistaken for a match.
+ */
+function hostnameOf(value: string | null | undefined): string {
+  if (!value || !value.trim()) return "";
+  const raw = value.trim();
+  try {
+    return new URL(raw.includes("://") ? raw : `http://${raw}`).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Checks if the incoming request Origin is an authorized InTab origin.
  * Prevents third-party malicious sites from abusing InTab as an open anonymous proxy.
  *
@@ -72,11 +87,18 @@ function clientKey(req: Request): string {
  * what an Origin-less caller can do; a shared secret would be the next step
  * if the relay ever needs to be closed completely.
  */
-function isAllowedOrigin(originStr: string | null): boolean {
+function isAllowedOrigin(originStr: string | null, requestHost?: string | null): boolean {
   if (!originStr) return true; // Direct same-origin request (no Origin header)
   try {
     const o = new URL(originStr);
     const host = o.hostname.toLowerCase();
+    // Same-origin first, against the host the request actually arrived on:
+    // that is what "this app calling itself" means, and it holds on any domain
+    // the app is deployed to. The list below can only name the two the vendor
+    // owns, so without this test an app on its own domain answers 403 to its
+    // own relay — the shape of failure that reads as "the web tools are broken".
+    const ownHost = hostnameOf(requestHost).replace(/^www\./, "");
+    if (ownHost && host.replace(/^www\./, "") === ownHost) return true;
     return (
       host === "localhost" ||
       host === "127.0.0.1" ||
@@ -103,7 +125,7 @@ export default async function handler(req: Request): Promise<Response> {
   const origin = req.headers.get("origin");
 
   // Enforce origin validation to prevent open relay abuse
-  if (origin && !isAllowedOrigin(origin)) {
+  if (origin && !isAllowedOrigin(origin, new URL(req.url).host)) {
     return new Response(
       JSON.stringify({
         error: `Forbidden cross-origin proxy request: Origin '${origin}' is not authorized.`,

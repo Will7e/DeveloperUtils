@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  VERIFICATION_KIND_LABEL,
   clearVerification,
   formatAge,
   proofSection,
@@ -322,5 +323,31 @@ describe("verification ledger — evidence is per binding", () => {
         verificationEvidence(CONV, { workspaceUpdatedAt: 50 }).map((e) => e.status)
       ).toEqual(["fresh-pass"]);
     })();
+  });
+});
+
+describe("the browser workspace kind", () => {
+  // A browser workspace and the user's machine both answer "did the suite pass",
+  // and they are not the same claim: one is a WASM runtime in a tab, the other is
+  // the environment the code will actually run in. The ledger keeps them apart so
+  // a reviewer can tell which one produced a green.
+
+  it("is its own kind, ordered between the type check and the user's machine", () => {
+    recordVerification(CONV, typecheck());
+    recordVerification(CONV, command({ kind: "workspace", summary: "`npm test` exited 0 in the browser workspace" }));
+    expect(verificationEvidence(CONV, { workspaceUpdatedAt: 50 }).map((e) => e.kind)).toEqual([
+      "typecheck",
+      "workspace",
+    ]);
+    expect(VERIFICATION_KIND_LABEL.workspace).toMatch(/browser workspace/);
+  });
+
+  it("counts as a run of the suite in the pull request's proof section", () => {
+    recordVerification(CONV, command({ kind: "workspace", summary: "`npm test` exited 0 in the browser workspace" }));
+    const section = proofSection(verificationEvidence(CONV, { workspaceUpdatedAt: 50 }));
+    expect(section).toContain("browser workspace");
+    // The caveat is DERIVED: something did run the commands, so saying otherwise
+    // would undersell the evidence the PR carries.
+    expect(section).not.toContain("Test suite, linter and build commands");
   });
 });

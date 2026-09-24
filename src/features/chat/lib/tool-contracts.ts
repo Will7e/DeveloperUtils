@@ -283,7 +283,7 @@ export const TOOL_CONTRACTS: Readonly<Record<ToolName, ToolContract>> = {
     misuse:
       "a non-interactive flag is mandatory (-y, --yes, --no-input): a command that stops to ask a question hangs the turn. Long-running work (a dev server) has no business here.",
     proves:
-      "only a zero exit code proves the run passed. Non-zero IS failure — quote the first failure lines rather than paraphrasing them, and re-run the SAME command after a fix.",
+      "only a zero exit code proves the run passed. Non-zero IS failure — quote the first failure lines rather than paraphrasing them, and re-run the SAME command after a fix. The result says which workspace it ran in (`ranIn`): a browser workspace in this tab needs no setup and is not the user's machine, so do not report a run there as having happened in their environment.",
     effects: "external",
     autonomy: "act",
     sensitivity: "project",

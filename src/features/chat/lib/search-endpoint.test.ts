@@ -149,9 +149,54 @@ describe("handleSearchRequest", () => {
       env: { TAVILY_API_KEY: "k" },
       fetchImpl,
       origin: "https://evil.example.com",
+      host: "intab.example.com",
     });
     expect(res.status).toBe(403);
     expect(calls).toHaveLength(0);
+  });
+
+  it("accepts a same-origin call on a domain nobody wrote down", async () => {
+    // The failure this pins: the app deployed on its own domain called its own
+    // endpoint, the hard-coded allowlist did not name that domain, and search
+    // answered 403 while the provider key was perfectly configured.
+    const { fetchImpl, calls } = stubFetch({ payload: tavilyPayload });
+    const res = await call("q", 5, {
+      env: { TAVILY_API_KEY: "k" },
+      fetchImpl,
+      origin: "https://tools.acme.example",
+      host: "tools.acme.example",
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("matches the request host regardless of port or www", async () => {
+    const { fetchImpl } = stubFetch({ payload: tavilyPayload });
+    const withPort = await call("q", 5, {
+      env: { TAVILY_API_KEY: "k" },
+      fetchImpl,
+      origin: "http://localhost:5199",
+      host: "localhost:5199",
+    });
+    expect(withPort.status).toBe(200);
+    const www = await call("q", 5, {
+      env: { TAVILY_API_KEY: "k" },
+      fetchImpl,
+      origin: "https://www.acme.example",
+      host: "acme.example",
+    });
+    expect(www.status).toBe(200);
+  });
+
+  it("does not let a missing Host header widen the allowlist", async () => {
+    const { fetchImpl } = stubFetch({ payload: tavilyPayload });
+    const res = await call("q", 5, {
+      env: { TAVILY_API_KEY: "k" },
+      fetchImpl,
+      origin: "https://evil.example.com",
+      host: null,
+    });
+    expect(res.status).toBe(403);
   });
 
   it("throttles a client that spends the quota in a loop", async () => {
@@ -238,5 +283,16 @@ describe("isAllowedSearchOrigin", () => {
     const vercelEnv = { VERCEL_PROJECT_PRODUCTION_URL: "intab.vercel.app" };
     expect(isAllowedSearchOrigin("https://intab.vercel.app", vercelEnv)).toBe(true);
     expect(isAllowedSearchOrigin("https://preview-abc.intab.vercel.app", vercelEnv)).toBe(true);
+  });
+
+  it("allows a same-origin call against the request's own host", () => {
+    expect(
+      isAllowedSearchOrigin("https://tools.acme.example", {}, "tools.acme.example")
+    ).toBe(true);
+    // The Origin's own host is what is compared — a lookalike does not become
+    // same-origin by sitting next to the real host.
+    expect(
+      isAllowedSearchOrigin("https://evil.com", {}, "tools.acme.example")
+    ).toBe(false);
   });
 });

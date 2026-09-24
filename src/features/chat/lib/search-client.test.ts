@@ -1,12 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { searchWeb } from "./search-client";
+import { capabilityState, resetAvailability } from "./availability";
 
 const realFetch = globalThis.fetch;
+
+beforeEach(() => resetAvailability());
 
 afterEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = realFetch;
+  resetAvailability();
 });
 
 function stubFetch(response: Response | (() => Promise<Response>)) {
@@ -99,6 +103,38 @@ describe("searchWeb", () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) return;
     expect(outcome.error).toContain("non-JSON");
+  });
+
+  it("reports a refused origin as a routing problem, never as a missing key", async () => {
+    // The confusing shape of "search is broken": the key is set, the route
+    // exists, and the call is refused for who sent it. Telling the user to add
+    // a key here would send them to fix the one thing that is fine.
+    stubFetch(json({ code: "FORBIDDEN_ORIGIN", error: "This origin may not use the search endpoint." }, 403));
+    const outcome = await searchWeb("q");
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.setupRequired).toBe(false);
+    expect(outcome.error).toContain("origin");
+    expect(outcome.error).toContain("ask for the URL");
+  });
+
+  it("records an unreachable endpoint as observed-down for the next turn's note", async () => {
+    // The note is how the model learns the consequence BEFORE it invents a URL:
+    // "search is unavailable this turn — ask the user". A failure that is never
+    // recorded is a failure the next turn repeats blind.
+    stubFetch(json({ code: "FORBIDDEN_ORIGIN", error: "refused" }, 403));
+    await searchWeb("q");
+    expect(capabilityState("webSearch")).toBe("down");
+  });
+
+  it("returns the observed state to up when a search works", async () => {
+    stubFetch(json({ code: "FORBIDDEN_ORIGIN", error: "refused" }, 403));
+    await searchWeb("q");
+    expect(capabilityState("webSearch")).toBe("down");
+
+    stubFetch(json({ provider: "tavily", results: [] }));
+    await searchWeb("q again");
+    expect(capabilityState("webSearch")).toBe("up");
   });
 
   it("reports a transport failure without throwing", async () => {

@@ -1,0 +1,24 @@
+# Isolation headers for hosts that read `_headers` from the build output
+# (Cloudflare Pages, Netlify) rather than from `vercel.json`.
+#
+# These are the same values `vercel.json` serves and the same values the Vite dev
+# server serves, because the browser workspace tier cannot boot without them —
+# the runtime is a cross-origin iframe that needs SharedArrayBuffer, which a
+# document only receives when it is cross-origin isolated. A deployment that
+# serves the build but not the headers presents a workspace that fails for a
+# reason no error message names. `deployment-headers.test.ts` fails the build if
+# this file, `vercel.json` and the shared module disagree.
+#
+# `credentialless` rather than `require-corp`: the app's own CSP allows arbitrary
+# https images and esm.sh modules, and neither would survive a CORP requirement.
+# `same-origin-allow-popups` rather than `same-origin`: GitHub sign-in is a popup
+# whose result comes back by postMessage.
+
+/*
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Embedder-Policy: credentialless
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), cross-origin-isolated=(self "https://stackblitz.com")
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; object-src 'none'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net https://esm.sh blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://esm.sh; connect-src *; img-src 'self' data: blob: https:; worker-src 'self' blob: https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net https://stackblitz.com; frame-src 'self' blob: https://cdn.jsdelivr.net https://stackblitz.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self';

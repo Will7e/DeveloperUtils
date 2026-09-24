@@ -44,6 +44,8 @@ import { resolveMentionContext } from "./services/mention-context";
 import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
 import { ActivityRail } from "./components/ActivityRail";
+import { WorkspacePreview } from "./components/WorkspacePreview";
+import { WorkspaceStrip } from "./components/WorkspaceStrip";
 import { ChangesSheet } from "./components/ChangesSheet";
 import { useNarrowLayout } from "./components/useNarrowLayout";
 import { ChangesPane } from "./components/ChangesPane";
@@ -188,6 +190,9 @@ export function ChatPage() {
   // button brings it back.
   const attachedAt = activeConversation?.repoContext?.attachedAt ?? 0;
   const [closedForAttachment, setClosedForAttachment] = useState<number | null>(null);
+  // The live preview is a panel the user opens and dismisses, not a pane they
+  // work in — so it is page state, not layout state.
+  const [previewOpen, setPreviewOpen] = useState(false);
   const panelVisible = Boolean(repoAttached) && closedForAttachment !== attachedAt;
   // Fail closed: the change set in this panel must be the change set of the
   // repository the panel is about. After a switch, the in-memory entry is the
@@ -816,6 +821,18 @@ export function ChatPage() {
                     onOpenChanges={() => setClosedForAttachment(null)}
                   />
 
+                  {/* What this page can execute, and whether the app is running
+                      in it. Above the composer for the same reason the activity
+                      rail is: it answers a question the user has while waiting,
+                      and it says which workspace a "verified" chip came from —
+                      this tab, or a daemon they paired. */}
+                  <WorkspaceStrip
+                    conversationId={activeConversationId}
+                    repoAttached={repoAttached}
+                    previewOpen={previewOpen}
+                    onTogglePreview={setPreviewOpen}
+                  />
+
                   <Composer
                     value={draft}
                     onChange={setDraft}
@@ -892,6 +909,13 @@ export function ChatPage() {
               }}
             />
 
+            <WorkspaceStrip
+              conversationId={activeConversationId}
+              repoAttached={repoAttached}
+              previewOpen={previewOpen}
+              onTogglePreview={setPreviewOpen}
+            />
+
             <Composer
               value={draft}
               onChange={setDraft}
@@ -949,6 +973,11 @@ export function ChatPage() {
           </>
         )}
       </main>
+
+      {/* The app the agent is changing, running, beside the diff. Outside the
+          two layout branches because it belongs to the page: whether the
+          preview is open has nothing to do with how the panes are arranged. */}
+      <WorkspacePreview open={previewOpen} onClose={() => setPreviewOpen(false)} />
 
       <PushApprovalModal />
 

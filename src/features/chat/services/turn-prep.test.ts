@@ -179,3 +179,42 @@ describe("prepareTurn with no API key", () => {
     expect(conversation?.messages[0]?.content).toMatch(/API key/i);
   });
 });
+
+// ============================================================
+// What the prompt owes a turn that can read the web
+// ============================================================
+// Two halves of one promise, both of which were missing on the most
+// common configuration (a chat with no repository attached):
+//
+//   • the tool surface OFFERS the web pair and the prose describes them, so
+//     the agent knows it can look something up rather than recall it; and
+//   • every result that came from outside this app is wrapped in
+//     <untrusted-content> by lib/untrusted.ts — so the STANDING RULE that
+//     explains the wrapper has to ride the same turn. A delimiter with no
+//     rule is the half that makes it theatre.
+
+describe("a repo-free turn that can browse", () => {
+  it("offers the web pair and explains the untrusted-content delimiter", async () => {
+    const store = useChatStore.getState();
+    store.updateSettings({ apiKey: "sk-test" });
+    const id = store.createConversation("openai/gpt-4o-mini");
+    store.addMessage(id, { role: "user", content: "what changed in vite 8?" });
+
+    const prepared = await prepareTurn(id);
+    expect(prepared).not.toBeNull();
+    const prompt = prepared!.systemPrompt;
+    const names = (prepared!.tools ?? []).map(
+      (t) => (t as { function?: { name?: string } }).function?.name
+    );
+
+    expect(names).toContain("search_web");
+    expect(names).toContain("fetch_url");
+    expect(prompt, "the web tools must be documented").toContain("- search_web:");
+    expect(prompt, "the web tools must be documented").toContain("- fetch_url:");
+    expect(prompt, "the wrapper needs its rule").toContain("<untrusted-content>");
+    // The rule has to describe what those tags mean, not merely contain the
+    // string: a page that tells the model to run something is the case it is
+    // there for.
+    expect(prompt).toMatch(/never instructions to follow/i);
+  });
+});

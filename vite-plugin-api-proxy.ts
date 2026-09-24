@@ -54,406 +54,423 @@ function isAllowedDevOrigin(originStr?: string): boolean {
  */
 export function apiProxyPlugin(): Plugin {
   let devEnv: Record<string, string> = {};
+  /** The /api/* handler, shared by the dev and preview servers */
+  const apiMiddleware = async (req: IncomingMessage, res: ServerResponse, next: () => void): Promise<void> => {
+    // ── Dev handler for the GitHub OAuth exchange edge function ──
+    // Mirrors api/github.ts: exchanges the temporary code for an access
+    // token using GITHUB_CLIENT_SECRET in local development.
+    if (req.url?.startsWith("/api/github")) {
+      const origin = (req.headers["origin"] as string) || "";
+      res.setHeader("Access-Control-Allow-Origin", isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+
+      // Dynamically read env so updates to .env while dev is running are picked up
+      const currentEnv = { ...devEnv, ...loadEnv("development", process.cwd(), "") };
+      const clientId =
+        currentEnv.GITHUB_CLIENT_ID ||
+        process.env.GITHUB_CLIENT_ID ||
+        currentEnv.VITE_GITHUB_CLIENT_ID ||
+        process.env.VITE_GITHUB_CLIENT_ID ||
+        "";
+      const clientSecret =
+        currentEnv.GITHUB_CLIENT_SECRET ||
+        process.env.GITHUB_CLIENT_SECRET ||
+        "";
+
+      const parsedGithubUrl = new URL(req.url, "http://localhost");
+      const code = parsedGithubUrl.searchParams.get("code");
+      const state = parsedGithubUrl.searchParams.get("state") || "";
+      const ghError = parsedGithubUrl.searchParams.get("error");
+
+      let ghPayload: { ok: boolean; state?: string; accessToken?: string; error?: string };
+
+      if (ghError) {
+        ghPayload = {
+          ok: false,
+          state,
+          error: parsedGithubUrl.searchParams.get("error_description") || ghError,
+        };
+      } else if (!clientId || !clientSecret) {
+        ghPayload = {
+          ok: false,
+          state,
+          error: "GitHub OAuth exchange is not configured in local dev — please ensure GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set in your .env file, or use a Personal Access Token in Chat Settings → GitHub.",
+        };
+      } else if (!code) {
+        ghPayload = {
+          ok: false,
+          state,
+          error: "Missing ?code parameter from GitHub callback.",
+        };
+      } else {
+        try {
+          const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              client_id: clientId,
+              client_secret: clientSecret,
+              code,
+              state,
+            }),
+          });
+
+          if (!tokenRes.ok) {
+            ghPayload = {
+              ok: false,
+              state,
+              error: `GitHub token exchange failed (HTTP ${tokenRes.status}).`,
+            };
+          } else {
+            const data = (await tokenRes.json()) as {
+              access_token?: string;
+              error?: string;
+              error_description?: string;
+            };
+
+            if (data.error || !data.access_token) {
+              ghPayload = {
+                ok: false,
+                state,
+                error: data.error_description || data.error || "GitHub did not return an access token.",
+              };
+            } else {
+              ghPayload = {
+                ok: true,
+                accessToken: data.access_token,
+                state,
+              };
+            }
+          }
+        } catch (err: unknown) {
+          ghPayload = {
+            ok: false,
+            state,
+            error: err instanceof Error ? err.message : "GitHub token exchange network error.",
+          };
+        }
+      }
+
+      // Mirrors api/github.ts: payload in a JSON data block (escaped), logic
+      // in the shared external script, so no string can escape into markup.
+      res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+      );
+      res.end(
+        `<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"><title>Connecting GitHub…</title></head>
+  <body>
+<script id="intab-oauth-payload" type="application/json">${safeJsonForHtml(ghPayload)}</script>
+<script src="/oauth/github-popup.js" data-target-origin="${escapeHtmlAttribute(origin || "http://localhost:5173")}"></script>
+<p style="font-family: system-ui; color: #555;">Completing GitHub sign-in…</p>
+  </body>
+</html>`
+      );
+      return;
+    }
+
+    // ── Dev stub for the license edge function ──
+    // In production /api/license runs as a Vercel edge function. In dev
+    // there is no server route, so without this stub the SPA fallback
+    // would answer with index.html and license activation would fail
+    // with a confusing parse error. Behavior mirrors api/license.ts:
+    // any well-formed key is accepted; LEMON_SQUEEZY_TEST_KEY forces a
+    // rejection so the failure path can be tested too.
+    if (req.url?.startsWith("/api/license")) {
+      const origin = (req.headers["origin"] as string) || "";
+      const allowedOrigin = isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "";
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      if (req.method !== "POST") {
+        res.statusCode = 405;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ valid: false, error: "Method not allowed" }));
+        return;
+      }
+
+      let bodyRaw = "";
+      req.on("data", (chunk) => (bodyRaw += chunk));
+      req.on("end", () => {
+        try {
+          const body = JSON.parse(bodyRaw || "{}") as { licenseKey?: string };
+          const key = (body.licenseKey || "").trim();
+          if (!key) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ valid: false, error: "Missing licenseKey" }));
+            return;
+          }
+          if (key === "LEMON_SQUEEZY_TEST_KEY") {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ valid: false, error: "License is not valid (test rejection key)" }));
+            return;
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ valid: true, expiresAt: null }));
+        } catch {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ valid: false, error: "Invalid JSON body" }));
+        }
+      });
+      return;
+    }
+
+    if (!req.url?.startsWith("/api/proxy")) {
+      return next();
+    }
+
+    const origin = (req.headers["origin"] as string) || "";
+    const allowedOrigin = isAllowedDevOrigin(origin) ? (origin || "http://localhost:5173") : "";
+
+    // Reject drive-by attacks from foreign origins
+    if (origin && !isAllowedDevOrigin(origin)) {
+      res.statusCode = 403;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          error: `Forbidden cross-origin request from untrusted origin: '${origin}'`,
+          code: "CROSS_ORIGIN_FORBIDDEN",
+        })
+      );
+      return;
+    }
+
+    // Handle preflight OPTIONS request
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Expose-Headers", "*");
+    res.setHeader("Access-Control-Max-Age", "86400");
+
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(req.url, "http://localhost");
+      const targetUrl = parsedUrl.searchParams.get("url") || (req.headers["x-target-url"] as string);
+
+      if (!targetUrl) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Missing 'url' query parameter or 'x-target-url' header" }));
+        return;
+      }
+
+      // SSRF Guard: Validate target against cloud metadata endpoints
+      const ssrfCheck = validateUrlForSSRF(targetUrl, {
+        allowLocalhost: true, // Allow local development endpoints
+        allowPrivateSubnets: true, // Allow intranet endpoints in local dev
+      });
+
+      if (!ssrfCheck.allowed || !ssrfCheck.normalizedUrl) {
+        res.statusCode = 403;
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            error: `Forbidden target URL: ${ssrfCheck.reason || "Blocked by SSRF policy"}`,
+            code: "SSRF_BLOCKED",
+          })
+        );
+        return;
+      }
+
+      const validUrl = new URL(ssrfCheck.normalizedUrl);
+
+      // Read incoming body
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      }
+      const bodyBuffer = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+
+      // Assemble upstream headers
+      const forwardHeaders: Record<string, string> = {};
+
+      // 1. Copy incoming headers (excluding hop-by-hop & proxy-specific)
+      for (const [key, val] of Object.entries(req.headers)) {
+        const lower = key.toLowerCase();
+        if (
+          !HOP_BY_HOP_HEADERS.has(lower) &&
+          !NEVER_FORWARDED_HEADERS.has(lower) &&
+          lower !== "x-target-url" &&
+          lower !== "x-proxy-headers" &&
+          typeof val === "string"
+        ) {
+          forwardHeaders[key] = val;
+        }
+      }
+
+      // 2. Unpack explicit custom headers from `x-proxy-headers`
+      // (Allows client to supply browser-forbidden headers like User-Agent, Cookie, etc.)
+      const rawProxyHeaders = req.headers["x-proxy-headers"];
+      if (typeof rawProxyHeaders === "string" && rawProxyHeaders.trim()) {
+        try {
+          const customHeaders = JSON.parse(decodeURIComponent(rawProxyHeaders));
+          if (customHeaders && typeof customHeaders === "object") {
+            for (const [k, v] of Object.entries(customHeaders)) {
+              if (typeof v === "string" && k.trim()) {
+                forwardHeaders[k.trim()] = v;
+              }
+            }
+          }
+        } catch {
+          // Ignore JSON parse errors in custom headers
+        }
+      }
+
+      // Set host header to target host
+      forwardHeaders["host"] = validUrl.host;
+
+      // Perform upstream fetch via Node.js with safe redirect loop
+      let currentMethod = (req.method || "GET").toUpperCase();
+      const canHaveBody = currentMethod !== "GET" && currentMethod !== "HEAD";
+      const initialBody = canHaveBody && bodyBuffer && bodyBuffer.length > 0 ? bodyBuffer : undefined;
+
+      const MAX_REDIRECTS = 3;
+      let upstreamRes: Response | null = null;
+      let activeTargetUrl = validUrl;
+      /** Status of the hop that just finished — a 303 makes the NEXT one a GET */
+      let previousStatus: number | null = null;
+
+      for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        // Read from its own variable rather than from `upstreamRes`, which this
+        // statement is about to replace (and which is null on hop 0).
+        const hopMethod: string =
+          hop === 0 ? currentMethod : previousStatus === 303 ? "GET" : currentMethod;
+        upstreamRes = await fetch(activeTargetUrl.toString(), {
+          method: hopMethod,
+          headers: forwardHeaders,
+          body: hop === 0 ? initialBody : undefined,
+          redirect: "manual",
+        });
+        previousStatus = upstreamRes.status;
+
+        if ([301, 302, 303, 307, 308].includes(upstreamRes.status)) {
+          const location = upstreamRes.headers.get("location");
+          if (!location) break;
+
+          const resolvedRedirectUrl = new URL(location, activeTargetUrl).toString();
+          const redirectCheck = validateUrlForSSRF(resolvedRedirectUrl, {
+            allowLocalhost: true,
+            allowPrivateSubnets: true,
+          });
+
+          if (!redirectCheck.allowed || !redirectCheck.normalizedUrl) {
+            res.statusCode = 403;
+            res.setHeader("Content-Type", "application/json");
+            res.end(
+              JSON.stringify({
+                error: `SSRF Blocked: Redirect target prohibited: ${redirectCheck.reason || "Forbidden redirect target"}`,
+                code: "SSRF_REDIRECT_BLOCKED",
+              })
+            );
+            return;
+          }
+
+          activeTargetUrl = new URL(redirectCheck.normalizedUrl);
+          forwardHeaders["host"] = activeTargetUrl.host;
+          if (upstreamRes.status === 303) {
+            currentMethod = "GET";
+          }
+          continue;
+        }
+
+        break;
+      }
+
+      if (!upstreamRes) {
+        throw new Error("No response from target server");
+      }
+
+      // Forward response status
+      res.statusCode = upstreamRes.status;
+      res.statusMessage = upstreamRes.statusText;
+
+      // Forward response headers (excluding encoding/length headers handled by Node fetch)
+      upstreamRes.headers.forEach((val, key) => {
+        const lower = key.toLowerCase();
+        if (
+          lower !== "content-encoding" &&
+          lower !== "content-length" &&
+          lower !== "transfer-encoding" &&
+          lower !== "access-control-allow-origin" &&
+          lower !== "access-control-expose-headers"
+        ) {
+          res.setHeader(key, val);
+        }
+      });
+
+      // Stream body to client
+      if (upstreamRes.body) {
+        const reader = upstreamRes.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+
+      res.end();
+    } catch (err: unknown) {
+      const error = err as Error & { code?: string };
+      console.error("[API Proxy Error]:", error.message);
+
+      if (!res.headersSent) {
+        res.statusCode = 502;
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            error: `Proxy request failed: ${error.message}`,
+            code: error.code || "PROXY_GATEWAY_ERROR",
+          })
+        );
+      } else {
+        res.end();
+      }
+    }
+  };
+
   return {
     name: "vite-plugin-api-proxy",
     configResolved(config) {
       devEnv = loadEnv(config.mode, config.root, "");
     },
     configureServer(server) {
-      server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
-        // ── Dev handler for the GitHub OAuth exchange edge function ──
-        // Mirrors api/github.ts: exchanges the temporary code for an access
-        // token using GITHUB_CLIENT_SECRET in local development.
-        if (req.url?.startsWith("/api/github")) {
-          const origin = (req.headers["origin"] as string) || "";
-          res.setHeader("Access-Control-Allow-Origin", isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "");
-          res.setHeader("Content-Type", "text/html; charset=utf-8");
-          res.setHeader("Cache-Control", "no-store");
-
-          if (req.method === "OPTIONS") {
-            res.statusCode = 204;
-            res.end();
-            return;
-          }
-
-          // Dynamically read env so updates to .env while dev is running are picked up
-          const currentEnv = { ...devEnv, ...loadEnv("development", process.cwd(), "") };
-          const clientId =
-            currentEnv.GITHUB_CLIENT_ID ||
-            process.env.GITHUB_CLIENT_ID ||
-            currentEnv.VITE_GITHUB_CLIENT_ID ||
-            process.env.VITE_GITHUB_CLIENT_ID ||
-            "";
-          const clientSecret =
-            currentEnv.GITHUB_CLIENT_SECRET ||
-            process.env.GITHUB_CLIENT_SECRET ||
-            "";
-
-          const parsedGithubUrl = new URL(req.url, "http://localhost");
-          const code = parsedGithubUrl.searchParams.get("code");
-          const state = parsedGithubUrl.searchParams.get("state") || "";
-          const ghError = parsedGithubUrl.searchParams.get("error");
-
-          let ghPayload: { ok: boolean; state?: string; accessToken?: string; error?: string };
-
-          if (ghError) {
-            ghPayload = {
-              ok: false,
-              state,
-              error: parsedGithubUrl.searchParams.get("error_description") || ghError,
-            };
-          } else if (!clientId || !clientSecret) {
-            ghPayload = {
-              ok: false,
-              state,
-              error: "GitHub OAuth exchange is not configured in local dev — please ensure GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET are set in your .env file, or use a Personal Access Token in Chat Settings → GitHub.",
-            };
-          } else if (!code) {
-            ghPayload = {
-              ok: false,
-              state,
-              error: "Missing ?code parameter from GitHub callback.",
-            };
-          } else {
-            try {
-              const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-                body: JSON.stringify({
-                  client_id: clientId,
-                  client_secret: clientSecret,
-                  code,
-                  state,
-                }),
-              });
-
-              if (!tokenRes.ok) {
-                ghPayload = {
-                  ok: false,
-                  state,
-                  error: `GitHub token exchange failed (HTTP ${tokenRes.status}).`,
-                };
-              } else {
-                const data = (await tokenRes.json()) as {
-                  access_token?: string;
-                  error?: string;
-                  error_description?: string;
-                };
-
-                if (data.error || !data.access_token) {
-                  ghPayload = {
-                    ok: false,
-                    state,
-                    error: data.error_description || data.error || "GitHub did not return an access token.",
-                  };
-                } else {
-                  ghPayload = {
-                    ok: true,
-                    accessToken: data.access_token,
-                    state,
-                  };
-                }
-              }
-            } catch (err: unknown) {
-              ghPayload = {
-                ok: false,
-                state,
-                error: err instanceof Error ? err.message : "GitHub token exchange network error.",
-              };
-            }
-          }
-
-          // Mirrors api/github.ts: payload in a JSON data block (escaped), logic
-          // in the shared external script, so no string can escape into markup.
-          res.setHeader(
-            "Content-Security-Policy",
-            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
-          );
-          res.end(
-            `<!DOCTYPE html>
-<html>
-  <head><meta charset="utf-8"><title>Connecting GitHub…</title></head>
-  <body>
-    <script id="intab-oauth-payload" type="application/json">${safeJsonForHtml(ghPayload)}</script>
-    <script src="/oauth/github-popup.js" data-target-origin="${escapeHtmlAttribute(origin || "http://localhost:5173")}"></script>
-    <p style="font-family: system-ui; color: #555;">Completing GitHub sign-in…</p>
-  </body>
-</html>`
-          );
-          return;
-        }
-
-        // ── Dev stub for the license edge function ──
-        // In production /api/license runs as a Vercel edge function. In dev
-        // there is no server route, so without this stub the SPA fallback
-        // would answer with index.html and license activation would fail
-        // with a confusing parse error. Behavior mirrors api/license.ts:
-        // any well-formed key is accepted; LEMON_SQUEEZY_TEST_KEY forces a
-        // rejection so the failure path can be tested too.
-        if (req.url?.startsWith("/api/license")) {
-          const origin = (req.headers["origin"] as string) || "";
-          const allowedOrigin = isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "";
-          res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-          res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-          res.setHeader("Access-Control-Allow-Headers", "*");
-
-          if (req.method === "OPTIONS") {
-            res.statusCode = 204;
-            res.end();
-            return;
-          }
-          if (req.method !== "POST") {
-            res.statusCode = 405;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ valid: false, error: "Method not allowed" }));
-            return;
-          }
-
-          let bodyRaw = "";
-          req.on("data", (chunk) => (bodyRaw += chunk));
-          req.on("end", () => {
-            try {
-              const body = JSON.parse(bodyRaw || "{}") as { licenseKey?: string };
-              const key = (body.licenseKey || "").trim();
-              if (!key) {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ valid: false, error: "Missing licenseKey" }));
-                return;
-              }
-              if (key === "LEMON_SQUEEZY_TEST_KEY") {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ valid: false, error: "License is not valid (test rejection key)" }));
-                return;
-              }
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ valid: true, expiresAt: null }));
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ valid: false, error: "Invalid JSON body" }));
-            }
-          });
-          return;
-        }
-
-        if (!req.url?.startsWith("/api/proxy")) {
-          return next();
-        }
-
-        const origin = (req.headers["origin"] as string) || "";
-        const allowedOrigin = isAllowedDevOrigin(origin) ? (origin || "http://localhost:5173") : "";
-
-        // Reject drive-by attacks from foreign origins
-        if (origin && !isAllowedDevOrigin(origin)) {
-          res.statusCode = 403;
-          res.setHeader("Content-Type", "application/json");
-          res.end(
-            JSON.stringify({
-              error: `Forbidden cross-origin request from untrusted origin: '${origin}'`,
-              code: "CROSS_ORIGIN_FORBIDDEN",
-            })
-          );
-          return;
-        }
-
-        // Handle preflight OPTIONS request
-        res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "*");
-        res.setHeader("Access-Control-Expose-Headers", "*");
-        res.setHeader("Access-Control-Max-Age", "86400");
-
-        if (req.method === "OPTIONS") {
-          res.statusCode = 204;
-          res.end();
-          return;
-        }
-
-        try {
-          const parsedUrl = new URL(req.url, "http://localhost");
-          const targetUrl = parsedUrl.searchParams.get("url") || (req.headers["x-target-url"] as string);
-
-          if (!targetUrl) {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Missing 'url' query parameter or 'x-target-url' header" }));
-            return;
-          }
-
-          // SSRF Guard: Validate target against cloud metadata endpoints
-          const ssrfCheck = validateUrlForSSRF(targetUrl, {
-            allowLocalhost: true, // Allow local development endpoints
-            allowPrivateSubnets: true, // Allow intranet endpoints in local dev
-          });
-
-          if (!ssrfCheck.allowed || !ssrfCheck.normalizedUrl) {
-            res.statusCode = 403;
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error: `Forbidden target URL: ${ssrfCheck.reason || "Blocked by SSRF policy"}`,
-                code: "SSRF_BLOCKED",
-              })
-            );
-            return;
-          }
-
-          const validUrl = new URL(ssrfCheck.normalizedUrl);
-
-          // Read incoming body
-          const chunks: Buffer[] = [];
-          for await (const chunk of req) {
-            chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-          }
-          const bodyBuffer = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
-
-          // Assemble upstream headers
-          const forwardHeaders: Record<string, string> = {};
-
-          // 1. Copy incoming headers (excluding hop-by-hop & proxy-specific)
-          for (const [key, val] of Object.entries(req.headers)) {
-            const lower = key.toLowerCase();
-            if (
-              !HOP_BY_HOP_HEADERS.has(lower) &&
-              !NEVER_FORWARDED_HEADERS.has(lower) &&
-              lower !== "x-target-url" &&
-              lower !== "x-proxy-headers" &&
-              typeof val === "string"
-            ) {
-              forwardHeaders[key] = val;
-            }
-          }
-
-          // 2. Unpack explicit custom headers from `x-proxy-headers`
-          // (Allows client to supply browser-forbidden headers like User-Agent, Cookie, etc.)
-          const rawProxyHeaders = req.headers["x-proxy-headers"];
-          if (typeof rawProxyHeaders === "string" && rawProxyHeaders.trim()) {
-            try {
-              const customHeaders = JSON.parse(decodeURIComponent(rawProxyHeaders));
-              if (customHeaders && typeof customHeaders === "object") {
-                for (const [k, v] of Object.entries(customHeaders)) {
-                  if (typeof v === "string" && k.trim()) {
-                    forwardHeaders[k.trim()] = v;
-                  }
-                }
-              }
-            } catch {
-              // Ignore JSON parse errors in custom headers
-            }
-          }
-
-          // Set host header to target host
-          forwardHeaders["host"] = validUrl.host;
-
-          // Perform upstream fetch via Node.js with safe redirect loop
-          let currentMethod = (req.method || "GET").toUpperCase();
-          const canHaveBody = currentMethod !== "GET" && currentMethod !== "HEAD";
-          const initialBody = canHaveBody && bodyBuffer && bodyBuffer.length > 0 ? bodyBuffer : undefined;
-
-          const MAX_REDIRECTS = 3;
-          let upstreamRes: Response | null = null;
-          let activeTargetUrl = validUrl;
-
-          for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-            upstreamRes = await fetch(activeTargetUrl.toString(), {
-              method: hop === 0 ? currentMethod : (upstreamRes?.status === 303 ? "GET" : currentMethod),
-              headers: forwardHeaders,
-              body: hop === 0 ? initialBody : undefined,
-              redirect: "manual",
-            });
-
-            if ([301, 302, 303, 307, 308].includes(upstreamRes.status)) {
-              const location = upstreamRes.headers.get("location");
-              if (!location) break;
-
-              const resolvedRedirectUrl = new URL(location, activeTargetUrl).toString();
-              const redirectCheck = validateUrlForSSRF(resolvedRedirectUrl, {
-                allowLocalhost: true,
-                allowPrivateSubnets: true,
-              });
-
-              if (!redirectCheck.allowed || !redirectCheck.normalizedUrl) {
-                res.statusCode = 403;
-                res.setHeader("Content-Type", "application/json");
-                res.end(
-                  JSON.stringify({
-                    error: `SSRF Blocked: Redirect target prohibited: ${redirectCheck.reason || "Forbidden redirect target"}`,
-                    code: "SSRF_REDIRECT_BLOCKED",
-                  })
-                );
-                return;
-              }
-
-              activeTargetUrl = new URL(redirectCheck.normalizedUrl);
-              forwardHeaders["host"] = activeTargetUrl.host;
-              if (upstreamRes.status === 303) {
-                currentMethod = "GET";
-              }
-              continue;
-            }
-
-            break;
-          }
-
-          if (!upstreamRes) {
-            throw new Error("No response from target server");
-          }
-
-          // Forward response status
-          res.statusCode = upstreamRes.status;
-          res.statusMessage = upstreamRes.statusText;
-
-          // Forward response headers (excluding encoding/length headers handled by Node fetch)
-          upstreamRes.headers.forEach((val, key) => {
-            const lower = key.toLowerCase();
-            if (
-              lower !== "content-encoding" &&
-              lower !== "content-length" &&
-              lower !== "transfer-encoding" &&
-              lower !== "access-control-allow-origin" &&
-              lower !== "access-control-expose-headers"
-            ) {
-              res.setHeader(key, val);
-            }
-          });
-
-          // Stream body to client
-          if (upstreamRes.body) {
-            const reader = upstreamRes.body.getReader();
-            try {
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                res.write(value);
-              }
-            } finally {
-              reader.releaseLock();
-            }
-          }
-
-          res.end();
-        } catch (err: unknown) {
-          const error = err as Error & { code?: string };
-          console.error("[API Proxy Error]:", error.message);
-
-          if (!res.headersSent) {
-            res.statusCode = 502;
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error: `Proxy request failed: ${error.message}`,
-                code: error.code || "PROXY_GATEWAY_ERROR",
-              })
-            );
-          } else {
-            res.end();
-          }
-        }
-      });
+      server.middlewares.use(apiMiddleware);
+    },
+    // The built app has to reach its own relay too: `vite preview` serves the
+    // real build, so a relay that exists only in dev is a production failure
+    // nobody sees until it is deployed (and it reads as "the web tools are
+    // broken", never as "the route is missing").
+    configurePreviewServer(server) {
+      server.middlewares.use(apiMiddleware);
     },
   };
 }

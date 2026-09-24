@@ -13,6 +13,14 @@
 // The environment is re-read on every request, so adding TAVILY_API_KEY (or
 // any other provider key) to `.env` takes effect on the NEXT search — no dev
 // server restart. That is the whole point: put the key in, it works.
+//
+// It is mounted on BOTH servers, and that is not symmetry for its own sake.
+// `vite preview` serves the real build — the only place an unbuilt dev-server
+// route can be caught before a deploy — and it installs only the plugins'
+// `configurePreviewServer` hooks. Mounting this on `configureServer` alone
+// meant search worked in `npm run dev` and the preview server answered with
+// the SPA's index.html: "not wired up in this environment", with the provider
+// key sitting right there in .env.
 // ============================================================
 
 import { loadEnv, type Plugin } from "vite";
@@ -20,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 
 import { handleSearchRequest } from "./src/features/chat/lib/search-endpoint";
 
-/** Origins allowed to reach the dev endpoint (localhost only) */
+/** Origins allowed to reach the local endpoint (localhost only) */
 function isAllowedDevOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
   try {
@@ -65,48 +73,62 @@ function readJsonBody(req: IncomingMessage, maxBytes = 8 * 1024): Promise<unknow
 
 export function apiSearchPlugin(): Plugin {
   let devEnv: Record<string, string> = {};
+
+  /** The /api/search handler, shared by the dev and preview servers */
+  const searchMiddleware = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    next: () => void
+  ): Promise<void> => {
+    if (!req.url?.startsWith("/api/search")) return next();
+
+    const origin = req.headers["origin"] as string | undefined;
+    if (isAllowedDevOrigin(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    }
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.end(JSON.stringify({ code: "METHOD_NOT_ALLOWED", error: "Method not allowed" }));
+      return;
+    }
+
+    // Re-read .env per request: a key added while the server is running
+    // is picked up by the next search instead of requiring a restart.
+    const env = { ...devEnv, ...loadEnv("development", process.cwd(), ""), ...process.env };
+    const body = (await readJsonBody(req)) as { query?: unknown; limit?: unknown } | null;
+
+    const result = await handleSearchRequest(body?.query, body?.limit, {
+      env,
+      clientKey: "dev-local",
+      origin: origin ?? null,
+      host: req.headers.host ?? null,
+    });
+
+    res.statusCode = result.status;
+    res.end(JSON.stringify(result.body));
+  };
+
   return {
     name: "vite-plugin-api-search",
     configResolved(config) {
       devEnv = loadEnv(config.mode, config.root, "");
     },
     configureServer(server) {
-      server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
-        if (!req.url?.startsWith("/api/search")) return next();
-
-        const origin = req.headers["origin"] as string | undefined;
-        if (isAllowedDevOrigin(origin)) {
-          res.setHeader("Access-Control-Allow-Origin", origin ?? "*");
-          res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-        }
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.setHeader("Cache-Control", "no-store");
-
-        if (req.method === "OPTIONS") {
-          res.statusCode = 204;
-          res.end();
-          return;
-        }
-        if (req.method !== "POST") {
-          res.statusCode = 405;
-          res.end(JSON.stringify({ code: "METHOD_NOT_ALLOWED", error: "Method not allowed" }));
-          return;
-        }
-
-        // Re-read .env per request: a key added while the server is running
-        // is picked up by the next search instead of requiring a restart.
-        const env = { ...devEnv, ...loadEnv("development", process.cwd(), ""), ...process.env };
-        const body = (await readJsonBody(req)) as { query?: unknown; limit?: unknown } | null;
-
-        const result = await handleSearchRequest(body?.query, body?.limit, {
-          env,
-          clientKey: "dev-local",
-          origin: origin ?? null,
-        });
-
-        res.statusCode = result.status;
-        res.end(JSON.stringify(result.body));
-      });
+      server.middlewares.use(searchMiddleware);
+    },
+    // `vite preview` serves the built app on a real origin, so this is where a
+    // search route that only exists in dev gets caught.
+    configurePreviewServer(server) {
+      server.middlewares.use(searchMiddleware);
     },
   };
 }

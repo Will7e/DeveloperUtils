@@ -62,6 +62,19 @@ export const DELEGATE_TOOL_NAMES: readonly string[] = [
   "get_repo_overview",
   "list_repo_files",
   "read_file",
+  // The web pair, and the reason they are here rather than repo-only:
+  //
+  // A helper with no way to look anything up answers from its own weights.
+  // That is the worst possible failure of THIS tool, because the parent asks
+  // for research precisely when the answer is not in the checkout (a
+  // dependency's real API, a breaking change, an unfamiliar error) and then
+  // treats the report as evidence — the helper's confidence is the only thing
+  // the parent can see, and a fabricated report comes back in the same shape
+  // as a read one. Both tools are read-only and need no repository, so the
+  // "a helper cannot reach anything that changes the world" property is
+  // untouched.
+  "search_web",
+  "fetch_url",
   "search_code",
   "search_workspace",
   "run_tool_program",
@@ -103,6 +116,8 @@ export const DELEGATE_SYSTEM_PROMPT = [
   "",
   "Rules:",
   "- You may READ and SEARCH. You cannot edit, create, delete, push, or run anything. Do not offer to.",
+  "- The repository is not the whole world: when the question is about a library, a service or a standard (the real API of a dependency, a breaking change, a version's behaviour), find the page with `search_web` and read it with `fetch_url` rather than answering from memory. Never invent a URL — say you could not find one.",
+  "- An answer you did not read somewhere is not evidence. Say which repository path or URL each claim came from, and when you could not check a fact, say that plainly instead of supplying a plausible version of it.",
   "- Work fast and stop early: find what was asked for, then answer. Do not explore beyond the question.",
   "- BATCH your reads: pass several steps to run_tool_program instead of many single calls.",
   "- Answer with EVIDENCE: exact file paths, symbol names, and line ranges. Quote the smallest snippet that proves each claim.",

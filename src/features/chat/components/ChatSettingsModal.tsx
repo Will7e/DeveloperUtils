@@ -962,14 +962,21 @@ function GitHubTabContent({
 }
 
 // ============================================================
-// Companion Tab — The Local Runner That Can Actually Prove A Change
+// Companion Tab — The Optional Local Runner
 // ============================================================
-// `run_command` is the only tier that turns "this should work" into "this
-// passed" without pushing a branch first, and it needs a process on the user's
-// machine to do it. Until now its address and pairing token came from the
-// environment alone, so the tier existed for whoever had read the source and
-// for nobody else: a shipped build reported every change unverified, and the
-// agent — correctly — said so on every task.
+// `run_command` turns "this should work" into "this passed" without pushing a
+// branch first, and it does that in a browser workspace in the tab by default —
+// no pairing, no install. What this tab configures is the FALLBACK for the
+// projects a tab cannot run (native dependencies, non-stdlib Python, a service,
+// a tree too large to mount), and for running them on the user's own machine
+// where the environment is theirs.
+//
+// Until now this was the only tier, and its address and pairing token came from
+// the environment alone, so it existed for whoever had read the source and for
+// nobody else: a shipped build reported every change unverified, and the agent —
+// correctly — said so on every task. The browser workspace removed that, and
+// this tab is now a choice rather than a prerequisite — which is exactly why its
+// copy has to say so.
 //
 // This is the two-click version. It is deliberately explicit about two facts a
 // green dot cannot convey: WHERE commands would run (this machine, or someone
@@ -1072,11 +1079,12 @@ function CompanionTabContent({
           <div>
             <div className="settings-info-card-title">Run your project's own commands</div>
             <div className="settings-info-card-desc">
-              The companion is a small process on your machine that materializes each chat's change
-              set into a throwaway working tree and runs the project's real commands there (install,
-              build, test, lint, typecheck). It is what lets the agent say a change PASSED instead of
-              saying it should work — the only verification that does not require pushing a branch
-              first. Commands never run in your own checkout.
+              The companion is OPTIONAL. By default the agent runs your project's real commands
+              (install, build, test, lint, typecheck) in a browser workspace inside the tab, with no
+              setup at all. The companion is the fallback for the projects a tab cannot run:
+              dependencies that need native code, Python beyond the standard library, a database or
+              another service, a very large tree. Pair one and it takes over automatically on the
+              machine you paired it from. Commands never run in your own checkout.
             </div>
           </div>
         </div>

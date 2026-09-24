@@ -124,6 +124,12 @@ const EXEMPT: Record<string, string> = {
     "in-flight endpoint requests, keyed by model id and removed in the fetch's `finally`, so it empties itself and cannot hold repository state",
   "lib/model-catalog.ts:endpointListeners":
     "pub/sub subscriber list for the endpoints cache's change notification, so the header's serving line re-reads without polling; holds callbacks, never state — the answers it notifies about are the already-exempt `endpointsCache` map beside it",
+  "container/container-host.ts:listeners":
+    "pub/sub subscriber list for the workspace status (booting, ready, the preview URL), so the UI re-reads without polling; holds callbacks, never filesystem state — the runtime they describe is the registered `container.runtime` resource below, which the same module releases",
+  "container/container-host.ts:eventListeners":
+    "pub/sub subscriber list for workspace RUNTIME events (server-ready, preview console messages); holds callbacks, never state, and is cleared with the runtime it belongs to — the events themselves are consumed as they arrive and are not cached",
+  "container/preview-bridge.ts:listeners":
+    "pub/sub subscriber list for the preview status (starting, running, the dev server's URL); holds callbacks, never state — the console evidence it notifies about lives in the `state` scalar beside it, which is released with the mounted tree by the container host's own registered resource",
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -162,6 +168,7 @@ describe("scoped-resource registry", () => {
     expect(registeredResources().map((r) => r.name).sort()).toEqual([
       "app-action-ledger.entries",
       "ask-user.parked-questions",
+      "container.runtime",
       "github-client.tree",
       "repo-base.tree",
       "repo.instructions",

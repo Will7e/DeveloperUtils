@@ -7,6 +7,12 @@
 //   typecheck  runs in the browser over the workspace's own sources. Always
 //              available, and always the weakest: it answers "does this
 //              type-check", never "does this work".
+//   workspace  runs the project's OWN commands — install, test, build — in a
+//              browser workspace in this tab. No pairing, no push, no server:
+//              the real dependency graph executes. Weaker than the user's own
+//              machine in a way that is worth stating rather than hiding (it is
+//              the tab's Linux-ish runtime, so no native toolchains, no
+//              services), and stronger than a type check by a long way.
 //   command    runs the project's real commands in a real tree on the user's
 //              machine, through the companion. The tier for anything JS/TS and
 //              the only fast one.
@@ -49,8 +55,8 @@ export interface VerificationStep {
   available: boolean;
   /** Why it cannot run, when it cannot — stated so the model can say it */
   blockedBy?: string;
-  /** True when a run is the only thing missing (a push, or a companion) */
-  needs?: "companion" | "push" | "repository";
+  /** True when a run is the only thing missing (a push, a companion, a page) */
+  needs?: "companion" | "push" | "repository" | "workspace";
 }
 
 export interface VerificationPlanInput {
@@ -60,6 +66,14 @@ export interface VerificationPlanInput {
   hasChanges: boolean;
   /** Whether the companion is known to be up, down, or not yet observed */
   companion: CapabilityState;
+  /**
+   * Whether this page can host a browser workspace, and whether one is up.
+   *
+   * Optional so every existing caller keeps its meaning: an unobserved
+   * workspace is reported as available-but-unprobed rather than as absent, and
+   * "unsupported" (no cross-origin isolation) is the honest "down".
+   */
+  workspace?: CapabilityState;
   /**
    * The change set has been pushed to its working branch, which is what makes
    * CI dispatchable. False for the ordinary mid-task case.
@@ -94,17 +108,28 @@ export interface VerificationPlan {
 const TIER_PROVES: Record<VerificationTier, string> = {
   ci: "the repository's own workflow on the pushed branch — the authoritative definition of green for the pull request",
   command: "the project's real commands in a working tree on the user's machine (install, build, test, lint, typecheck)",
+  workspace:
+    "the project's real commands in a browser workspace in this tab (install, build, test) — the actual dependency graph runs, but not your own environment: no native toolchains and no services",
   typecheck: "that the workspace's own sources type-check — nothing about whether the change behaves correctly",
 };
 
+/**
+ * `run_command` serves two tiers, deliberately.
+ *
+ * Which workspace a command runs in is a routing decision the harness makes
+ * from facts the model cannot see (is this page cross-origin isolated? is a
+ * companion paired?), and asking a model to choose between two spellings of
+ * "run npm test" is how it picks the one that cannot run.
+ */
 const TIER_TOOL: Record<VerificationTier, VerificationTool> = {
   ci: "verify_with_ci",
   command: "run_command",
+  workspace: "run_command",
   typecheck: "run_checks",
 };
 
-/** Strongest first: CI beats a local command beats a static check. */
-const TIER_ORDER: readonly VerificationTier[] = ["ci", "command", "typecheck"];
+/** Strongest first: CI beats a machine beats a tab beats a static check. */
+const TIER_ORDER: readonly VerificationTier[] = ["ci", "command", "workspace", "typecheck"];
 
 function companionBlocked(companion: CapabilityState, reason?: string): string {
   if (companion === "down") {
@@ -126,6 +151,7 @@ function companionBlocked(companion: CapabilityState, reason?: string): string {
  */
 export function planVerification(input: VerificationPlanInput): VerificationPlan {
   const evidence = input.evidence ?? [];
+  const workspace = input.workspace ?? "unknown";
   const freshPass = new Set(
     evidence.filter((e) => e.status === "fresh-pass").map((e) => e.kind)
   );
@@ -140,6 +166,40 @@ export function planVerification(input: VerificationPlanInput): VerificationPlan
           available: false,
           needs: "repository",
           blockedBy: "no repository is attached, so there are no project sources to check",
+        };
+      }
+      return { ...base, available: true };
+    }
+
+    if (tier === "workspace") {
+      if (!input.repoAttached) {
+        return {
+          ...base,
+          available: false,
+          needs: "repository",
+          blockedBy: "no repository is attached, so there is no project to run",
+        };
+      }
+      if (workspace === "down") {
+        return {
+          ...base,
+          available: false,
+          needs: "workspace",
+          blockedBy:
+            "this page cannot host a browser workspace (it is not cross-origin isolated), so no command can run in the tab",
+        };
+      }
+      // "unknown" is NOT "up". Whether a page can host a workspace is declared
+      // (it is `crossOriginIsolated`, readable before anything boots), so an
+      // unobserved state means the caller did not say — and a tier promised on a
+      // guess is how a model reports a command it never ran. It is named as
+      // unchecked instead, which is true and actionable.
+      if (workspace !== "up") {
+        return {
+          ...base,
+          available: false,
+          needs: "workspace",
+          blockedBy: "whether this page can host a browser workspace has not been checked yet",
         };
       }
       return { ...base, available: true };
@@ -282,6 +342,12 @@ function describePlan(params: {
   lines.push(
     `Strongest tier you can reach: \`${recommended.tool}\` — it proves ${recommended.proves}.`
   );
+  if (recommended.blockedBy) {
+    // An AVAILABLE step can still carry a caveat (the workspace waiting on its
+    // boot). Stated here because the "not available" list below only covers the
+    // tiers this turn cannot reach at all.
+    lines.push(`Before you rely on it: ${recommended.blockedBy}.`);
+  }
   if (alreadyProven.length > 0) {
     lines.push(
       `Already proven against this exact revision: ${alreadyProven.join(", ")}. Do not re-run those; they describe this code.`
@@ -362,6 +428,7 @@ export const VERIFICATION_STATE_LABEL: Record<VerificationState, string> = {
  */
 export const VERIFICATION_TIER_SHORT: Record<VerificationTier, string> = {
   typecheck: "types",
+  workspace: "browser",
   command: "command",
   ci: "CI",
 };

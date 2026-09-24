@@ -61,7 +61,10 @@ import { describeBinding } from "../identity/identity";
 import { assessPushPolicy, policyWarnings } from "../lib/push-policy";
 import { assessCommandPolicy, summarizeCommandPolicy } from "../lib/command-policy";
 import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
-import { capabilityState, noteCompanionOutcome } from "../lib/availability";
+import { capabilityState, noteCompanionOutcome, workspaceSupport } from "../lib/availability";
+import { describeMount } from "../container/mount-plan";
+import { runInContainer } from "../container/container-executor";
+import { mountPlanForWorkspace } from "./container-workspace";
 import { planVerification } from "../lib/verification-plan";
 import {
   COMPANION_UNPAIRED_HELP,
@@ -945,6 +948,138 @@ export async function runCallMcpTool(
   };
 }
 
+// ── run_command's first tier: the project's commands in this tab ──
+//
+// Two workspaces can run a command, and the model does not choose between them:
+// the browser workspace in this tab needs no install and no pairing, so it is
+// tried FIRST, and the local companion is the fallback for the repos a tab
+// cannot run (native dependencies, non-stdlib Python, a Postgres service, a tree
+// too large to mount). Which one produced a result is a fact about its authority
+// — the tab's runtime is not the user's machine — so every result and every
+// ledger entry names the tier it ran in.
+
+/** The verdict for a container run, in the words a model should quote */
+function workspaceVerdictLine(outcome: { exitCode: number | null; timedOut: boolean }): string {
+  if (outcome.timedOut) return "was killed after its timeout";
+  // A process the runtime killed settles without a code — the honest sentence is
+  // that it did not report one. `exited null` reads as a bug in the app, and an
+  // agent quoting it states something that did not happen.
+  if (outcome.exitCode === null) return "ended without reporting an exit code";
+  return `exited ${outcome.exitCode}`;
+}
+
+/** The shape of a run the user cancelled, from wherever it was cancelled */
+function stoppedResult(started: number, command: string, why: string): { ran: true; result: ToolCallResult } {
+  return {
+    ran: true,
+    result: {
+      callId: "",
+      name: "run_command",
+      ok: false,
+      data: { error: STOPPED_BY_USER, command, ...(why ? { why } : {}) },
+      durationMs: Date.now() - started,
+      summary: "stopped by the user",
+    },
+  };
+}
+
+/**
+ * Runs the command in the browser workspace.
+ *
+ * `ran: false` is the only case that falls through to the companion, and it is
+ * deliberately narrow: the command could not START here (no isolation, no boot,
+ * no installable tree). A non-zero exit never falls through — that failing exit
+ * code is the answer the model asked for, and re-running it somewhere else would
+ * turn one result into two.
+ */
+async function tryBrowserWorkspace(input: {
+  conversationId: string;
+  command: string;
+  why: string;
+  ws: WorkspaceState;
+  args: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<{ ran: true; result: ToolCallResult } | { ran: false; reason: string | null }> {
+  const started = Date.now();
+  const support = workspaceSupport();
+  if (support.state === "down") return { ran: false, reason: null };
+
+  const mount = await mountPlanForWorkspace(input.ws);
+  if (!mount.ok) return { ran: false, reason: mount.error };
+  const { plan, notes: mountNotes } = mount.result;
+  if (input.signal?.aborted) return stoppedResult(started, input.command, input.why);
+
+  const run = await runInContainer({
+    command: input.command,
+    plan,
+    revision: input.ws.updatedAt,
+    ...(typeof input.args.timeoutMs === "number" ? { timeoutMs: input.args.timeoutMs } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+
+  if (!run.ok) {
+    // A Stop is NOT a reason to try somewhere else. The abort reached the tab's
+    // process and the user asked for it to stop; falling through would run the
+    // same command on their own machine — after they cancelled it — and would
+    // report a companion that is working fine as down on the way.
+    if (input.signal?.aborted) return stoppedResult(started, input.command, input.why);
+    return { ran: false, reason: run.error };
+  }
+
+  const outcome = run.outcome;
+  const passed = outcome.exitCode === 0;
+  const notes = [...mountNotes, ...outcome.notes];
+
+  // Into the ledger as its own kind. `command` means "the project's commands ran
+  // in a working tree on the user's machine" and this did not: it ran in a WASM
+  // runtime in a tab, on a different Node, with no services. A reviewer reading
+  // "verified" is entitled to know which one answered.
+  recordVerification(input.conversationId, {
+    kind: "workspace",
+    at: Date.now(),
+    workspaceUpdatedAt: input.ws.updatedAt,
+    ok: passed,
+    summary: `\`${input.command}\` ${workspaceVerdictLine(outcome)} in the browser workspace (${outcome.durationMs}ms)`,
+    details: passed ? [] : failureLines(outcome),
+    source: "run_command",
+  });
+
+  return {
+    ran: true,
+    result: {
+      callId: "",
+      name: "run_command",
+      ok: passed,
+      data: {
+        command: outcome.command,
+        ...(input.why ? { why: input.why } : {}),
+        ranIn: "browser workspace (this tab)",
+        exitCode: outcome.exitCode,
+        signal: outcome.signal,
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        timedOut: outcome.timedOut,
+        outputTruncated: outcome.truncated,
+        cwd: outcome.cwd,
+        durationMs: outcome.durationMs,
+        notes,
+        mounted: describeMount(plan),
+        verification: passed
+          ? {
+              status: "passed",
+              evidence: `\`${input.command}\` exited 0 in the browser workspace — the project's own command ran against this revision in the tab, not on the user's machine.`,
+            }
+          : {
+              status: outcome.timedOut ? "timed-out" : "failed",
+              evidence: `\`${input.command}\` ${workspaceVerdictLine(outcome)} in the browser workspace.`,
+            },
+      },
+      durationMs: Date.now() - started,
+      summary: `${passed ? "exit 0" : outcome.timedOut ? "timed out" : workspaceVerdictLine(outcome)} (browser) — ${input.command.slice(0, 44)}`,
+    },
+  };
+}
+
 // ── run_command (the only tool that can VERIFY) ──────────────
 
 /**
@@ -1023,6 +1158,25 @@ export async function runShellCommand(
   const ws = await latestWorkspace(conversationId);
   if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
 
+  // The browser workspace first, the user's machine second. This order is the
+  // whole point of the tier: it needs no pairing, no install and no permission,
+  // so the common case (a JS/TS project, in a tab) verifies without asking the
+  // user to set anything up. A command that cannot start here falls through
+  // rather than failing, and the reason rides along so the refusal below can name
+  // both places it was tried.
+  const browser = await tryBrowserWorkspace({
+    conversationId,
+    command,
+    why,
+    ws,
+    args,
+    ...(signal ? { signal } : {}),
+  });
+  if (browser.ran) return browser.result;
+  const browserFallback = browser.reason
+    ? ` The browser workspace in this tab could not run it either: ${browser.reason}`
+    : "";
+
   const store = useChatStore.getState();
   // Where the companion is, and the token to talk to it with: the pair saved in
   // Chat settings → Companion, or the environment when that names one.
@@ -1039,7 +1193,7 @@ export async function runShellCommand(
     noteCompanionOutcome("down", reason);
     return fail(
       `${command} was NOT RUN — no companion is paired with this app, so nothing ran and this change is ` +
-        `UNVERIFIED. ${COMPANION_UNPAIRED_HELP} Report this change as UNVERIFIED until it has run.`,
+        `UNVERIFIED. ${COMPANION_UNPAIRED_HELP} Report this change as UNVERIFIED until it has run.${browserFallback}`,
       "not run — unverified"
     );
   }
@@ -1050,7 +1204,7 @@ export async function runShellCommand(
     return fail(
       `${command} was NOT RUN — ${reason} Running real commands needs the local companion. ` +
         "Start it with `npm run companion`, then paste the token it prints into Chat settings → Companion. " +
-        "Report this change as UNVERIFIED until it has run.",
+        `Report this change as UNVERIFIED until it has run.${browserFallback}`,
       "not run — unverified"
     );
   }
@@ -1059,7 +1213,7 @@ export async function runShellCommand(
     noteCompanionOutcome("down", reason);
     return fail(
       `The companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}. ` +
-        "It was NOT run: restart the companion so the two agree rather than letting it answer a request it does not understand.",
+        `It was NOT run: restart the companion so the two agree rather than letting it answer a request it does not understand.${browserFallback}`,
       "not run — version mismatch"
     );
   }
@@ -1071,7 +1225,7 @@ export async function runShellCommand(
     return fail(
       `${command} was NOT RUN — a companion answered at ${credentials.origin} but no pairing token is set, ` +
         "so it would refuse the command anyway. Paste the token the companion printed at startup into " +
-        "Chat settings → Companion. This change is UNVERIFIED.",
+        `Chat settings → Companion. This change is UNVERIFIED.${browserFallback}`,
       "not run — unpaired"
     );
   }
@@ -1117,7 +1271,7 @@ export async function runShellCommand(
     // is; the reason rides along so the next turn's note can name the cause
     // instead of reporting a generic "companion down".
     noteCompanionOutcome("down", result.error);
-    return fail(`The command was not run: ${result.error}`, "not run — unverified");
+    return fail(`The command was not run: ${result.error}${browserFallback}`, "not run — unverified");
   }
   if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
   // It answered and it ran something: the next turn's note can say so, and a

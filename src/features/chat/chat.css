@@ -6302,3 +6302,237 @@ typography rather than looking like a control of its own */
   border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
+
+/* ── Browser workspace strip ─────────────────────────────────
+   The line above the composer that says what this page can execute and whether
+   the app is running in it. Deliberately the SAME shape as `.chat-activity`
+   (same height, same border, same type size): the two are stacked, they are both
+   "what is happening right now", and two different-looking strips in the same
+   two slots would read as two different features. */
+.chat-workspace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 5px 14px;
+  min-height: 26px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-1);
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chat-workspace-muted { color: var(--text-3); opacity: 0.75; }
+
+.chat-workspace-icon { flex-shrink: 0; color: var(--accent); }
+.chat-workspace-icon-warn { color: var(--amber); }
+
+.chat-workspace-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+/* The right half holds the preview controls, so it takes the slack */
+.chat-workspace-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.chat-workspace-hint {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: 10.5px;
+  cursor: help;
+}
+
+.chat-workspace-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-workspace-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+
+.chat-workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-1);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-workspace-chip-warn {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 35%, transparent);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+/* ── Live preview panel ──────────────────────────────────────
+   A floating panel rather than a third column: on the narrow layout there is no
+   room for one, and the preview is something a person looks at briefly and then
+   dismisses, not a surface they work in. */
+.chat-preview {
+  position: absolute;
+  right: 16px;
+  /* Above the open-changes button, which sits at 96px: the two are both
+     bottom-right, and a preview that covers the button that opens the diff
+     would hide the thing the preview is showing the running half of. */
+  bottom: 148px;
+  width: min(520px, calc(100% - 32px));
+  height: min(420px, calc(100% - 300px));
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  background: var(--ds-background-200);
+  box-shadow: var(--ds-shadow-menu);
+  overflow: hidden;
+  z-index: 25;
+}
+
+.chat-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.chat-preview-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.chat-preview-command {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-preview-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-preview-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.chat-preview-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-1);
+  color: var(--text-1);
+}
+
+.chat-preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  /* The backdrop the app paints over. A token rather than white: the frame is
+     empty until the dev server's first byte, and a hard-coded white flash in
+     dark mode is worse than the surface colour it becomes. */
+  background: var(--ds-background-100);
+}
+
+.chat-preview-body {
+  flex: 1;
+  padding: 10px 12px;
+  overflow: auto;
+}
+
+.chat-preview-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.chat-preview-line-warn { color: var(--amber); }
+
+.chat-preview-output {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: pre-wrap;
+}
+
+.chat-preview-console {
+  flex-shrink: 0;
+  max-height: 96px;
+  overflow: auto;
+  border-top: 1px solid var(--border-1);
+  padding: 6px 10px;
+  background: var(--bg-1);
+}
+
+.chat-preview-issue {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 3px;
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.chat-preview-issue-kind {
+  flex-shrink: 0;
+  color: var(--amber);
+  font-family: var(--font-mono);
+}
+
+.chat-preview-issue-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

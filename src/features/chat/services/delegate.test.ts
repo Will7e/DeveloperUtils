@@ -88,6 +88,17 @@ describe("delegate allowlist", () => {
   it("carries the untrusted-content rule into the helper's instructions", () => {
     expect(DELEGATE_SYSTEM_PROMPT).toContain("<untrusted-content>");
   });
+
+  it("gives the helper the web pair, so a lookup cannot become a guess", () => {
+    // A helper asked to research something that is NOT in the checkout used to
+    // have no way to look it up, and its report came back to the parent in the
+    // same shape whether it read a page or recalled one. Both tools are
+    // read-only, so the allowlist's read-only property is untouched.
+    expect(DELEGATE_TOOL_NAMES).toContain("search_web");
+    expect(DELEGATE_TOOL_NAMES).toContain("fetch_url");
+    expect(isDelegateTool("search_web")).toBe(true);
+    expect(DELEGATE_SYSTEM_PROMPT).toContain("search_web");
+  });
 });
 
 describe("runDelegateLoop", () => {

@@ -151,6 +151,10 @@ describe("cached prefix — separation from per-turn facts", () => {
     repo: REPO,
     companion: "up",
     companionReason: null,
+    // The other execution tier, and a required field because every turn has an
+    // answer for it: the page either can host a browser workspace or it cannot.
+    workspace: "up",
+    workspaceReason: null,
     webSearch: "up",
     mcpServers: 0,
     toolCalling: true,

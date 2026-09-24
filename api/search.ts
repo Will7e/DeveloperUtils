@@ -63,6 +63,9 @@ export default async function handler(req: Request): Promise<Response> {
     env: process.env,
     clientKey: clientKey(req),
     origin: req.headers.get("origin"),
+    // The host this request arrived on, so a same-origin call is recognised
+    // on any domain the app is deployed to (lib/search-endpoint.ts).
+    host: req.headers.get("host"),
   });
 
   return json(result.body, result.status);

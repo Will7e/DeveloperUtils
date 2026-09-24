@@ -35,11 +35,12 @@ import {
   probeCompanion,
   type SavedCompanion,
 } from "../companion/companion-client";
+import { readWorkspaceEnvironment, workspaceVerdict } from "../container/boot-probe";
 
 export type CapabilityState = "up" | "down" | "unknown";
 
 /** Capabilities whose availability is learned by trying them */
-export type ObservedCapability = "companion" | "webSearch";
+export type ObservedCapability = "companion" | "webSearch" | "workspace";
 
 interface CapabilityNote {
   state: CapabilityState;
@@ -58,6 +59,16 @@ const observed = new Map<ObservedCapability, CapabilityNote>();
  * was running perfectly and simply had no token.
  */
 let companionIssue: string | null = null;
+
+/**
+ * Why the browser workspace is not usable, when it is not.
+ *
+ * Same reasoning as the companion's: "down" has two unrelated causes with two
+ * unrelated fixes — this page is not cross-origin isolated (a deployment
+ * property nobody can fix from the app), or a runtime that was supported failed
+ * to boot. A model told only "down" invents one of them.
+ */
+let workspaceIssue: string | null = null;
 
 /** How long an observed state is trusted before it is re-probed */
 const OBSERVED_TTL_MS = 60_000;
@@ -119,6 +130,7 @@ export function capabilityState(name: ObservedCapability): CapabilityState {
 export function resetAvailability(): void {
   observed.clear();
   companionIssue = null;
+  workspaceIssue = null;
   lastProbeAt = 0;
   notifyCapability();
 }
@@ -184,6 +196,38 @@ export function noteCompanionOutcome(state: CapabilityState, reason?: string | n
   noteCapability("companion", state);
 }
 
+/**
+ * Whether this PAGE can host a browser workspace at all.
+ *
+ * Declared, not observed, and therefore known before anything boots: it is the
+ * document's own `crossOriginIsolated`, plus whether shared memory is exposed.
+ * That is what separates this tier from the companion — no pairing, no probe,
+ * no user step — so the answer is available at the start of the very first turn
+ * rather than after a tool call has already failed.
+ */
+export function workspaceSupport(): { state: CapabilityState; reason: string | null } {
+  const verdict = workspaceVerdict(readWorkspaceEnvironment());
+  if (!verdict.supported) return { state: "down", reason: verdict.summary };
+  const observedState = capabilityState("workspace");
+  if (observedState === "down") return { state: "down", reason: workspaceIssue };
+  return { state: observedState, reason: null };
+}
+
+/** The last workspace failure reason, or null while it is working / unobserved */
+export function workspaceDownReason(): string | null {
+  const support = workspaceSupport();
+  return support.state === "down" ? support.reason : null;
+}
+
+/**
+ * Records what the workspace just did. Called by the host and the executor: a
+ * booted runtime is the only reliable proof that this page can host one.
+ */
+export function noteWorkspaceOutcome(state: CapabilityState, reason?: string | null): void {
+  if (reason !== undefined) workspaceIssue = state === "up" ? null : (reason ?? null);
+  noteCapability("workspace", state);
+}
+
 export interface TurnAvailability {
   /** Repository attached to this conversation, when there is one */
   repo: RepoContext | null;
@@ -194,6 +238,14 @@ export interface TurnAvailability {
    * mismatch are three fixes, and only one of them is "start the companion".
    */
   companionReason?: string | null;
+  /**
+   * Whether commands can run in THIS TAB, and whether that has been proven yet.
+   * `unknown` here means "this page could host a workspace, nothing has booted
+   * one" — which is why it is stated as a fact without a consequence.
+   */
+  workspace: CapabilityState;
+  /** Why the workspace cannot run here, when it cannot */
+  workspaceReason?: string | null;
   webSearch: CapabilityState;
   /** Configured MCP servers (declared state, not a probe) */
   mcpServers: number;
@@ -208,10 +260,13 @@ export function declaredAvailability(params: {
   mcpServers: number;
   model: ModelInfo | undefined;
 }): TurnAvailability {
+  const workspace = workspaceSupport();
   return {
     repo: params.repo,
     companion: capabilityState("companion"),
     companionReason: companionDownReason(),
+    workspace: workspace.state,
+    workspaceReason: workspace.reason,
     webSearch: capabilityState("webSearch"),
     mcpServers: params.mcpServers,
     toolCalling: params.model ? modelSupportsTools(params.model) : true,
@@ -231,17 +286,42 @@ export function describeAvailability(a: TurnAvailability): string {
 
   facts.push(a.repo ? `repository attached (${a.repo.owner}/${a.repo.repo}@${a.repo.branch})` : "no repository attached");
 
-  if (a.companion === "up") facts.push("local companion running");
-  else if (a.companion === "down") {
+  // The two execution tiers are described TOGETHER, because they are two answers
+  // to one question ("can a command run this turn?") and the model's next move
+  // depends on the pair, not on either fact alone. The line that used to be here
+  // said `run_command` cannot run anything whenever the companion was down —
+  // which stopped being true the moment this app could run a command in its own
+  // tab, and would have made the model report a green run as UNVERIFIED.
+  const workspaceReady = a.workspace !== "down";
+  if (a.companion === "up") {
+    facts.push("local companion running");
+  } else if (a.companion === "down") {
     // The reason is stated, not implied. "NOT running" was wrong for the most
     // common case (a companion that is up but unpaired), and a model handed the
     // wrong cause writes the wrong fix into its reply and into the user's head.
     facts.push(a.companionReason ? `local companion unavailable — ${a.companionReason}` : "local companion NOT running");
+  }
+
+  if (a.workspace === "up") {
+    facts.push("browser workspace running in this tab");
+  } else if (a.workspace === "down") {
+    facts.push(a.workspaceReason ? `browser workspace unavailable — ${a.workspaceReason}` : "browser workspace unavailable");
+  } else if (workspaceReady) {
+    facts.push("browser workspace available on this page (not started yet)");
+  }
+
+  if (a.companion === "down" && !workspaceReady) {
     consequences.push(
       "`run_command` cannot run anything this turn — a change you cannot execute is UNVERIFIED, so say that plainly instead of retrying the command"
     );
     consequences.push(
-      "If the user asks how to make it work, tell them to pair a companion under Chat settings → Companion, or start one with `npm run companion` and paste the token"
+      "If the user asks how to make it work, tell them to open the app in a current desktop Chromium browser (commands then run in the browser tab itself), or pair a companion under Chat settings → Companion with `npm run companion`"
+    );
+  } else if (a.companion !== "up") {
+    // Commands CAN run — in the tab. Say where, because it is a different
+    // environment from the user's machine and a run's authority depends on it.
+    consequences.push(
+      "`run_command` runs in the browser workspace, not on the user's machine: cite it as the project's commands run in this tab, and do not present it as having run in their environment"
     );
   }
 
