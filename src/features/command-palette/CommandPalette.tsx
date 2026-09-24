@@ -348,13 +348,24 @@ export function CommandPalette() {
         category: "Agents",
         icon: <StopCircle style={{ width: 14, height: 14 }} />,
         action: () => {
-          const store = useChatStore.getState();
-          if (!store.isStreaming) {
+          // App-wide on purpose: this entry names no thread, and with several
+          // agents working the honest reading of "stop" here is "stop the work".
+          const running = Object.keys(useChatStore.getState().streams).length;
+          if (running === 0) {
             addToast({ message: "No turn is running.", type: "info" });
             return;
           }
           // Through the runner so the abort path is the same one /stop uses.
-          void import("@/features/chat/services/chat-runner").then((m) => m.stopChatStream());
+          void import("@/features/chat/services/chat-runner").then((m) => {
+            const stopped = m.stopChatStream();
+            addToast({
+              message:
+                stopped > 1
+                  ? `Stopping ${stopped} agents.`
+                  : "Stopping the running turn.",
+              type: "info",
+            });
+          });
         },
       },
       {

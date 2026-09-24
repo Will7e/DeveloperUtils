@@ -22,6 +22,7 @@
 
 import React from "react";
 import { AlertTriangle, RefreshCw, X } from "lucide-react";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { usePreview } from "./useWorkspace";
 
 interface WorkspacePreviewProps {
@@ -49,18 +50,29 @@ export function WorkspacePreview({ open, onClose }: WorkspacePreviewProps) {
         {preview.command && <span className="chat-preview-command">{preview.command}</span>}
         <span className="chat-preview-actions">
           {running && (
+            <SimpleTooltip content="Reload the preview" side="bottom">
+              <button
+                type="button"
+                className="chat-preview-action"
+                onClick={() => setReloadKey((key) => key + 1)}
+                aria-label="Reload the preview"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </SimpleTooltip>
+          )}
+          {/* Icon-only, so it needs a name as well as a tooltip: the tooltip is
+              for a person with a pointer, the label is for everyone else. */}
+          <SimpleTooltip content="Close the preview" side="bottom">
             <button
               type="button"
               className="chat-preview-action"
-              onClick={() => setReloadKey((key) => key + 1)}
-              title="Reload the preview"
+              onClick={onClose}
+              aria-label="Close the preview"
             >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
-          )}
-          <button type="button" className="chat-preview-action" onClick={onClose} title="Close the preview">
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          </SimpleTooltip>
         </span>
       </header>
 

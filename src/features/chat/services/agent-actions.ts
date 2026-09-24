@@ -64,7 +64,7 @@ import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
 import { capabilityState, noteCompanionOutcome, workspaceSupport } from "../lib/availability";
 import { describeMount } from "../container/mount-plan";
 import { runInContainer } from "../container/container-executor";
-import { mountPlanForWorkspace } from "./container-workspace";
+import { mountPlanForWorkspace, workspaceOwnerFor } from "./container-workspace";
 import { planVerification } from "../lib/verification-plan";
 import {
   COMPANION_UNPAIRED_HELP,
@@ -1013,6 +1013,9 @@ async function tryBrowserWorkspace(input: {
     command: input.command,
     plan,
     revision: input.ws.updatedAt,
+    // The page's workspace holds one thread's tree at a time; naming this thread
+    // is what lets the executor empty it first when another thread had it.
+    owner: workspaceOwnerFor(input.conversationId),
     ...(typeof input.args.timeoutMs === "number" ? { timeoutMs: input.args.timeoutMs } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
@@ -2097,7 +2100,13 @@ export async function runPushChanges(
   if (changes.length === 0) {
     return fail("No workspace changes to push — edit files with write_file first.");
   }
-  if (store.pendingPush) {
+  // Scoped to THIS conversation: a push this agent already has waiting is a
+  // reason not to ask twice, while a push another agent has queued is not this
+  // chat's problem — it lands behind it in the same FIFO approval queue.
+  const alreadyWaiting = store.approvals.some(
+    (a) => a.kind === "push" && a.conversationId === conversationId
+  );
+  if (alreadyWaiting) {
     return fail("A push is already awaiting approval — wait for the user to decide.");
   }
 
@@ -2275,7 +2284,7 @@ export async function runPushChanges(
   // and the result below says STOPPED rather than "rejected" — the model must
   // not read a user's stop as a decision about the change set.
   const onAbort = () =>
-    useChatStore.getState().resolvePushApproval(false, STOPPED_BY_USER);
+    useChatStore.getState().dismissApprovalsFor(conversationId, STOPPED_BY_USER);
   if (signal) signal.addEventListener("abort", onAbort, { once: true });
   const decision = await store.requestPushApproval({
     conversationId,

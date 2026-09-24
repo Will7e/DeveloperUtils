@@ -42,6 +42,7 @@ import "../services/ask-user";
 import "../lib/repo-instructions";
 import "../lib/app-action-ledger";
 import "../services/turn-prep";
+import "../session/turn-engine";
 
 const CHAT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -83,6 +84,7 @@ const REGISTERED: Record<string, string> = {
   "services/turn-prep.ts:fingerprintCache": "turn-prep.project-fingerprint",
   "lib/app-action-ledger.ts:entries": "app-action-ledger.entries",
   "lib/skill-activity.ts:byConversation": "skill-activity.records",
+  "session/turn-engine.ts:sessions": "session.turn",
 };
 
 /**
@@ -124,6 +126,8 @@ const EXEMPT: Record<string, string> = {
     "in-flight endpoint requests, keyed by model id and removed in the fetch's `finally`, so it empties itself and cannot hold repository state",
   "lib/model-catalog.ts:endpointListeners":
     "pub/sub subscriber list for the endpoints cache's change notification, so the header's serving line re-reads without polling; holds callbacks, never state — the answers it notifies about are the already-exempt `endpointsCache` map beside it",
+  "lib/app-tools.ts:runLanes":
+    "the snippet runner's per-language promise chain from `withRunLane`; it holds in-flight RUNS, not their results, so nothing in it is derived from a thread-on-repository — the sandbox worker it serializes onto is app-wide and keeps no state between runs, and a transition has nothing here to release",
   "container/container-host.ts:listeners":
     "pub/sub subscriber list for the workspace status (booting, ready, the preview URL), so the UI re-reads without polling; holds callbacks, never filesystem state — the runtime they describe is the registered `container.runtime` resource below, which the same module releases",
   "container/container-host.ts:eventListeners":
@@ -172,6 +176,7 @@ describe("scoped-resource registry", () => {
       "github-client.tree",
       "repo-base.tree",
       "repo.instructions",
+      "session.turn",
       "skill-activity.records",
       "tool-cache.results",
       "turn-prep.project-fingerprint",

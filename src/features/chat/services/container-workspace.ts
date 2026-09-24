@@ -26,6 +26,22 @@ import { readFileContent } from "../lib/github-client";
 import type { WorkspaceState } from "../types";
 import { planWorkspaceMount, type MountPlanResult } from "../container/workspace-mount";
 import { startPreview, stopPreview } from "../container/preview-bridge";
+import { type WorkspaceOwner } from "../container/container-host";
+
+/**
+ * The thread a workspace operation belongs to, named for the other thread's sake.
+ *
+ * The label is not decoration: the only moment it is read is a handoff, when the
+ * other agent is told — in its own turn note — which thread's tree it just took
+ * over, and the user is told which agent's preview stopped. The conversation id
+ * is the right label when the thread has no title yet, and the fallback is a
+ * phrase rather than an id, because the sentence it lands in is shown to a person.
+ */
+export function workspaceOwnerFor(conversationId: string): WorkspaceOwner {
+  const conversation = useChatStore.getState().conversations.find((entry) => entry.id === conversationId);
+  const label = conversation?.title?.trim();
+  return { threadId: conversationId, label: label && label.length > 0 ? label : "a thread without a title yet" };
+}
 
 /**
  * The repository's text at this workspace's base commit.
@@ -104,6 +120,7 @@ export async function startPreviewForConversation(
     plan: mount.result.plan,
     revision: ws.updatedAt,
     mountNotes: mount.result.notes,
+    owner: workspaceOwnerFor(conversationId),
   });
   if (!started.ok) return { ok: false, error: started.error };
   return { ok: true, url: started.url };

@@ -29,9 +29,9 @@ function conversation(over: Partial<ChatConversation> = {}): ChatConversation {
 function status(over: Partial<ConversationStatusInput> = {}) {
   return conversationStatus({
     conversation: conversation(),
-    streamingConversationId: null,
+    streaming: false,
     reconnecting: false,
-    checksRunningFor: null,
+    runningChecks: false,
     isActive: false,
     lastSeenAt: 1,
     ...over,
@@ -44,27 +44,29 @@ describe("conversationStatus — one glyph, and one reason for it", () => {
     expect(status().label).toBe("");
   });
 
-  it("reports a stream in THIS thread as running, and another thread's as not", () => {
-    expect(status({ streamingConversationId: "c1" }).kind).toBe("running");
-    expect(status({ streamingConversationId: "other" }).kind).toBe("idle");
+  it("reports a stream in THIS thread as running, and a peer's work as not", () => {
+    // The input is per-thread, so two agents streaming at once give each row its
+    // own answer — which an app-wide "who owns the stream" could not.
+    expect(status({ streaming: true }).kind).toBe("running");
+    expect(status({ streaming: false }).kind).toBe("idle");
   });
 
   it("says a reconnect is a reconnect rather than ordinary work", () => {
-    const reconnecting = status({ streamingConversationId: "c1", reconnecting: true });
+    const reconnecting = status({ streaming: true, reconnecting: true });
     expect(reconnecting.kind).toBe("running");
     expect(reconnecting.label).toMatch(/reconnect/i);
   });
 
   it("counts a user-initiated check run as work", () => {
-    expect(status({ checksRunningFor: "c1" }).kind).toBe("running");
-    expect(status({ checksRunningFor: "c1" }).label).toMatch(/checks/i);
+    expect(status({ runningChecks: true }).kind).toBe("running");
+    expect(status({ runningChecks: true }).label).toMatch(/checks/i);
   });
 
   it("prefers RUNNING over unread — a live turn is not a history lesson", () => {
     // Both are true: it streamed while we were away, and it is streaming now.
     const s = status({
       conversation: conversation({ updatedAt: 9_000 }),
-      streamingConversationId: "c1",
+      streaming: true,
       lastSeenAt: 1,
     });
     expect(s.kind).toBe("running");
@@ -73,7 +75,7 @@ describe("conversationStatus — one glyph, and one reason for it", () => {
   it("prefers RUNNING over a failure in the transcript", () => {
     const s = status({
       conversation: conversation({ messages: [message({ error: true })] }),
-      streamingConversationId: "c1",
+      streaming: true,
     });
     expect(s.kind).toBe("running");
   });

@@ -27,7 +27,11 @@ let secure: unknown;
 function fakeRuntime(): ContainerRuntime {
   return {
     mount: vi.fn(async () => {}),
-    writeFile: vi.fn(async () => {}),
+    fs: {
+      writeFile: vi.fn(async () => {}),
+      mkdir: vi.fn(async () => {}),
+      rm: vi.fn(async () => {}),
+    },
     spawn: vi.fn(),
     on: vi.fn(() => () => {}),
     teardown: vi.fn(async () => {}),

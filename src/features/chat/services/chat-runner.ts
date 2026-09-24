@@ -9,7 +9,7 @@
 // page-local fallback — instead of two that drift apart.
 
 import { useAppStore } from "@/stores/app.store";
-import { useChatStore } from "@/stores/chat.store";
+import { selectStream, useChatStore } from "@/stores/chat.store";
 import { AGENT_ITERATIONS } from "../constants";
 import { visibleMessages } from "../types";
 import type { ChatMessage } from "../types";
@@ -94,7 +94,9 @@ export function sendUserMessage(
       conversationId,
       arg: resolution.arg,
       models: getCachedModelCatalog() ?? [],
-      isStreaming: live.isStreaming && live.streamingConversationId === conversationId,
+      // Per conversation, so a command run in an idle chat is not told the
+      // app is busy because a DIFFERENT agent is replying.
+      isStreaming: selectStream(live, conversationId) !== null,
     }).then((outcome) => {
       // An explicit draft (a command handing its prefix back) is honored here
       // too. Only an explicit one: this entry point is not the composer, so
@@ -116,7 +118,11 @@ export function sendUserMessage(
   //
   // The one exception is a turn parked on a question: there, the user's
   // words ARE the answer, and typing them is the natural way to give it.
-  if (store.isStreaming || isTurnRunning()) {
+  //
+  // Only THIS conversation being busy is a reason to queue: another agent
+  // working in another chat is what parallel agents means, and queueing here
+  // would make a free thread wait on a busy one for no reason at all.
+  if (isTurnRunning(conversationId)) {
     const live = useChatStore.getState().conversations.find((c) => c.id === conversationId);
     if (live?.pendingQuestion) {
       answerQuestion(conversationId, { note: trimmed });
@@ -180,9 +186,15 @@ export function sendUserMessage(
   void runTurn(conversationId);
 }
 
-/** Aborts the in-flight turn (partial output is preserved) */
-export function stopChatStream(): void {
-  stopTurn();
+/**
+ * Aborts the in-flight turn of one conversation, or of every running one.
+ *
+ * Partial output is preserved either way. The id matters when several agents
+ * are working: the composer's Stop belongs to the chat it sits in, while the
+ * unnamed form (the palette's "stop") ends all of them.
+ */
+export function stopChatStream(conversationId?: string): number {
+  return stopTurn(conversationId);
 }
 
 /**
@@ -295,7 +307,7 @@ export function answerQuestion(conversationId: string, input: QuestionAnswerInpu
 export async function regenerateLastResponse(conversationId: string): Promise<void> {
   const store = useChatStore.getState();
   const conv = store.conversations.find((c) => c.id === conversationId);
-  if (!conv || store.isStreaming || isTurnRunning()) return;
+  if (!conv || isTurnRunning(conversationId)) return;
 
   const visible = visibleMessages(conv.messages);
   const last = visible[visible.length - 1];
@@ -349,7 +361,7 @@ export async function resumeInterruptedTurn(conversationId: string): Promise<boo
   if (resumeInFlight) return false;
   const store = useChatStore.getState();
   const conv = store.conversations.find((c) => c.id === conversationId);
-  if (!conv?.pendingTurn || store.isStreaming || isTurnRunning()) return false;
+  if (!conv?.pendingTurn || isTurnRunning(conversationId)) return false;
 
   resumeInFlight = true;
   try {
@@ -421,19 +433,20 @@ export async function resumeUserTurn(conversationId: string): Promise<void> {
   const store = useChatStore.getState();
   const conv = store.conversations.find((c) => c.id === conversationId);
   if (!conv?.pendingTurn) return;
-  if (store.isStreaming || isTurnRunning()) return;
+  if (isTurnRunning(conversationId)) return;
 
-  store.setReconnecting(true);
+  // Per conversation: a resume belongs to one thread, and a badge would
+  // otherwise appear over a chat that is answering normally.
+  store.setReconnecting(conversationId, true);
   try {
     await runTurn(conversationId);
     if (!navigator.onLine) {
       // The network went away mid-attempt — keep the marker for a retry
       await new Promise((r) => setTimeout(r, 1500));
-      const live = useChatStore.getState();
-      if (!live.isStreaming && !isTurnRunning()) await runTurn(conversationId);
+      if (!isTurnRunning(conversationId)) await runTurn(conversationId);
     }
   } finally {
-    useChatStore.getState().setReconnecting(false);
+    useChatStore.getState().setReconnecting(conversationId, false);
   }
 
   // The engine clears the marker whenever it ran. A still-present
@@ -465,9 +478,10 @@ export async function resumeUserTurn(conversationId: string): Promise<void> {
  */
 export function commitPartialReply(conversationId: string): string | null {
   const state = useChatStore.getState();
-  if (!state.isStreaming) return null;
-  if (isTurnRunning() && !isTurnUnrecoverable()) return null;
-  const content = state.streamingContent;
+  const stream = selectStream(state, conversationId);
+  if (!stream) return null;
+  if (isTurnRunning(conversationId) && !isTurnUnrecoverable(conversationId)) return null;
+  const content = stream.content;
   if (!content.trim()) return null;
 
   const conv = state.conversations.find((c) => c.id === conversationId);
@@ -477,13 +491,13 @@ export function commitPartialReply(conversationId: string): string | null {
   // duplicate the partial.
   if (last?.resumedPartial && last.content === content) return last.id;
 
-  const reasoning = state.streamingReasoning;
+  const reasoning = stream.reasoning;
   const id = state.commitDirectAssistantMessage(conversationId, {
     content,
     reasoning: reasoning || undefined,
     resumedPartial: true,
   });
-  useChatStore.setState({ streamingContent: "", streamingReasoning: "" });
+  useChatStore.getState().discardStreaming(conversationId);
   logTurnEvent({
     turnId: null,
     conversationId,

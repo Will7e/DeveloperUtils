@@ -12,7 +12,7 @@
 // pepper+account key) before leaving the device.
 
 import { readEncryptedValue } from "@/services/encrypted-storage.service";
-import { useChatStore } from "./chat.store";
+import { selectAnyStreaming, useChatStore } from "./chat.store";
 
 const CHAT_STORAGE_NAME = "intab_chat_state";
 
@@ -109,8 +109,11 @@ export async function applyChatSnapshot(snapshot: unknown): Promise<void> {
   const snap = snapshot as Partial<ChatPersistedState>;
   if (!Array.isArray(snap.conversations)) return;
 
-  // Never clobber a live stream (pulls can land mid-generation)
-  if (useChatStore.getState().isStreaming) return;
+  // Never clobber a live stream (pulls can land mid-generation). ANY running
+  // stream counts, not just the active chat's: this replaces the whole
+  // conversation list, so applying it mid-generation would discard the
+  // in-flight output of every agent working at that moment.
+  if (selectAnyStreaming(useChatStore.getState())) return;
 
   try {
     const partial: Partial<ChatPersistedState> = {

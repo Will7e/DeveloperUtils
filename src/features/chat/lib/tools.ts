@@ -26,6 +26,7 @@ import {
 } from "./github-client";
 import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
 import { runToolProgram } from "./tool-program";
+import { readViewFor } from "./tool-cache";
 import { findSkill, matchSkills } from "./skills";
 import { isUntrustedTool, wrapUntrusted } from "./untrusted";
 import { AGENT_TOOLS, summarizeToolCall } from "./tool-registry";
@@ -700,6 +701,10 @@ export async function executeToolCall(
           repo,
           token,
           signal,
+          // The steps read through this thread's working copy, so they are cached
+          // against it (see tool-cache.ReadView) — a program must not replay a
+          // peer agent's uncommitted file contents as its own step results.
+          view: readViewFor(ctx.conversationId),
           execute: (stepCall) => executeToolCall(stepCall, ctx),
         });
       }

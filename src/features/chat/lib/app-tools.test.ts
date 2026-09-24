@@ -27,6 +27,7 @@ import {
   compareDataTool,
   diffTextTool,
   formatCodeTool,
+  resetRunLanes,
   runCodeTool,
   searchLibraryTool,
 } from "./app-tools";
@@ -34,10 +35,12 @@ import {
 const execute = vi.mocked(compilerService.execute);
 const isReady = vi.mocked(compilerService.isReady);
 const initialize = vi.mocked(compilerService.initialize);
+const cancelled = vi.mocked(compilerService.cancel);
 const format = vi.mocked(formatContent);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetRunLanes();
   isReady.mockResolvedValue(true);
   initialize.mockResolvedValue(undefined);
   execute.mockResolvedValue({
@@ -119,6 +122,51 @@ describe("run_code", () => {
     const result = await runCodeTool({ language: "javascript", code: "while(1){}" });
     expect(result.data).toMatchObject({ timedOut: true });
     expect(String((result.data as { hint?: string }).hint)).toMatch(/NO output/);
+  });
+
+  it("does not let one agent's Stop cancel another agent's snippet", async () => {
+    // The sandbox has ONE `activeWorker` and one app-wide `cancel()`, so two
+    // interleaved runs meant the first run's Stop terminated the second run's
+    // worker — a worker in another conversation, which then reported an
+    // unexplained failure. Runs are serialized per language, so a Stop can only
+    // ever reach the run whose turn asked for it: the second run is still queued
+    // when the first one cancels.
+    let inFlight = 0;
+    let overlapped = false;
+    const gates: Array<() => void> = [];
+    execute.mockImplementation(async () => {
+      inFlight += 1;
+      if (inFlight > 1) overlapped = true;
+      await new Promise<void>((resolve) => gates.push(resolve));
+      inFlight -= 1;
+      return { stdout: "ok", stderr: "", exitCode: 0, duration: 1, timestamp: 0 };
+    });
+
+    const releaseNextRun = async () => {
+      while (gates.length === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+      gates.shift()?.();
+    };
+
+    const controller = new AbortController();
+    const stopping = runCodeTool({ language: "javascript", code: "1" }, { signal: controller.signal });
+    // One turn of the loop: the first run is inside `execute` by now.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = runCodeTool({ language: "javascript", code: "2" });
+
+    controller.abort();
+    await releaseNextRun();
+    // The aborted run has returned by now — its cancel call is behind us — and
+    // the queued run starts only here.
+    const stopped = await stopping;
+    await releaseNextRun();
+    const completed = await second;
+
+    expect(stopped.ok).toBe(false);
+    expect(String((stopped.data as { error: string }).error)).toMatch(/cancelled/);
+    expect(completed.ok).toBe(true);
+    // The cancel that the aborted turn issued reached nothing but its own run.
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(overlapped).toBe(false);
   });
 
   it("refuses to start when the turn was already stopped", async () => {

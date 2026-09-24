@@ -30,7 +30,18 @@ vi.mock("@/features/chat/lib/github-write", () => ({
   }),
 }));
 
-import { currentWorkspace, selectWorkspace, useChatStore } from "./chat.store";
+import {
+  currentWorkspace,
+  selectApprovalCount,
+  selectCheckStartedAt,
+  selectHasApprovalOfKind,
+  selectPendingApproval,
+  selectReconnecting,
+  selectStream,
+  selectStreamAborted,
+  selectWorkspace,
+  useChatStore,
+} from "./chat.store";
 import { visibleMessages } from "@/features/chat/types";
 import type { RepoContext, WorkspaceState, WorkspaceFile } from "@/features/chat/types";
 import { persistWorkspace } from "@/features/chat/workspace/workspace";
@@ -516,24 +527,91 @@ describe("selectWorkspace — a working copy, or nothing", () => {
   });
 
   it("ignores stream deltas that belong to no live stream", () => {
-    // Both streaming buffers are single fields, not per-conversation, so an
-    // append that does not check who is streaming writes one conversation's
-    // tokens into whatever message is committed next. Reasoning text used to
-    // be appended unconditionally while content was guarded — a delta from a
-    // finished turn could appear as the reasoning of the answer you are
-    // reading now.
-    store().endStreaming(false);
-    store().appendStreamingReasoning("reasoning from a stream that is over");
-    store().appendStreamingContent("content from a stream that is over");
-
-    expect(store().streamingReasoning).toBe("");
-    expect(store().streamingContent).toBe("");
-
+    // The buffer exists exactly while the stream does, and every append names
+    // its conversation. A delta that arrives after its stream ended — a
+    // torn-down round, an adoption that lost a race — is dropped, rather than
+    // written into whatever message is committed next.
     const id = store().createConversation("model-a");
+    store().endStreaming(id, false);
+    store().appendStreamingReasoning(id, "reasoning from a stream that is over");
+    store().appendStreamingContent(id, "content from a stream that is over");
+
+    expect(selectStream(store(), id)).toBeNull();
+
     store().beginStreaming(id);
-    store().appendStreamingReasoning("thinking…");
-    expect(store().streamingReasoning).toBe("thinking…");
-    store().endStreaming(false);
+    store().appendStreamingReasoning(id, "thinking…");
+    expect(selectStream(store(), id)?.reasoning).toBe("thinking…");
+    store().endStreaming(id, false);
+    expect(selectStream(store(), id)).toBeNull();
+  });
+
+  it("keeps two agents' streams in their own buffers and their own messages", () => {
+    // THE multi-tenancy guarantee. With one app-wide buffer these two streams
+    // braided into a single string and the commit took whichever conversation
+    // the slot named — one agent's words inside another agent's reply.
+    const first = store().createConversation("model-a");
+    const second = store().createConversation("model-a");
+    store().beginStreaming(first);
+    store().beginStreaming(second);
+    store().appendStreamingContent(first, "alpha");
+    store().appendStreamingContent(second, "beta");
+    store().appendStreamingReasoning(second, "thinking about beta");
+
+    expect(selectStream(store(), first)?.content).toBe("alpha");
+    expect(selectStream(store(), second)?.content).toBe("beta");
+    // Reasoning is not shared either — it landed on the thread that emitted it.
+    expect(selectStream(store(), first)?.reasoning).toBe("");
+
+    expect(store().commitStreamingMessage(second, { model: "model-a" })).not.toBeNull();
+    const secondMessages = store().conversations.find((c) => c.id === second)?.messages ?? [];
+    const firstMessages = store().conversations.find((c) => c.id === first)?.messages ?? [];
+    expect(secondMessages.some((m) => m.content === "beta")).toBe(true);
+    expect(firstMessages.some((m) => m.content.includes("beta"))).toBe(false);
+
+    store().endStreaming(first, false);
+    store().endStreaming(second, false);
+  });
+
+  it("marks a stop on the thread that was stopped", () => {
+    // "You stopped this one" is a fact about a thread: an app-wide flag would
+    // mark a peer agent's healthy reply as aborted too.
+    const stopped = store().createConversation("model-a");
+    const other = store().createConversation("model-a");
+    store().beginStreaming(stopped);
+    store().beginStreaming(other);
+
+    store().endStreaming(stopped, true);
+
+    expect(selectStreamAborted(store(), stopped)).toBe(true);
+    expect(selectStreamAborted(store(), other)).toBe(false);
+    // A new stream for the same thread clears the previous stop.
+    store().beginStreaming(stopped);
+    expect(selectStreamAborted(store(), stopped)).toBe(false);
+    store().endStreaming(other, false);
+    store().endStreaming(stopped, false);
+  });
+
+  it("tracks reconnecting and running checks per conversation", () => {
+    const id = store().createConversation("model-a");
+    const peer = store().createConversation("model-a");
+
+    store().setReconnecting(id, true);
+    store().setCheckRun(id, true);
+
+    expect(selectReconnecting(store(), id)).toBe(true);
+    expect(selectReconnecting(store(), peer)).toBe(false);
+    expect(selectCheckStartedAt(store(), id)).not.toBeNull();
+    expect(selectCheckStartedAt(store(), peer)).toBeNull();
+
+    store().setReconnecting(id, false);
+    store().setCheckRun(id, false);
+    // A stale finally() must not blank a newer run's indicator, so clearing a
+    // run that is not recorded is a no-op rather than a delete.
+    store().setCheckRun(peer, false);
+    expect(selectCheckStartedAt(store(), id)).toBeNull();
+    store().setCheckRun(peer, true);
+    store().setCheckRun(peer, false);
+    expect(selectCheckStartedAt(store(), peer)).toBeNull();
   });
 
   it("refuses a workspace whose repository fields do not match its binding", async () => {
@@ -676,19 +754,26 @@ describe("approval gates", () => {
     stats: { files: 0, additions: 0, deletions: 0 },
   };
 
+  /** The id of the oldest waiting approval, which is what a dialog answers */
+  function headId(): string {
+    const head = selectPendingApproval(store());
+    if (!head) throw new Error("no approval is waiting");
+    return head.id;
+  }
+
   it("parks an external write on a dialog by default", async () => {
     store().updateSettings({ autoApproveTools: false });
     const decision = store().requestHttpApproval(pendingHttp);
-    expect(store().pendingHttp).not.toBeNull();
-    store().resolveHttpApproval(true);
+    expect(selectPendingApproval(store())?.kind).toBe("http");
+    store().resolveApproval(headId(), { approved: true });
     await expect(decision).resolves.toMatchObject({ approved: true });
-    expect(store().pendingHttp).toBeNull();
+    expect(selectApprovalCount(store())).toBe(0);
   });
 
   it("sends nothing and mounts no dialog when the request is declined", async () => {
     store().updateSettings({ autoApproveTools: false });
     const decision = store().requestHttpApproval(pendingHttp);
-    store().resolveHttpApproval(false, "not that record");
+    store().resolveApproval(headId(), { approved: false, note: "not that record" });
     await expect(decision).resolves.toMatchObject({ approved: false, note: "not that record" });
   });
 
@@ -697,15 +782,18 @@ describe("approval gates", () => {
     const decision = await store().requestHttpApproval(pendingHttp);
     // `auto` is what lets the tool result tell the model nobody was asked.
     expect(decision).toEqual({ approved: true, auto: true });
-    expect(store().pendingHttp).toBeNull();
-    expect(store().httpGate).toBeNull();
+    expect(selectApprovalCount(store())).toBe(0);
   });
 
   it("parks a push on a dialog by default", async () => {
     store().updateSettings({ autoApproveTools: false });
     const decision = store().requestPushApproval(pendingPush);
-    expect(store().pendingPush).not.toBeNull();
-    store().resolvePushApproval(true, undefined, false, ["docs/x.md"]);
+    expect(selectPendingApproval(store())?.kind).toBe("push");
+    store().resolveApproval(headId(), {
+      approved: true,
+      openPr: false,
+      excludePaths: ["docs/x.md"],
+    });
     await expect(decision).resolves.toMatchObject({
       approved: true,
       openPr: false,
@@ -717,14 +805,89 @@ describe("approval gates", () => {
     store().updateSettings({ autoApproveTools: true });
     const decision = await store().requestPushApproval(pendingPush);
     expect(decision).toEqual({ approved: true, openPr: true, auto: true });
-    expect(store().pendingPush).toBeNull();
-    expect(store().pushGate).toBeNull();
+    expect(selectApprovalCount(store())).toBe(0);
   });
 
-  it("clearing a parked gate resolves it as a refusal rather than hanging", async () => {
+  it("dismissing a parked gate resolves it as a refusal rather than hanging", async () => {
     store().updateSettings({ autoApproveTools: false });
     const decision = store().requestPushApproval(pendingPush);
-    store().clearPendingPush();
+    store().dismissApproval(headId(), "the push dialog was closed without a decision");
     await expect(decision).resolves.toMatchObject({ approved: false });
+  });
+
+  // ── Two agents asking at once ──
+
+  it("queues a second agent's request instead of letting it take the first's place", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const peerRequest = { ...pendingHttp, conversationId: "c2", url: "https://api.example.com/v2/x" };
+
+    const first = store().requestHttpApproval(pendingHttp);
+    const second = store().requestHttpApproval(peerRequest);
+
+    // Both are waiting, and the OLDEST is the one a dialog would show. The old
+    // single slot silently replaced the first request — and the first agent's
+    // promise then never resolved, which is a hung turn, not just a hidden
+    // dialog.
+    expect(selectApprovalCount(store())).toBe(2);
+    expect(selectPendingApproval(store())?.conversationId).toBe("c1");
+
+    store().resolveApproval(headId(), { approved: true });
+    await expect(first).resolves.toMatchObject({ approved: true });
+    expect(selectPendingApproval(store())?.conversationId).toBe("c2");
+
+    store().resolveApproval(headId(), { approved: false, note: "no" });
+    await expect(second).resolves.toMatchObject({ approved: false, note: "no" });
+    expect(selectApprovalCount(store())).toBe(0);
+  });
+
+  it("keeps push and http requests apart in the same queue", () => {
+    store().updateSettings({ autoApproveTools: false });
+    void store().requestPushApproval(pendingPush);
+    void store().requestHttpApproval({ ...pendingHttp, conversationId: "c2" });
+
+    expect(selectApprovalCount(store())).toBe(2);
+    expect(selectPendingApproval(store())?.kind).toBe("push");
+    expect(selectHasApprovalOfKind(store(), "http")).toBe(true);
+    // Resolving the push must not touch the http request behind it.
+    store().resolveApproval(headId(), { approved: false });
+    expect(selectPendingApproval(store())?.kind).toBe("http");
+    store().dismissApprovalsFor("c2");
+    expect(selectApprovalCount(store())).toBe(0);
+  });
+
+  it("drops and refuses the approvals of a thread the user stopped", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const stoppedPush = store().requestPushApproval(pendingPush);
+    const stoppedHttp = store().requestHttpApproval(pendingHttp);
+    const peerRequest = store().requestHttpApproval({ ...pendingHttp, conversationId: "c2" });
+
+    store().dismissApprovalsFor("c1", "Stopped by the user.");
+
+    await expect(stoppedPush).resolves.toMatchObject({
+      approved: false,
+      note: "Stopped by the user.",
+    });
+    await expect(stoppedHttp).resolves.toMatchObject({ approved: false });
+    // A peer's waiting request is not the stopped agent's to drop.
+    expect(selectApprovalCount(store())).toBe(1);
+    expect(selectPendingApproval(store())?.conversationId).toBe("c2");
+    store().resolveApproval(headId(), { approved: true });
+    await expect(peerRequest).resolves.toMatchObject({ approved: true });
+  });
+
+  it("refuses a decision addressed to an approval that is already gone", () => {
+    store().updateSettings({ autoApproveTools: false });
+    store().requestPushApproval(pendingPush);
+    const id = headId();
+    store().resolveApproval(id, { approved: true });
+
+    // A second answer for the same dialog (a double click, a stale modal) must
+    // be a no-op: resolving somebody else's promise is the bug this prevents.
+    const bystander = store().requestHttpApproval({ ...pendingHttp, conversationId: "c9" });
+    store().resolveApproval(id, { approved: true });
+    expect(selectApprovalCount(store())).toBe(1);
+    expect(selectPendingApproval(store())?.conversationId).toBe("c9");
+    void bystander;
+    store().dismissApprovalsFor("c9");
   });
 });

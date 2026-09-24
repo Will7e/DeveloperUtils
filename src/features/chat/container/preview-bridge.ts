@@ -39,6 +39,8 @@ import {
   ensureContainer,
   subscribeWorkspaceEvents,
   type ContainerRuntime,
+  type WorkspaceEvent,
+  type WorkspaceOwner,
 } from "./container-host";
 import {
   fileInTree,
@@ -71,6 +73,19 @@ export const MAX_PREVIEW_ISSUES = 25;
 
 /** The server's startup output kept for a failure report */
 export const MAX_PREVIEW_OUTPUT_CHARS = 4_000;
+
+/**
+ * How long the output reader may take to finish before a failure is described.
+ *
+ * Long enough for a flushed stream to deliver its last chunk, short enough that a
+ * stream nobody closed cannot delay the report the user is waiting for.
+ */
+const OUTPUT_DRAIN_MS = 750;
+
+/** The two ways waiting for a dev server can end */
+type StartupOutcome =
+  | { ok: true; url: string; port: number }
+  | { ok: false; error: string; exitCode?: number };
 
 export type PreviewStatus = "idle" | "starting" | "running" | "failed" | "stopped";
 
@@ -108,6 +123,38 @@ let state: PreviewState = INITIAL;
 let process: ContainerProcessHandle | null = null;
 let outputTail = "";
 
+/**
+ * Why the server's output stream could not be read, if it could not.
+ *
+ * Kept apart from `outputTail` on purpose. An empty tail has two very different
+ * meanings — the command printed nothing, or nobody was able to listen — and a
+ * failure report that cannot tell them apart sends the reader looking for a bug
+ * in a script that may not have one.
+ */
+let outputUnreadable: string | null = null;
+
+/**
+ * Identifies the startup attempt in flight.
+ *
+ * Incremented by every `startPreview` and by every stop, so a server that is
+ * killed while it is still starting is not reported as the project's failure to
+ * start one. The user pressing Stop knows what they did; they should not be told
+ * their dev script is broken.
+ */
+let startToken = 0;
+
+/**
+ * The thread whose dev server this is.
+ *
+ * A page runs ONE dev server — that is the design, not a limitation to work
+ * around — so this is the other half of the workspace lease: when another thread
+ * takes the filesystem, the files this server is serving stop existing, and a
+ * preview that keeps answering from a removed directory is worse than no preview
+ * at all. The `workspace-released` event tells us whose lease ended; this is how
+ * we know whether it was ours.
+ */
+let ownerThreadId: string | null = null;
+
 /** As much of a spawned process as this module holds on to */
 type ContainerProcessHandle = Awaited<ReturnType<ContainerRuntime["spawn"]>>;
 
@@ -134,6 +181,9 @@ export function previewState(): PreviewState {
 export function resetPreview(): void {
   process = null;
   outputTail = "";
+  outputUnreadable = null;
+  startToken = 0;
+  ownerThreadId = null;
   state = INITIAL;
   revision += 1;
 }
@@ -160,6 +210,10 @@ function setState(next: Partial<PreviewState>): void {
  * instruction budget spent on nothing.
  */
 subscribeWorkspaceEvents((event) => {
+  if (event.type === "workspace-released") {
+    handleWorkspaceReleased(event);
+    return;
+  }
   if (event.type !== "preview-message") return;
   const message = event.message;
   if (message.type === PREVIEW_CONSOLE_ERROR) {
@@ -175,6 +229,39 @@ subscribeWorkspaceEvents((event) => {
     addIssue("unhandled-rejection", "message" in message ? message.message : "an unhandled rejection");
   }
 });
+
+/**
+ * Gives the dev server up when this thread loses the filesystem.
+ *
+ * Driven by the workspace's own event, so it lands at the moment the removal
+ * happens rather than at the next interaction: in between, the server would
+ * happily answer from files that are no longer there.
+ */
+function handleWorkspaceReleased(event: Extract<WorkspaceEvent, { type: "workspace-released" }>): void {
+  if (!ownerThreadId || event.threadId !== ownerThreadId) return;
+  const running = process;
+  process = null;
+  ownerThreadId = null;
+  // The release ends any startup in flight too, so it must not be reported later
+  // as that attempt failing on its own.
+  startToken += 1;
+  if (running) {
+    try {
+      running.kill();
+    } catch {
+      // Already gone.
+    }
+  }
+  setState({
+    status: running ? "stopped" : state.status,
+    url: null,
+    port: null,
+    notes: [
+      ...state.notes,
+      `The dev server was stopped because ${event.reason}. A preview runs in this thread's own tree, so one thread losing the workspace ends its preview.`,
+    ],
+  });
+}
 
 function describeArgs(args: unknown[]): string {
   const parts = args.map((arg) => {
@@ -256,8 +343,17 @@ export async function startPreview(input: {
   plan: MountPlan;
   revision: number;
   mountNotes?: string[];
+  /** The thread whose revision this server serves; see `ownerThreadId` */
+  owner?: WorkspaceOwner;
 }): Promise<{ ok: true; url: string; port: number } | { ok: false; error: string }> {
   if (state.status === "starting") return { ok: false, error: "the preview is already starting" };
+
+  const attempt = (startToken += 1);
+
+  // Claimed BEFORE the prepare below, so the release event a takeover emits for
+  // the thread being evicted is never mistaken for this thread losing its own
+  // workspace.
+  if (input.owner) ownerThreadId = input.owner.threadId;
 
   // A second dev server on the same port is the failure this module exists to
   // prevent, and the guard above only covers the window before the first one
@@ -297,7 +393,7 @@ export async function startPreview(input: {
   });
 
   const prepared = await serializeWorkspaceWork(async () => {
-    const mounted = await prepareWorkspace(input.plan, input.revision);
+    const mounted = await prepareWorkspace(input.plan, input.revision, input.owner);
     if (!mounted.ok) return { ok: false as const, error: mounted.error };
     const installed = await ensureDependencies(input.plan, input.revision);
     if (!installed.ok) return { ok: false as const, error: installed.error };
@@ -317,6 +413,7 @@ export async function startPreview(input: {
   }
 
   outputTail = "";
+  outputUnreadable = null;
   let spawned: ContainerProcessHandle;
   try {
     spawned = await instance.spawn("jsh", ["-c", detected.command], {
@@ -328,9 +425,15 @@ export async function startPreview(input: {
     return { ok: false, error: `The dev server would not start: ${message}` };
   }
   process = spawned;
-  void pumpOutput(spawned);
+  const pump = pumpOutput(spawned);
 
   const outcome = await waitForServerReady(spawned, PREVIEW_START_TIMEOUT_MS);
+  // Drained before the failure is described, because the tail is filled by a
+  // reader running alongside this await: the last line a dying dev server prints
+  // — the one naming the cause — is the most likely to still be in flight, and
+  // reading the tail the instant the process is known to be gone reported an
+  // empty output for a command that had plenty to say.
+  await settleWithin(pump, OUTPUT_DRAIN_MS);
   if (!outcome.ok) {
     try {
       spawned.kill();
@@ -338,17 +441,106 @@ export async function startPreview(input: {
       // Already gone.
     }
     process = null;
+
+    // A deliberate stop is not a failure to start, and saying it was reads as a
+    // bug in the project's dev script.
+    if (attempt !== startToken) {
+      return { ok: false, error: "the preview was stopped while it was starting" };
+    }
+
     const tail = outputTail.trim();
     const note = `\`${detected.command}\` ${outcome.error}`;
+    const hint = diagnoseDevServerFailure(tail, outcome.exitCode ?? null, declaredScripts(input.plan));
     setState({
       status: "failed",
-      notes: [...state.notes, note, ...(tail ? [`The dev server's output:\n${tail}`] : [])],
+      notes: [
+        ...state.notes,
+        note,
+        ...(hint ? [hint] : []),
+        ...(tail ? [`The dev server's output:\n${tail}`] : []),
+        ...(outputUnreadable
+          ? [`Its output could not be read (${outputUnreadable}), so the exit status is all the evidence there is.`]
+          : []),
+      ],
     });
     return { ok: false, error: note };
   }
 
   setState({ status: "running", url: outcome.url, port: outcome.port });
   return { ok: true, url: outcome.url, port: outcome.port };
+}
+
+/**
+ * What an exit means when no server ever answered.
+ *
+ * The status is the whole difference between two unrelated situations: a script
+ * that runs and finishes on its own is not a server at all, while a non-zero
+ * status is the script refusing to run — and "exited before it served anything"
+ * left the reader to guess which one they had.
+ */
+export function describeDevServerExit(code: number | null): string {
+  if (code === 0) return "ran and finished without starting a server";
+  if (code === null) return "exited before it served anything";
+  return `exited before it served anything (exit status ${code})`;
+}
+
+/**
+ * The cause behind a failed start, when the evidence names one.
+ *
+ * Every hint is keyed to something the process actually printed. This is not a
+ * guess at what went wrong: a wrong cause is worse than no cause, because it
+ * sends the reader to fix a thing that is not broken. When nothing matches, the
+ * output itself is the report.
+ */
+export function diagnoseDevServerFailure(
+  output: string,
+  exitCode: number | null,
+  otherScripts: string[] = []
+): string | null {
+  if (exitCode === 0) {
+    const also = otherScripts.length > 0 ? ` This revision also declares ${otherScripts.map((s) => `\`${s}\``).join(", ")}.` : "";
+    return `The script finished instead of staying up. A preview needs a script that keeps a server alive — a build or a one-shot task looks exactly like this.${also}`;
+  }
+
+  const evidence = output.trim();
+  if (!evidence) return null;
+  for (const { pattern, hint } of FAILURE_HINTS) {
+    if (pattern.test(evidence)) return hint;
+  }
+  return null;
+}
+
+/**
+ * What the printed evidence means, most specific first.
+ *
+ * These are the failures a browser workspace produces for reasons that have
+ * nothing to do with the project's code, which is exactly when a reader needs to
+ * be told so: each one looks like an ordinary crash in a terminal.
+ */
+const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
+  {
+    pattern: /requires Node\.js version|Unsupported engine|engine "node" is incompatible|You are using Node\.js/i,
+    hint: "It refuses the workspace's Node.js version. That version belongs to the browser runtime, not to this project, so this dev script cannot run here at all — which is a limit of the preview, not a bug in the code.",
+  },
+  {
+    pattern: /Cannot load native addon|invalid ELF header|not a valid (ELF|Win32)|not a shared object|\.node: cannot open/i,
+    hint: "It loads a native module. The workspace runs in WebAssembly and cannot load native addons, however cleanly the install finished.",
+  },
+  {
+    pattern: /EADDRINUSE|address already in use/i,
+    hint: "Something is already listening on its port. Stop the preview and start it again.",
+  },
+  {
+    pattern: /command not found|: not found|npm error code 127|Cannot find module|ERR_MODULE_NOT_FOUND/i,
+    hint: "A command or module it needs is missing from the workspace, which points at the install rather than at the project: the lockfile install may have skipped or changed that dependency.",
+  },
+];
+
+/** Every script this revision declares, other than the one that was started */
+function declaredScripts(plan: MountPlan): string[] {
+  const scripts = scriptsOf(packageJsonOf(plan));
+  if (!scripts) return [];
+  return Object.keys(scripts).filter((name) => !(DEV_SCRIPTS as readonly string[]).includes(name));
 }
 
 function packageManagerField(packageJson: string | null): string | null {
@@ -367,13 +559,10 @@ function packageManagerField(packageJson: string | null): string | null {
  * dies instantly never emits `server-ready`, and waiting the full two minutes to
  * report it wastes exactly the time the user needed the answer.
  */
-function waitForServerReady(
-  spawned: ContainerProcessHandle,
-  timeoutMs: number
-): Promise<{ ok: true; url: string; port: number } | { ok: false; error: string }> {
+function waitForServerReady(spawned: ContainerProcessHandle, timeoutMs: number): Promise<StartupOutcome> {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (result: { ok: true; url: string; port: number } | { ok: false; error: string }) => {
+    const finish = (result: StartupOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -389,22 +578,45 @@ function waitForServerReady(
       () => finish({ ok: false, error: `did not answer within ${Math.round(timeoutMs / 1000)}s` }),
       timeoutMs
     );
-    void spawned.exit.then(() => finish({ ok: false, error: "exited before it served anything" })).catch(() => undefined);
+    // The status is carried out rather than turned into prose here: a cause needs
+    // the code (an exit of 0 and an exit of 1 are different reports) and only the
+    // caller has the process's output to read it against.
+    void spawned.exit
+      .then((code) => finish({ ok: false, error: describeDevServerExit(code), exitCode: code }))
+      .catch(() => undefined);
   });
+}
+
+/**
+ * Waits for `work`, but never longer than `ms`.
+ *
+ * Bounded because the work is a reader over a live stream: a stream that ends
+ * badly, or not at all, must not hold the failure report hostage.
+ */
+async function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  await Promise.race([
+    work.catch(() => undefined),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+  ]);
 }
 
 /** Keeps the last of the server's output, for a failure report */
 async function pumpOutput(spawned: ContainerProcessHandle): Promise<void> {
   try {
-    const reader = spawned.output().getReader();
+    const reader = spawned.output.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (typeof value !== "string") continue;
       outputTail = `${outputTail}${value}`.slice(-MAX_PREVIEW_OUTPUT_CHARS);
     }
-  } catch {
-    // A stream that ends badly is reported as the server's exit, which is below.
+  } catch (error) {
+    // Recorded, not swallowed: the one time this was silent, every command
+    // reported success with empty output — and a failure that cannot show output
+    // reads exactly like a process that printed none.
+    outputUnreadable = error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -416,6 +628,10 @@ async function pumpOutput(spawned: ContainerProcessHandle): Promise<void> {
 export function stopPreview(reason: string): void {
   const running = process;
   process = null;
+  ownerThreadId = null;
+  // Closing the startup attempt in flight: a server killed while starting exits
+  // like a server that crashed, and only this flag tells the two apart.
+  startToken += 1;
   if (running) {
     try {
       running.kill();

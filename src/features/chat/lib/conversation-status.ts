@@ -7,10 +7,10 @@
 // which of these is running, which one is waiting on ME, and which one finished
 // while I was looking at something else?
 //
-// Every fact needed is already in the store — a stream names its conversation,
-// a parked turn carries its question, a failed reply marks its own message, and
-// "run checks" names the thread it belongs to. So this is a REDUCTION over state
-// the page already holds, and the part worth pinning is the PRECEDENCE: a thread
+// Every fact needed is already in the store — streams, checks and resumes are
+// all keyed by conversation, a parked turn carries its question, and a failed
+// reply marks its own message. So this is a REDUCTION over state the page
+// already holds, and the part worth pinning is the PRECEDENCE: a thread
 // that is both running and unread is running (the dot would be describing the
 // past), and a thread parked on a question outranks one that merely finished.
 //
@@ -35,12 +35,18 @@ export const IDLE_STATUS: ConversationStatus = { kind: "idle", label: "", needsU
 
 export interface ConversationStatusInput {
   conversation: ChatConversation;
-  /** The thread the live stream belongs to, or null when nothing is streaming */
-  streamingConversationId: string | null;
+  /**
+   * True when THIS thread has a stream in flight.
+   *
+   * Asked per thread rather than answered by "which id owns the app's stream":
+   * several threads stream at once now, and an app-wide owner would make every
+   * row but one read idle while the page was in fact busy.
+   */
+  streaming: boolean;
   /** That stream dropped and a resume is in flight */
   reconnecting: boolean;
-  /** The thread a user-initiated "Run checks" is in flight for, if any */
-  checksRunningFor: string | null;
+  /** True when a user-initiated "Run checks" is in flight for THIS thread */
+  runningChecks: boolean;
   /** True for the thread on screen: its own open state is not news about it */
   isActive: boolean;
   /**
@@ -61,23 +67,21 @@ export interface ConversationStatusInput {
  */
 export function conversationStatus({
   conversation,
-  streamingConversationId,
+  streaming,
   reconnecting,
-  checksRunningFor,
+  runningChecks,
   isActive,
   lastSeenAt,
 }: ConversationStatusInput): ConversationStatus {
-  const id = conversation.id;
-
   // 1. Something is happening in it RIGHT NOW. Beats every historical fact:
   //    while a turn streams, "unread" would be describing the previous one.
-  if (streamingConversationId === id) {
+  if (streaming) {
     if (reconnecting) {
       return { kind: "running", label: "Reconnecting to the stream", needsUser: false };
     }
     return { kind: "running", label: "The agent is working here", needsUser: false };
   }
-  if (checksRunningFor === id) {
+  if (runningChecks) {
     return { kind: "running", label: "Running checks", needsUser: false };
   }
 

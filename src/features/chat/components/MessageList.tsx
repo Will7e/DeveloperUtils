@@ -16,7 +16,7 @@
 
 import React from "react";
 import { ArrowDown, Brain, RefreshCw, WifiOff } from "lucide-react";
-import { useChatStore } from "@/stores/chat.store";
+import { selectReconnecting, selectStream, useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { QuestionCard } from "./QuestionCard";
@@ -97,15 +97,16 @@ export function MessageList({
   onOpenSettings,
 }: MessageListProps) {
   // Subscribe to streaming state here — the page, header, sidebar and
-  // composer stay untouched while tokens arrive. This component is
-  // keyed by conversation id, so "streaming in the active conversation"
-  // is exactly "streaming here".
-  const streamingContent = useChatStore((s) => s.streamingContent);
-  const streamingReasoning = useChatStore((s) => s.streamingReasoning);
-  const reconnecting = useChatStore((s) => s.reconnecting);
-  const isStreamingHere = useChatStore(
-    (s) => s.isStreaming && s.streamingConversationId === s.activeConversationId
-  );
+  // composer stay untouched while tokens arrive. This component is keyed by
+  // conversation id, and it reads ITS OWN thread's buffer rather than "the"
+  // stream: with several agents working at once, a token belonging to another
+  // chat lands in another entry and re-renders nothing here.
+  const activeId = useChatStore((s) => s.activeConversationId);
+  const stream = useChatStore((s) => selectStream(s, s.activeConversationId));
+  const streamingContent = stream?.content ?? "";
+  const streamingReasoning = stream?.reasoning ?? "";
+  const reconnecting = useChatStore((s) => selectReconnecting(s, s.activeConversationId));
+  const isStreamingHere = stream !== null;
 
   // Interrupted-turn recovery affordance: when auto-resume failed
   // for this conversation, offer an explicit one-click Resume.
@@ -115,7 +116,6 @@ export function MessageList({
   // on every change, which is a cascading render for a boolean the store
   // already publishes. The selector returns a primitive, so it re-renders
   // only when the answer actually flips.
-  const activeId = useChatStore((s) => s.activeConversationId);
   const hasUnresumable = useChatStore((s) => {
     const conv = s.conversations.find((c) => c.id === s.activeConversationId);
     return conv?.pendingTurn?.outcome === "unresumable";

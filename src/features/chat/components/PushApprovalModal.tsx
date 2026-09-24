@@ -7,8 +7,12 @@
 // either approves (executes the GitHub write chain) or rejects
 // (optionally with a note fed back to the agent). Excluding is not
 // rejecting: held-back files keep their content and diff in the
-// workspace and can be pushed later. Rendered from ChatPage whenever
-// pendingPush is set.
+// workspace and can be pushed later.
+//
+// Rendered from ChatPage whenever a push approval is at the head of the store's
+// approval queue. The queue is what keeps several agents honest: the oldest ask
+// gets the dialog, the rest wait their turn, and each answer resolves exactly its
+// own promise.
 
 import React from "react";
 import {
@@ -24,13 +28,23 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
-import { useChatStore } from "@/stores/chat.store";
+import { selectApprovalCount, selectPendingApproval, useChatStore } from "@/stores/chat.store";
 import { useModalDialog } from "./useModalDialog";
 
+/** What a dialog closed without a decision tells the awaiting push */
+const DISMISSED = "the push dialog was closed without a decision";
+
 export const PushApprovalModal = React.memo(function PushApprovalModal() {
-  const pendingPush = useChatStore((s) => s.pendingPush);
-  const resolvePushApproval = useChatStore((s) => s.resolvePushApproval);
-  const clearPendingPush = useChatStore((s) => s.clearPendingPush);
+  // The HEAD of the approval queue — see the header comment for why the queue
+  // rather than a single slot.
+  const approval = useChatStore(selectPendingApproval);
+  const waiting = useChatStore(selectApprovalCount);
+  const resolveApproval = useChatStore((s) => s.resolveApproval);
+  const dismissApproval = useChatStore((s) => s.dismissApproval);
+
+  // Null while nothing is waiting, and while an HTTP approval is the head: that
+  // dialog is on screen instead, and this one returns when its turn comes.
+  const mine = approval?.kind === "push" ? approval : null;
 
   const [executing, setExecuting] = React.useState(false);
   const [openPatches, setOpenPatches] = React.useState<Set<string>>(new Set());
@@ -39,7 +53,7 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
   const [rejectNote, setRejectNote] = React.useState("");
   const [showRejectNote, setShowRejectNote] = React.useState(false);
 
-  const pendingCreatedAt = pendingPush?.createdAt;
+  const pendingCreatedAt = mine?.request.createdAt;
   React.useEffect(() => {
     if (pendingCreatedAt !== undefined) {
       setOpenPatches(new Set());
@@ -54,9 +68,17 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
 
   // Declared before the early return so the hook order is stable: this modal
   // unmounts whenever no push is pending.
-  const panelRef = useModalDialog<HTMLDivElement>({ onDismiss: clearPendingPush });
+  const panelRef = useModalDialog<HTMLDivElement>({
+    onDismiss: () => {
+      if (mine) dismissApproval(mine.id, DISMISSED);
+    },
+  });
 
-  if (!pendingPush) return null;
+  if (!mine) return null;
+
+  const pendingPush = mine.request;
+  /** Requests queued behind this one, which the user does not see yet */
+  const othersWaiting = Math.max(0, waiting - 1);
 
   const togglePatch = (path: string) => {
     setOpenPatches((prev) => {
@@ -88,21 +110,20 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
     setExecuting(true);
     // The PR choice and the exclusions ride with the decision — a window
     // global would be read by a different module at an unpredictable time.
-    resolvePushApproval(
-      true,
-      undefined,
+    // One call, by request id: it resolves THIS agent's promise and leaves the
+    // queue to the next asker.
+    resolveApproval(mine.id, {
+      approved: true,
       openPr,
-      heldBack.map((c) => c.path)
-    );
+      excludePaths: heldBack.map((c) => c.path),
+    });
   };
 
-  const handleReject = () => {
-    // Resolve the awaiting runPushChanges promise FIRST — clearing
-    // pendingPush before resolving would drop the gate resolver and
-    // deadlock the agent tool loop on an unresolved promise.
-    resolvePushApproval(false, rejectNote.trim() || undefined);
-    clearPendingPush();
-  };
+  const handleReject = () =>
+    resolveApproval(mine.id, {
+      approved: false,
+      ...(rejectNote.trim() ? { note: rejectNote.trim() } : {}),
+    });
 
   return (
     <div className="chat-modal-overlay" role="dialog" aria-modal="true" aria-label="Approve push">
@@ -126,6 +147,13 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
               <span className="chat-approval-del">−{deletions}</span> · branch{" "}
               <code>{pendingPush.branchName}</code> → <code>{pendingPush.baseBranch}</code>
             </p>
+            {othersWaiting > 0 ? (
+              <p className="chat-approval-subtitle" role="status">
+                {othersWaiting === 1
+                  ? "Another agent is also waiting for a decision — it is asked next."
+                  : `${othersWaiting} more agents are waiting for a decision — they are asked one at a time.`}
+              </p>
+            ) : null}
           </div>
         </div>
 

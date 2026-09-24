@@ -87,22 +87,86 @@ export type ComposerDraftUpdate = string | ((previous: string) => string);
 
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = { draft: "", images: [] };
 
+/**
+ * One conversation's in-flight assistant output.
+ *
+ * Held together as one value because the three fields share a lifetime: the
+ * buffer exists exactly while the stream does, and `startedAt` is what lets a
+ * UI order several live streams by who started first.
+ */
+export interface ConversationStream {
+  /** Content accumulated for the in-flight assistant message */
+  content: string;
+  /** Reasoning-token text accumulated for the in-flight message */
+  reasoning: string;
+  /** When this stream started (ms since epoch) */
+  startedAt: number;
+}
+
+/** Part of an approval that is the same whoever is asking */
+interface ApprovalBase {
+  /** Stable id, so a dialog answers the request it was opened for */
+  id: string;
+  /** The thread whose agent is waiting */
+  conversationId: string;
+  createdAt: number;
+}
+
+/**
+ * An action parked on the user's decision.
+ *
+ * The resolver travels WITH the request rather than in a parallel slot, so a
+ * second agent asking for something cannot displace the first one's answer.
+ */
+export type PendingApproval =
+  | (ApprovalBase & {
+      kind: "push";
+      request: PendingPush;
+      resolve: (decision: PushDecision) => void;
+    })
+  | (ApprovalBase & {
+      kind: "http";
+      request: PendingHttpRequest;
+      resolve: (decision: HttpApprovalDecision) => void;
+    });
+
+/** The decision an approval of either kind carries */
+export type ApprovalDecision = PushDecision | HttpApprovalDecision;
+
 export interface ChatStoreState {
   conversations: ChatConversation[];
   activeConversationId: string | null;
   settings: ChatSettings;
 
   // ── Transient (not persisted) ──
-  isStreaming: boolean;
-  streamingConversationId: string | null;
-  /** Content accumulated for the in-flight assistant message */
-  streamingContent: string;
-  /** Reasoning-token text accumulated for the in-flight message */
-  streamingReasoning: string;
-  /** True after abort — partial output is kept */
-  wasAborted: boolean;
-  /** True while a resume attempt is reconnecting (transient banner) */
-  reconnecting: boolean;
+  /**
+   * In-flight assistant text, ONE ENTRY PER STREAMING CONVERSATION.
+   *
+   * Keyed by conversation rather than held in a single slot because several
+   * agents can be working at once. With one app-wide buffer, two live streams
+   * appended into the same string — a delta belonging to one thread landed in
+   * another thread's message — and the commit took whichever conversation the
+   * slot happened to name. The key is what makes that unrepresentable: every
+   * append says which conversation it belongs to, and an append for a stream
+   * that is over is dropped rather than folded into a neighbour.
+   */
+  streams: Record<string, ConversationStream>;
+  /**
+   * Conversations whose last stream was stopped by the user.
+   *
+   * Per conversation for the same reason the buffers are: "you stopped this
+   * one" is a fact about a thread, and an app-wide flag would have one Stop
+   * mark every other agent's finished reply as aborted too.
+   */
+  abortedStreams: Record<string, true>;
+  /**
+   * Conversations whose resume attempt is reconnecting right now.
+   *
+   * Keyed by conversation like every other transient here: a resume belongs to
+   * ONE thread, and an app-wide flag would put "reconnecting…" on a chat that is
+   * answering normally because a different one lost its stream.
+   */
+  reconnecting: Record<string, true>;
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
   settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
@@ -115,7 +179,7 @@ export interface ChatStoreState {
    * agent is idle during it is exactly the "is it hung?" question the rail exists
    * to answer. Keyed by conversation so a run cannot make another thread look busy.
    */
-  checkRun: { conversationId: string; startedAt: number } | null;
+  checkRuns: Record<string, number>;
 
   /**
    * When each thread was last on screen, for the list's "finished while you were
@@ -148,28 +212,23 @@ export interface ChatStoreState {
   // ── Agent workspace (transient; hydrated from IndexedDB) ──
   /** conversationId → workspace */
   workspaces: Record<string, WorkspaceState>;
-  /** Push awaiting user approval (one at a time, app-wide) */
-  pendingPush: PendingPush | null;
-  /** Resolve callbacks for the push approval gate */
-  pushGate: {
-    resolve: (decision: PushDecision) => void;
-    conversationId: string;
-  } | null;
   /**
-   * External write awaiting the user's approval (one at a time, app-wide).
+   * Agent actions parked on the user's decision, OLDEST FIRST.
    *
-   * A separate gate from the push one rather than a shared "pending action"
-   * slot: they answer different questions ("may I ship this diff?" vs "may I
-   * send this request?"), and a single slot would let one silently replace
-   * the other's dialog — resolving the push promise from the HTTP modal is a
-   * bug with no visible symptom.
+   * A queue rather than the single slot these used to be. "One at a time,
+   * app-wide" stopped being a queuing rule the moment two agents could run at
+   * once: a second request REPLACED the first, so the first agent's promise
+   * was never resolved and its turn hung behind a dialog nobody could see.
+   * Each entry carries its own resolver and the conversation it belongs to,
+   * and the UI shows the head of the queue — so the other one waits, visibly,
+   * instead of vanishing.
+   *
+   * Push and HTTP stay separate KINDS in one queue rather than two queues:
+   * they answer different questions ("may I ship this diff?" vs "may I send
+   * this request?"), and sharing one dialog at a time is only safe when the
+   * kind is what tells them apart.
    */
-  pendingHttp: PendingHttpRequest | null;
-  /** Resolve callbacks for the HTTP write gate */
-  httpGate: {
-    resolve: (decision: HttpApprovalDecision) => void;
-    conversationId: string;
-  } | null;
+  approvals: PendingApproval[];
 
   // ── Workspace actions ──
   setWorkspace: (conversationId: string, ws: WorkspaceState) => void;
@@ -177,19 +236,22 @@ export interface ChatStoreState {
   /** Ensures a workspace exists for the repo (creating + hydrating tree) */
   ensureWorkspace: (conversationId: string) => Promise<WorkspaceState | null>;
   removeWorkspace: (conversationId: string) => void;
-  /** Opens the approval gate; resolves when the user decides */
+  /** Opens the push gate; resolves when the user decides */
   requestPushApproval: (pending: PendingPush) => Promise<PushDecision>;
-  resolvePushApproval: (
-    approved: boolean,
-    note?: string,
-    openPr?: boolean,
-    excludePaths?: string[]
-  ) => void;
-  clearPendingPush: () => void;
   /** Opens the HTTP write gate; resolves when the user decides */
   requestHttpApproval: (pending: PendingHttpRequest) => Promise<HttpApprovalDecision>;
-  resolveHttpApproval: (approved: boolean, note?: string) => void;
-  clearPendingHttp: () => void;
+  /** Answers ONE waiting approval by id; a no-op when it is already gone */
+  resolveApproval: (id: string, decision: ApprovalDecision) => void;
+  /** Refuses and drops one waiting approval (a dismissed dialog) */
+  dismissApproval: (id: string, note?: string) => void;
+  /**
+   * Refuses and drops every approval belonging to one conversation.
+   *
+   * This is what Stop does: an approval gate is a WAIT, and a wait that
+   * outlives its turn leaves that agent parked forever behind a dialog for
+   * work the user already ended.
+   */
+  dismissApprovalsFor: (conversationId: string, note?: string) => void;
 
   // ── Conversation actions ──
   /**
@@ -272,11 +334,11 @@ export interface ChatStoreState {
   markPendingTurn: (conversationId: string) => void;
   /** Clears the pending-turn marker (turn outcome committed) */
   clearPendingTurn: (conversationId: string) => void;
-  appendStreamingContent: (chunk: string) => void;
+  appendStreamingContent: (conversationId: string, chunk: string) => void;
   /** Appends reasoning-token text (reasoning models via OpenRouter) */
-  appendStreamingReasoning: (chunk: string) => void;
+  appendStreamingReasoning: (conversationId: string, chunk: string) => void;
   /** Commits the streaming content as a real message; returns its id */
-  commitStreamingMessage: (meta?: {
+  commitStreamingMessage: (conversationId: string, meta?: {
     model?: string;
     latencyMs?: number;
     usage?: UsageInfo;
@@ -308,9 +370,12 @@ export interface ChatStoreState {
     conversationId: string,
     message: Pick<ChatMessage, "content"> & Partial<ChatMessage>
   ) => string | null;
-  /** Discards in-flight content (used when stream produced nothing) */
-  discardStreaming: () => void;
-  endStreaming: (aborted: boolean) => void;
+  /** Discards in-flight content for one conversation (stream produced nothing) */
+  discardStreaming: (conversationId: string) => void;
+  /** Ends one conversation's stream, dropping its buffer */
+  endStreaming: (conversationId: string, aborted: boolean) => void;
+  /** Drops every in-flight stream (teardown paths that replace the app state) */
+  clearStreams: () => void;
 
   // ── Settings ──
   updateSettings: (patch: Partial<ChatSettings>) => void;
@@ -324,8 +389,8 @@ export interface ChatStoreState {
     settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
   }) => void;  /** Hydration-time cleanup of stale pending-turn markers */
   cleanupStalePendingTurns: () => void;
-  /** Toggles the reconnecting banner (resume retries) */
-  setReconnecting: (value: boolean) => void;
+  /** Toggles one conversation's reconnecting banner (resume retries) */
+  setReconnecting: (conversationId: string, value: boolean) => void;
   /** Marks a user-run verification as started/finished for one conversation */
   setCheckRun: (conversationId: string, running: boolean) => void;
 
@@ -339,6 +404,39 @@ export interface ChatStoreState {
 
 function touchConversation(conv: ChatConversation): ChatConversation {
   return { ...conv, updatedAt: Date.now() };
+}
+
+/** A copy of `record` without `key` — and the same object when it had none */
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const next: Record<string, T> = {};
+  for (const [k, value] of Object.entries(record)) {
+    if (k !== key) next[k] = value;
+  }
+  return next;
+}
+
+let approvalSeq = 0;
+
+/** Id for one waiting approval, so a dialog answers the request it opened for */
+function createApprovalId(): string {
+  approvalSeq += 1;
+  return `approval_${Date.now().toString(36)}_${approvalSeq.toString(36)}`;
+}
+
+/**
+ * Answers a waiting approval as a refusal.
+ *
+ * Switched on the kind rather than called through the union, because the two
+ * resolvers take different decision shapes and a silent mismatch here is a
+ * dialog that closes with nobody's promise resolved.
+ */
+function refuseApproval(approval: PendingApproval, note?: string): void {
+  if (approval.kind === "push") {
+    approval.resolve({ approved: false, ...(note ? { note } : {}) });
+  } else {
+    approval.resolve({ approved: false, ...(note ? { note } : {}) });
+  }
 }
 
 /**
@@ -390,23 +488,17 @@ export const useChatStore = create<ChatStoreState>()(
       activeConversationId: null,
       settings: DEFAULT_CHAT_SETTINGS,
 
-      isStreaming: false,
-      streamingConversationId: null,
-      streamingContent: "",
-      streamingReasoning: "",
-      wasAborted: false,
-      reconnecting: false,
+      streams: {},
+      abortedStreams: {},
+      reconnecting: {},
       settingsOpen: false,
       settingsTab: null,
-      checkRun: null,
+      checkRuns: {},
       lastSeenAt: {},
 
       composerDrafts: {},
       workspaces: {},
-      pendingPush: null,
-      pushGate: null,
-      pendingHttp: null,
-      httpGate: null,
+      approvals: [],
 
       // ── Composer ──
       // Write-through, in the same store as the threads themselves: reading
@@ -530,38 +622,21 @@ export const useChatStore = create<ChatStoreState>()(
           return Promise.resolve({ approved: true, openPr: true, auto: true });
         }
         return new Promise((resolve) => {
-          set({
-            pendingPush: pending,
-            pushGate: {
-              conversationId: pending.conversationId,
-              resolve: (decision) => resolve(decision),
-            },
-          });
+          set((s) => ({
+            approvals: [
+              ...s.approvals,
+              {
+                id: createApprovalId(),
+                kind: "push",
+                conversationId: pending.conversationId,
+                createdAt: pending.createdAt,
+                request: pending,
+                resolve,
+              },
+            ],
+          }));
         });
       },
-
-      resolvePushApproval: (approved, note, openPr, excludePaths) =>
-        set((s) => {
-          const gate = s.pushGate;
-          if (gate)
-            gate.resolve({
-              approved,
-              note,
-              openPr,
-              ...(excludePaths && excludePaths.length > 0 ? { excludePaths } : {}),
-            });
-          return { pushGate: null, pendingPush: approved ? null : s.pendingPush };
-        }),
-
-      clearPendingPush: () =>
-        set((s) => {
-          // Defensive: if the gate is still open (e.g. the modal was
-          // unmounted without deciding, or a caller cleared before
-          // resolving), reject it so the awaiting tool executor never
-          // hangs on an unresolved promise.
-          if (s.pushGate) s.pushGate.resolve({ approved: false });
-          return { pendingPush: null, pushGate: null };
-        }),
 
       requestHttpApproval: (pending) => {
         // Same pre-approval as the push gate: no dialog, decision marked
@@ -571,29 +646,50 @@ export const useChatStore = create<ChatStoreState>()(
           return Promise.resolve({ approved: true, auto: true });
         }
         return new Promise((resolve) => {
-          set({
-            pendingHttp: pending,
-            httpGate: {
-              conversationId: pending.conversationId,
-              resolve: (decision) => resolve(decision),
-            },
-          });
+          set((s) => ({
+            approvals: [
+              ...s.approvals,
+              {
+                id: createApprovalId(),
+                kind: "http",
+                conversationId: pending.conversationId,
+                createdAt: pending.createdAt,
+                request: pending,
+                resolve,
+              },
+            ],
+          }));
         });
       },
 
-      resolveHttpApproval: (approved, note) =>
+      resolveApproval: (id, decision) =>
         set((s) => {
-          const gate = s.httpGate;
-          if (gate) gate.resolve({ approved, ...(note ? { note } : {}) });
-          return { httpGate: null, pendingHttp: null };
+          const waiting = s.approvals.find((a) => a.id === id);
+          // Vanished already (a Stop dismissed it, or a second answer for the
+          // same dialog arrived): a no-op, never a resolve of somebody else's
+          // promise.
+          if (!waiting) return s;
+          if (waiting.kind === "push") waiting.resolve(decision as PushDecision);
+          else waiting.resolve(decision as HttpApprovalDecision);
+          return { approvals: s.approvals.filter((a) => a.id !== id) };
         }),
 
-      clearPendingHttp: () =>
+      dismissApproval: (id, note) =>
         set((s) => {
-          // Same defensive resolve as the push gate: an unmounted modal must
-          // not leave the awaiting http_write hanging forever.
-          if (s.httpGate) s.httpGate.resolve({ approved: false, note: "the request dialog was closed without a decision" });
-          return { pendingHttp: null, httpGate: null };
+          const waiting = s.approvals.find((a) => a.id === id);
+          if (!waiting) return s;
+          // An unmounted dialog must not leave its tool executor awaiting a
+          // promise nothing will ever resolve.
+          refuseApproval(waiting, note);
+          return { approvals: s.approvals.filter((a) => a.id !== id) };
+        }),
+
+      dismissApprovalsFor: (conversationId, note) =>
+        set((s) => {
+          const mine = s.approvals.filter((a) => a.conversationId === conversationId);
+          if (mine.length === 0) return s;
+          for (const waiting of mine) refuseApproval(waiting, note);
+          return { approvals: s.approvals.filter((a) => a.conversationId !== conversationId) };
         }),
       createConversation: (model, seed) => {
         const id = generateId();
@@ -989,14 +1085,23 @@ export const useChatStore = create<ChatStoreState>()(
         })),
 
       // ── Streaming ──
+      //
+      // Every action here names its conversation, and that is the whole
+      // multi-tenancy change: two agents can stream at once, and neither can
+      // write into the other's buffer or commit the other's text. The insert
+      // is what opens a gate; the appends close it again when the stream is
+      // over, which is how a late delta from a torn-down round is dropped
+      // instead of landing in whatever stream is running now.
       beginStreaming: (conversationId) =>
-        set({
-          isStreaming: true,
-          streamingConversationId: conversationId,
-          streamingContent: "",
-          streamingReasoning: "",
-          wasAborted: false,
-        }),
+        set((s) => ({
+          streams: {
+            ...s.streams,
+            [conversationId]: { content: "", reasoning: "", startedAt: Date.now() },
+          },
+          // A new stream for a thread clears that thread's stopped mark — the
+          // "aborted" note is about the reply that ended, not about the chat.
+          abortedStreams: withoutKey(s.abortedStreams, conversationId),
+        })),
 
       markPendingTurn: (conversationId) =>
         set((s) => ({
@@ -1020,41 +1125,49 @@ export const useChatStore = create<ChatStoreState>()(
       // fresh turn, or a torn-down round that missed its unsubscribe)
       // must never append into a NEW turn's streaming buffer — that
       // is exactly the doubled/garbled-output symptom.
-      appendStreamingContent: (chunk) =>
-        set((s) =>
-          s.isStreaming && s.streamingConversationId
-            ? { streamingContent: s.streamingContent + chunk }
-            : s
-        ),
+      appendStreamingContent: (conversationId, chunk) =>
+        set((s) => {
+          const stream = s.streams[conversationId];
+          // No buffer means the stream is over (or was never opened). Dropping
+          // the delta is the honest answer: appending it anywhere else is how
+          // one thread's words ended up in another thread's answer.
+          if (!stream) return s;
+          return {
+            streams: {
+              ...s.streams,
+              [conversationId]: { ...stream, content: stream.content + chunk },
+            },
+          };
+        }),
 
-      // Guarded like `appendStreamingContent` above: this field is not
-      // per-conversation, so an unguarded append lets a delta belonging to
-      // one stream land in another conversation's message — reasoning text
-      // from the last chat you had open, attached to the answer you are
-      // reading now.
-      appendStreamingReasoning: (chunk) =>
-        set((s) =>
-          s.isStreaming && s.streamingConversationId
-            ? { streamingReasoning: s.streamingReasoning + chunk }
-            : s
-        ),
+      appendStreamingReasoning: (conversationId, chunk) =>
+        set((s) => {
+          const stream = s.streams[conversationId];
+          if (!stream) return s;
+          return {
+            streams: {
+              ...s.streams,
+              [conversationId]: { ...stream, reasoning: stream.reasoning + chunk },
+            },
+          };
+        }),
 
-      commitStreamingMessage: (meta) => {
-        const { streamingConversationId, streamingContent, streamingReasoning } = get();
-        if (!streamingConversationId || !streamingContent.trim()) return null;
+      commitStreamingMessage: (conversationId, meta) => {
+        const stream = get().streams[conversationId];
+        if (!stream || !stream.content.trim()) return null;
         const id = generateId();
-        const reasoning = meta?.reasoning ?? streamingReasoning;
+        const reasoning = meta?.reasoning ?? stream.reasoning;
         set((s) => ({
-          conversations: mapConversation(s.conversations, streamingConversationId, (c) =>
+          conversations: mapConversation(s.conversations, conversationId, (c) =>
             touchConversation({
               ...c,
               messages: [
                 ...c.messages,
                 stampBinding(
-                  streamingConversationId,
+                  conversationId,
                   {
                     role: "assistant",
-                    content: s.streamingContent,
+                    content: stream.content,
                     reasoning: reasoning || undefined,
                     ...meta,
                   },
@@ -1067,7 +1180,17 @@ export const useChatStore = create<ChatStoreState>()(
         return id;
       },
 
-      discardStreaming: () => set({ streamingContent: "", streamingReasoning: "" }),
+      discardStreaming: (conversationId) =>
+        set((s) => {
+          const stream = s.streams[conversationId];
+          if (!stream) return s;
+          return {
+            streams: {
+              ...s.streams,
+              [conversationId]: { ...stream, content: "", reasoning: "" },
+            },
+          };
+        }),
 
       commitToolCallsMessage: (conversationId, calls, meta) => {
         const id = generateId();
@@ -1120,14 +1243,15 @@ export const useChatStore = create<ChatStoreState>()(
         }));
       },
 
-      endStreaming: (aborted) =>
-        set({
-          isStreaming: false,
-          streamingConversationId: null,
-          streamingContent: "",
-          streamingReasoning: "",
-          wasAborted: aborted,
-        }),
+      endStreaming: (conversationId, aborted) =>
+        set((s) => ({
+          streams: withoutKey(s.streams, conversationId),
+          abortedStreams: aborted
+            ? { ...s.abortedStreams, [conversationId]: true }
+            : s.abortedStreams,
+        })),
+
+      clearStreams: () => set({ streams: {}, abortedStreams: {} }),
 
       commitDirectAssistantMessage: (conversationId, message) => {
         const id = generateId();
@@ -1196,15 +1320,20 @@ export const useChatStore = create<ChatStoreState>()(
         set((s) => ({ settings: { ...s.settings, ...patch } })),
 
       setCheckRun: (conversationId, running) =>
-        set((s) => ({
-          // Only this conversation's run may clear the flag: a stale finally()
-          // from an abandoned run must not blank a newer one's indicator.
-          checkRun: running
-            ? { conversationId, startedAt: Date.now() }
-            : s.checkRun?.conversationId === conversationId
-              ? null
-              : s.checkRun,
-        })),
+        set((s) => {
+          // Only this conversation's run may clear its own flag: a stale
+          // finally() from an abandoned run must not blank a newer one's
+          // indicator, and two threads verifying at once each keep their own.
+          const checkRuns = { ...s.checkRuns };
+          if (running) {
+            checkRuns[conversationId] = Date.now();
+          } else if (conversationId in checkRuns) {
+            delete checkRuns[conversationId];
+          } else {
+            return s;
+          }
+          return { checkRuns };
+        }),
 
       setSettingsOpen: (open, tab) =>
         set({ settingsOpen: open, settingsTab: open ? tab ?? null : null }),
@@ -1214,7 +1343,12 @@ export const useChatStore = create<ChatStoreState>()(
       setSettingsModalState: ({ settingsOpen, settingsTab }) =>
         set({ settingsOpen, settingsTab }),
 
-      setReconnecting: (value) => set({ reconnecting: value }),
+      setReconnecting: (conversationId, value) =>
+        set((s) => ({
+          reconnecting: value
+            ? { ...s.reconnecting, [conversationId]: true }
+            : withoutKey(s.reconnecting, conversationId),
+        })),
 
       /** Clears pendingTurn markers that outlived their turn (>24h) */
       cleanupStalePendingTurns: () =>
@@ -1287,19 +1421,14 @@ export const useChatStore = create<ChatStoreState>()(
           conversations: (p.conversations ?? current.conversations).map((c) =>
             isLegacyIntabModelId(c.model) ? { ...c, model: DEFAULT_CHAT_MODEL } : c
           ),
-          isStreaming: false,
-          streamingConversationId: null,
-          streamingContent: "",
-          wasAborted: false,
-          reconnecting: false,
+          streams: {},
+          abortedStreams: {},
+          reconnecting: {},
           settingsOpen: false,
           settingsTab: null,
-          checkRun: null,
+          checkRuns: {},
           workspaces: {},
-          pendingPush: null,
-          pushGate: null,
-          pendingHttp: null,
-          httpGate: null,
+          approvals: [],
         };
       },
     }
@@ -1348,4 +1477,81 @@ export function selectWorkspace(
 /** `selectWorkspace` for callers that are not rendering */
 export function currentWorkspace(threadId: string | null): WorkspaceState | null {
   return selectWorkspace(useChatStore.getState(), threadId);
+}
+
+// ── Selectors: per-thread transient state ────────────────────
+//
+// These are what callers read instead of the app-wide flags they used to read.
+// Every one of those questions — is this thread streaming, is a verification
+// running for it, is it waiting on the user — is a question about ONE thread,
+// and a single boolean could not answer it once two agents could be busy at
+// once. Returning the STORED value (never a fresh object) keeps them safe to
+// use directly as `useSyncExternalStore` selectors.
+
+/** The stream in flight for one conversation, or null when it is idle */
+export function selectStream(
+  state: ChatStoreState,
+  conversationId: string | null
+): ConversationStream | null {
+  if (!conversationId) return null;
+  return state.streams[conversationId] ?? null;
+}
+
+/** True when ANY conversation is streaming */
+export function selectAnyStreaming(state: ChatStoreState): boolean {
+  return Object.keys(state.streams).length > 0;
+}
+
+/** Ids of every conversation with a stream in flight */
+export function selectStreamingIds(state: ChatStoreState): string[] {
+  return Object.keys(state.streams);
+}
+
+/** True when the last stream this conversation had was stopped by the user */
+export function selectStreamAborted(
+  state: ChatStoreState,
+  conversationId: string | null
+): boolean {
+  return Boolean(conversationId && state.abortedStreams[conversationId]);
+}
+
+/** True while this conversation's resume attempt is reconnecting */
+export function selectReconnecting(
+  state: ChatStoreState,
+  conversationId: string | null
+): boolean {
+  return Boolean(conversationId && state.reconnecting[conversationId]);
+}
+
+/** When this conversation's user-run verification started, or null */
+export function selectCheckStartedAt(
+  state: ChatStoreState,
+  conversationId: string | null
+): number | null {
+  if (!conversationId) return null;
+  return state.checkRuns[conversationId] ?? null;
+}
+
+/**
+ * The approval the UI should show: the OLDEST waiting one.
+ *
+ * FIFO and one dialog at a time, because a decision deserves undivided
+ * attention — and because showing the newest would let a second agent's
+ * request hide a first one's, which is the failure the queue exists to fix.
+ */
+export function selectPendingApproval(state: ChatStoreState): PendingApproval | null {
+  return state.approvals[0] ?? null;
+}
+
+/** How many approvals are waiting (the "N more waiting" affordance) */
+export function selectApprovalCount(state: ChatStoreState): number {
+  return state.approvals.length;
+}
+
+/** True when at least one approval of this kind is waiting */
+export function selectHasApprovalOfKind(
+  state: ChatStoreState,
+  kind: PendingApproval["kind"]
+): boolean {
+  return state.approvals.some((a) => a.kind === kind);
 }

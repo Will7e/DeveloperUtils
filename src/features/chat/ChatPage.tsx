@@ -8,7 +8,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileDiff } from "lucide-react";
-import { useChatStore, selectActiveConversation, selectWorkspace } from "@/stores/chat.store";
+import {
+  useChatStore,
+  selectActiveConversation,
+  selectAnyStreaming,
+  selectStreamingIds,
+  selectWorkspace,
+} from "@/stores/chat.store";
 import type { ConversationSeed } from "@/stores/chat.store";
 import { useWorkspaceStoreSlice } from "@/hooks/useWorkspace";
 import { flushWorkspaceSave } from "./workspace/workspace";
@@ -72,23 +78,24 @@ export function ChatPage() {
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const settings = useChatStore((s) => s.settings);
-  const isStreaming = useChatStore((s) => s.isStreaming);
-  const streamingConversationId = useChatStore((s) => s.streamingConversationId);
   const settingsOpen = useChatStore((s) => s.settingsOpen);
   const settingsTab = useChatStore((s) => s.settingsTab);
-  // Inputs the sidebar's per-thread glyph needs beyond the conversation list
-  // itself: the stream's owner, a resume in flight, the "run checks" owner, and
-  // the seen-stamps that decide what counts as unread.
-  const reconnecting = useChatStore((s) => s.reconnecting);
+  // Per-thread transients, read as the maps themselves rather than as "the one
+  // that is running": several agents can be in flight at once, and every
+  // question asked of them below is asked about a SPECIFIC thread. The
+  // seen-stamps decide what counts as unread.
+  const streams = useChatStore((s) => s.streams);
+  const reconnectingThreads = useChatStore((s) => s.reconnecting);
+  const checkRuns = useChatStore((s) => s.checkRuns);
   const lastSeenAt = useChatStore((s) => s.lastSeenAt);
-  const checkRun = useChatStore((s) => s.checkRun);
 
   const activeConversation = useChatStore(selectActiveConversation);
 
-  // Streaming is scoped to one conversation: other chats stay fully
-  // usable while a stream runs elsewhere. (Declared before the
-  // command helpers, which read it during render.)
-  const isStreamingHere = isStreaming && streamingConversationId === activeConversationId;
+  // Streaming is scoped to one conversation: other chats stay fully usable
+  // while a stream runs elsewhere, and the composer's send/stop belong to the
+  // chat they sit in. (Declared before the command helpers, which read it
+  // during render.)
+  const isStreamingHere = Boolean(activeConversationId && streams[activeConversationId]);
 
   /**
    * What every thread in the list is doing, keyed by id (lib/conversation-status).
@@ -104,9 +111,9 @@ export function ChatPage() {
     for (const conversation of conversations) {
       out[conversation.id] = conversationStatus({
         conversation,
-        streamingConversationId,
-        reconnecting,
-        checksRunningFor: checkRun?.conversationId ?? null,
+        streaming: Boolean(streams[conversation.id]),
+        reconnecting: Boolean(reconnectingThreads[conversation.id]),
+        runningChecks: Boolean(checkRuns[conversation.id]),
         isActive: conversation.id === activeConversationId,
         lastSeenAt: lastSeenAt[conversation.id],
       });
@@ -114,9 +121,9 @@ export function ChatPage() {
     return out;
   }, [
     conversations,
-    streamingConversationId,
-    reconnecting,
-    checkRun,
+    streams,
+    reconnectingThreads,
+    checkRuns,
     activeConversationId,
     lastSeenAt,
   ]);
@@ -244,7 +251,9 @@ export function ChatPage() {
   useEffect(() => {
     const ensureConversation = () => {
       const state = useChatStore.getState();
-      if (state.activeConversationId || state.isStreaming) return;
+      // Any running stream counts: a chat created while an agent is mid-reply
+      // would steal the selection from the turn the user is watching.
+      if (state.activeConversationId || selectAnyStreaming(state)) return;
       if (state.conversations.length > 0) {
         state.selectConversation(state.conversations[0]!.id);
       } else {
@@ -276,16 +285,21 @@ export function ChatPage() {
     const resume = () => {
       const state = useChatStore.getState();
       state.cleanupStalePendingTurns();
-      if (state.isStreaming) return;
-      // Most recently interrupted first; markers flagged unresumable
-      // wait for the explicit Resume affordance instead of retrying
-      // the failed auto path on every load.
+      // No app-wide "is anything streaming" guard: an interrupted thread is
+      // resumed even while a DIFFERENT agent works, because its own marker says
+      // its reply was lost. `resumeInterruptedTurn` refuses a chat that is
+      // already running, and a plain turn adopts the live host stream rather
+      // than re-streaming it.
+      //
+      // Most recently interrupted first; markers flagged unresumable wait for
+      // the explicit Resume affordance instead of retrying the failed auto path
+      // on every load.
       const candidates = state.conversations
         .filter((c) => c.pendingTurn && c.pendingTurn.outcome !== "unresumable")
         .sort((a, b) => (b.pendingTurn!.startedAt ?? 0) - (a.pendingTurn!.startedAt ?? 0));
       for (const conv of candidates) {
         void resumeInterruptedTurn(conv.id);
-        break; // one stream at a time
+        break; // one resume per load
       }
     };
 
@@ -340,12 +354,22 @@ export function ChatPage() {
 
     const flushPartial = () => {
       const state = useChatStore.getState();
-      const id = state.streamingConversationId ?? state.activeConversationId;
-      if (id) commitPartialReply(id);
-      // Workspaces save on a debounce — flush the active one so an
-      // instant close can't lose the last agent edit.
-      const ws = state.workspaces[id ?? ""];
-      if (ws) void flushWorkspaceSave(id!, ws);
+      // EVERY in-flight stream is flushed, not just one: a page-local stream
+      // dies with the page, and with several agents working there are several
+      // partial replies to rescue before the document goes away.
+      const inFlight = selectStreamingIds(state);
+      const ids = inFlight.length > 0
+        ? inFlight
+        : state.activeConversationId
+          ? [state.activeConversationId]
+          : [];
+      for (const id of ids) {
+        commitPartialReply(id);
+        // Workspaces save on a debounce — flush them too, so an instant close
+        // cannot lose the last agent edit.
+        const ws = state.workspaces[id];
+        if (ws) void flushWorkspaceSave(id, ws);
+      }
     };
     window.addEventListener("pagehide", flushPartial);
     const onVisChange = () => {
@@ -552,8 +576,12 @@ export function ChatPage() {
     sendUserMessage(resolveTargetConversation(), text);
   };
 
+  //
+  // Scoped to the chat the composer belongs to: with several agents working,
+  // Stop must end the reply the user is looking at and leave the others alone.
+  // The app-wide form (the palette's) is what stops everything.
   const handleStop = () => {
-    stopChatStream();
+    stopChatStream(activeConversationId ?? undefined);
   };
 
   /**
@@ -839,7 +867,6 @@ export function ChatPage() {
                     onSend={handleSend}
                     onStop={handleStop}
                     isStreaming={isStreamingHere}
-                    disabled={isStreaming && !isStreamingHere}
                     placeholder={
                       activeConversation?.repoContext
                         ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`
@@ -922,7 +949,6 @@ export function ChatPage() {
               onSend={handleSend}
               onStop={handleStop}
               isStreaming={isStreamingHere}
-              disabled={isStreaming && !isStreamingHere}
               placeholder={
                 activeConversation?.repoContext
                   ? `Ask about ${activeConversation.repoContext.owner}/${activeConversation.repoContext.repo}…`

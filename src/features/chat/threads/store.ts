@@ -99,8 +99,20 @@ export interface ThreadStore {
   /** Bind this store to the conversation it represents */
   attach(thread: { threadId: string }): void;
   upsertThread(draft: ThreadDraft): Promise<ThreadRegistry>;
-  claimPaths(paths: string[], options?: { ttlMs?: number }): Promise<ClaimOutcome>;
-  releasePaths(paths?: string[]): Promise<ThreadRegistry>;
+  /**
+   * Claims paths for one thread.
+   *
+   * `threadId` is how a caller says WHOSE claim this is, and passing it is what
+   * makes the claim safe once two conversations run in one page: the alternative
+   * is the attach-then-act sequence, which has an await in the middle — so thread
+   * B's attach lands between thread A's attach and thread A's claim, and A's claim
+   * is recorded against B. That is not a lost write but a WRONG warning: B is
+   * reported as holding a file it never touched, and A is reported as holding
+   * none. Omitted, it falls back to the attached thread, which remains right for
+   * the single-conversation case.
+   */
+  claimPaths(paths: string[], options?: { ttlMs?: number; threadId?: string }): Promise<ClaimOutcome>;
+  releasePaths(paths?: string[], options?: { threadId?: string }): Promise<ThreadRegistry>;
   /** Refresh presence and renew this thread's own claims */
   heartbeat(): Promise<ThreadRegistry>;
   /** Forget this thread entirely (turn ended / conversation closed) */
@@ -359,7 +371,7 @@ export function createThreadStore(overrides: Partial<ThreadStorePorts> = {}): Th
     },
 
     async claimPaths(paths, options) {
-      const threadId = selfThreadId;
+      const threadId = options?.threadId ?? selfThreadId;
       const now = ports.now();
       const ttlMs = options?.ttlMs ?? DEFAULT_CLAIM_TTL_MS;
       if (!threadId || paths.length === 0) {
@@ -371,8 +383,8 @@ export function createThreadStore(overrides: Partial<ThreadStorePorts> = {}): Th
       });
     },
 
-    async releasePaths(paths) {
-      const threadId = selfThreadId;
+    async releasePaths(paths, options) {
+      const threadId = options?.threadId ?? selfThreadId;
       if (!threadId) return registry;
       return mutate((base) => {
         const next = releasePaths(base, threadId, paths);

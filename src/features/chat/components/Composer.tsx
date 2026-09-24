@@ -70,7 +70,13 @@ interface ComposerProps {
   onStop: () => void;
   /** True while THIS conversation is streaming */
   isStreaming: boolean;
-  /** True when a stream is running in a different conversation */
+  /**
+   * True when the composer itself cannot take input.
+   *
+   * NOT "another conversation is streaming": that was true of the app when one
+   * turn could run at a time, and it is the assumption parallel agents remove —
+   * a peer replying in another chat is no reason this one cannot be typed in.
+   */
   disabled?: boolean;
   /** Placeholder hint, e.g. active model */
   placeholder?: string;

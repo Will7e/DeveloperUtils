@@ -23,6 +23,7 @@
 
 import React from "react";
 import { AlertTriangle, Globe, Loader2, Play, RotateCw, Square } from "lucide-react";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { startPreviewForConversation, stopPreviewForConversation } from "../services/container-workspace";
 import { useContainerStatus, usePreview, useWorkspaceCapability } from "./useWorkspace";
 
@@ -69,9 +70,17 @@ export function WorkspaceStrip({
         <span className="chat-workspace-text">
           Commands cannot run in this tab on this page.
         </span>
-        <span className="chat-workspace-hint" title={capability.reason ?? undefined}>
-          why?
-        </span>
+        {/* Focusable rather than a bare `title`: this is the only place the
+            reason is stated, and a hint only a mouse can reach is a hint half of
+            the people who need it do not have. */}
+        <SimpleTooltip
+          content={capability.reason ?? "This page cannot host a browser workspace."}
+          side="top"
+        >
+          <span className="chat-workspace-hint" tabIndex={0} role="note">
+            why?
+          </span>
+        </SimpleTooltip>
       </div>
     );
   }
@@ -113,9 +122,14 @@ function describeWorkspace(status: ReturnType<typeof useContainerStatus>): React
           {status.nodeVersion ? ` (Node ${status.nodeVersion})` : ""}
         </span>
         {status.mountedFiles > 0 && (
-          <span className="chat-workspace-hint" title="Files mounted for the revision the last command ran against">
-            {status.mountedFiles} files
-          </span>
+          <SimpleTooltip
+            content="Files mounted for the revision the last command ran against"
+            side="top"
+          >
+            <span className="chat-workspace-hint" tabIndex={0}>
+              {status.mountedFiles} files
+            </span>
+          </SimpleTooltip>
         )}
       </>
     );
@@ -143,14 +157,16 @@ function describePreview(
   const issues = preview.issues.length;
   const issueChip =
     issues > 0 ? (
-      <button
-        type="button"
-        className="chat-workspace-chip chat-workspace-chip-warn"
-        onClick={() => onTogglePreview(true)}
-        title="Runtime problems reported by the preview"
-      >
-        {issues} console error{issues === 1 ? "" : "s"}
-      </button>
+      <SimpleTooltip content="Runtime problems reported by the preview" side="top">
+        <button
+          type="button"
+          className="chat-workspace-chip chat-workspace-chip-warn"
+          onClick={() => onTogglePreview(true)}
+          aria-label={`Show ${issues} runtime problem${issues === 1 ? "" : "s"} reported by the preview`}
+        >
+          {issues} console error{issues === 1 ? "" : "s"}
+        </button>
+      </SimpleTooltip>
     ) : null;
 
   if (preview.status === "starting" || busy) {
@@ -177,15 +193,15 @@ function describePreview(
           <Globe className="h-3 w-3" aria-hidden="true" />
           {previewOpen ? "Hide" : "Show"}
         </button>
-        <button
-          type="button"
-          className="chat-workspace-action"
-          onClick={() => void start()}
-          title="Restart the dev server — needed after a dependency or config change"
+        <SimpleTooltip
+          content="Restart the dev server — needed after a dependency or config change"
+          side="top"
         >
-          <RotateCw className="h-3 w-3" aria-hidden="true" />
-          Restart
-        </button>
+          <button type="button" className="chat-workspace-action" onClick={() => void start()}>
+            <RotateCw className="h-3 w-3" aria-hidden="true" />
+            Restart
+          </button>
+        </SimpleTooltip>
         <button type="button" className="chat-workspace-action" onClick={stopPreviewForConversation}>
           <Square className="h-3 w-3" aria-hidden="true" />
           Stop

@@ -15,7 +15,12 @@ import {
   resetContainerQueue,
   runInContainer,
 } from "./container-executor";
-import { adoptRuntimeForTest, resetContainerHost, type ContainerRuntime } from "./container-host";
+import {
+  adoptRuntimeForTest,
+  resetContainerHost,
+  workspaceHolder,
+  type ContainerRuntime,
+} from "./container-host";
 import { planMount } from "./mount-plan";
 
 const PKG = JSON.stringify({ name: "demo", scripts: { test: "vitest run" } });
@@ -43,13 +48,14 @@ function fakeProcess(output: string, exitCode: number) {
   });
   return {
     exit,
-    output: () =>
-      new ReadableStream<string>({
-        start(controller) {
-          controller.enqueue(output);
-          controller.close();
-        },
-      }),
+    // A stream PROPERTY, matching the SDK: as a method it agreed with a wrong
+    // interface and the real runtime threw straight into the output pump's catch.
+    output: new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue(output);
+        controller.close();
+      },
+    }),
     kill: () => {
       killed = true;
       resolveExit(137);
@@ -60,7 +66,15 @@ function fakeProcess(output: string, exitCode: number) {
 function runtimeWith(spawn: ContainerRuntime["spawn"]): ContainerRuntime {
   return {
     mount: vi.fn(async () => {}),
-    writeFile: vi.fn(async () => {}),
+    // The filesystem is under `fs`, mirroring the SDK. It was declared on the
+    // instance once, which no unit test could catch — a fake implements the
+    // interface it is handed — and the real runtime failed with
+    // "instance.writeFile is not a function" on every revision after the first.
+    fs: {
+      writeFile: vi.fn(async () => {}),
+      mkdir: vi.fn(async () => {}),
+      rm: vi.fn(async () => {}),
+    },
     spawn,
     on: vi.fn(() => () => {}),
     teardown: vi.fn(async () => {}),
@@ -175,6 +189,7 @@ describe("runInContainer — installing before judging", () => {
     adoptRuntimeForTest({
       ...runtimeWith(spawn),
       fs: {
+        writeFile: vi.fn(async () => {}),
         mkdir: vi.fn(async () => {}),
         rm: vi.fn(async (path: string) => {
           removed.push(path);
@@ -217,7 +232,12 @@ describe("runInContainer — installing before judging", () => {
       if (line.includes("npm ci")) return fakeProcess("added 12 packages", 0);
       return fakeProcess("2 passed", 0);
     });
-    adoptRuntimeForTest(runtimeWith(spawn)); // no `fs`: nothing can be removed
+    // A filesystem with no `rm`: the revision's files can be written and the
+    // deleted one cannot be taken out.
+    adoptRuntimeForTest({
+      ...runtimeWith(spawn),
+      fs: { writeFile: vi.fn(async () => {}), mkdir: vi.fn(async () => {}) },
+    });
 
     const before = planMount({
       base: [
@@ -243,6 +263,28 @@ describe("runInContainer — installing before judging", () => {
     expect(second.outcome.notes.join(" ")).toMatch(/unproven/);
   });
 
+  it("refuses a runtime with no filesystem instead of running against the previous revision", async () => {
+    // The production failure, pinned: the interface once put `writeFile` on the
+    // instance, the real SDK keeps it under `fs`, and the first mount succeeded
+    // while every later revision threw "instance.writeFile is not a function" —
+    // which surfaced as a fall-through to the companion, i.e. "the agent cannot
+    // run anything after its first command".
+    const spawn = vi.fn(async () => fakeProcess("2 passed", 0));
+    adoptRuntimeForTest({
+      mount: vi.fn(async () => {}),
+      spawn,
+      on: vi.fn(() => () => {}),
+      teardown: vi.fn(async () => {}),
+    });
+
+    const first = await runInContainer({ command: "npm test", plan: plan(), revision: 1 });
+    expect(first.ok).toBe(true);
+    const second = await runInContainer({ command: "npm test", plan: plan(), revision: 1 });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error).toMatch(/exposes no filesystem/);
+  });
+
   it("refuses an empty tree instead of booting for nothing", async () => {
     adoptRuntimeForTest(runtimeWith(vi.fn()));
     const empty = planMount({ base: [{ path: "logo.png", content: "x" }], changes: [] });
@@ -250,5 +292,114 @@ describe("runInContainer — installing before judging", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.installed).toBeNull();
+  });
+});
+
+describe("the workspace lease — one filesystem, one thread at a time", () => {
+  /** A runtime that records a mount and every removal, and can be made unable to remove */
+  function recordingRuntime(options: { canRemove?: boolean } = {}) {
+    const mounts: string[] = [];
+    const removed: string[] = [];
+    const spawn = vi.fn(async (command: string, args: string[]) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      if (line.includes("npm ci")) return fakeProcess("added 12 packages", 0);
+      return fakeProcess("2 passed", 0);
+    });
+    const runtime = {
+      mount: vi.fn(async () => {
+        mounts.push("mount");
+      }),
+      spawn,
+      on: vi.fn(() => () => {}),
+      teardown: vi.fn(async () => {}),
+      ...(options.canRemove === false
+        ? {}
+        : {
+            fs: {
+              writeFile: vi.fn(async () => {}),
+              mkdir: vi.fn(async () => {}),
+              rm: vi.fn(async (path: string) => {
+                removed.push(path);
+              }),
+            },
+          }),
+    };
+    return { runtime: runtime as ContainerRuntime, mounts, removed };
+  }
+
+  const ALICE = { threadId: "alice", label: "fix the parser" };
+  const BOB = { threadId: "bob", label: "add a test" };
+
+  it("empties the other thread's tree before mounting this thread's revision", async () => {
+    // Without the empty, thread B's command runs in a filesystem that holds both
+    // threads' files: a file only alice's revision has is still there, and a
+    // passing suite becomes evidence about a tree that exists in no repository.
+    const { runtime, mounts, removed } = recordingRuntime();
+    adoptRuntimeForTest(runtime);
+
+    const alice = await runInContainer({ command: "npm test", plan: plan(), revision: 1, owner: ALICE });
+    expect(alice.ok).toBe(true);
+    if (!alice.ok) return;
+    expect(alice.outcome.notes.join(" ")).not.toMatch(/shared by every thread/);
+
+    const bob = await runInContainer({ command: "npm test", plan: plan(), revision: 2, owner: BOB });
+    expect(bob.ok).toBe(true);
+    if (!bob.ok) return;
+    // A full re-mount, not a delta: the filesystem held alice's files, so every
+    // one of them had to go before bob's tree could be called the revision.
+    expect(mounts).toHaveLength(2);
+    expect(removed).toContain("package.json");
+    expect(removed).toContain("package-lock.json");
+    expect(bob.outcome.notes.join(" ")).toMatch(/shared by every thread on this page/);
+    expect(bob.outcome.notes.join(" ")).toMatch(/fix the parser/);
+
+    // And back again: the lease alternates rather than blocking the second
+    // thread out of the tier entirely.
+    const aliceAgain = await runInContainer({ command: "npm test", plan: plan(), revision: 1, owner: ALICE });
+    expect(aliceAgain.ok).toBe(true);
+    expect(mounts).toHaveLength(3);
+    expect(workspaceHolder()?.threadId).toBe("alice");
+  });
+
+  it("leaves one thread's own tree alone, so a revision is still a delta", async () => {
+    const { runtime, mounts, removed } = recordingRuntime();
+    adoptRuntimeForTest(runtime);
+
+    await runInContainer({ command: "npm test", plan: plan(), revision: 1, owner: ALICE });
+    await runInContainer({ command: "npm test", plan: plan(), revision: 2, owner: ALICE });
+
+    // Re-mounting and re-installing on every revision would make the workspace
+    // useless for the single-thread case it was built for.
+    expect(mounts).toHaveLength(1);
+    expect(removed).toEqual([]);
+  });
+
+  it("refuses rather than mixing two threads' files when the tree cannot be emptied", async () => {
+    // The refusal is the honest outcome, not the limitation: mounting over a tree
+    // that cannot be emptied produces a green result about code that exists
+    // nowhere, and the caller can fall back to a tier that works.
+    const { runtime } = recordingRuntime({ canRemove: false });
+    adoptRuntimeForTest(runtime);
+
+    const alice = await runInContainer({ command: "npm test", plan: plan(), revision: 1, owner: ALICE });
+    expect(alice.ok).toBe(true);
+
+    const bob = await runInContainer({ command: "npm test", plan: plan(), revision: 2, owner: BOB });
+    expect(bob.ok).toBe(false);
+    if (bob.ok) return;
+    expect(bob.error).toMatch(/mixture of two trees/);
+    // The lease never moved, because nothing was mounted for the new owner.
+    expect(workspaceHolder()?.threadId).toBe("alice");
+  });
+
+  it("gives the workspace up when the thread's repository is torn down", async () => {
+    const { runtime } = recordingRuntime();
+    adoptRuntimeForTest(runtime);
+    await runInContainer({ command: "npm test", plan: plan(), revision: 1, owner: ALICE });
+    expect(workspaceHolder()).not.toBeNull();
+
+    resetContainerHost();
+    expect(workspaceHolder()).toBeNull();
   });
 });

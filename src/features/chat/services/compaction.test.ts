@@ -89,8 +89,7 @@ beforeEach(() => {
   useChatStore.setState({
     conversations: [],
     activeConversationId: null,
-    isStreaming: false,
-    streamingConversationId: null,
+    streams: {},
   });
   useChatStore.getState().updateSettings({ apiKey: "sk-test", systemPrompt: "" });
 });
@@ -356,7 +355,7 @@ describe("ensureCompaction", () => {
 describe("runCompactCommand", () => {
   it("refuses while this conversation is streaming", async () => {
     seed([message("user", "a"), message("assistant", "b"), message("user", "c"), message("assistant", "d")]);
-    useChatStore.setState({ isStreaming: true, streamingConversationId: conversationId });
+    useChatStore.setState({ streams: { [conversationId]: { content: "", reasoning: "", startedAt: 1 } } });
 
     await runCompactCommand(conversationId);
 
@@ -369,7 +368,9 @@ describe("runCompactCommand", () => {
 
   it("still runs while ANOTHER conversation streams", async () => {
     seed([message("user", "a"), message("assistant", "b"), message("user", "c"), message("assistant", "d")]);
-    useChatStore.setState({ isStreaming: true, streamingConversationId: "some-other-chat" });
+    useChatStore.setState({
+      streams: { "some-other-chat": { content: "", reasoning: "", startedAt: 1 } },
+    });
 
     await runCompactCommand(conversationId);
 

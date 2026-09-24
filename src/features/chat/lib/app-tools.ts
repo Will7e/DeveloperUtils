@@ -122,6 +122,46 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+// ── The runner's one lane per language ───────────────────────
+
+/**
+ * The engine a language runs in, as a queue.
+ *
+ * The sandbox is app-wide — one worker per language, one `activeWorker` slot and
+ * one `cancel()` — which was invisible while one turn ran at a time and is a
+ * cross-agent bug the moment two do: thread A pressing Stop cancelled thread B's
+ * snippet, because "the" running worker was B's. So a run is serialized per
+ * LANGUAGE rather than per thread: the worker cannot hold two programs anyway,
+ * and `cancel` then only ever reaches the caller's own run. Different languages
+ * keep their own lanes, so a Python run and a JavaScript run still overlap.
+ *
+ * The queue is keyed on the promise chain rather than on the caller, so nothing
+ * has to be threaded through the tool contract to make this work, and a rejected
+ * task cannot wedge the lane for the next caller.
+ */
+const runLanes = new Map<string, Promise<unknown>>();
+
+function withRunLane<T>(language: string, task: () => Promise<T>): Promise<T> {
+  const previous = runLanes.get(language) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  runLanes.set(
+    language,
+    run.catch(() => undefined)
+  );
+  return run;
+}
+
+/**
+ * Test seam: forget the lanes.
+ *
+ * A suite that leaves a task stuck in one lane would queue every later run
+ * behind it, and the symptom ("an unrelated test times out") points nowhere near
+ * the cause.
+ */
+export function resetRunLanes(): void {
+  runLanes.clear();
+}
+
 // ── run_code ─────────────────────────────────────────────────
 
 /**
@@ -186,83 +226,87 @@ export async function runCodeTool(
       : (RUN_TIMEOUTS[language] ?? 15_000);
   const timeout = Math.min(RUN_TIMEOUT_MAX, Math.max(1_000, requestedTimeout));
 
-  // A cold runtime is a real cost the model should know about before it
-  // reads a slow result as a hang: the first Python run downloads Pyodide.
-  let initialized = false;
-  try {
-    const ready = await compilerService.isReady(language as Language);
-    if (!ready) {
-      initialized = true;
-      await compilerService.initialize(language as Language);
+  // Everything from here on touches the shared engine — load, initialize, run,
+  // cancel — so it happens in this language's lane. See `withRunLane`.
+  return withRunLane(language, async () => {
+    // A cold runtime is a real cost the model should know about before it
+    // reads a slow result as a hang: the first Python run downloads Pyodide.
+    let initialized = false;
+    try {
+      const ready = await compilerService.isReady(language as Language);
+      if (!ready) {
+        initialized = true;
+        await compilerService.initialize(language as Language);
+      }
+    } catch (err) {
+      return fail(
+        name,
+        `The ${language} runtime failed to load: ${
+          err instanceof Error ? err.message : String(err)
+        }. Nothing was run — report this change as unverified rather than assuming the snippet works.`,
+        "runtime unavailable",
+        started
+      );
     }
-  } catch (err) {
-    return fail(
-      name,
-      `The ${language} runtime failed to load: ${
-        err instanceof Error ? err.message : String(err)
-      }. Nothing was run — report this change as unverified rather than assuming the snippet works.`,
-      "runtime unavailable",
-      started
-    );
-  }
 
-  if (ctx.signal?.aborted) {
-    await compilerService.cancel();
-    return fail(name, "Stopped by the user before the snippet ran.", "stopped", started);
-  }
-
-  try {
-    const result = await compilerService.execute(code, language as Language, {
-      timeout,
-      stdin,
-    });
     if (ctx.signal?.aborted) {
       await compilerService.cancel();
-      return fail(name, "Stopped by the user; the run was cancelled.", "stopped", started);
+      return fail(name, "Stopped by the user before the snippet ran.", "stopped", started);
     }
 
-    const passed = result.exitCode === 0;
-    const timedOut = /timed out/i.test(result.stderr);
-    return ok(
-      name,
-      {
-        language,
-        exitCode: result.exitCode,
-        stdout: clampStream(result.stdout),
-        stderr: clampStream(result.stderr),
-        durationMs: Math.round(result.duration),
-        timedOut,
-        ...(initialized
-          ? { note: `The ${language} runtime had to load first; that is why this call took longer than the run itself.` }
-          : {}),
-        ...(timedOut
-          ? {
-              hint:
-                "The run hit its timeout, so there is NO output to read as a result. Look for an unbounded loop, or pass a larger timeoutMs.",
-            }
-          : {}),
-        verification: passed
-          ? { status: "passed", evidence: `${language} snippet exited 0.` }
-          : {
-              status: timedOut ? "timed-out" : "failed",
-              evidence: `${language} snippet exited ${result.exitCode}; see stderr.`,
-            },
-        // Stated in the payload because it is the claim the model is most
-        // likely to overreach on: a green snippet is not a green build.
-        scope:
-          "Sandboxed snippet only — no workspace files, no dependencies, no project build. This does not verify the repository.",
-      },
-      `exit ${result.exitCode} — ${language} snippet`,
-      started
-    );
-  } catch (err) {
-    return fail(
-      name,
-      `The run failed to start: ${err instanceof Error ? err.message : String(err)}.`,
-      "run failed",
-      started
-    );
-  }
+    try {
+      const result = await compilerService.execute(code, language as Language, {
+        timeout,
+        stdin,
+      });
+      if (ctx.signal?.aborted) {
+        await compilerService.cancel();
+        return fail(name, "Stopped by the user; the run was cancelled.", "stopped", started);
+      }
+
+      const passed = result.exitCode === 0;
+      const timedOut = /timed out/i.test(result.stderr);
+      return ok(
+        name,
+        {
+          language,
+          exitCode: result.exitCode,
+          stdout: clampStream(result.stdout),
+          stderr: clampStream(result.stderr),
+          durationMs: Math.round(result.duration),
+          timedOut,
+          ...(initialized
+            ? { note: `The ${language} runtime had to load first; that is why this call took longer than the run itself.` }
+            : {}),
+          ...(timedOut
+            ? {
+                hint:
+                  "The run hit its timeout, so there is NO output to read as a result. Look for an unbounded loop, or pass a larger timeoutMs.",
+              }
+            : {}),
+          verification: passed
+            ? { status: "passed", evidence: `${language} snippet exited 0.` }
+            : {
+                status: timedOut ? "timed-out" : "failed",
+                evidence: `${language} snippet exited ${result.exitCode}; see stderr.`,
+              },
+          // Stated in the payload because it is the claim the model is most
+          // likely to overreach on: a green snippet is not a green build.
+          scope:
+            "Sandboxed snippet only — no workspace files, no dependencies, no project build. This does not verify the repository.",
+        },
+        `exit ${result.exitCode} — ${language} snippet`,
+        started
+      );
+    } catch (err) {
+      return fail(
+        name,
+        `The run failed to start: ${err instanceof Error ? err.message : String(err)}.`,
+        "run failed",
+        started
+      );
+    }
+  });
 }
 
 // ── format_code ──────────────────────────────────────────────

@@ -185,12 +185,13 @@ export async function claimThreadPaths(
 ): Promise<ClaimResult> {
   if (paths.length === 0) return NOTHING;
   try {
-    // The store speaks for ONE thread at a time (`selfThreadId`), so claiming
-    // attaches to the thread whose write this is before it asks. Two turns of
-    // two DIFFERENT conversations overlapping in one document is the one case
-    // where the claim could be recorded against the wrong thread, and the cost
-    // of that is a duplicated claim that lapses on its own — not a write that
-    // fails, which is the property this whole layer is built to preserve.
+    // The store speaks for ONE thread at a time (`selfThreadId`), so the thread
+    // this claim belongs to is named explicitly AND attached. Naming it is the
+    // load-bearing half now that two conversations run in one page: this function
+    // awaits between the attach and the claim (announce below), which is exactly
+    // the window in which the other conversation's write attaches and its paths
+    // get claimed under this thread's identity. The attach stays because the
+    // heartbeat and the detach still speak for "this page's thread".
     store.attach({ threadId: identity.threadId });
     const existing = store.snapshot().threads[identity.threadId];
     // Presence first: a claim against a thread the registry has never heard of
@@ -203,7 +204,7 @@ export async function claimThreadPaths(
     if (!existing || existing.status !== identity.status) {
       await announcePresence(identity, store);
     }
-    const outcome = await store.claimPaths(paths);
+    const outcome = await store.claimPaths(paths, { threadId: identity.threadId });
     return { granted: outcome.granted, conflicts: outcome.conflicts };
   } catch {
     return NOTHING;

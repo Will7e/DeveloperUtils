@@ -144,6 +144,28 @@ describe("claim arbitration across tabs", () => {
     b.dispose();
   });
 
+  it("claims for the thread that asked, not for whichever conversation attached last", async () => {
+    // TWO conversations in ONE page share one store instance, and `selfThreadId`
+    // is page-wide. The claim path awaits between attaching and claiming (it
+    // announces presence in between), so the other conversation's attach lands in
+    // that window — and without the explicit thread id the write is recorded
+    // against the wrong thread: a peer is warned about a file it never touched
+    // and the thread that DID touch it holds nothing.
+    const store = makeStore({ tabId: "tab-a" });
+    await store.upsertThread(draft({ threadId: "ta", label: "A" }));
+    await store.upsertThread(draft({ threadId: "tb", label: "B" }));
+
+    store.attach({ threadId: "ta" });
+    store.attach({ threadId: "tb" });
+    const outcome = await store.claimPaths(["src/shared.ts"], { threadId: "ta" });
+
+    expect(outcome.granted).toEqual(["src/shared.ts"]);
+    expect(store.snapshot().threads.ta?.claims.map((claim) => claim.path)).toEqual(["src/shared.ts"]);
+    expect(store.snapshot().threads.tb?.claims ?? []).toHaveLength(0);
+
+    store.dispose();
+  });
+
   it("frees the path when the holder releases it", async () => {
     const a = makeStore({ tabId: "tab-a" });
     const b = makeStore({ tabId: "tab-b" });

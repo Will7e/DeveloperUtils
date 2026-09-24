@@ -62,6 +62,18 @@ function normalizedCsp(value: string | undefined): string {
   return (value ?? "").trim().replace(/;+$/, "");
 }
 
+/** `directive → sources`, for comparing two policies by what they ALLOW */
+function directives(policy: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const part of policy.split(";")) {
+    const words = part.trim().split(/\s+/).filter(Boolean);
+    const [name, ...values] = words;
+    if (!name) continue;
+    out.set(name.toLowerCase(), values);
+  }
+  return out;
+}
+
 /** The header map from a static `_headers` file (`Indented-Key: value`) */
 function staticHeaderMap(): Map<string, string> {
   const map = new Map<string, string>();
@@ -80,17 +92,26 @@ describe("deployment headers — the isolation contract", () => {
     }
   });
 
-  it("keeps the popup opener alive, because GitHub sign-in returns through it", () => {
-    // Stated as its own assertion because the tempting edit is `same-origin`,
-    // which isolates just as well and silently breaks sign-in instead.
-    expect(vercelHeaderMap().get("cross-origin-opener-policy")).toBe("same-origin-allow-popups");
+  it("uses the COOP value that actually isolates, which is only `same-origin`", () => {
+    // This assertion used to demand `same-origin-allow-popups`, on the reasoning
+    // that both isolate and only one keeps the OAuth opener alive. Measured in a
+    // browser: `same-origin-allow-popups` leaves `crossOriginIsolated === false`
+    // and `SharedArrayBuffer` undefined, so the runtime cannot boot at all — the
+    // test was defending a value that made the tier impossible, and it is the
+    // reason a green suite shipped a workspace that could never start.
+    expect(vercelHeaderMap().get("cross-origin-opener-policy")).toBe("same-origin");
   });
 
-  it("uses credentialless, which is the COEP value the rest of the app survives", () => {
-    // `require-corp` would demand Cross-Origin-Resource-Policy on every no-cors
-    // subresource: esm.sh does not send it, and `img-src https:` deliberately
-    // allows images from hosts that never will.
-    expect(vercelHeaderMap().get("cross-origin-embedder-policy")).toBe("credentialless");
+  it("uses the COEP value the runtime's own frame requires, which is require-corp", () => {
+    // This assertion used to demand `credentialless` — chosen to spare `no-cors`
+    // subresources a CORP requirement — and that reasoning was wrong twice over:
+    // the runtime is itself a cross-origin isolated frame whose response serves
+    // `COEP: require-corp`, and WebContainers' troubleshooting guide says embedding
+    // it means "both the embed and embedder have the same COOP/COEP settings".
+    // Measured: the CDNs and the GitHub avatar host send CORP anyway, and esm.sh -
+    // the one that does not — is only ever loaded as an ES module, which is a CORS
+    // request, so CORP never applies to it.
+    expect(vercelHeaderMap().get("cross-origin-embedder-policy")).toBe("require-corp");
   });
 
   it("grants the runtime iframe the delegated cross-origin-isolated permission", () => {
@@ -117,6 +138,36 @@ describe("deployment headers — the isolation contract", () => {
       expect(served.get(header.key.toLowerCase()), `public/_headers: ${header.key}`).toBe(header.value);
     }
     expect(normalizedCsp(served.get("content-security-policy"))).toBe(CONTENT_SECURITY_POLICY);
+  });
+
+  it("keeps index.html's meta policy covering everything the deployment policy requires", () => {
+    // The fourth copy, and the one that broke the boot: a `<meta http-equiv>` CSP
+    // applies to the dev server AND to production (browsers enforce the
+    // intersection with the header), so a runtime origin missing there blocks the
+    // iframe no matter what vercel.json says. Nothing pinned it, so the fix in the
+    // other three files looked complete while the frame was still refused.
+    const html = read("index.html");
+    const meta = /<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*content="([^"]+)"/i.exec(html);
+    expect(meta, "index.html has no CSP meta tag").toBeTruthy();
+
+    const required = directives(CONTENT_SECURITY_POLICY);
+    const served = directives(meta![1]!);
+    const missing: string[] = [];
+    for (const [name, values] of required) {
+      // Ignored by browsers in a meta policy, and absent from one by design.
+      if (name === "frame-ancestors") continue;
+      const present = served.get(name);
+      if (!present) {
+        missing.push(`${name} (the whole directive)`);
+        continue;
+      }
+      // Superset, not equality: the meta policy is the dev policy and keeps
+      // `'unsafe-inline'` in script-src for Vite's HMR preamble.
+      for (const value of values) {
+        if (!present.includes(value)) missing.push(`${name} → ${value}`);
+      }
+    }
+    expect(missing, `index.html's CSP does not cover: ${missing.join(", ")}`).toEqual([]);
   });
 
   it("has the workspace dependency declared, not merely installed", () => {

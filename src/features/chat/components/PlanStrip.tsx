@@ -21,7 +21,7 @@ import {
   Loader2,
   ListChecks,
 } from "lucide-react";
-import { useChatStore } from "@/stores/chat.store";
+import { selectStream, useChatStore } from "@/stores/chat.store";
 import { planProgress, planProgressLine } from "../lib/agent-plan";
 import { approvePlan } from "../services/chat-runner";
 import { isTurnRunning } from "../session/turn-engine";
@@ -56,7 +56,9 @@ export const PlanStrip = React.memo(function PlanStrip({
     const conv = s.conversations.find((c) => c.id === conversationId);
     return (conv?.mode ?? s.settings.defaultMode) === "plan";
   });
-  const isStreaming = useChatStore((s) => s.isStreaming);
+  // This thread's own stream: the strip belongs to one conversation, and a peer
+  // agent working elsewhere is no reason to hide its Approve button.
+  const isStreaming = useChatStore((s) => selectStream(s, conversationId) !== null);
   // A plan the user collapsed stays collapsed as its steps tick over; a
   // NEW plan opens itself, because that is the moment it matters. Doing it
   // during render (React's documented adjust-state-when-input-changes
@@ -115,7 +117,7 @@ export const PlanStrip = React.memo(function PlanStrip({
           forward is "switch mode, then retype an instruction" makes the
           plan itself decorative — approving it is what authorizes the
           edits, and it says so in the transcript. */}
-      {planMode && conversationId && !collapsed && !isStreaming && !isTurnRunning() && (
+      {planMode && conversationId && !collapsed && !isStreaming && !isTurnRunning(conversationId) && (
         <div className="chat-plan-actions">
           <button
             type="button"

@@ -17,25 +17,48 @@
 //
 // ── The four decisions, and why ──────────────────────────────
 //
-// 1. `Cross-Origin-Opener-Policy: same-origin-allow-popups`, never the plain
-//    `same-origin`. Both isolate the document, and only one of them survives
-//    GitHub sign-in: the app authenticates through a POPUP whose result arrives
-//    by `postMessage` to the opener, and `same-origin` severs that relationship
-//    the moment the popup navigates. `allow-popups` keeps the opener for windows
-//    the page opened itself while still isolating the document, which is exactly
-//    the trade this app needs.
+// 1. `Cross-Origin-Opener-Policy: same-origin`. MEASURED, not reasoned about:
+//    with `same-origin-allow-popups` the browser reports
+//    `crossOriginIsolated === false` and `SharedArrayBuffer` is undefined, so the
+//    runtime cannot boot at all — the value looks like the one that keeps OAuth
+//    popups working while isolating, and it is not. MDN says the same outright
+//    (features that depend on cross-origin isolation "need to set the COOP header
+//    to same-origin"), and StackBlitz's own engineering blog is blunter:
+//    "Interactions that require cross-origin window interactions such as OAuth
+//    and payments will break."
 //
-// 2. `Cross-Origin-Embedder-Policy: credentialless`, not `require-corp`. Under
-//    `require-corp` every `no-cors` subresource must carry
-//    `Cross-Origin-Resource-Policy`. Measured, not assumed: jsdelivr and
-//    fonts.gstatic.com send it, `esm.sh` does not, and this app's `img-src`
-//    deliberately allows arbitrary `https:` images — hosts nobody can
-//    retroactively stamp with CORP. `credentialless` fetches those subresources
-//    WITHOUT credentials instead of refusing them, so the workspace tier can be
-//    added without dismantling unrelated features. The cost is real and named
-//    rather than hidden: Firefox does not implement `credentialless`, so a
-//    Firefox user gets "this needs a Chromium browser" from the probe instead of
-//    a mysterious failure.
+//    So this value has a PRICE, and it is paid in `github-auth.ts`: `same-origin`
+//    puts a cross-origin popup in its own browsing context group, which means
+//    `window.opener` is null inside it AND `.closed` on the opener's handle reads
+//    true forever. Both facts are load-bearing there — the token comes back over a
+//    BroadcastChannel instead of `opener.postMessage`, and a closed popup can no
+//    longer be read as "the user cancelled". Change this header and read that file.
+//
+// 2. `Cross-Origin-Embedder-Policy: require-corp`. This is the vendor's stated
+//    requirement, and the reason is not about our subresources at all: the
+//    runtime is a cross-origin frame that is itself isolated, and WebContainers'
+//    own troubleshooting guide says that to embed a cross-origin-isolated site
+//    "both the embed and embedder have the same COOP/COEP settings. The
+//    WebContainer API requires require-corp." The frame's response confirms it —
+//    `https://stackblitz.com/headless` serves `COEP: require-corp`, `COOP:
+//    same-origin`.
+//
+//    The first version of this file chose `credentialless` to avoid CORP demands
+//    on `no-cors` subresources, and the fear was overblown in both directions.
+//    Measured: `avatars.githubusercontent.com` and the JS CDNs send
+//    `Cross-Origin-Resource-Policy: cross-origin` (the app's remote images are
+//    safe), and `esm.sh` — which does not — is only ever loaded as an ES MODULE,
+//    which is a CORS request, so CORP never applies to it. Both values were also
+//    tried against the live boot and behave identically, so nothing is lost by
+//    following the vendor's requirement instead of our own reasoning.
+//
+//    Since this is the value the BOOT has to be told as well, it is exported as
+//    `declaredCoep()` below rather than sniffed from the document at runtime:
+//    `document.crossOriginEmbedderPolicy` is not implemented in Chromium, so the
+//    original sniff fell back to a hardcoded value and could disagree with the
+//    header — which the runtime reports as
+//    "SharedArrayBuffer transfer requires self.crossOriginIsolated" from inside
+//    its own frame, with nothing pointing at the header.
 //
 // 3. `Permissions-Policy: cross-origin-isolated=(self "<runtime origin>")`. The
 //    SDK creates the runtime iframe with `allow="cross-origin-isolated"`, and a
@@ -63,13 +86,31 @@ export const RUNTIME_PATH = "/headless";
  * and images from hosts that never heard of CORP.
  */
 export const ISOLATION_HEADERS: readonly { key: string; value: string }[] = [
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
-  { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
   {
     key: "Permissions-Policy",
     value: `camera=(), microphone=(), geolocation=(), payment=(), cross-origin-isolated=(self "${RUNTIME_ORIGIN}")`,
   },
 ];
+
+/**
+ * The COEP value this app SERVES.
+ *
+ * The boot has to be told the same value the response carries — the SDK fixes it
+ * at the first boot and a mismatch is not reported as a mismatch, it surfaces as
+ * "SharedArrayBuffer transfer requires self.crossOriginIsolated" from inside the
+ * runtime frame.
+ *
+ * So it is read from the headers above rather than sniffed. Sniffing was the
+ * original mistake: `document.crossOriginEmbedderPolicy` is not implemented in
+ * Chromium, so "read it from the document, it reflects reality" silently fell back
+ * to the wrong value on the one browser that can host a workspace.
+ */
+export function declaredCoep(): "require-corp" | "credentialless" {
+  const value = isolationHeaderValue("cross-origin-embedder-policy");
+  return value === "credentialless" ? "credentialless" : "require-corp";
+}
 
 /** The same headers as a plain object, the shape Vite's dev server wants */
 export function isolationHeaders(): Record<string, string> {
@@ -84,6 +125,13 @@ export function isolationHeaders(): Record<string, string> {
  * Unchanged from what production already serves except for the runtime frame:
  * the previous `frame-src 'self' blob: https://cdn.jsdelivr.net` forbids the one
  * URL the workspace cannot boot without.
+ *
+ * There is a FOURTH copy of this policy: the `<meta http-equiv>` in `index.html`,
+ * which is the dev-time policy and applies in production too (browsers enforce
+ * the intersection of the meta policy and the header). It is not optional and not
+ * covered by importing this module — leaving the runtime origin out of it produced
+ * "Refused to frame 'https://stackblitz.com/'" in the console and a boot that
+ * never resolved. `deployment-headers.test.ts` now holds it to this value.
  */
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",

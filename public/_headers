@@ -11,12 +11,15 @@
 #
 # `credentialless` rather than `require-corp`: the app's own CSP allows arbitrary
 # https images and esm.sh modules, and neither would survive a CORP requirement.
-# `same-origin-allow-popups` rather than `same-origin`: GitHub sign-in is a popup
-# whose result comes back by postMessage.
+# `same-origin` rather than `same-origin-allow-popups`, measured in a browser:
+# only `same-origin` sets `crossOriginIsolated`, and `same-origin-allow-popups`
+# leaves SharedArrayBuffer undefined so the runtime cannot boot. The cost is that
+# the OAuth popup loses its opener — github-auth.ts returns the token over a
+# BroadcastChannel for that reason.
 
 /*
-  Cross-Origin-Opener-Policy: same-origin-allow-popups
-  Cross-Origin-Embedder-Policy: credentialless
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), cross-origin-isolated=(self "https://stackblitz.com")
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff

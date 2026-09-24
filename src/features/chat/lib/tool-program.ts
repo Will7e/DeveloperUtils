@@ -26,6 +26,7 @@ import {
   toolCacheKey,
   lookupToolCache,
   storeToolCache,
+  type ReadView,
 } from "./tool-cache";
 import { PROGRAMMABLE_TOOL_NAMES } from "./tool-registry";
 import type {
@@ -66,6 +67,16 @@ export interface RunToolProgramParams {
   repo: RepoContext;
   token: string;
   signal?: AbortSignal;
+  /**
+   * The revision the steps read through (see tool-cache.ReadView).
+   *
+   * Passed in rather than derived here, because the steps run through the same
+   * workspace-first read tools as plain calls: a program cached under the
+   * repository alone would replay one agent's working copy into another's step
+   * results, which is worse than a cache miss because the output is then bound
+   * to a variable and quoted.
+   */
+  view?: ReadView | null;
   /** Executes one whitelisted tool (wired to executeToolCall by tools.ts) */
   execute: (call: ToolCallRequest) => Promise<ToolCallResult>;
 }
@@ -255,7 +266,7 @@ export async function runToolProgram(
   params: RunToolProgramParams
 ): Promise<ToolCallResult> {
   const started = Date.now();
-  const { call, repo, token, signal, execute } = params;
+  const { call, repo, token, signal, view, execute } = params;
 
   const parsed = parseToolProgram(call.arguments);
   if ("data" in parsed) {
@@ -306,7 +317,7 @@ export async function runToolProgram(
 
     // Session cache: same key builder the runner uses for plain calls
     const pseudo: ToolCallRequest = { id: call.id, name: step.tool, arguments: JSON.stringify(args) };
-    const cacheKey = toolCacheKey(pseudo, repo);
+    const cacheKey = toolCacheKey(pseudo, repo, view);
     const hit = lookupToolCache(cacheKey);
     if (hit) {
       okCount++;

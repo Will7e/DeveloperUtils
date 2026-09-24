@@ -11,35 +11,50 @@
 // own one-line reason, headers with credential-shaped values masked, and the
 // body — and the agent's tool call blocks on the answer. Rejecting carries
 // the user's note back into the turn, which is the input the model should
-// adapt to; nothing is ever sent on an unresolved dialog (the store's
-// clearPendingHttp resolves it as a refusal).
+// adapt to; nothing is ever sent on an unresolved dialog (a dismissed dialog
+// resolves it as a refusal).
 //
 // Deliberately NOT merged with PushApprovalModal: they gate different
-// actions and a shared "pending" slot would let one dialog answer the
-// other's promise.
-//
-// Rendered from ChatPage whenever pendingHttp is set.
+// actions and a shared dialog would let one answer the other's promise. They do
+// share ONE FIFO queue, which is what keeps two agents from asking at once: this
+// renders only when a request of its own kind is at the head.
 
 import React from "react";
 import { Check, Globe, TriangleAlert, X } from "lucide-react";
-import { useChatStore } from "@/stores/chat.store";
+import { selectApprovalCount, selectPendingApproval, useChatStore } from "@/stores/chat.store";
 import { redactHeaders } from "../services/app-actions";
 import { useModalDialog } from "./useModalDialog";
 
+/** What a dialog closed without a decision tells the awaiting tool */
+const DISMISSED = "the request dialog was closed without a decision";
+
 export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
-  const pendingHttp = useChatStore((s) => s.pendingHttp);
-  const resolveHttpApproval = useChatStore((s) => s.resolveHttpApproval);
-  const clearPendingHttp = useChatStore((s) => s.clearPendingHttp);
+  // The HEAD of the approval queue, not "the pending http request": with two
+  // agents able to ask at once, a modal bound to a single slot would answer the
+  // newest ask and leave the older promise unresolved forever.
+  const approval = useChatStore(selectPendingApproval);
+  const waiting = useChatStore(selectApprovalCount);
+  const resolveApproval = useChatStore((s) => s.resolveApproval);
+  const dismissApproval = useChatStore((s) => s.dismissApproval);
 
   const [note, setNote] = React.useState("");
   const [showNote, setShowNote] = React.useState(false);
+
+  // Null while nothing is waiting, and while a PUSH is the head — that dialog is
+  // on screen instead, and this one comes back when its turn arrives.
+  const mine = approval?.kind === "http" ? approval : null;
+
   // Enter dismisses the same way Reject does (a refusal, never an approval), and
   // the panel keeps Tab inside the dialog: the agent's http_write call is blocked
   // on this answer, so a gate the keyboard cannot leave is a turn that cannot be
   // unblocked. Declared before the early return so the hook order is stable.
-  const panelRef = useModalDialog<HTMLDivElement>({ onDismiss: clearPendingHttp });
+  const panelRef = useModalDialog<HTMLDivElement>({
+    onDismiss: () => {
+      if (mine) dismissApproval(mine.id, DISMISSED);
+    },
+  });
 
-  const pendingCreatedAt = pendingHttp?.createdAt;
+  const pendingCreatedAt = mine?.request.createdAt;
   React.useEffect(() => {
     if (pendingCreatedAt !== undefined) {
       setNote("");
@@ -47,7 +62,11 @@ export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
     }
   }, [pendingCreatedAt]);
 
-  if (!pendingHttp) return null;
+  if (!mine) return null;
+
+  const pendingHttp = mine.request;
+  /** Requests queued behind this one, which the user does not see yet */
+  const othersWaiting = Math.max(0, waiting - 1);
 
   // Masked for DISPLAY only — the request that goes out carries the real
   // header, because the agent sent it for a reason. What must not happen is
@@ -59,17 +78,16 @@ export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
   // The approval unblocks the awaiting tool call, which then sends the
   // request. Nothing to wait for here: the dialog's job ends with the
   // decision, and the transcript row shows the result when it arrives.
-  const handleApprove = () => {
-    resolveHttpApproval(true);
-    clearPendingHttp();
-  };
+  // One call per decision, by request id: the queue drops that entry and
+  // resolves exactly its own promise, so a second agent's dialog cannot be
+  // answered by this click.
+  const handleApprove = () => resolveApproval(mine.id, { approved: true });
 
-  const handleReject = () => {
-    // Resolve FIRST, then clear: clearing alone would drop the gate resolver
-    // and leave the awaiting http_write tool hanging.
-    resolveHttpApproval(false, note.trim() || undefined);
-    clearPendingHttp();
-  };
+  const handleReject = () =>
+    resolveApproval(mine.id, {
+      approved: false,
+      ...(note.trim() ? { note: note.trim() } : {}),
+    });
 
   return (
     <div className="chat-modal-overlay" role="dialog" aria-modal="true" aria-label="Approve external request">
@@ -81,6 +99,13 @@ export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
             <p className="chat-approval-subtitle">
               <strong>{pendingHttp.method}</strong> <code>{pendingHttp.url}</code>
             </p>
+            {othersWaiting > 0 ? (
+              <p className="chat-approval-subtitle" role="status">
+                {othersWaiting === 1
+                  ? "Another agent is also waiting for a decision — it is asked next."
+                  : `${othersWaiting} more agents are waiting for a decision — they are asked one at a time.`}
+              </p>
+            ) : null}
           </div>
         </div>
 

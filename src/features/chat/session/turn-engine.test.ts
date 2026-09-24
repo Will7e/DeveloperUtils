@@ -18,7 +18,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runTurn, getSessionState } from "./turn-engine";
 import { LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
 import { getTurnLog, resetTurnLog } from "./turn-log";
-import { useChatStore } from "@/stores/chat.store";
+import { selectStream, useChatStore } from "@/stores/chat.store";
 import { AGENT_COMPLETION_NUDGES } from "../constants";
 import { normalizePlan } from "../lib/agent-plan";
 import { clearVerification, recordVerification } from "../lib/verification-ledger";
@@ -186,7 +186,7 @@ beforeEach(() => {
 afterEach(() => {
   // No marker may survive a turn, whatever path it took.
   expect(getSessionState().phase).toBe("idle");
-  expect(store().isStreaming).toBe(false);
+  expect(selectStream(store(), conversationId)).toBeNull();
 });
 
 describe("turn engine — transport failure", () => {

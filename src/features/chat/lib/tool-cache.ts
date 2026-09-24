@@ -10,12 +10,15 @@
 // each tool declares `cacheable`, and this module consults it. Today
 // that means read-only file/tree reads are cached while search_code is
 // not (time-sensitive indexing). Cache lookups are keyed by
-// (repo, branch, tool, args) so a branch switch or repo re-attach
-// invalidates cleanly.
+// (repo, branch, tool, args, READ VIEW) so a branch switch or repo re-attach
+// invalidates cleanly AND two agents on one repository cannot serve each
+// other's reads.
 
+import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
 import { isToolCacheable } from "./tool-registry";
 import { registerScopedResource } from "../identity/scoped-resources";
+import { bindingIdOf } from "../identity/bindings";
 
 interface CacheEntry {
   result: ToolCallResult;
@@ -33,13 +36,57 @@ const cache = new Map<string, CacheEntry>();
 let clock = 0;
 
 /**
+ * The revision a cached read resolves against.
+ *
+ * Reads are WORKSPACE-FIRST (lib/tools.ts): `read_file` answers from the
+ * thread's working copy when that copy holds the file, so the identical call
+ * with identical arguments returns DIFFERENT bytes in two threads that have
+ * edited different things. A key of (repo, branch, tool, args) therefore served
+ * one agent's uncommitted edit to another agent as "the file's content" — the
+ * same evidence-mismatch class the binding layer exists to prevent, and one
+ * that only becomes reachable once two threads can work at once.
+ *
+ * What is in the key is the WORKING COPY, not the repository: a read whose
+ * answer comes from GitHub would be safe to share, but the lookup happens
+ * before the call, when nothing yet knows which side will answer. Refusing to
+ * share is the honest direction, and the expensive half — the tree and the
+ * pristine contents at a base commit — is still shared across threads by
+ * workspace/repo-base.ts, keyed by repository and commit.
+ */
+export interface ReadView {
+  /** The thread-on-repository this read belongs to */
+  bindingId?: string;
+  /** That working copy's revision; it moves on every agent write */
+  workspaceUpdatedAt?: number;
+}
+
+/**
+ * The read view for a conversation, or null when there is no thread.
+ *
+ * Reads the SAME working copy the read tools will read (selectWorkspace fails
+ * closed on a stale entry), so the key and the answer are derived from one
+ * source rather than from two that can disagree.
+ */
+export function readViewFor(conversationId: string | null | undefined): ReadView | null {
+  if (!conversationId) return null;
+  const state = useChatStore.getState();
+  const workspace = selectWorkspace(state, conversationId);
+  return {
+    bindingId: bindingIdOf(conversationId),
+    workspaceUpdatedAt: workspace?.updatedAt,
+  };
+}
+
+/**
  * Builds the cache key for a tool call. Unknown/unparseable
  * arguments — or a tool the registry marks non-cacheable — yield
  * null → not cacheable.
  */
 export function toolCacheKey(
   call: Pick<ToolCallRequest, "name" | "arguments">,
-  repo: Pick<RepoContext, "owner" | "repo" | "branch">
+  repo: Pick<RepoContext, "owner" | "repo" | "branch">,
+  /** Where the read resolves from; omit only when the caller has no thread */
+  view?: ReadView | null
 ): string | null {
   if (!isToolCacheable(call.name)) return null;
   let args: Record<string, unknown>;
@@ -54,6 +101,11 @@ export function toolCacheKey(
     .sort()
     .map((k) => `${k}=${String(args[k])}`);
   parts.push(...sortedArgs);
+  // Appended rather than prepended, because `clearToolCacheForRepo` drops
+  // entries by the `owner|repo|` prefix this key starts with. `#view` cannot be
+  // produced by an argument (arguments are `key=value` pairs, and no tool has an
+  // argument named `#view`), so the marker cannot be forged by tool input.
+  if (view) parts.push(`#view=${view.bindingId ?? "-"}@${view.workspaceUpdatedAt ?? "-"}`);
   return parts.join("|");
 }
 

@@ -561,7 +561,7 @@ export async function runCompactCommand(conversationId: string): Promise<void> {
   // can never read (each turn builds one request; see prepareTurn).
   // /clear and /retry refuse for the same reason.
   const store = useChatStore.getState();
-  if (store.isStreaming && store.streamingConversationId === conversationId) {
+  if (store.streams[conversationId]) {
     addToast("Stop the reply that is streaming before compacting context.", "error");
     return;
   }

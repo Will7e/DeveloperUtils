@@ -6351,6 +6351,7 @@ typography rather than looking like a control of its own */
   color: var(--text-3);
   font-size: 10.5px;
   cursor: help;
+  border-bottom: 1px dotted var(--border-2);
 }
 
 .chat-workspace-action {
@@ -6373,6 +6374,15 @@ typography rather than looking like a control of its own */
   background: var(--bg-hover);
   border-color: var(--accent);
   color: var(--text-1);
+}
+
+/* These are buttons in a strip that is otherwise read-only text, so focus has to
+   be visible for keyboard use — the same rule `.chat-verify-chip` follows. */
+.chat-workspace-action:focus-visible,
+.chat-workspace-chip:focus-visible,
+.chat-workspace-hint:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
 }
 
 .chat-workspace-chip {
@@ -6465,6 +6475,13 @@ typography rather than looking like a control of its own */
   background: var(--bg-hover);
   border-color: var(--border-1);
   color: var(--text-1);
+}
+
+/* Icon-only buttons: the frame's controls are two glyphs, and a keyboard user
+   needs to see which one they are on. */
+.chat-preview-action:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
 }
 
 .chat-preview-frame {

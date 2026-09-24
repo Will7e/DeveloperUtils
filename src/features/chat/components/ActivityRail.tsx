@@ -25,7 +25,7 @@
 import React from "react";
 import { ArrowRight, Check, Loader2, ShieldAlert } from "lucide-react";
 import { useAppStore } from "@/stores/app.store";
-import { useChatStore } from "@/stores/chat.store";
+import { selectReconnecting, selectStream, useChatStore } from "@/stores/chat.store";
 import { deriveActivity, justFinished, type Activity } from "../lib/activity";
 import { useVerificationReadout } from "./useVerificationReadout";
 
@@ -55,13 +55,13 @@ export function ActivityRail({
 }: ActivityRailProps) {
   // One primitive per subscription: tokens arrive many times a second, and a
   // selector returning a fresh object would re-render on every unrelated store
-  // write too.
-  const isStreamingHere = useChatStore(
-    (s) => s.isStreaming && s.streamingConversationId === s.activeConversationId
-  );
-  const streamingContent = useChatStore((s) => s.streamingContent);
-  const streamingReasoning = useChatStore((s) => s.streamingReasoning);
-  const reconnecting = useChatStore((s) => s.reconnecting);
+  // write too. Each one reads THIS thread's entry, so another agent streaming
+  // in parallel moves nothing on this line.
+  const stream = useChatStore((s) => selectStream(s, s.activeConversationId));
+  const isStreamingHere = stream !== null;
+  const streamingContent = stream?.content ?? "";
+  const streamingReasoning = stream?.reasoning ?? "";
+  const reconnecting = useChatStore((s) => selectReconnecting(s, s.activeConversationId));
   const messages = useChatStore(
     (s) => s.conversations.find((c) => c.id === s.activeConversationId)?.messages
   );
@@ -71,8 +71,8 @@ export function ActivityRail({
   const waitingForUser = useChatStore(
     (s) => Boolean(s.conversations.find((c) => c.id === s.activeConversationId)?.pendingQuestion)
   );
-  const checkRunHere = useChatStore(
-    (s) => s.checkRun !== null && s.checkRun.conversationId === s.activeConversationId
+  const checkRunHere = useChatStore((s) =>
+    Boolean(s.activeConversationId && s.checkRuns[s.activeConversationId])
   );
   // The finished-turn line reports what has been proven about the change set it
   // is announcing, from the same read the header chip and the pane use.
@@ -213,30 +213,46 @@ export function ShellActivityPresence({
   chatVisible: boolean;
   /** Whether to draw the pill (false while the chat page is on screen) */
   showPill: boolean;
-}) {
-  // Two primitive subscriptions, deliberately: this lives in the app chrome, and
-  // a selector returning an object would re-render the shell once per streamed
-  // token.
-  const streamingId = useChatStore((s) => (s.isStreaming ? s.streamingConversationId : null));
-  const streamingTitle = useChatStore(
-    (s) => s.conversations.find((c) => c.id === s.streamingConversationId)?.title ?? "chat"
-  );
+}) {  // Primitive subscriptions, deliberately: this lives in the app chrome, and a
+  // selector returning an object (or a fresh array) would re-render the shell
+  // once per streamed token — and an array would never compare equal, which is
+  // an infinite render loop rather than a slow one.
+  const streamingCount = useChatStore((s) => Object.keys(s.streams).length);
+  const streamingId = useChatStore((s) => Object.keys(s.streams)[0] ?? null);
+  const streamingTitle = useChatStore((s) => {
+    const id = Object.keys(s.streams)[0];
+    return id ? (s.conversations.find((c) => c.id === id)?.title ?? "chat") : null;
+  });
 
   // ── The completion notice ──
   // Held in a ref rather than state: these are facts about the PREVIOUS render,
   // and putting them in state would make the notice depend on its own render
-  // pass. The chat that was streaming is remembered when the streak begins,
-  // because by the time it ends `streamingConversationId` is already cleared.
+  // pass. What was streaming is remembered when the streak begins, because by
+  // the time it ends every stream is already cleared.
+  //
+  // The STREAK is "anything streaming → nothing streaming", not "one particular
+  // chat": with several agents working, one finishing while another continues is
+  // not the moment to announce anything, and the count is what distinguishes the
+  // two cases.
   const wasStreaming = React.useRef(false);
-  const watching = React.useRef<{ id: string; title: string } | null>(null);
+  const watching = React.useRef<{ id: string; title: string; count: number } | null>(null);
   const addToast = useAppStore((s) => s.addToast);
 
   React.useEffect(() => {
-    if (streamingId) {
+    if (streamingCount > 0) {
+      const previous = watching.current;
       wasStreaming.current = true;
-      if (!watching.current) watching.current = { id: streamingId, title: streamingTitle };
+      watching.current = {
+        id: streamingId ?? previous?.id ?? "",
+        title: streamingTitle ?? previous?.title ?? "chat",
+        // The PEAK, not the current count: six agents that started staggered and
+        // finished one by one were still six, and reporting "1" would undersell
+        // what the notice is about.
+        count: Math.max(previous?.count ?? 0, streamingCount),
+      };
       return;
     }
+
     const finished = wasStreaming.current;
     const target = watching.current;
     wasStreaming.current = false;
@@ -245,23 +261,33 @@ export function ShellActivityPresence({
     // already reading the reply with a notice about it is noise.
     if (!finished || !target || chatVisible) return;
     addToast({
-      message: `The agent finished in “${target.title}”.`,
+      message:
+        target.count > 1
+          ? `${target.count} agents finished — the most recent in “${target.title}”.`
+          : `The agent finished in “${target.title}”.`,
       type: "info",
       duration: 8000,
     });
-  }, [streamingId, streamingTitle, chatVisible, addToast]);
+  }, [streamingCount, streamingId, streamingTitle, chatVisible, addToast]);
 
   if (!streamingId || !showPill) return null;
 
+  const several = streamingCount > 1;
   return (
     <button
       type="button"
       className="shell-agent-pill"
       onClick={() => onOpen(streamingId)}
-      title={`The agent is still working in "${streamingTitle}" — click to watch`}
+      title={
+        several
+          ? `${streamingCount} agents are working — click to watch one of them`
+          : `The agent is still working in "${streamingTitle}" — click to watch`
+      }
     >
       <Loader2 className="h-3.5 w-3.5 spin" aria-hidden="true" />
-      <span className="shell-agent-pill-text">Working in {streamingTitle}</span>
+      <span className="shell-agent-pill-text">
+        {several ? `${streamingCount} agents working` : `Working in ${streamingTitle}`}
+      </span>
     </button>
   );
 }

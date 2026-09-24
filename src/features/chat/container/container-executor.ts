@@ -33,6 +33,7 @@ import type { FileSystemTree } from "@webcontainer/api";
 import { noteWorkspaceOutcome } from "../lib/availability";
 import { STOPPED_BY_USER } from "../companion/companion-client";
 import {
+  claimWorkspace,
   containerStatus,
   ensureContainer,
   mountWorkspace,
@@ -42,6 +43,7 @@ import {
   workspacePaths,
   writeWorkspaceFiles,
   type ContainerRuntime,
+  type WorkspaceOwner,
 } from "./container-host";
 import { flattenTree, type MountPlan } from "./mount-plan";
 import {
@@ -161,6 +163,8 @@ interface ExecOutcome {
   aborted: boolean;
   durationMs: number;
   droppedChars: number;
+  /** Why the output stream could not be read, when it could not */
+  unreadable: string | null;
 }
 
 /**
@@ -188,9 +192,20 @@ async function execOnce(
 
   let output = "";
   let dropped = 0;
+  /**
+   * Set when the output could not be read at all, and reported rather than
+   * swallowed.
+   *
+   * The swallow that used to be here ("a stream that ends badly still leaves us
+   * the exit code") hid the fact that `output` is a stream PROPERTY in this SDK
+   * version while this module called it as a method: every command threw into this
+   * catch and came back as `exit 0` with empty output — a green result nobody could
+   * read, produced by the one module whose job is to make green results trustworthy.
+   */
+  let unreadable: string | null = null;
   const hardStop = options.maxChars * 2;
   const pump = (async () => {
-    const reader = process.output().getReader();
+    const reader = process.output.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -207,8 +222,8 @@ async function execOnce(
         dropped += value.length - room;
       }
     }
-  })().catch(() => {
-    // A stream that ends badly still leaves us the exit code, which is the result.
+  })().catch((error: unknown) => {
+    unreadable = error instanceof Error ? error.message : String(error);
   });
 
   let timedOut = false;
@@ -249,6 +264,7 @@ async function execOnce(
       aborted,
       durationMs: Date.now() - started,
       droppedChars: dropped,
+      unreadable,
     },
   };
 }
@@ -268,12 +284,26 @@ async function execOnce(
  * A removal the runtime refuses is REPORTED, not swallowed: a tree that still
  * holds a file this revision deleted is evidence about the wrong code, and the
  * only alternative to saying so is a green result nobody can trust.
+ *
+ * `owner` is the thread this tree belongs to, and passing it is what makes the
+ * mount honest once two threads can run at once: the claim empties the filesystem
+ * when it belonged to somebody else, so the delta below is always applied to a
+ * tree that is this thread's own. See `claimWorkspace`.
  */
 export async function prepareWorkspace(
   plan: MountPlan,
-  revision: number
+  revision: number,
+  owner?: WorkspaceOwner
 ): Promise<{ ok: true; mode: "mounted" | "refreshed"; files: number; notes: string[] } | { ok: false; error: string }> {
   if (plan.empty) return { ok: false, error: "the workspace holds no files for this revision" };
+
+  let handoff: string[] = [];
+  if (owner) {
+    const claim = await claimWorkspace(owner);
+    if (!claim.ok) return { ok: false, error: claim.error };
+    handoff = claim.notes;
+  }
+
   const current = containerStatus();
   const neverMounted = current.mountedRevision === null;
 
@@ -283,7 +313,7 @@ export async function prepareWorkspace(
     // A new tree is a new filesystem as far as installs are concerned.
     installedRevision = null;
     await primeNodeVersion();
-    return { ok: true, mode: "mounted", files: mounted.files, notes: [] };
+    return { ok: true, mode: "mounted", files: mounted.files, notes: handoff };
   }
 
   const files = flattenTree(plan.tree);
@@ -291,7 +321,7 @@ export async function prepareWorkspace(
   if (!written.ok) return { ok: false, error: written.error };
   noteMountedRevision(revision);
 
-  const notes: string[] = [];
+  const notes: string[] = [...handoff];
   const present = new Set(files.map((file) => file.path));
   const stale = workspacePaths().filter((path) => !present.has(path));
   if (stale.length > 0) {
@@ -323,7 +353,7 @@ async function primeNodeVersion(): Promise<void> {
   try {
     const probe = await instance.spawn("node", ["--version"]);
     await exitCodeOf(probe);
-    const reader = probe.output().getReader();
+    const reader = probe.output.getReader();
     let text = "";
     for (;;) {
       const { done, value } = await reader.read();
@@ -440,6 +470,15 @@ export async function runInContainer(request: {
   /** Install the revision's dependencies first (the default for a test run) */
   install?: boolean;
   signal?: AbortSignal;
+  /**
+   * The thread this command is being run for.
+   *
+   * Optional only because the local/companion tiers and the tests do not mount
+   * anything; every caller that mounts a tree on this page passes it, because the
+   * claim it drives is what keeps one thread's files out of another thread's
+   * evidence.
+   */
+  owner?: WorkspaceOwner;
 }): Promise<ContainerExecResult> {
   if (request.signal?.aborted) return { ok: false, error: STOPPED_BY_USER };
 
@@ -451,7 +490,7 @@ export async function runInContainer(request: {
       return { ok: false, error: containerStatus().reason ?? "no browser workspace is available on this page" };
     }
 
-    const prepared = await prepareWorkspace(request.plan, request.revision);
+    const prepared = await prepareWorkspace(request.plan, request.revision, request.owner);
     if (!prepared.ok) return { ok: false, error: prepared.error };
     const notes: string[] = [...prepared.notes];
     if (prepared.mode === "mounted") {
@@ -475,6 +514,15 @@ export async function runInContainer(request: {
 
     const { outcome } = result;
     if (outcome.aborted) return { ok: false, error: STOPPED_BY_USER };
+    if (outcome.unreadable) {
+      // A stream this module cannot read means the exit code is the ONLY evidence
+      // there is, and an unreported empty result is a green light with nothing
+      // behind it.
+      return {
+        ok: false,
+        error: `the command ran, but its output could not be read from the workspace (${outcome.unreadable}), so a zero exit code here proves only that the process ended. Do not treat this as a passing run.`,
+      };
+    }
 
     const capped = capOutput(outcome.text, maxChars);
     const truncated = capped.truncated || outcome.truncated;

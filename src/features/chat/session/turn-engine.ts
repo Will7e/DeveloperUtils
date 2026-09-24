@@ -17,9 +17,13 @@
 //  - commit semantics per end reason, token calibration, and clearing
 //    the pending-turn marker on every exit path.
 //
-// State lives in ONE explicit session object (no ambient module
-// flags), and a turn is single-flight: a second run while running is
-// refused rather than interleaved.
+// State lives in ONE explicit session object PER CONVERSATION (no ambient
+// module flags), and a turn is single-flight WITHIN its conversation: a second
+// run of the same chat while it is running is refused rather than interleaved,
+// while a different chat starts its own turn — which is what makes several
+// agents able to work at once. The turn-scoped things (abort controller, call
+// ledger, tool surface, escalated model) are per-conversation for the same
+// reason: they describe a turn, and two turns do not share one.
 
 import { useChatStore, selectWorkspace } from "@/stores/chat.store";
 import {
@@ -29,7 +33,12 @@ import {
   type TurnPreparation,
 } from "../services/turn-prep";
 import { executeToolCall, serializeToolResult, parseToolArguments } from "../lib/tools";
-import { lookupToolCache, storeToolCache, toolCacheKey } from "../lib/tool-cache";
+import {
+  lookupToolCache,
+  readViewFor,
+  storeToolCache,
+  toolCacheKey,
+} from "../lib/tool-cache";
 import {
   validateToolCall,
   getToolMeta,
@@ -113,6 +122,10 @@ import {
   runUpdatePullRequest,
 } from "../services/github-collab-actions";
 import { runAppTool } from "../services/app-actions";
+import { registerScopedResource } from "../identity/scoped-resources";
+// The Stop note a dismissed approval carries, so a gate closed by "stop" reads
+// to the model as the user stopping the work rather than rejecting a change.
+import { STOPPED_BY_USER } from "../companion/companion-client";
 import { runAskUser, runSuggestNext, settlePendingQuestion } from "../services/ask-user";
 import { sessionHost } from "./session-client";
 import { HostTurnSource, LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
@@ -199,24 +212,59 @@ export interface TurnSessionState {
   stuckRefusals: number;
 }
 
-const session: TurnSessionState = {
-  phase: "idle",
-  conversationId: null,
-  source: null,
-  turnId: null,
-  abort: null,
-  toolCalls: [],
-  inToolPhase: false,
-  callLedger: new Map(),
-  recoveredTextCalls: false,
-  recoveredNote: null,
-  effort: DEFAULT_REASONING_EFFORT,
-  mode: DEFAULT_CHAT_MODE,
-  modelOverride: null,
-  escalated: false,
-  stuckRefusals: 0,
-  sentToolNames: null,
-};
+/**
+ * The state of a conversation that is not running anything.
+ *
+ * Handed back by the accessors below rather than kept as a tombstone in the
+ * map: a finished turn leaves no record, so nothing can read a stale tool
+ * surface, ledger or escalated model off a turn that is over.
+ */
+function idleSession(conversationId: string | null): TurnSessionState {
+  return {
+    phase: "idle",
+    conversationId,
+    source: null,
+    turnId: null,
+    abort: null,
+    toolCalls: [],
+    inToolPhase: false,
+    callLedger: new Map(),
+    recoveredTextCalls: false,
+    recoveredNote: null,
+    effort: DEFAULT_REASONING_EFFORT,
+    mode: DEFAULT_CHAT_MODE,
+    modelOverride: null,
+    escalated: false,
+    stuckRefusals: 0,
+    sentToolNames: null,
+  };
+}
+
+/**
+ * Live turns, ONE PER CONVERSATION.
+ *
+ * The map is the multi-tenancy. A turn reads and writes only its own entry, so
+ * two conversations streaming at once cannot reach each other's abort signal,
+ * call ledger, sent-tool surface or escalated model. Entries are removed when
+ * the turn ends, so "is this thread running?" is answered by presence rather
+ * than by a flag some exit path has to remember to clear.
+ */
+const sessions = new Map<string, TurnSessionState>();
+
+/** This conversation's turn state, creating it as the turn starts */
+function sessionOf(conversationId: string): TurnSessionState {
+  const existing = sessions.get(conversationId);
+  if (existing) return existing;
+  const created = idleSession(conversationId);
+  sessions.set(conversationId, created);
+  return created;
+}
+
+/** This conversation's turn state when it has a turn in flight, else null */
+function runningSession(conversationId: string): TurnSessionState | null {
+  const state = sessions.get(conversationId);
+  return state && state.phase === "running" ? state : null;
+}
 
 /** Identical executions allowed before the ledger takes over */
 const REPEAT_MAX_EXECUTIONS = 2;
@@ -238,12 +286,34 @@ const LOST_ROUND_RETRIES = 1;
 /** Serialized result kept in the ledger for a reuse (bounded) */
 const LEDGER_RESULT_MAX_CHARS = 4_000;
 
-export function getSessionState(): Readonly<TurnSessionState> {
-  return session;
+/**
+ * Turn state for one conversation, or for whichever turn is running.
+ *
+ * The unnamed form means "the running turn", which is what callers that
+ * predate parallelism (evals, the turn log) actually want: in the single-turn
+ * case they exercise there is exactly one.
+ */
+export function getSessionState(conversationId?: string): Readonly<TurnSessionState> {
+  if (conversationId) return sessions.get(conversationId) ?? idleSession(conversationId);
+  return liveSessions()[0] ?? idleSession(null);
 }
 
-export function isTurnRunning(): boolean {
-  return session.phase === "running";
+/** Every turn in flight, ordered by conversation so the order is stable */
+export function liveSessions(): TurnSessionState[] {
+  return [...sessions.values()]
+    .filter((s) => s.phase === "running")
+    .sort((a, b) => (a.conversationId ?? "").localeCompare(b.conversationId ?? ""));
+}
+
+/**
+ * Whether a turn is running — for one conversation, or for any of them.
+ *
+ * Both readings are needed and they answer different questions: "may I send in
+ * this chat?" is per conversation, while "is anything working?" is app-wide.
+ */
+export function isTurnRunning(conversationId?: string): boolean {
+  if (conversationId) return runningSession(conversationId) !== null;
+  return liveSessions().length > 0;
 }
 
 /**
@@ -252,9 +322,11 @@ export function isTurnRunning(): boolean {
  * replayed on resume. Host-mode streaming is reload-surviving, so
  * guarding it would fight the feature it exists to provide.
  */
-export function isTurnUnrecoverable(): boolean {
-  if (session.phase === "idle") return false;
-  return session.inToolPhase || !session.source?.survivable;
+export function isTurnUnrecoverable(conversationId?: string): boolean {
+  const live = conversationId
+    ? liveSessions().filter((s) => s.conversationId === conversationId)
+    : liveSessions();
+  return live.some((s) => s.inToolPhase || !s.source?.survivable);
 }
 
 // ── Injectable seams (tests) ────────────────────────────────
@@ -369,11 +441,15 @@ function toolPhaseMeta(conversationId: string): {
  * the user AND to the model on its next round. Consumes the note, so a
  * later tool phase in the same turn is not annotated twice.
  */
-function withRecoveryNote(meta: { content: string; reasoning: string; model: string }): {
+function withRecoveryNote(
+  conversationId: string,
+  meta: { content: string; reasoning: string; model: string }
+): {
   content: string;
   reasoning: string;
   model: string;
 } {
+  const session = sessionOf(conversationId);
   const note = session.recoveredNote;
   session.recoveredNote = null;
   if (!note) return meta;
@@ -480,8 +556,12 @@ async function renderTurn(
   /** Events captured between the start request and this subscription */
   prebuffer: HostEvent[] = []
 ): Promise<RenderOutcome> {
+  // The turn this renderer belongs to. Reading it through the conversation id
+  // (rather than from a module variable) is what lets two renderers run at
+  // once: each folds its deltas into ITS OWN session and ITS OWN store buffer.
+  const session = sessionOf(conversationId);
   const api = useChatStore.getState();
-  if (!api.isStreaming) api.beginStreaming(conversationId);
+  if (!api.streams[conversationId]) api.beginStreaming(conversationId);
 
   let content = "";
   let reasoning = "";
@@ -504,11 +584,11 @@ async function renderTurn(
   const seedContent = seed?.content ?? "";
   const seedReasoning = seed?.reasoning ?? "";
   if (seedContent) {
-    useChatStore.getState().appendStreamingContent(seedContent);
+    useChatStore.getState().appendStreamingContent(conversationId, seedContent);
     content += seedContent;
   }
   if (seedReasoning) {
-    useChatStore.getState().appendStreamingReasoning(seedReasoning);
+    useChatStore.getState().appendStreamingReasoning(conversationId, seedReasoning);
     reasoning += seedReasoning;
   }
 
@@ -546,8 +626,8 @@ async function renderTurn(
           const r = event.delta.reasoning ?? "";
           content += c;
           reasoning += r;
-          if (c) useChatStore.getState().appendStreamingContent(c);
-          if (r) useChatStore.getState().appendStreamingReasoning(r);
+          if (c) useChatStore.getState().appendStreamingContent(conversationId, c);
+          if (r) useChatStore.getState().appendStreamingReasoning(conversationId, r);
           break;
         }
         case "TOOL_CALLS": {
@@ -621,9 +701,13 @@ function commitRender(
   outcome: RenderOutcome,
   fallbackModelId?: string
 ): string | null {
+  const session = sessionOf(conversationId);
   const api = useChatStore.getState();
-  const streamed = api.streamingContent;
-  const streamedReasoning = api.streamingReasoning;
+  // The buffer is THIS conversation's, read at the moment of the commit: the
+  // text a lost round produced is the text its own thread is holding, never
+  // whatever another agent happens to be streaming alongside it.
+  const streamed = api.streams[conversationId]?.content ?? "";
+  const streamedReasoning = api.streams[conversationId]?.reasoning ?? "";
   // The model id IS the wire model now — no virtual-model masking.
   const model = outcome.modelId ?? fallbackModelId ?? undefined;
   const reasoning = (streamedReasoning || outcome.reasoning) || undefined;
@@ -641,7 +725,7 @@ function commitRender(
   };
 
   if (outcome.kind === "lost") {
-    api.discardStreaming();
+    api.discardStreaming(conversationId);
     if (streamed.trim()) {
       return api.commitDirectAssistantMessage(conversationId, {
         content: `${streamed}\n\n— _the response engine stopped responding; partial reply kept._`,
@@ -835,10 +919,15 @@ async function executeToolPhase(
   calls: ToolCallRequest[],
   streamMeta: { content: string; reasoning: string; model: string }
 ): Promise<void> {
+  const session = sessionOf(conversationId);
   const store = useChatStore.getState();
   const conversation = store.conversations.find((c) => c.id === conversationId);
   const repoContext = conversation?.repoContext;
   const settings = store.settings;
+  // One view for the whole phase: this thread's working copy, at the revision
+  // the phase is reading through. It is what keeps the shared tool cache from
+  // handing THIS agent a peer's uncommitted edit as "the file's content".
+  const readView = readViewFor(conversationId);
 
   useChatStore.getState().commitToolCallsMessage(conversationId, calls, streamMeta);
 
@@ -985,7 +1074,7 @@ async function executeToolPhase(
       results.set(idx, record(normalized, failure));
       return;
     }
-    const cacheKey = repoContext ? toolCacheKey(normalized, repoContext) : null;
+    const cacheKey = repoContext ? toolCacheKey(normalized, repoContext, readView) : null;
     const hit = lookupToolCache(cacheKey);
     if (hit) {
       const cached: ToolCallResult = { ...hit, callId: call.id, durationMs: 0 };
@@ -1135,6 +1224,7 @@ async function executeToolPhase(
  * turn, so the next message goes back to the model the user picked.
  */
 function maybeEscalate(conversationId: string, fromModel: string, deps: EngineDeps): void {
+  const session = sessionOf(conversationId);
   const store = useChatStore.getState();
   if (!canEscalate({ enabled: store.settings.autoEscalate, alreadyEscalated: session.escalated })) {
     return;
@@ -1199,6 +1289,7 @@ async function runRound(
   source: TurnSource,
   deps: EngineDeps
 ): Promise<RoundResult> {
+  const session = sessionOf(conversationId);
   const prepared = await deps.prepare(conversationId, {
     modelOverride: session.modelOverride ?? undefined,
   });
@@ -1331,8 +1422,8 @@ async function runRound(
   const produced =
     Boolean(outcome.content.trim() || outcome.reasoning.trim()) || session.toolCalls.length > 0;
   if (outcome.kind === "lost" && !produced) {
-    useChatStore.getState().discardStreaming();
-    useChatStore.getState().endStreaming(false);
+    useChatStore.getState().discardStreaming(conversationId);
+    useChatStore.getState().endStreaming(conversationId, false);
     session.turnId = null;
     return { kind: "lost", committed: false, outcome };
   }
@@ -1340,7 +1431,7 @@ async function runRound(
   const committedId = commitRender(conversationId, outcome, turn.modelId);
   useChatStore
     .getState()
-    .endStreaming(outcome.kind === "end" && outcome.reason === "aborted");
+    .endStreaming(conversationId, outcome.kind === "end" && outcome.reason === "aborted");
   session.turnId = null;
 
   if (outcome.kind === "lost") {
@@ -1392,6 +1483,7 @@ interface RoundRunner {
  * existed when the round started.
  */
 function completionVerdictFor(conversationId: string, agentTools: boolean): CompletionVerdict {
+  const session = sessionOf(conversationId);
   const state = useChatStore.getState();
   const conversation = state.conversations.find((c) => c.id === conversationId);
   const workspace = selectWorkspace(state, conversationId);
@@ -1435,6 +1527,7 @@ async function runBatch(
   runner: RoundRunner,
   cap: number
 ): Promise<boolean> {
+  const session = sessionOf(conversationId);
   // `completionNudges` extends the bound as it is granted: a nudge only
   // ever follows a round the model ended itself, so a runaway TOOL loop
   // still stops at exactly `cap`, while stopping with the work open buys
@@ -1458,7 +1551,7 @@ async function runBatch(
       //    the rest of the turn to the page-local one.
       if (runner.source.survivable && runner.localFallbacks === 0) {
         runner.localFallbacks += 1;
-        useChatStore.getState().discardStreaming();
+        useChatStore.getState().discardStreaming(conversationId);
         logTurnEvent({
           turnId: null,
           conversationId,
@@ -1491,7 +1584,7 @@ async function runBatch(
       //    outcome is still in hand.
       if (result.kind === "lost" && result.outcome) {
         commitRender(conversationId, result.outcome);
-        useChatStore.getState().endStreaming(false);
+        useChatStore.getState().endStreaming(conversationId, false);
       }
       return true;
     }
@@ -1558,7 +1651,11 @@ async function runBatch(
       detail: `${calls.length} calls`,
     });
     try {
-      await executeToolPhase(conversationId, calls, withRecoveryNote(toolPhaseMeta(conversationId)));
+      await executeToolPhase(
+        conversationId,
+        calls,
+        withRecoveryNote(conversationId, toolPhaseMeta(conversationId))
+      );
     } finally {
       session.inToolPhase = false;
     }
@@ -1597,6 +1694,7 @@ async function runBatch(
  * honest answer rather than a chore.
  */
 async function runRounds(conversationId: string, deps: EngineDeps): Promise<void> {
+  const session = sessionOf(conversationId);
   const cap = maxIterations(deps);
   const runner: RoundRunner = {
     source: await deps.resolveSource(),
@@ -1637,9 +1735,13 @@ export async function runTurn(
   conversationId: string,
   deps: Partial<EngineDeps> = {}
 ): Promise<void> {
-  // A tool phase started in this conversation counts as "still running".
-  if (session.phase !== "idle") return;
+  // Refused only for THIS conversation: a tool phase this chat already started
+  // counts as "still running", while a turn belonging to another chat is not
+  // this chat's business. Parallelism is the feature; two turns interleaved
+  // inside one thread is the bug this guard exists for.
+  if (runningSession(conversationId)) return;
   const resolved: EngineDeps = { ...defaultDeps, ...deps };
+  const session = sessionOf(conversationId);
 
   session.phase = "running";
   session.conversationId = conversationId;
@@ -1668,9 +1770,9 @@ export async function runTurn(
       detail,
     });
     const api = useChatStore.getState();
-    const partial = api.streamingContent;
-    api.discardStreaming();
-    api.endStreaming(false);
+    const partial = api.streams[conversationId]?.content ?? "";
+    api.discardStreaming(conversationId);
+    api.endStreaming(conversationId, false);
     api.addMessage(conversationId, {
       role: "assistant",
       content: partial.trim()
@@ -1679,22 +1781,13 @@ export async function runTurn(
       error: true,
     });
   } finally {
-    // Last-resort guard: no exit path may leave a spinner running.
+    // Last-resort guard: no exit path may leave THIS conversation's spinner
+    // running — and nothing here may touch another agent's stream.
     const api = useChatStore.getState();
-    if (api.isStreaming && api.streamingConversationId === conversationId) {
-      api.endStreaming(false);
-    }
-    session.phase = "idle";
-    session.conversationId = null;
-    session.source = null;
-    session.turnId = null;
-    session.abort = null;
-    session.toolCalls = [];
-    session.inToolPhase = false;
-    session.callLedger = new Map();
-    session.recoveredTextCalls = false;
-    session.recoveredNote = null;
-    session.sentToolNames = null;
+    if (api.streams[conversationId]) api.endStreaming(conversationId, false);
+    // The turn is over, so its record goes with it: nothing may read a tool
+    // ledger, a sent-tool surface or an escalated model off a finished turn.
+    sessions.delete(conversationId);
     // Safety net: a question whose turn is over has nobody left to answer
     // it, and a waiter that outlives its turn would swallow the next answer
     // into a promise nothing is awaiting. On the reload path there is no
@@ -1742,7 +1835,7 @@ export async function adoptTurn(
   conversationId: string,
   deps: Partial<EngineDeps> = {}
 ): Promise<boolean> {
-  if (session.phase !== "idle") return false;
+  if (runningSession(conversationId)) return false;
   const resolved: EngineDeps = { ...defaultDeps, ...deps };
 
   const ready = await sessionHost.connect().catch(() => false);
@@ -1772,6 +1865,7 @@ export async function adoptTurn(
   if (!snapshot?.turnId || snapshot.conversationId !== conversationId) return false;
 
   let adopted = false;
+  const session = sessionOf(conversationId);
 
   session.phase = "running";
   session.conversationId = conversationId;
@@ -1810,7 +1904,7 @@ export async function adoptTurn(
     const committedId = commitRender(conversationId, outcome, undefined);
     useChatStore
       .getState()
-      .endStreaming(outcome.kind === "end" && outcome.reason === "aborted");
+      .endStreaming(conversationId, outcome.kind === "end" && outcome.reason === "aborted");
     logTurnEvent({
       turnId: snapshot.turnId,
       conversationId,
@@ -1835,7 +1929,11 @@ export async function adoptTurn(
       session.toolCalls = [];
       session.inToolPhase = true;
       try {
-        await executeToolPhase(conversationId, calls, withRecoveryNote(toolPhaseMeta(conversationId)));
+        await executeToolPhase(
+        conversationId,
+        calls,
+        withRecoveryNote(conversationId, toolPhaseMeta(conversationId))
+      );
       } finally {
         session.inToolPhase = false;
       }
@@ -1852,43 +1950,90 @@ export async function adoptTurn(
     return false;
   } finally {
     const api = useChatStore.getState();
-    if (api.isStreaming && api.streamingConversationId === conversationId) {
-      api.endStreaming(false);
-    }
-    session.phase = "idle";
-    session.conversationId = null;
-    session.source = null;
-    session.turnId = null;
-    session.abort = null;
-    session.toolCalls = [];
-    session.inToolPhase = false;
-    session.callLedger = new Map();
-    session.recoveredTextCalls = false;
-    session.recoveredNote = null;
-    session.sentToolNames = null;
+    if (api.streams[conversationId]) api.endStreaming(conversationId, false);
+    sessions.delete(conversationId);
     if (adopted) useChatStore.getState().clearPendingTurn(conversationId);
   }
 }
 
-/** Stops the in-flight turn (partial output is preserved by the commit) */
-export function stopTurn(): void {
-  const api = useChatStore.getState();
-  if (!api.isStreaming && session.phase === "idle") return;
-  if (session.turnId && session.source) {
-    session.source.abortTurn(session.turnId);
-    return;
+/**
+ * Stops the in-flight turn of one conversation, or of every one running.
+ *
+ * The unnamed form is the app-wide Stop (the palette's, a keyboard shortcut):
+ * with several agents working, "stop" from a surface that names no thread means
+ * the user wants the work to end, not just the chat they happen to be on. A
+ * caller that DOES know which thread it means passes its id, so one agent's
+ * stop never touches a peer's turn.
+ *
+ * Both the transport turn AND the local controller are aborted. The transport
+ * abort stops the stream; the controller is what every page-side wait checks —
+ * a tool holding the turn, the next round, and the completion gate's "a stop
+ * always wins". Aborting only the transport left the tool loop free to nudge
+ * the model onward after the user had already ended it.
+ *
+ * Returns how many turns were stopped, so a caller can report it.
+ */
+export function stopTurn(conversationId?: string): number {
+  const targets = conversationId
+    ? liveSessions().filter((s) => s.conversationId === conversationId)
+    : liveSessions();
+
+  for (const target of targets) {
+    // A parked approval is a wait, and a wait that outlives its turn leaves
+    // that agent parked behind a dialog for work the user has ended.
+    if (target.conversationId) {
+      useChatStore.getState().dismissApprovalsFor(target.conversationId, STOPPED_BY_USER);
+    }
+    if (target.turnId && target.source) target.source.abortTurn(target.turnId);
+    target.abort?.abort();
   }
-  session.abort?.abort();
+  return targets.length;
 }
 
-/** Exposed for tests/UI: waits for the engine to go idle again */
-export async function waitForIdle(timeoutMs = 5_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+/**
+ * A live turn describes ONE thread on ONE repository, so a move ends it.
+ *
+ * This is the same rule the browser workspace states (container-host.ts): a
+ * turn's request, its working copy and its tool results are all about the
+ * revision it started on, and a turn that survived a repository switch would
+ * keep reading and writing files in a repository it was never prepared for —
+ * producing evidence about code that is no longer in play. Ending it is honest:
+ * the partial reply is committed, the marker is cleared, and the user can send
+ * again into the new context.
+ *
+ * Scoped to the thread that moved. A peer agent on another thread (or on the
+ * same repository under another binding) keeps working, which is now the
+ * ordinary case rather than an oversight: over-releasing is the mistake in the
+ * other direction (see scoped-resources.ts).
+ */
+registerScopedResource({
+  name: "session.turn",
+  scope: "binding",
+  release: ({ transition }) => {
+    if (transition.type === "thread.created") return;
+    stopTurn(transition.threadId);
+  },
+});
+
+/**
+ * Waits for the engine to go idle again — one conversation, or all of them.
+ *
+ * Defaults to the conversation when one is named; the unnamed form is what a
+ * test or an eval that drove a single turn means.
+ */
+export async function waitForIdle(
+  conversationIdOrTimeout?: string | number,
+  timeoutMs = 5_000
+): Promise<boolean> {
+  const conversationId =
+    typeof conversationIdOrTimeout === "string" ? conversationIdOrTimeout : undefined;
+  const budget = typeof conversationIdOrTimeout === "number" ? conversationIdOrTimeout : timeoutMs;
+  const deadline = Date.now() + budget;
   while (Date.now() < deadline) {
-    if (session.phase === "idle") return true;
+    if (!isTurnRunning(conversationId)) return true;
     await sleep(10);
   }
-  return session.phase === "idle";
+  return !isTurnRunning(conversationId);
 }
 
 /** Re-exported host usage shape for callers of the engine */

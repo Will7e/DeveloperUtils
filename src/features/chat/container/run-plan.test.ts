@@ -51,7 +51,7 @@ describe("import manager normalization — a pinned manager is still that manage
       hasPackageJson: true,
     });
     expect(yarn.step?.command).toBe("yarn install");
-    expect(yarn.note).toMatch(/resolve now/);
+    expect(yarn.note).toMatch(/resolves now/);
 
     const bun = planInstall({
       packageManager: "bun@1.1.0",

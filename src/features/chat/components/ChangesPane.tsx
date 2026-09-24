@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useAppStore } from "@/stores/app.store";
-import { selectWorkspace, useChatStore } from "@/stores/chat.store";
+import { selectStream, selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { collectChangeSet } from "../lib/change-set";
 import { failingPaths } from "../lib/change-set-verification";
 import {
@@ -208,9 +208,9 @@ export const ChangesPane = React.memo(function ChangesPane({
   const workspace = useChatStore((s) => selectWorkspace(s, conversationId) ?? undefined);
   const conversation = useChatStore((s) => s.conversations.find((c) => c.id === conversationId));
   const repoAttached = Boolean(conversation?.repoContext);
-  const isStreamingHere = useChatStore(
-    (s) => s.isStreaming && s.streamingConversationId === conversationId
-  );
+  // THIS thread's stream, not "the" one: a peer agent editing its own working
+  // copy in another chat must not grey out this pane's Run-checks button.
+  const isStreamingHere = useChatStore((s) => selectStream(s, conversationId) !== null);
 
   const changes = React.useMemo(() => collectChangeSet(workspace), [workspace]);
   const [openPaths, setOpenPaths] = React.useState<Set<string>>(new Set());

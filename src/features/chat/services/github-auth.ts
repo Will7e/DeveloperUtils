@@ -3,8 +3,18 @@
 // ============================================================
 // OAuth: opens a popup to github.com/login/oauth/authorize with the
 // redirect pointing at /api/github (edge function). The function
-// exchanges the code server-side and postMessages the token back;
-// we listen for it and validate by fetching the authenticated user.
+// exchanges the code server-side and hands the token back; we listen
+// for it and validate by fetching the authenticated user.
+//
+// The hand-back arrives over a BROADCASTCHANNEL, and that is a consequence of
+// the browser workspace, not a preference: the app is served with
+// `Cross-Origin-Opener-Policy: same-origin` (measured — see
+// container/isolation.ts) and that puts the popup in its own browsing context
+// group the moment it visits github.com. `window.opener` is then null inside it
+// and `popup.closed` reads true forever in here, so neither `opener.postMessage`
+// nor a "was it closed?" poll can be trusted. A BroadcastChannel is scoped to the
+// ORIGIN, which survives both. The postMessage listener stays for the browsers and
+// flows where the opener does survive.
 //
 // PAT: validated the same way (GET /user) before being accepted.
 //
@@ -24,6 +34,8 @@ const VITE_GITHUB_CLIENT_ID =
   (import.meta.env.VITE_GITHUB_CLIENT_ID as string | undefined) || "";
 
 const MESSAGE_SOURCE = "intab-github-oauth";
+/** Must match the name in public/oauth/github-popup.js */
+const BROADCAST_CHANNEL = "intab-github-oauth";
 const POPUP_TIMEOUT_MS = 120_000;
 /** Where the OAuth `state` we generated is stashed for the CSRF check */
 const OAUTH_STATE_KEY = "intab:github-oauth-state";
@@ -79,7 +91,9 @@ function openOAuthPopup(authorizeUrl: string): Promise<OAuthPayload> {
     let settled = false;
     const cleanup = () => {
       window.removeEventListener("message", onMessage);
-      window.clearInterval(pollId);
+      channel?.removeEventListener("message", onChannel);
+      channel?.close();
+      if (pollId) window.clearInterval(pollId);
       window.clearTimeout(timeoutId);
     };
     const finish = (payload: OAuthPayload) => {
@@ -94,17 +108,16 @@ function openOAuthPopup(authorizeUrl: string): Promise<OAuthPayload> {
       resolve(payload);
     };
 
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      // The credential must come from the popup this call opened — not from
-      // any other same-origin frame that can reach this window.
-      if (event.source !== popup) return;
-      const data = event.data as { source?: string; payload?: OAuthPayload } | null;
+    /**
+     * Accepts a payload only if it survived the CSRF state check.
+     *
+     * Shared by both channels. The state check is the guard that matters on the
+     * BroadcastChannel, where any same-origin document can publish: a payload
+     * whose `state` is not the one this sign-in generated is dropped rather than
+     * stored as the GitHub token.
+     */
+    const accept = (data: { source?: string; payload?: OAuthPayload } | null | undefined) => {
       if (!data || data.source !== MESSAGE_SOURCE || !data.payload) return;
-
-      // CSRF guard: /api/github echoes the state we generated. A response
-      // carrying a different state did not originate from our sign-in and is
-      // dropped instead of being stored as the GitHub token.
       const expected = readStashedState();
       if (expected && data.payload.state !== expected) {
         finish({
@@ -113,17 +126,40 @@ function openOAuthPopup(authorizeUrl: string): Promise<OAuthPayload> {
         });
         return;
       }
-
       finish(data.payload);
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      // The credential must come from the popup this call opened — not from
+      // any other same-origin frame that can reach this window.
+      if (event.source !== popup) return;
+      accept(event.data as { source?: string; payload?: OAuthPayload } | null);
     };
     window.addEventListener("message", onMessage);
 
-    // Poll for manual close (user closed the popup without finishing)
-    const pollId = window.setInterval(() => {
-      if (popup.closed && !settled) {
-        finish({ ok: false, error: "GitHub sign-in was cancelled." });
-      }
-    }, 400);
+    // The channel the popup actually delivers on under `COOP: same-origin`.
+    // Origin-scoped, so it works with no opener relationship at all.
+    const channel =
+      typeof BroadcastChannel === "function" ? new BroadcastChannel(BROADCAST_CHANNEL) : null;
+    const onChannel = (event: MessageEvent) =>
+      accept(event.data as { source?: string; payload?: OAuthPayload } | null);
+    channel?.addEventListener("message", onChannel);
+
+    // Poll for manual close (user closed the popup without finishing).
+    //
+    // Skipped on a cross-origin isolated page, where the check is a false alarm:
+    // COOP puts the popup in its own browsing context group, so the handle reports
+    // `closed === true` from the first tick while the user is still signing in —
+    // which cancelled every sign-in within 400ms. The timeout below covers the
+    // case this poll exists for.
+    const pollId = window.crossOriginIsolated
+      ? 0
+      : window.setInterval(() => {
+          if (popup.closed && !settled) {
+            finish({ ok: false, error: "GitHub sign-in was cancelled." });
+          }
+        }, 400);
 
     const timeoutId = window.setTimeout(() => {
       finish({ ok: false, error: "GitHub sign-in timed out — try again." });
