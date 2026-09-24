@@ -1,239 +1,236 @@
 # InTab Forge — Speculation, Proof-of-Behavior & Survivor Fusion
 
-> **One sentence:** Other agents make one model attempt one answer and *hope* it works; InTab Forge seeds **K diverse attempts** across our free-model pool, **runs them in our browser runtime**, keeps only the candidates that **prove they work**, fuses the survivors' shared logic into a solution better than any single model could produce, and **feeds every failure cause back into routing and memory** — at zero marginal model cost.
+> **Status: proposal. Nothing in this document is shipped, and this file was
+> wrong the last time it was written.**
+>
+> The previous revision described the in-page preview runtime (`preview-runtime.ts`,
+> the five-file preview host, `PreviewPane.tsx`), Forge's `preview-bridge` probe
+> runner, and the InTab Learn router as ✅ shipped, and called the browser "the
+> oracle" as the core moat. Those pieces were **deleted** — see §1. A document
+> that advertises code which no longer exists is not a roadmap, it is a trap: it
+> was enough to misdirect the first read of this repository, and it will
+> misdirect the next plan written from it. What follows is the same algorithm
+> re-anchored on the execution tiers that actually exist today.
 
-This is InTab's own technology. It is only *rational* on InTab: it requires free models (to afford K parallel attempts), a browser (to afford a local, instant, private verifier), and a workspace (to have something provable to run). Cursor, Copilot, and Devin have none of these three; Freebuff has free models but no verification-native loop. This document specifies the algorithm, the math, the data model, and the integration path into the agent stack we just shipped.
+> **One sentence:** Instead of one model attempt and a hope, seed **K diverse
+> attempts**, **run each one against a real execution oracle**, keep only the
+> candidates that prove they work, fuse the survivors' shared logic, and feed
+> every failure cause back into the next seed — with the oracle choosing task
+> class, not the other way round.
+
+The premise has not changed: verification-by-execution beats verification-by-
+persuasion, and parallel decorrelated attempts beat one attempt when the marginal
+attempt is cheap. What changed is *where execution happens* in this app, and that
+single fact decides which tasks Forge may ever be pointed at.
 
 ---
 
-## 1. Why competitors can't copy it
+## 1. What was removed, and what it costs this spec
 
-| Competitor | Their loop | Structural weakness |
+| Removed | Where it went | What it takes from Forge |
 |---|---|---|
-| Copilot / Cursor / generic chat | One model → one patch → user reviews | Pay per token, so parallel attempts are unaffordable; verification = "the LLM said so" |
-| Devin-class plan loops | Plan → execute → re-plan on failure | Cloud sandbox = slow, costly verification; failure signals are LLM-judged |
-| Freebuff | Free multi-agent "plan, edit, run, verify" | Verification is a single execution pass; no cross-candidate logic, no learned memory |
-| InTab today (agent + Learn) | Route well → edit → preview → push | Verification exists but is *reactive* (fix errors after they happen); single-model quality ceiling |
+| `preview-runtime.ts` (1,434 lines) — esbuild-wasm + in-page module resolution | deleted in `e9144b4` ("remove preview feature") | the millisecond verifier. Build and boot probes ran in the page, per candidate, for free. |
+| the preview host (`preview-host/*`, 1,352 lines) + `preview-bridge` + `PreviewPane` | same commit | probe assertions via `postMessage`, and the candidate-strip UI they would have reported into |
+| module resolver (`graph`/`glob`/`aliases`/`module-resolution`, ~1,900 lines), `css-pipeline`, `vfs`, `bundle`, `cdn`, `env`, `entry`, `document`, `preload` | same commit | the ability to run *any* candidate without an install step |
+| the InTab Learn router (bandit over provider outcomes) | removed earlier | the routing half of the Survivor Ledger (§5), which was supposed to consume `winner.modelId` |
+| `src/preview-frame.html`, `src/preview-harness.html` | moved to `docs/qa/` | nothing — they were reverted QA scratch, not runtime |
 
-Forge exploits three levers competitors structurally lack:
+**Why it was deleted, in one line: it re-implemented a build toolchain inside the
+page, so every project quirk had to be re-taught to it, and a preview that
+*approximates* a project is worse than no preview — it looks like the app and is
+not.**
 
-1. **Free-model economics.** K parallel attempts cost ≈ $0 on the InTab pool. On paid models, K=4 speculation multiplies spend by 4; on InTab it multiplies *quality* at constant cost.
-2. **The browser is the oracle.** Our preview runtime (esbuild-wasm + sandboxed iframe + console bridge) executes candidate code locally in milliseconds — deterministic, private, no cloud sandbox queue, no data leaving the user's machine.
-3. **We own the ground truth.** Regenerations, aborts, preview errors, and probe outcomes are observed *locally* (the same insight behind InTab Learn) — so the solver can be scored on evidence, not on self-reported confidence.
+That is the fragility finding this document exists to record, because it is
+larger than one feature. The visual/verification layer has been rebuilt and
+discarded more than once in this codebase, each time for the same reason: a
+second, approximating implementation of something the project already owns (its
+bundler, its module resolution, its CSS pipeline, its dev server). The rule that
+follows is the design constraint for everything below:
 
----
+> **One interpreter of "it works" per tier.** The app may *own* a verifier — the
+> companion (T2) runs the project's real commands, `verify_with_ci` (T3) runs the
+> repository's own workflow — but it must never ship a second implementation that
+> guesses how the project would build. Anything that needs the project's
+> toolchain gets delegated to the project's toolchain.
 
-## 2. The Forge Loop — five stages
-
-```
-            ┌──────────────────────────────────────────────────────┐
-            │                    TASK INTAKE                        │
-            │  user prompt + repo context + workspace state         │
-            └───────────────┬──────────────────────────────────────┘
-                            ▼
-      ┌───────────── 1. SEED ─────────────┐   K diversity axes:
-      │ Diversity-Seeded Speculation      │   · model family (pool diversity)
-      │ K attempts launched in parallel   │   · temperature ladder
-      │ on the InTab pool (≈ $0)          │   · plan prior (per-seed strategy)
-      └───────────────┬───────────────────┘   · file-selection prior
-                      ▼
-      ┌───────────── 2. PROVE ────────────┐   Proof-of-Behavior:
-      │ Run every candidate in the        │   · esbuild build → typed errors
-      │ preview runtime against the       │   · runtime boot probe
-      │ Probe Manifest (§3)               │   · behavior probes (props/logic)
-      │ No LLM judge — code must RUN.     │   · regression probes (from repo)
-      └───────────────┬───────────────────┘   · console cleanliness
-                      ▼
-      ┌───────────── 3. FUSE ─────────────┐   Survivor Fusion:
-      │ Consensus-map the survivors'      │   · agreement on touched files
-      │ diffs; splice the strongest       │   · line-level consensus regions
-      │ verified synthesis; 3/4 agreement │   · disagreement → judge probe
-      │ regions are adopted wholesale.    │     decides by execution
-      └───────────────┬───────────────────┘
-                      ▼
-      ┌───────────── 4. REFINE ───────────┐   Ceaseless Refinement:
-      │ If no survivor: fuse every        │   · error taxonomy, not "retry"
-      │ failure cause into ONE shared     │   · all K models' lessons fused
-      │ context (§2.4) and re-seed with   │   · does not restart from zero
-      │ narrower diversity. Budget-bounded│   · escalation ladder, not a spiral
-      └───────────────┬───────────────────┘
-                      ▼
-      ┌───────────── 5. LEDGER ───────────┐   Survivor Ledger:
-      │ Record task signature, winner,    │   · feeds InTab Learn bandit
-      │ probe results, failure causes →   │   · per-repo solve memory
-      │ persisted learning (§5)           │   · next task starts smarter
-      └───────────────────────────────────┘
-```
-
-### 2.1 SEED — Diversity-Seeded Speculation (DSS)
-
-Single-attempt agents are capped by `pass@1` of their best model. Forge samples the *ensemble*: for a task `t`, launch `K` candidates concurrently, each engineered to be **decorrelated** — because independent failures are what fusion can fix.
-
-Seed vector per candidate `i`:
-
-```
-seed_i = ( model_i,      temperature_i,  prior_i,   context_i )
-```
-
-- **model_i** — drawn from *distinct model families* in the pool (never two variants of the same family when K is small). Different pretraining = different failure modes = fusion fuel.
-- **temperature_i** — a fixed ladder, e.g. `[0.2, 0.5, 0.8, 1.0]`. Low-temp seeds produce "safe" solutions; high-temp seeds explore alternatives fusion can borrow from.
-- **prior_i** — a one-paragraph *strategy prior* that differs per seed: "minimal-diff conservative", "component-architecture first", "test-first", "fix the data flow before the UI". Seeds disagree on *approach*, not just wording.
-- **context_i** — a file-selection prior: each seed gets the shared repo context plus 1–2 extra files from a rotated heuristic list (importers, previous-editor, sibling components). Candidates see *slightly different slices* of the codebase.
-
-`K` adapts: `K = 2` for trivial single-file edits (probe verdict is cheap), `K = 4` for multi-file features, `K = 6` for tasks the Ledger remembers as hard (prior failures on similar signatures). Always `K ≤ INTAB_HEDGE_MAX_STREAMS × 2` and bounded by pool capacity.
-
-### 2.2 PROVE — Proof-of-Behavior (PoB)
-
-The core belief: **the only unfakeable verifier is execution.** LLM-as-judge produces plausible-sounding, wrong verdicts; PoB produces typed, reproducible evidence. Every candidate patch is installed into a scratch copy of the workspace and executed against a **Probe Manifest** — ordered from cheapest to most discriminating, with early-exit:
-
-| # | Probe | Cost | Catches |
-|---|---|---|---|
-| P0 | **Build probe** — esbuild-wasm compiles the candidate | ms | syntax, missing exports, type-level breakage |
-| P1 | **Boot probe** — module loads in the sandboxed iframe; no throw at import time | ms | broken imports, top-level crashes, SSR/DSO misuse |
-| P2 | **Regression probes** — behavior checks *inferred from the reference repo* (§2.3): the app must still do what it did before | ~100ms each | the classic agent failure: fixes the new thing, breaks the old thing |
-| P3 | **Intent probes** — checks derived from the user's stated intent, with concrete assertions | ~100ms each | "did the right thing, wrong" |
-| P4 | **Property probes** — invariant checks (no `console.error` output during boot; key components render; state round-trips) | cheap | silent rot |
-
-Each probe emits a typed verdict: `pass | fail {errorKind, message, location}`. `errorKind` ∈ `{build, import, runtime, assertion, console, timeout}` — this taxonomy is what makes refinement intelligent (§2.4) and learning durable (§5).
-
-**Anti-gaming rule:** probes assert *observable behavior* (rendered output, DOM presence, returned values, console silence) — never "the code looks right". A candidate cannot pass PoB by being persuasive.
-
-### 2.3 Where probes come from — Test Inference from the Reference (TIR)
-
-Writing tests manually kills autonomy; inventing tests invites LLM-hallucinated assertions. TIR takes a third path, unique to a *workspace with a base commit*:
-
-1. **Regression spec for free:** the base workspace *is* the test suite. We derive P2 probes by executing the pristine workspace once and recording: which routes/components booted, which DOM nodes existed, which console lines appeared. The base's observable behavior becomes the regression contract the patch must preserve.
-2. **Intent probes from the user turn:** the seeder asks *one* small pool model (cheap) to convert the user's request into 2–4 concrete assertions (`"search field filters the visible list" → render list, type query, count visible rows changes`), each phrased as a runnable DOM/behavior check, never as code review.
-3. **Repo-native checks:** if the repo already has a test runner configured for the browser bundle, its tests are the P2 manifest (highest trust). If not, TIR's derived probes are used (medium trust, still execution-based).
-
-Trust ordering: repo tests > recorded base behavior > inferred intent assertions. The manifest records its provenance and trust level, and the Ledger uses it to weight confidence.
-
-### 2.4 REFINE — Ceaseless Refinement with Fused Failure Context
-
-When all K candidates fail, naive agents retry or give up. Forge **fuses the failure evidence of every candidate into one shared context** and re-seeds with that knowledge injected — refinement that starts from everything the ensemble learned, not from zero:
-
-```
-fusedContext = Σ over candidates: {
-  candidate i strategy prior,
-  furthest probe reached,
-  typed error(s): {errorKind, message, location},
-  one-line diagnosis written *by that candidate itself* before failing (self-report)
-}
-
-re-seed instruction (shared): "K attempts failed. Verified facts:
-  - every attempt that reached the boot probe crashed with <kind> at <location>
-  - the only candidate that produced rendering reached <probe> and failed on <assertion>
-  - no attempt modified <file x>, which P2 traces suggest is involved
-  Produce a patch that avoids these verified failure modes."
-```
-
-The escalation ladder is budget-aware and logged: `K=2, t-ladder` → `K=4, new families` → `K=4, strategy pivots` (e.g. force a different file-selection prior) → **honest stop** with the typed evidence surfaced to the user ("the intent probe 'filter changes row count' cannot pass — the API the repo uses does not expose filtering; here is what would be needed"). Refinement rounds are capped (default 3) and each round's re-seed *must* cite the fused facts — the loop cannot silently repeat itself.
-
-### 2.5 FUSE — Survivor Fusion
-
-When ≥2 candidates pass all probes, Forge doesn't just pick the winner — it extracts the *consensus*:
-
-1. **Touch-set agreement:** files modified by ≥ ⌈2/3 of survivors⌉ form the consensus touch-set; files touched by only one survivor are inspected for spurious edits (agents love drive-by refactors; consensus kills them).
-2. **Region consensus:** for each consensus file, line-level diff regions where a supermajority of survivors made *semantically similar* edits are adopted from the best-scoring survivor wholesale. Divergent regions go to a **judge probe**: the two variants are executed head-to-head against the manifest and the faster/cleaner one wins.
-3. **Synthesis fallback:** if survivors each solve different sub-goals correctly (rare but real with strategy priors), one final pool model is asked to *splice* verified pieces — and the spliced result must re-run the full manifest before it's trusted. Nothing enters the workspace unproven.
-
-Fusion is why Forge beats "pick the best of N": ensemble agreement empirically dominates the best single sample (the same mechanism behind SRank / CodeRSA reranking), but Forge's version is *execution-anchored* rather than similarity-anchored, which no text-based reranker can claim.
+For Forge, the consequence is concrete and uncomfortable: **the oracle is no
+longer free or instant.** Every candidate costs a real command or a real CI run,
+which prices the loop below in seconds and minutes rather than milliseconds. So
+Forge's first requirement is not K, or fusion, or a ledger — it is *a task class
+with a cheap oracle*.
 
 ---
 
-## 3. The Probe Manifest — data model
+## 2. The oracle ladder (what can actually prove a candidate today)
+
+`lib/verification-plan.ts` already answers "which tier can prove this change, and
+has one?" — a pure router over the repository, the change set, the companion's
+state, the push state and the verification ledger. Forge's prover must be *that
+router applied per candidate*, not a new abstraction beside it: the day there are
+two answers to "what can prove this", one of them will be wrong.
+
+| Probe | Tier | Cost | Proves | Catches |
+|---|---|---|---|---|
+| **P0 Static** | in-page typecheck (`run_checks`), linters via companion | ~ms / ~s | compiles, types line up | syntax, missing exports, type-level breakage |
+| **P1 Build** | companion: the project's own build command | seconds | the project still builds | config, entry points, asset/bundler breakage |
+| **P2 Tests** | companion: the project's own test command | seconds–minutes | behaviour the repo already asserts | **the classic agent failure: fixes the new thing, breaks the old thing** |
+| **P3 Intent** | companion: a command the *user's request* implies | seconds–minutes | the requested behaviour, not just a green suite | "did the right thing, wrong" |
+| **P4 CI** | `verify_with_ci` on the pushed branch | minutes | the repository's definition of done, with its secrets and services | everything the local tree approximates |
+
+Three properties of this ladder decide the design:
+
+1. **P0–P2 are the only per-candidate probes.** P4 is authoritative and far too
+   slow to run K times; it is the *final gate on the survivor*, not a probe.
+   A candidate that has not cleared P0–P2 must never be sent to CI.
+2. **P3 is the probe nobody has.** Nothing in the repo generates it. This is the
+   real gap between "the tests pass" and "you did what I asked", and it is where
+   a small model *is* worth spending on — converting the user's sentence into two
+   or three runnable assertions, not judging the code.
+3. **Refusals are evidence.** "Toolchain absent", "no test script", "no
+   `workflow_dispatch` trigger", "no dependency install possible" are all cases
+   the router already reports by name. A candidate set that cannot be probed must
+   be reported as **unproven**, never as passing.
+
+### 2.1 What this means for K
+
+- **Eligible tasks only.** K candidates are affordable where a cheap oracle
+  exists (a pipeline task with a typecheck, test or build command). For tasks
+  with no oracle, Forge degrades to what the agent does today: one attempt, and
+  honesty about what was not proven.
+- **K is bounded by the oracle, not by ambition.** Speculation pays when
+  `latency(candidate) ≪ latency(whole attempt)`; with a per-candidate P1/P2 run
+  in the seconds, `K = 2–4` concurrent trees is the plausible band. Anything
+  priced in CI minutes makes the fusion maths a fiction.
+- **Cost is no longer ~0 in the way this document used to claim.** Model tokens
+  may be free on this pool; *verification* is not (machine time, CI minutes,
+  the user's CPU). The honest budget line is the oracle's.
+
+---
+
+## 3. The loop
+
+```
+ TASK INTAKE
+   user request + repo + change-set
+        │
+        ├── 0. ELIGIBILITY ── verification-plan router ──▶ no oracle? STOP (one attempt)
+        ▼
+   1. SEED     K candidates, decorrelated: model family × temperature × strategy prior × file-slice
+        ▼
+   2. PROVE    P0 static → P1 build → P2 tests, per candidate, early-exit on first typed failure
+               (typed verdict: {pass | fail{errorKind, message, location}})
+        ▼
+   3. FUSE     ≥2 survivors? adopt touch-set + region consensus; disagreement → P3 intent probe
+        ▼
+   4. REFINE   no survivor? fuse EVERY candidate's typed failure + self-diagnosis into one context,
+               re-seed narrower (bounded rounds, then an honest stop with the evidence)
+        ▼
+   5. GATE     the survivor goes through the EXISTING approval gate: diff, warnings, preflight,
+               verification-ledger lines, push → then P4 CI
+        ▼
+   6. LEDGER   record task signature, seeds, failing causes, survivor, and what the user did with it
+```
+
+Stages 2, 5 and 6 are anchored in code that exists today: the ledger (§5), the
+push gate with its reviewer warnings, and the verification ledger that stores
+evidence *against a revision* so a pass followed by another edit reads as
+**stale** rather than as proof. Stage 1, 3 and 4 are the unbuilt part.
+
+### 3.1 Typed failures are the whole point of §4
+
+`errorKind ∈ {static, build, test, intent, timeout, unknown}` — because "retry"
+and "refine" are different actions, and a fused failure context is only useful if
+each failure says *what kind of wrong* it was and *where*. A round that cannot
+cite what the previous round proved is a loop, not a refinement.
+
+### 3.2 The anti-gaming rule
+
+Probes assert **observable behaviour** — exit codes, produced artifacts, command
+output, and for P3 the assertions derived from the user's sentence. Never "the
+code looks right", and never a model's opinion of the diff. If a probe cannot be
+expressed as something a command decides, it is not a probe; it is a review, and
+it belongs in the gate's warnings where a human sees it.
+
+---
+
+## 4. Fusion, and when not to do it
+
+> **Do not build the fuser before the oracle.** The last Forge design leaned on a
+> consensus-fusion loop with no execution verifier behind it, which is a machine
+> for producing confident unaccountable patches — and it is exactly why that
+> version could not be maintained. Fusion is stage 3, not stage 1.
+
+When ≥2 candidates survive the same probe set:
+
+1. **Touch-set agreement.** Files edited by at least two thirds of survivors are
+   the consensus set; singletons are inspected as suspected drive-by edits.
+   Without execution, this heuristic is all you have — with P2 behind it, an
+   unproven singleton is simply dropped rather than argued about.
+2. **Region consensus**, adopted from the best-scoring survivor; divergent regions
+   are decided by **running both** against P2/P3, not by voting.
+3. **Synthesis fallback** (survivors solving different sub-goals): a final splice
+   is allowed, and the spliced result must re-run the full probe set before it is
+   trusted. Nothing enters the workspace unproven.
+
+Note what is left of the old "ensemble agreement dominates best-of-N" claim once
+the oracle is not instant: agreement is a *routing* signal (which survivor's
+region to try first), not a proof. The proof is still the command.
+
+---
+
+## 5. The ledger
+
+What exists: `lib/verification-ledger.ts` — evidence recorded per conversation
+against a **revision** of the workspace, with kinds (`typecheck`, `command`,
+`ci`), age, and staleness; consumed by the turn note, the push gate and the
+header chip. That is the primitive the Survivor Ledger would extend:
 
 ```ts
-interface ProbeManifest {
-  taskId: string;
-  provenance: "repo-tests" | "base-recording" | "inferred-intent" | "hybrid";
-  probes: Array<{
-    id: string;
-    kind: "build" | "boot" | "regression" | "intent" | "property";
-    // DOM/behavior assertion in a tiny declarative DSL, executed
-    // inside the sandboxed preview iframe by the bridge:
-    //   { "expect": "visible", "selector": "[data-testid='rows']",
-    //     "count": { "op": "lt", "value": 10 },
-    //     "after": { "action": "type", "selector": "input", "text": "ab" } }
-    assertion: Record<string, unknown>;
-    trust: number;            // 0..1 — repo 1.0, base-recording 0.8, inferred 0.6
-    timeoutMs: number;
-  }>;
-}
-
-interface CandidateVerdict {
-  seedIndex: number;
-  modelId: string;
-  furthestProbe: string;
-  passed: boolean;
-  failures: Array<{ probeId: string; errorKind: string; message: string; location?: string }>;
-  consoleNoise: number;       // warnings/errors emitted during run
-  diff: WorkspaceChange[];    // the candidate's patch, for fusion
-  latencyMs: number;
-}
-```
-
-Execution environment: the preview runtime we already shipped, pointed at a *scratch* workspace (base + candidate diff), with the bridge extended to answer probe assertions via postMessage (it already mirrors console and errors — the DSL runner is an incremental addition). Total added latency per candidate: build (~200ms) + boot + probes ≈ well under a second; K candidates run *concurrently* in separate iframes.
-
----
-
-## 4. The math — why this beats single-shot
-
-- **Pass-rate lift.** With independent per-attempt success `p`, best-of-K succeeds with `1−(1−p)^K`; at `p=0.45`, K=4 → **0.91**. Decorrelation (family + temperature + prior diversity) is what keeps attempts near-independent — and it's exactly what a paid single-model agent cannot buy.
-- **Consensus lift.** Fusion adopts regions agreed by a supermajority, which raises precision above the best survivor: if each survivor is right on a region with `q > 0.5`, a 3-of-4 consensus region is right with `P ≥ Σ C(4,k) q^k (1−q)^{4−k}` over `k≥3 ≈ 0.82` at `q=0.6` — better than the 0.6 best-sample rate on that region.
-- **Cost model.** On the InTab pool the marginal cost of K is ~0 (free models, daily caps spread across the pool — which InTab Learn already balances). The only real budgets are *latency* and *pool-capacity*, both handled by adaptive K and the escalation ladder. On a competitor's paid stack this same algorithm multiplies spend by K — which is why they can't follow.
-
----
-
-## 5. The Ledger — learning that compounds
-
-Every Forge run writes a **Survivor Ledger** entry (persisted, per-repo, alongside InTab Learn):
-
-```ts
-interface LedgerEntry {
-  taskSignature: string;       // files-touched fingerprint + intent class
-  k, rounds: number;
-  winner: { modelId: string; seedStrategy: string } | null;
-  failingCauses: string[];     // typed errorKinds seen before success
-  probeProvenance: string;
+interface LedgerEntry {          // proposal — not implemented
+  taskSignature: string;         // changed-file fingerprint + intent class
+  k: number; rounds: number;
+  survivor: string | null;       // for the transcript's sake, not for routing
+  failingCauses: string[];       // typed errorKinds seen before success
+  oracle: "companion" | "ci" | "static" | "none";
   outcome: "solved" | "fused" | "escalated" | "honest-stop";
   userVerdict?: "kept" | "regenerated" | "rejected-after-push";
 }
 ```
 
-Three compounding loops:
-
-1. **Routing (exists — InTab Learn):** `winner.modelId` and failure records sharpen the per-(model, turnKind) bandit; Forge's K-parallel runs generate far more learning signal per minute than the single-stream loop did.
-2. **Seeding (new):** for a repeat task signature (same repo area, similar intent), the Ledger biases seed priors toward past-winning strategies and away from failure patterns ("the last 3 attempts touching `payments/` failed on boot imports — raise P1 strictness, add import graph to context").
-3. **Probe reuse:** recorded base-behavior manifests are cached per (repo, commit) — later tasks on the same repo inherit a richer regression contract, making verification *stronger over time* at zero extra cost.
-
-The user-visible effect after a few sessions: the agent fails less on *their* repos, in *their* frameworks, with *their* conventions — an edge that is literally made of their own history and cannot be cloned by a competitor with a generic model.
+Two honest caveats. The router this data used to feed (the Learn bandit) is gone,
+so today the ledger's consumers are the prompt, the gate and the chip — a
+`taskSignature → seed prior` bias has no consumer until a router exists again.
+And `winner.modelId` is the kind of per-model scoring that made the retired router
+drift: prefer recording *what proved the change* over *who wrote it*.
 
 ---
 
-## 6. Integration plan on the current stack
+## 6. Staging, in dependency order
 
-| Phase | Work | Builds on |
-|---|---|---|
-| **F1 — Manifest & bridge DSL** | Probe Manifest type + declarative assertion runner inside the preview bridge (`preview-bridge.ts`, `preview-runtime.ts` scratch-workspace builds) | preview runtime ✅ |
-| **F2 — Seeder** | `forge/seeder.ts`: K candidates from pool families × temperature ladder × strategy priors; parallel `streamChat` calls (reuse hedged-race plumbing) | chat-runner ✅, intab-llm pool ✅ |
-| **F3 — PoB executor** | `forge/prove.ts`: run manifest per candidate in scratch iframes; typed verdicts; early-exit ordering | F1 |
-| **F4 — Fusion** | `forge/fuse.ts`: touch-set + region consensus, judge probes for disagreements | F3, workspace diff ✅ |
-| **F5 — Refinement ladder** | fused-failure re-seed with round caps + honest-stop surface | F2, F3 |
-| **F6 — Ledger** | `forge/ledger.ts` persistence + InTab Learn hookup + seeding bias | intab-learn ✅ |
-| **F7 — UX** | Forge panel: candidate strip (K attempts, probe badges), fusion explanation, honest-stop evidence | PreviewPane ✅ |
-
-The agent keeps its existing contract — the user still sees one answer and one approval gate. Forge is the machinery *behind* the curtain: what arrives for review is a probe-passing, consensus-fused patch, and the preview they watch live is running the survivor.
+| Phase | Work | Needs | Status |
+|---|---|---|---|
+| **F0 — Oracle** | One task class with a cheap, real verifier end to end: companion P1/P2 on a JS/TS repo, with typed verdicts and honest refusals | companion ✅, `command-policy` ✅, verification-plan ✅ | **the only prerequisite** |
+| **F1 — Candidate runner** | K trees (companion trees are capped at 3 today), one candidate per tree, run P0→P2, early exit, collect typed verdicts | F0, `materialize-plan` ✅ | not built |
+| **F2 — Seeder** | Model family × temperature ladder × strategy prior × file slice; parallel stream calls | F1 | not built |
+| **F3 — Refinement** | Fused typed-failure re-seed, round cap, honest stop | F1, F2 | not built |
+| **F4 — Fusion** | Touch-set + region consensus, head-to-head probes for divergence | F3 | not built |
+| **F5 — P3 intent probes** | The user's sentence → 2–3 runnable assertions; the missing half of "did what I asked" | F1, a small model | not built |
+| **F6 — Ledger** | Extend the verification ledger with seed attribution | F1 | not built |
 
 ---
 
-## 7. Name & positioning
+## 7. What Forge is not
 
-**InTab Forge** — *"proof-of-behavior solving."*
-
-Marketing line for the site: **"Other agents guess. Forge makes candidates prove they work — in your browser, before you ever see them."**
-
-Three bullet defensibility story:
-- **Free-model speculation** — 4 parallel attempts where others can't afford 1.
-- **Browser-native verification** — the oracle is local, instant, and private; no cloud sandbox, no LLM judge.
-- **A memory made of your own history** — routing, seeding, and probes all learn from every solve, per repo.
+- **It is not a reason to rebuild the preview.** Running the project's own
+  toolchain (T2/T3) is the direction; an in-page approximation of one is the
+  thing we already removed once.
+- **It is not a way to skip the gate.** The survivor arrives at the same
+  approval dialog as any other change, with the same preflight, the same
+  evidence audit, and now also the same cross-thread warnings when another agent
+  thread holds one of the paths.
+- **It is not honest without its refusals.** A run with no available oracle must
+  say so in those words. "K candidates, none verified" is a real outcome and the
+  one users most need to see.
+- **It is not for every task.** Where no command can decide the outcome, the
+  correct behaviour is the current one: one attempt, and a summary that does not
+  imply a check that never ran.

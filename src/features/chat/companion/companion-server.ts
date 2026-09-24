@@ -51,6 +51,13 @@ import {
   type CompanionRequest,
   type ExecOutcome,
 } from "./protocol.ts";
+import {
+  DEFAULT_CACHE_ENTRIES,
+  adoptCachedModules,
+  pruneDependencyCache,
+  promoteModules,
+  readLockfileKey,
+} from "./dependency-cache.ts";
 
 export interface CompanionHttpRequest {
   method: string;
@@ -81,6 +88,17 @@ export interface CompanionContext {
   trees: Map<string, TreeRecord>;
   /** How many trees to keep before evicting the oldest */
   maxTrees?: number;
+  /**
+   * Where promoted `node_modules` trees live, keyed by lockfile hash.
+   *
+   * Separate from `treesDir` on purpose: trees are disposable per conversation
+   * and evicted on a count, while this is the thing the count forced — the cache
+   * is what lets a second task on a repository skip the install the first one
+   * already paid for.
+   */
+  cacheDir: string;
+  /** How many cached dependency trees to keep */
+  maxCacheEntries: number;
 }
 
 export function createCompanionContext(options: {
@@ -88,12 +106,16 @@ export function createCompanionContext(options: {
   allowedOrigins: readonly string[];
   treesDir: string;
   maxTrees?: number;
+  cacheDir?: string;
+  maxCacheEntries?: number;
 }): CompanionContext {
   return {
     token: options.token,
     allowedOrigins: options.allowedOrigins,
     treesDir: options.treesDir,
     trees: new Map(),
+    cacheDir: options.cacheDir ?? path.join(options.treesDir, "..", "intab-companion-cache"),
+    maxCacheEntries: options.maxCacheEntries ?? DEFAULT_CACHE_ENTRIES,
     ...(options.maxTrees !== undefined ? { maxTrees: options.maxTrees } : {}),
   };
 }
@@ -123,12 +145,18 @@ function isAllowedCaller(origin: string | undefined, allowed: readonly string[])
   }
 }
 
-function json(status: number, payload: unknown, origin?: string): CompanionHttpResponse {
+function json(
+  status: number,
+  payload: unknown,
+  origin?: string,
+  allowPrivateNetwork = false
+): CompanionHttpResponse {
   return {
     status,
     headers: {
       "content-type": "application/json",
       ...(origin ? { "access-control-allow-origin": origin, vary: "origin" } : {}),
+      ...(origin && allowPrivateNetwork ? { "access-control-allow-private-network": "true" } : {}),
     },
     body: JSON.stringify(payload),
   };
@@ -149,15 +177,26 @@ export async function handleCompanionRequest(
   const path0 = request.path.split("?")[0] ?? request.path;
 
   if (method === "OPTIONS") {
+    const allowed = isAllowedCaller(origin, ctx.allowedOrigins);
     return {
       status: 204,
       headers: {
-        ...(isAllowedCaller(origin, ctx.allowedOrigins) && origin
-          ? { "access-control-allow-origin": origin, vary: "origin" }
-          : {}),
+        ...(allowed && origin ? { "access-control-allow-origin": origin, vary: "origin" } : {}),
         "access-control-allow-methods": "GET, POST, OPTIONS",
         "access-control-allow-headers": "content-type, x-companion-token",
         "access-control-max-age": "600",
+        //
+        // Private Network Access. A page served over HTTPS (the deployed app)
+        // asking for `http://127.0.0.1` is a request from a public address into
+        // a private one, and Chrome will not send it until a preflight comes
+        // back with this header. Without it the companion was reachable ONLY
+        // from the dev server on plain http, so the tier that can actually
+        // prove a change existed for nobody but the person running `vite`.
+        //
+        // Sent only to an origin that is already allowed: the header grants the
+        // transport, and the allowlist plus the pairing token still decide the
+        // answer, so a disallowed origin gets nothing from being told yes here.
+        ...(allowed ? { "access-control-allow-private-network": "true" } : {}),
       },
       body: "",
     };
@@ -167,11 +206,20 @@ export async function handleCompanionRequest(
   // companion here at all?" before it has anything to send. It answers with
   // the version so a probe can detect a stale install rather than use it.
   if (path0 === "/health" && method === "GET") {
-    return json(200, {
-      ok: true,
-      protocolVersion: COMPANION_PROTOCOL_VERSION,
-      capabilities: companionCapabilities(),
-    });
+    const allowed = isAllowedCaller(origin, ctx.allowedOrigins);
+    if (origin && !allowed) {
+      return json(403, { ok: false, error: "This origin may not drive the companion." });
+    }
+    return json(
+      200,
+      {
+        ok: true,
+        protocolVersion: COMPANION_PROTOCOL_VERSION,
+        capabilities: companionCapabilities(),
+      },
+      allowed && origin ? origin : undefined,
+      allowed
+    );
   }
 
   if (!isAllowedCaller(origin, ctx.allowedOrigins)) {
@@ -181,17 +229,17 @@ export async function handleCompanionRequest(
     return json(401, {
       ok: false,
       error: "The pairing token is missing or wrong. It is printed when the companion starts.",
-    }, origin);
+    }, origin, true);
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(request.body || "{}");
   } catch {
-    return json(400, { ok: false, error: "Body must be JSON." }, origin);
+    return json(400, { ok: false, error: "Body must be JSON." }, origin, true);
   }
   if (!isCompanionRequest(parsed)) {
-    return json(400, { ok: false, error: "Not a request this protocol understands." }, origin);
+    return json(400, { ok: false, error: "Not a request this protocol understands." }, origin, true);
   }
   const message: CompanionRequest = parsed;
 
@@ -201,9 +249,9 @@ export async function handleCompanionRequest(
         type: "PROTOCOL_MISMATCH",
         protocolVersion: COMPANION_PROTOCOL_VERSION,
         expected: message.protocolVersion,
-      }, origin);
+      }, origin, true);
     }
-    return json(200, { type: "HELLO_ACK", protocolVersion: COMPANION_PROTOCOL_VERSION, capabilities: companionCapabilities() }, origin);
+    return json(200, { type: "HELLO_ACK", protocolVersion: COMPANION_PROTOCOL_VERSION, capabilities: companionCapabilities() }, origin, true);
   }
 
   if (message.type === "RELEASE") {
@@ -212,7 +260,7 @@ export async function handleCompanionRequest(
       ctx.trees.delete(message.conversationId);
       await rm(tree.root, { recursive: true, force: true }).catch(() => {});
     }
-    return json(200, { type: "RELEASED", id: message.id }, origin);
+    return json(200, { type: "RELEASED", id: message.id }, origin, true);
   }
 
   if (message.type === "MATERIALIZE") {
@@ -222,7 +270,7 @@ export async function handleCompanionRequest(
       { writes: message.writes, deletes: message.deletes ?? [] },
       message.repo
     );
-    return json(200, { type: "MATERIALIZED", id: message.id, ...result }, origin);
+    return json(200, { type: "MATERIALIZED", id: message.id, ...result }, origin, true);
   }
 
   // EXEC: refresh the tree from the change set first, so a command never runs
@@ -245,7 +293,19 @@ export async function handleCompanionRequest(
         ]
       : [],
   });
-  return json(200, { type: "EXEC_RESULT", id: message.id, outcome }, origin);
+
+  // Capture whatever install the command just did, so the NEXT task on this
+  // lockfile skips it. Observed rather than predicted: the companion never has
+  // to know which package manager ran or what the project's install step is,
+  // which is what makes this work for npm, pnpm, yarn and bun alike.
+  const promote = await promoteModules({
+    cacheRoot: ctx.cacheDir,
+    treeRoot: tree.root,
+    key: await readLockfileKey(tree.root),
+  });
+  if (promote.changed) void pruneDependencyCache(ctx.cacheDir, ctx.maxCacheEntries);
+
+  return json(200, { type: "EXEC_RESULT", id: message.id, outcome }, origin, true);
 }
 
 /**
@@ -300,6 +360,16 @@ async function materializeForConversation(
     deleted = result.deleted;
     bytes = result.bytes;
   }
+
+  // Dependencies before the command, not after: the whole saving is that the
+  // project's install does not have to run at all. Keyed on the lockfile the
+  // tree currently holds, and skipped when the tree already has a `node_modules`
+  // of its own, so a real install always outranks a cached copy of one.
+  await adoptCachedModules({
+    cacheRoot: ctx.cacheDir,
+    treeRoot: root,
+    key: await readLockfileKey(root),
+  });
 
   record.touchedAt = Date.now();
   return {
@@ -465,10 +535,18 @@ if (invokedDirectly) {
         "",
         `  Companion listening on ${running.origin} (loopback only)`,
         "",
-        "  Pairing token — paste it into the app and restart the dev server:",
+        "  Pair with it in the app:  AI Chat → Chat settings → Companion",
+        "    origin:  " + running.origin,
+        "    token:   " + token,
+        "",
+        "  (Or, for a dev server, export these and restart it:)",
         "",
         `    VITE_COMPANION_ORIGIN=${running.origin}`,
         `    VITE_COMPANION_TOKEN=${token}`,
+        "",
+        "  To reach this companion from the DEPLOYED app (an HTTPS page), add its",
+        "  origin to COMPANION_APP_ORIGINS — the app sends a private-network",
+        "  preflight, and an origin that is not listed is refused.",
         "",
         "  Commands run in a throwaway tree per conversation, never in your own",
         "  checkout. Dependencies install INSIDE that tree, so a first run copies",

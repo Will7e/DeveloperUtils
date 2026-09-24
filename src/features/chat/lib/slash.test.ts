@@ -56,14 +56,14 @@ describe("resolveSlashInput", () => {
   });
 
   it("refuses to guess between several prefix matches", () => {
-    // /s could be /stop, /system, /skills or /settings
+    // /s could be /stop, /system or /settings
     expect(resolveSlashInput("/s", CHAT_COMMANDS)).toEqual({ kind: "unknown", token: "s" });
   });
 
   it("resolves keywords/aliases", () => {
-    expect(resolveSlashInput("/ctx", CHAT_COMMANDS)).toEqual({
+    expect(resolveSlashInput("/cancel", CHAT_COMMANDS)).toEqual({
       kind: "command",
-      id: "context",
+      id: "stop",
       arg: "",
     });
     expect(resolveSlashInput("/regenerate", CHAT_COMMANDS)).toEqual({

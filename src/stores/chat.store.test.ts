@@ -187,6 +187,97 @@ describe("createConversation — what a new chat inherits", () => {
   });
 });
 
+describe("duplicateConversation — a fork of the transcript, not of the turn", () => {
+  /** The source, carrying every piece of in-flight state a copy must not take */
+  function sourceWithLiveTurn(): string {
+    const id = store().createConversation("model-a", { repo: WEB });
+    store().addMessage(id, { role: "user", content: "do the thing" });
+    const withoutTurnState = store().conversations.find((c) => c.id === id)!;
+    useChatStore.setState({
+      conversations: [
+        {
+          ...withoutTurnState,
+          // A workspace, so the summary below is a real count and not zero
+          pendingChanges: 3,
+          plan: {
+            steps: [{ id: "s1", text: "edit the file", status: "active" }],
+            updatedAt: 1,
+            complete: false,
+          },
+          pendingTurn: { startedAt: 2 },
+          pendingQuestion: {
+            header: "Which?",
+            question: "Pick one",
+            options: [{ label: "a" }],
+            callId: "call-1",
+            askedAt: 3,
+          },
+          queued: [{ id: "q1", text: "and also", queuedAt: 4 }],
+          // Configuration and history: these DO belong to the chat
+          model: "model-a",
+          mode: "plan",
+          systemPrompt: "be terse",
+          summary: { text: "earlier", coversCount: 2, createdAt: 5, freedTokens: 120 },
+        },
+        ...store().conversations.filter((c) => c.id !== id),
+      ],
+    });
+    return id;
+  }
+
+  it("carries no unfinished-turn state into the copy", () => {
+    // Each of these is user-visible on the copy and each one is false there: a
+    // resume prompt for the source's turn, a question card whose answer would
+    // resume a tool loop the copy never ran, queued messages waiting for a
+    // round boundary the copy cannot reach, and a live plan it is not running.
+    const id = sourceWithLiveTurn();
+    const copyId = store().duplicateConversation(id)!;
+    const copy = store().conversations.find((c) => c.id === copyId)!;
+
+    expect(copy.pendingTurn).toBeUndefined();
+    expect(copy.pendingQuestion).toBeUndefined();
+    expect(copy.queued).toBeUndefined();
+    expect(copy.plan).toBeUndefined();
+
+    // The source keeps all of it: duplicating must not disturb the original.
+    const source = store().conversations.find((c) => c.id === id)!;
+    expect(source.pendingTurn).toEqual({ startedAt: 2 });
+    expect(source.pendingQuestion?.callId).toBe("call-1");
+    expect(source.queued).toHaveLength(1);
+    expect(source.plan?.steps).toHaveLength(1);
+  });
+
+  it("does not claim the source's changed-file count", () => {
+    // `pendingChanges` summarises a workspace the copy does not have yet: its
+    // id keys nothing in `workspaces`. Inheriting the count put a "3 changed"
+    // badge on a chat with no changes, and clicking it opened an empty pane.
+    const id = sourceWithLiveTurn();
+    const copyId = store().duplicateConversation(id)!;
+
+    expect(store().conversations.find((c) => c.id === copyId)?.pendingChanges).toBeUndefined();
+    expect(store().conversations.find((c) => c.id === id)?.pendingChanges).toBe(3);
+    expect(store().workspaces[copyId]).toBeUndefined();
+  });
+
+  it("keeps what belongs to the chat and gives the copy its own messages", () => {
+    const id = sourceWithLiveTurn();
+    const copyId = store().duplicateConversation(id)!;
+    const copy = store().conversations.find((c) => c.id === copyId)!;
+
+    expect(copy.title).toMatch(/\(copy\)$/);
+    expect(copy.repoContext).toEqual(WEB);
+    expect(copy.mode).toBe("plan");
+    expect(copy.systemPrompt).toBe("be terse");
+    expect(copy.summary).toEqual({ text: "earlier", coversCount: 2, createdAt: 5, freedTokens: 120 });
+    expect(copy.messages).toHaveLength(1);
+    // Fresh ids, so a reply or an edit in one chat cannot address a message in
+    // the other.
+    expect(copy.messages[0]!.id).not.toBe(
+      store().conversations.find((c) => c.id === id)!.messages[0]!.id
+    );
+  });
+});
+
 function store() {
   return useChatStore.getState();
 }
@@ -555,5 +646,85 @@ describe("a repository switch clears the job that was left behind", () => {
     // …and it is the REPOSITORY, not just "attached": a switch gives a
     // different stamp, which is the whole point.
     expect(expected).toContain("acme/web@main");
+  });
+});
+
+// ============================================================
+// Approval Gates — and the "run tools without asking" opt-out
+// ============================================================
+// Two tools can act outside this machine: http_write (a request that changes
+// someone else's system) and push_changes (a commit and pull request). Both
+// block on a dialog by DEFAULT, and both resolve immediately when the user
+// has turned on settings.autoApproveTools. These tests pin both directions,
+// because the failure that matters is a gate that silently stops gating.
+describe("approval gates", () => {
+  const pendingHttp = {
+    conversationId: "c1",
+    createdAt: 1,
+    method: "POST",
+    url: "https://api.example.com/v1/tickets",
+    headers: {},
+  };
+  const pendingPush = {
+    conversationId: "c1",
+    createdAt: 1,
+    branchName: "agent/x",
+    baseBranch: "main",
+    commitMessage: "fix: x",
+    prTitle: "fix: x",
+    changes: [],
+    stats: { files: 0, additions: 0, deletions: 0 },
+  };
+
+  it("parks an external write on a dialog by default", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const decision = store().requestHttpApproval(pendingHttp);
+    expect(store().pendingHttp).not.toBeNull();
+    store().resolveHttpApproval(true);
+    await expect(decision).resolves.toMatchObject({ approved: true });
+    expect(store().pendingHttp).toBeNull();
+  });
+
+  it("sends nothing and mounts no dialog when the request is declined", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const decision = store().requestHttpApproval(pendingHttp);
+    store().resolveHttpApproval(false, "not that record");
+    await expect(decision).resolves.toMatchObject({ approved: false, note: "not that record" });
+  });
+
+  it("auto-approves an external write with no dialog when the flag is on", async () => {
+    store().updateSettings({ autoApproveTools: true });
+    const decision = await store().requestHttpApproval(pendingHttp);
+    // `auto` is what lets the tool result tell the model nobody was asked.
+    expect(decision).toEqual({ approved: true, auto: true });
+    expect(store().pendingHttp).toBeNull();
+    expect(store().httpGate).toBeNull();
+  });
+
+  it("parks a push on a dialog by default", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const decision = store().requestPushApproval(pendingPush);
+    expect(store().pendingPush).not.toBeNull();
+    store().resolvePushApproval(true, undefined, false, ["docs/x.md"]);
+    await expect(decision).resolves.toMatchObject({
+      approved: true,
+      openPr: false,
+      excludePaths: ["docs/x.md"],
+    });
+  });
+
+  it("auto-approves a push with the dialog's own defaults when the flag is on", async () => {
+    store().updateSettings({ autoApproveTools: true });
+    const decision = await store().requestPushApproval(pendingPush);
+    expect(decision).toEqual({ approved: true, openPr: true, auto: true });
+    expect(store().pendingPush).toBeNull();
+    expect(store().pushGate).toBeNull();
+  });
+
+  it("clearing a parked gate resolves it as a refusal rather than hanging", async () => {
+    store().updateSettings({ autoApproveTools: false });
+    const decision = store().requestPushApproval(pendingPush);
+    store().clearPendingPush();
+    await expect(decision).resolves.toMatchObject({ approved: false });
   });
 });

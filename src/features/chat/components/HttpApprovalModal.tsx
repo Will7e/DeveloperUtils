@@ -24,6 +24,7 @@ import React from "react";
 import { Check, Globe, TriangleAlert, X } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
 import { redactHeaders } from "../services/app-actions";
+import { useModalDialog } from "./useModalDialog";
 
 export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
   const pendingHttp = useChatStore((s) => s.pendingHttp);
@@ -32,6 +33,11 @@ export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
 
   const [note, setNote] = React.useState("");
   const [showNote, setShowNote] = React.useState(false);
+  // Enter dismisses the same way Reject does (a refusal, never an approval), and
+  // the panel keeps Tab inside the dialog: the agent's http_write call is blocked
+  // on this answer, so a gate the keyboard cannot leave is a turn that cannot be
+  // unblocked. Declared before the early return so the hook order is stable.
+  const panelRef = useModalDialog<HTMLDivElement>({ onDismiss: clearPendingHttp });
 
   const pendingCreatedAt = pendingHttp?.createdAt;
   React.useEffect(() => {
@@ -67,7 +73,7 @@ export const HttpApprovalModal = React.memo(function HttpApprovalModal() {
 
   return (
     <div className="chat-modal-overlay" role="dialog" aria-modal="true" aria-label="Approve external request">
-      <div className="chat-approval-panel">
+      <div className="chat-approval-panel" ref={panelRef} tabIndex={-1}>
         <div className="chat-approval-header">
           <Globe className="h-4 w-4 chat-approval-shield" aria-hidden="true" />
           <div>

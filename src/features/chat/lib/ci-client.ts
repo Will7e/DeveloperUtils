@@ -19,6 +19,7 @@
 // ============================================================
 
 import { githubFetch, GitHubError } from "./github-client";
+import { GITHUB_API_BASE_URL } from "../constants";
 import {
   CI_POLL_INTERVAL_MS,
   CI_POLL_MAX_INTERVAL_MS,
@@ -153,6 +154,38 @@ export async function findDispatchedRun(
   return null;
 }
 
+/**
+ * The most recent runs of a branch (or of the whole repository).
+ *
+ * `verify_with_ci` finds the run IT dispatched, which is the right rule for a
+ * verification. A read that only wants to explain a red badge — "what broke on
+ * my branch" — needs the opposite: the newest run there is, whoever started
+ * it. Newest-first is the API's own order, so this does not sort.
+ */
+export async function listWorkflowRuns(request: {
+  token: string;
+  owner: string;
+  repo: string;
+  branch?: string;
+  workflowPath?: string;
+  perPage?: number;
+}): Promise<CiRun[]> {
+  const params = new URLSearchParams({
+    per_page: String(Math.min(Math.max(request.perPage ?? 10, 1), 50)),
+  });
+  if (request.branch) params.set("branch", request.branch);
+  const path = request.workflowPath
+    ? `/repos/${request.owner}/${request.repo}/actions/workflows/${workflowIdFromPath(request.workflowPath)}/runs?${params}`
+    : `/repos/${request.owner}/${request.repo}/actions/runs?${params}`;
+  const res = await githubFetch(path, request.token);
+  const payload = (await res.json()) as { workflow_runs?: unknown };
+  const rows = Array.isArray(payload.workflow_runs) ? payload.workflow_runs : [];
+  return rows.flatMap((raw) => {
+    const run = normalizeRun(raw);
+    return run ? [run] : [];
+  });
+}
+
 /** One run's current state. */
 export async function fetchRun(
   request: { token: string; owner: string; repo: string; runId: number }
@@ -182,6 +215,177 @@ function normalizeRun(raw: unknown): CiRun | null {
 export type CiWaitResult =
   | { ok: true; run: CiRun; verdict: CiVerdict }
   | { ok: false; error: string };
+
+/** Which job and step broke, and the first failures from its log. */
+export interface CiFailureDetail {
+  /** Job name as GitHub labels it, e.g. "build (20.x)" */
+  job: string;
+  /** The failing step's name, when the job reports one */
+  step: string | null;
+  /** Deduplicated, timestamp-stripped failure lines, already capped */
+  lines: string[];
+  /**
+   * Set when the log could not be read, naming why. The job and step are still
+   * reported: "`test` failed at step `npm test`" is already most of what the
+   * agent needs in order to act, and it must survive the log fetch failing.
+   */
+  logUnavailable?: string;
+}
+
+/** Cap on the log body we are willing to read (the tail is what matters) */
+const CI_LOG_MAX_CHARS = 200_000;
+/** How many failure lines to keep — the ledger caps at 20 anyway */
+const CI_FAILURE_LINE_CAP = 16;
+
+/** ANSI colour and control sequences, which make a log unreadable to a model */
+// eslint-disable-next-line no-control-regex
+const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
+
+/** `2026-09-24T01:02:03.4567890Z ` — GitHub prefixes every log line with one */
+const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s?/;
+
+const ERROR_MARKERS =
+  /(##\[error\]|npm ERR!|error:|ERROR|Error\b|FAIL|failed|assertion|panic|Traceback|exited with code|cannot find|no such file)/;
+
+/**
+ * The failing job's own output — what the verdict could not carry.
+ *
+ * `verify_with_ci` reported a conclusion and a URL, so a failed run told the
+ * agent THAT it broke and never WHERE. The consequence was concrete: the agent
+ * could not fix what CI reported without the user opening the run and pasting
+ * the log back into the chat, which made the tier useless at exactly the moment
+ * it mattered. This reads the failure instead of linking to it.
+ *
+ * Never throws. A log that cannot be read degrades to the job and step names,
+ * because that is still an instruction and an exception is not.
+ */
+export async function fetchCiFailure(
+  request: { token: string; owner: string; repo: string; runId: number },
+  deps: CiClientDeps = {}
+): Promise<CiFailureDetail | null> {
+  const doFetch = deps.fetch ?? fetch;
+  // Assigned on every path that survives the catch, so there is no initial
+  // `null` that a reader has to check against a later reassignment.
+  let job: CiJob | null;
+  try {
+    const res = await githubFetch(
+      `/repos/${request.owner}/${request.repo}/actions/runs/${request.runId}/jobs?per_page=50`,
+      request.token
+    );
+    const payload = (await res.json()) as { jobs?: unknown[] };
+    job = firstFailedJob(payload.jobs ?? []);
+  } catch {
+    return null;
+  }
+  if (!job) return null;
+
+  const failingStep =
+    job.steps.find((s) => s.conclusion === "failure" || s.conclusion === "timed_out")?.name ?? null;
+  const base: CiFailureDetail = { job: job.name, step: failingStep, lines: [] };
+
+  try {
+    // The jobs endpoint answers 302 to a short-lived signed URL; fetch follows
+    // it, and that URL carries its own authorization so the header is not what
+    // authorizes the download.
+    const res = await doFetch(
+      `${GITHUB_API_BASE_URL}/repos/${request.owner}/${request.repo}/actions/jobs/${job.id}/logs`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${request.token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        ...(deps.signal ? { signal: deps.signal } : {}),
+      }
+    );
+    if (!res.ok) {
+      return { ...base, logUnavailable: `GitHub answered HTTP ${res.status} for the job log.` };
+    }
+    const text = (await res.text()).slice(-CI_LOG_MAX_CHARS);
+    return { ...base, lines: extractFailureLines(text) };
+  } catch (err) {
+    if (deps.signal?.aborted) return { ...base, logUnavailable: "Stopped by the user before the log was read." };
+    return {
+      ...base,
+      logUnavailable: `The job log could not be read: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/** One job of a run, as far as a failure report needs to know it */
+type CiJob = {
+  id: number;
+  name: string;
+  conclusion: string | null;
+  steps: Array<{ name: string; conclusion: string | null }>;
+};
+
+function firstFailedJob(raw: unknown[]): CiJob | null {
+  const failed: CiJob[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const j = entry as Record<string, unknown>;
+    if (typeof j.id !== "number") continue;
+    const conclusion = typeof j.conclusion === "string" ? j.conclusion : null;
+    if (conclusion !== "failure" && conclusion !== "timed_out") continue;
+    const steps = Array.isArray(j.steps)
+      ? (j.steps as unknown[]).flatMap((s) => {
+          if (typeof s !== "object" || s === null) return [];
+          const step = s as Record<string, unknown>;
+          return [
+            {
+              name: typeof step.name === "string" ? step.name : "(unnamed step)",
+              conclusion: typeof step.conclusion === "string" ? step.conclusion : null,
+            },
+          ];
+        })
+      : [];
+    failed.push({
+      id: j.id,
+      name: typeof j.name === "string" ? j.name : `job ${j.id}`,
+      conclusion,
+      steps,
+    });
+  }
+  // A hard failure is more useful than a timeout, and the first of either is
+  // usually the upstream cause rather than a job that failed because of it.
+  return failed.find((j) => j.conclusion === "failure") ?? failed[0] ?? null;
+}
+
+/**
+ * The lines that explain the failure, not the last N lines of a log.
+ *
+ * GitHub's log for a failed step is mostly install noise, so a plain tail is
+ * often "added 412 packages" while the assertion that failed sits forty lines
+ * above. Markers pick the real errors out; if nothing matches, the tail is the
+ * fallback, and the caller is told what it got rather than being handed an
+ * empty list that reads as "no errors found".
+ */
+export function extractFailureLines(text: string): string[] {
+  const cleaned = text
+    .replace(ANSI, "")
+    .split("\n")
+    .map((line) => line.replace(LOG_TIMESTAMP, "").replace(/^##\[(error|warning|group|endgroup|section)\]/, "").trimEnd())
+    .filter((line) => line.trim().length > 0);
+
+  const seen = new Set<string>();
+  const picked: string[] = [];
+  for (const line of cleaned) {
+    if (!ERROR_MARKERS.test(line)) continue;
+    // GitHub repeats the same error once per matrix leg and once in the
+    // summary; the model needs it once.
+    const key = line.trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(key.length > 400 ? `${key.slice(0, 400)}…` : key);
+    if (picked.length >= CI_FAILURE_LINE_CAP) break;
+  }
+  if (picked.length > 0) return picked;
+
+  const tail = cleaned.slice(-8).filter((line) => !seen.has(line));
+  return tail.map((line) => (line.length > 400 ? `${line.slice(0, 400)}…` : line));
+}
+
 
 /**
  * Wait for the dispatched run to finish, backing off as it goes.

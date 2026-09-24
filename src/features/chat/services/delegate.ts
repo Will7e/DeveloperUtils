@@ -30,7 +30,12 @@
 // change set unchecked.
 
 import { TOOL_REGISTRY, type AgentToolMeta } from "../lib/tool-registry";
-import { getCachedModelCatalog } from "../lib/model-catalog";
+import { getCachedModelCatalog, getCompetenceIndex } from "../lib/model-catalog";
+import {
+  competenceFor,
+  competenceScore,
+  type CompetenceIndex,
+} from "../lib/model-benchmarks";
 import { modelSupportsTools } from "../lib/model-state";
 import type {
   CompleteChatWithToolsParams,
@@ -117,8 +122,16 @@ export interface ResearchModelChoice {
 
 /**
  * Picks the model a helper runs on. Preference order:
- *   1. the cheapest tool-capable FREE model the live catalog reports;
+ *   1. a tool-capable FREE model the live catalog reports;
  *   2. the conversation's own model (correct, just more expensive).
+ *
+ * The free tier is no longer ordered by context window alone. That was a proxy:
+ * a big window says a model can HOLD a repository, not that it can read one
+ * usefully. Where the publisher has measured the helper's job — driving a
+ * read-only tool loop over a repo, which is what the agentic index scores — the
+ * highest measured score wins, with context window and then id as the
+ * deterministic tiebreak. On a cold index nothing changes: the window ordering
+ * stands, so the same catalog still picks the same helper every time.
  *
  * A cold catalog (no metadata yet) falls through to the conversation's
  * model rather than guessing at a slug: a routing guess that 404s costs
@@ -127,19 +140,30 @@ export interface ResearchModelChoice {
 export function pickResearchModel(
   conversationModel: string,
   /** Catalog override (tests); defaults to the live cached catalog */
-  catalog: ModelInfo[] = getCachedModelCatalog() ?? []
+  catalog: ModelInfo[] = getCachedModelCatalog() ?? [],
+  /** Competence override (tests); defaults to the live cached index */
+  competence: CompetenceIndex = getCompetenceIndex()
 ): ResearchModelChoice {
   const free = catalog
     .filter((m) => m.isFree && m.id !== conversationModel && modelSupportsTools(m))
-    // Prefer a large window among the free tier, then a stable id order
-    // so the same task on the same catalog picks the same helper.
-    .sort(
-      (a, b) =>
+    .sort((a, b) => {
+      const scoreA = competenceScore(competenceFor(competence, a.id), "agentic") ?? -1;
+      const scoreB = competenceScore(competenceFor(competence, b.id), "agentic") ?? -1;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      return (
         (b.contextLength ?? 0) - (a.contextLength ?? 0) || a.id.localeCompare(b.id)
-    );
+      );
+    });
   const pick = free[0];
   if (pick) {
-    return { modelId: pick.id, reason: `free tool-capable model (${pick.name})` };
+    const measured = competenceScore(competenceFor(competence, pick.id), "agentic");
+    return {
+      modelId: pick.id,
+      reason:
+        measured !== undefined
+          ? `free tool-capable model, highest measured agentic index (${pick.name}, ${measured})`
+          : `free tool-capable model (${pick.name})`,
+    };
   }
   return { modelId: conversationModel, reason: "conversation model (no free tool-capable model known)" };
 }

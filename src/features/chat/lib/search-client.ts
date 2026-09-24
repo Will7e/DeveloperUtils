@@ -27,6 +27,16 @@ export interface SearchSuccess {
   results: SearchResult[];
 }
 
+/**
+ * Availability is LEARNED here, not assumed (lib/availability.ts).
+ *
+ * A search that just failed because no provider is configured is the most
+ * reliable probe there is, and the next turn's note can then tell the model the
+ * consequence before it wastes a round discovering it: ask for the URL instead
+ * of inventing one. A search that worked says the opposite.
+ */
+import { noteCapability } from "./availability";
+
 export interface SearchFailure {
   ok: false;
   error: string;
@@ -111,6 +121,7 @@ export async function searchWeb(
   }
 
   if (res.status === 503 && body.code === "SEARCH_NOT_CONFIGURED") {
+    noteCapability("webSearch", "down");
     return { ok: false, error: setupMessage(body), setupRequired: true };
   }
 
@@ -124,6 +135,7 @@ export async function searchWeb(
     };
   }
 
+  noteCapability("webSearch", "up");
   return {
     ok: true,
     provider: body.provider ?? "unknown",

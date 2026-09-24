@@ -18,6 +18,7 @@ import {
   resolveModelInfo,
   sendUserMessage,
   stopChatStream,
+  ensureCompetenceIndex,
   ensureModelCatalog,
   resumeInterruptedTurn,
   commitPartialReply,
@@ -25,10 +26,12 @@ import {
 import { activeBindingIdOf, getConversationContext, composeSystemPrompt } from "./context/engine";
 import { buildEffectiveSystemPrompt } from "./lib/skills";
 import { CHAT_COMMANDS, CHAT_COMMAND_BY_ID, runCommandById } from "./lib/commands";
+import { conversationStatus, type ConversationStatus } from "./lib/conversation-status";
 import { resolveSlashInput } from "./lib/slash";
 import { useAppStore } from "@/stores/app.store";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatHeader } from "./components/ChatHeader";
+import { downloadConversation } from "./services/export-conversation";
 import type { RepoSelection } from "./components/RepoPicker";
 import { planRepoPick, type RepoPickIntent } from "./lib/repo-routing";
 import { MessageList } from "./components/MessageList";
@@ -36,14 +39,19 @@ import { Composer } from "./components/Composer";
 import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
 import { HttpApprovalModal } from "./components/HttpApprovalModal";
+import { useSkillActivity } from "./lib/skill-activity";
 import { resolveMentionContext } from "./services/mention-context";
 import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
+import { ActivityRail } from "./components/ActivityRail";
+import { ChangesSheet } from "./components/ChangesSheet";
+import { useNarrowLayout } from "./components/useNarrowLayout";
 import { ChangesPane } from "./components/ChangesPane";
 import { collectChangeSet } from "./lib/change-set";
 import { modelSupportsImages } from "./services/chat-runner";
 import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
+import { installDebugForward } from "./session/debug-forward";
 import { isTurnUnrecoverable } from "./session/turn-engine";
 import { availableEfforts, modelSupportsTools } from "./lib/model-state";
 import { resolveToolSurface } from "./lib/tool-profiles";
@@ -66,6 +74,12 @@ export function ChatPage() {
   const streamingConversationId = useChatStore((s) => s.streamingConversationId);
   const settingsOpen = useChatStore((s) => s.settingsOpen);
   const settingsTab = useChatStore((s) => s.settingsTab);
+  // Inputs the sidebar's per-thread glyph needs beyond the conversation list
+  // itself: the stream's owner, a resume in flight, the "run checks" owner, and
+  // the seen-stamps that decide what counts as unread.
+  const reconnecting = useChatStore((s) => s.reconnecting);
+  const lastSeenAt = useChatStore((s) => s.lastSeenAt);
+  const checkRun = useChatStore((s) => s.checkRun);
 
   const activeConversation = useChatStore(selectActiveConversation);
 
@@ -74,9 +88,61 @@ export function ChatPage() {
   // command helpers, which read it during render.)
   const isStreamingHere = isStreaming && streamingConversationId === activeConversationId;
 
+  /**
+   * What every thread in the list is doing, keyed by id (lib/conversation-status).
+   *
+   * The sidebar draws one glyph per row and rolls a repository's threads up into
+   * its header, so the inputs are all store state — never local component state,
+   * or two panes would disagree about the same thread. `statuses` is required by
+   * ChatSidebarProps; computing it here is what makes that prop real rather than
+   * a type error.
+   */
+  const conversationStatuses = useMemo(() => {
+    const out: Record<string, ConversationStatus> = {};
+    for (const conversation of conversations) {
+      out[conversation.id] = conversationStatus({
+        conversation,
+        streamingConversationId,
+        reconnecting,
+        checksRunningFor: checkRun?.conversationId ?? null,
+        isActive: conversation.id === activeConversationId,
+        lastSeenAt: lastSeenAt[conversation.id],
+      });
+    }
+    return out;
+  }, [
+    conversations,
+    streamingConversationId,
+    reconnecting,
+    checkRun,
+    activeConversationId,
+    lastSeenAt,
+  ]);
+
+  // A thread you are looking at is a thread you have read.
+  //
+  // `conversationStatus` never calls the ACTIVE row unread, but the stamp still
+  // has to move, or switching away from a chat you just watched finish would
+  // accuse you of missing it. Stamped only once the thread is at rest — a stamp
+  // mid-turn would keep moving the finish line the dot is measured from — and
+  // only through the store's guarded write, which makes a repeat call free.
+  const activeStatus = activeConversationId
+    ? conversationStatuses[activeConversationId]
+    : undefined;
+  useEffect(() => {
+    if (!activeConversationId || activeStatus?.kind === "running" || activeStatus?.kind === "waiting") {
+      return;
+    }
+    useChatStore.getState().markConversationSeen(activeConversationId);
+  }, [activeConversationId, activeStatus]);
+
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Below the drawer breakpoint there is no room for two readable panes, so the
+  // change set becomes a sheet. See components/useNarrowLayout.ts for why this
+  // cannot be a stylesheet rule.
+  const narrow = useNarrowLayout();
 
   // ── Per-conversation composer state ──
   // A draft belongs to the chat it was typed in, so it is keyed by
@@ -90,6 +156,15 @@ export function ChatPage() {
   const setComposerDraft = useChatStore((s) => s.setComposerDraft);
   const setComposerImages = useChatStore((s) => s.setComposerImages);
   const composerId = activeConversationId ?? "";
+  // What the last prepared turn loaded from skill triggers, for the header's
+  // skills card (lib/skill-activity records it in services/turn-prep).
+  const skillActivity = useSkillActivity(activeConversationId);
+  const alwaysOnSkillNames = (settings.skills ?? [])
+    .filter((s) => s.enabled)
+    .map((s) => s.name);
+  const autoSkillCount = (settings.skills ?? []).filter(
+    (s) => !s.enabled && s.content.trim()
+  ).length;
   const draft = composerDrafts[composerId]?.draft ?? "";
   const pendingImages = composerDrafts[composerId]?.images ?? [];
   // The composer's own call sites keep React's setter shape (a value, or a
@@ -139,6 +214,12 @@ export function ChatPage() {
       })
       .then((list) => {
         if (!cancelled && list.length > 0) setModels(list);
+        // Published competence, fetched after the catalog because the join needs
+        // it: the index aliases each model's `canonical_slug`, which only exists
+        // once the catalog is in memory. Fired here rather than in the turn path
+        // so the escalation picker has measurements from the first turn instead
+        // of falling back to the price heuristic for the session's first swap.
+        void ensureCompetenceIndex(apiKey);
       })
       .catch(() => {
         /* curated fallbacks remain in place */
@@ -207,6 +288,23 @@ export function ChatPage() {
     return useChatStore.persist.onFinishHydration(resume);
   }, []);
 
+  // A cold start over thirty old chats must not read as thirty alerts. The
+  // per-thread glyphs call "unread" only for activity AFTER you arrived, so
+  // every thread with no stamp yet is stamped now, once, when the list mounts
+  // (store.seedConversationSeen). Without this call the unread branch could
+  // never fire for a thread you had not already selected this session.
+  useEffect(() => {
+    const seed = () => useChatStore.getState().seedConversationSeen();
+    if (useChatStore.persist.hasHydrated()) seed();
+    return useChatStore.persist.onFinishHydration(seed);
+  }, []);
+
+  // The turn log and the scorecard used to be two commands (/log,
+  // /scorecard) that printed only when someone thought to ask. They print
+  // themselves now, on the failures they describe (session/debug-forward),
+  // so the report is on screen-adjacent the moment the turn loses work.
+  useEffect(() => installDebugForward(), []);
+
   // Session hardening, once per mount:
   //  - pre-connect the session host so the first send skips the
   //    handshake (and reloads re-attach a beat sooner),
@@ -268,13 +366,16 @@ export function ChatPage() {
     };
   }, []);
 
-  // Global shortcut: ⌘⇧N (or Ctrl+Shift+N) starts a new chat,
-  // matching the sidebar button's tooltip.
+  // Global shortcut: ⌘⇧N (or Ctrl+Shift+N) starts a new chat, matching the
+  // sidebar's "New chat" row — including the part that row is FOR: a chat with
+  // no repository. Inheriting the active thread's repo here would make the
+  // keyboard and the click two different actions with one name.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        useChatStore.getState().createConversation(settings.defaultModel);
+        useChatStore.getState().createConversation(settings.defaultModel, { repo: null });
+        setSidebarOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -363,8 +464,8 @@ export function ChatPage() {
         models,
         isStreaming: isStreamingHere,
       });
-      // Commands may hand the composer a draft (/help reopens the
-      // menu); otherwise the input is cleared.
+      // A command that cannot act on its argument hands the prefix back
+      // (/rename with no title); otherwise the input is cleared.
       void Promise.resolve(outcome).then((result) => {
         setDraft(result && typeof result === "object" ? result.draft ?? "" : "");
       });
@@ -571,11 +672,21 @@ export function ChatPage() {
     useChatStore.getState().createConversation(settings.defaultModel);
   };
 
+  // The three pickers follow ONE rule: a change made in a chat belongs to that
+  // chat, and a change made with no chat open becomes the default for the next
+  // one (which is the empty state's whole purpose — it is where you set the
+  // model/mode you are about to start working with).
+  //
+  // The model picker used to break that rule: it wrote `defaultModel` on every
+  // switch, so the explicit "Default model" control in Chat settings was silently
+  // overwritten by any casual model change, and the two controls disagreed about
+  // which one decides. Effort and mode already behaved this way; the model picker
+  // was the outlier, and the settings control now means what its label says.
   const handleModelChange = (modelId: string) => {
     if (activeConversationId) {
       useChatStore.getState().setConversationModel(activeConversationId, modelId);
+      return;
     }
-    // First model switch also becomes the default for future chats
     useChatStore.getState().updateSettings({ defaultModel: modelId });
   };
 
@@ -613,10 +724,11 @@ export function ChatPage() {
       <ChatSidebar
         conversations={conversations}
         activeId={activeConversationId}
+        statuses={conversationStatuses}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onSelect={(id) => useChatStore.getState().selectConversation(id)}
-        onNew={handleNewChat}
+        onNew={() => handleNewChat({ repo: null })}
         onNewInRepo={(repo) => handleNewChat({ repo: { ...repo, attachedAt: Date.now() } })}
         onRename={(id, title) => useChatStore.getState().renameConversation(id, title)}
         onDelete={handleDeleteConversation}
@@ -638,7 +750,9 @@ export function ChatPage() {
           onModeChange={handleModeChange}
           context={context}
           hasConversationPrompt={Boolean(activeConversation?.systemPrompt)}
-          activeSkillCount={(settings.skills ?? []).filter((s) => s.enabled).length}
+          alwaysOnSkills={alwaysOnSkillNames}
+          availableSkillCount={autoSkillCount}
+          skillActivity={skillActivity}
           onOpenSkills={() => useChatStore.getState().setSettingsOpen(true, "skills")}
           repoContext={activeConversation?.repoContext}
           githubToken={settings.github?.token ?? ""}
@@ -646,9 +760,30 @@ export function ChatPage() {
           onRepoDetach={handleRepoDetach}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
           isSidebarOpen={sidebarOpen}
+          verification={
+            activeConversationId && activeConversation?.repoContext
+              ? {
+                  // Only the facts the chip cannot read for itself: it looks up
+                  // its own evidence (and the revision it belongs to) through
+                  // useVerificationReadout, so no revision is threaded through
+                  // this component to be compared somewhere else.
+                  conversationId: activeConversationId,
+                  repoAttached: true,
+                  hasChanges: !changeSet.empty,
+                  pushed: Boolean(activeWorkspace?.pushedAt),
+                }
+              : undefined
+          }
+          onOpenCompanionSettings={() =>
+            useChatStore.getState().setSettingsOpen(true, "companion")
+          }
+          hasMessages={Boolean(activeConversation?.messages.length)}
+          onExport={() => {
+            if (activeConversationId) downloadConversation(activeConversationId);
+          }}
         />
 
-        {panelVisible ? (
+        {panelVisible && !narrow ? (
           <div className="chat-agent-layout">
             <Group orientation="horizontal">
               <Panel defaultSize={55} minSize={30}>
@@ -670,6 +805,16 @@ export function ChatPage() {
                       completion gate reads it — opening the Changes panel is
                       no reason to hide it. */}
                   <PlanStrip conversationId={activeConversationId} />
+
+                  {/* Live activity: what the agent is doing right now, one line
+                      above the composer, where the eye already is while
+                      waiting. Derived from state this page holds — see
+                      lib/activity.ts. */}
+                  <ActivityRail
+                    conversationId={activeConversationId}
+                    filesChanged={changeSet.fileCount}
+                    onOpenChanges={() => setClosedForAttachment(null)}
+                  />
 
                   <Composer
                     value={draft}
@@ -706,6 +851,9 @@ export function ChatPage() {
               <Separator className="chat-agent-resize-handle" />
               <Panel defaultSize={45} minSize={25}>
                 <div className="chat-agent-panel">
+                  {/* Not `standalone`: the chat header is on screen above this
+                      pane, and it already states the verification status — one
+                      surface says it, this one acts on it. */}
                   <ChangesPane
                     conversationId={activeConversationId}
                     onClose={() => {
@@ -732,6 +880,17 @@ export function ChatPage() {
             />
 
             <PlanStrip conversationId={activeConversationId} />
+
+            <ActivityRail
+              conversationId={activeConversationId}
+              filesChanged={changeSet.fileCount}
+              onOpenChanges={() => {
+                // With no repository attached there is no Changes pane to open;
+                // the rail's line is about files, so it only offers the button
+                // when a workspace exists to show.
+                if (repoAttached) setClosedForAttachment(null);
+              }}
+            />
 
             <Composer
               value={draft}
@@ -763,6 +922,14 @@ export function ChatPage() {
                 useChatStore.getState().removeQueuedMessage(activeConversationId, id)
               }
             />
+            {narrow && panelVisible && (
+              <ChangesSheet
+                conversationId={activeConversationId}
+                onClose={() => {
+                  if (attachedAt) setClosedForAttachment(attachedAt);
+                }}
+              />
+            )}
             {repoAttached && !panelVisible && (
               <button
                 type="button"

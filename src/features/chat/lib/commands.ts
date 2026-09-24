@@ -12,7 +12,8 @@
 //
 // A command never sees raw UI state: it gets a small context
 // (conversation, argument, streaming flag) and returns an optional
-// outcome controlling the composer (e.g. /help reopens the menu).
+// outcome controlling the composer (e.g. /rename hands back the
+// prefix when it has no title to apply).
 //
 // Import discipline: this module must stay importable from the turn
 // runner, so anything that lives in the runner (regenerate) is
@@ -21,20 +22,14 @@
 import {
   ArrowDownToLine,
   Bot,
-  Braces,
   CircleStop,
   Eraser,
-  Gauge,
   Hammer,
-  LifeBuoy,
   ListTree,
   MessageSquarePlus,
   Pencil,
   RotateCcw,
-  ScrollText,
   Settings,
-  Shapes,
-  Signal,
   Undo2,
   Zap,
   type LucideIcon,
@@ -42,90 +37,17 @@ import {
 import { useAppStore } from "@/stores/app.store";
 import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import { CURATED_FALLBACK_MODELS } from "../constants";
-import { REASONING_EFFORT_META, modelSupportsTools } from "./model-state";
-import { resolveToolSurface } from "./tool-profiles";
+import { REASONING_EFFORT_META } from "./model-state";
 import { downloadConversation } from "../services/export-conversation";
-import { resolveModelInfo } from "./model-catalog";
 import { runCompactCommand } from "../services/compaction";
 import { undoLastWorkspaceMutation } from "../services/agent-actions";
 import { canUndo } from "../workspace/undo";
-import { TOOL_REGISTRY } from "./tool-registry";
-import { activeBindingIdOf, getConversationContext, composeSystemPrompt } from "../context/engine";
-import { buildEffectiveSystemPrompt } from "./skills";
-import { isTurnRunning, stopTurn } from "../session/turn-engine";
-import { getTurnLog, formatTurnLog } from "../session/turn-log";
-import { sessionHost } from "../session/session-client";
+import { stopTurn } from "../session/turn-engine";
 import { rankCommandSpecs } from "./slash";
-import { buildScorecard, formatScorecard } from "./scorecard";
-import type {
-  ChatMode,
-  ContextBreakdown,
-  ModelInfo,
-  ReasoningEffort,
-  ToolDefinition,
-} from "../types";
+import type { ChatMode, ModelInfo, ReasoningEffort } from "../types";
 
-function toast(
-  message: string,
-  type: "success" | "error" | "info" = "info",
-  multiline = false
-): void {
-  useAppStore.getState().addToast({ message, type, duration: 5000, multiline });
-}
-
-/**
- * Renders the window breakdown as an aligned report. Colored bars are
- * worth more than a paragraph in the meter card, but a command's job
- * is to be copyable — this is the same accounting as text.
- */
-function contextReport(info: ContextBreakdown, modelId: string): string {
-  const free = info.parts.find((p) => p.key === "free");
-  const rows: Array<[string, number]> = [
-    ...info.parts.filter((p) => p.key !== "free").map((p) => [p.label, p.tokens] as [string, number]),
-    ...(free ? [[free.label, free.tokens] as [string, number]] : []),
-  ];
-
-  const width = Math.max(...rows.map(([label]) => label.length));
-  const lines = rows.map(([label, tokens]) => {
-    const share = (tokens / Math.max(1, info.usableTokens)) * 100;
-    return `${label.padEnd(width)}  ${formatTokenCount(tokens).padStart(7)}  ${share.toFixed(1).padStart(5)}%`;
-  });
-
-  const foot = [
-    `Window ${info.maxTokens.toLocaleString()} · ${info.outputReserve.toLocaleString()} reserved for the reply · ${info.usableTokens.toLocaleString()} usable`,
-    !info.calibrated
-      ? "Estimates only — no measured token ratio for this model yet"
-      : null,
-    info.lastPromptTokens != null
-      ? `Last request: ${info.lastPromptTokens.toLocaleString()} prompt tokens (exact)` +
-        (info.lastCachedTokens
-          ? ` · ${info.lastCachedTokens.toLocaleString()} from cache`
-          : "")
-      : "No completed request yet — estimates only",
-    info.compactedTokens > 0
-      ? `${formatTokenCount(info.compactedTokens)} tokens folded into compacted memory`
-      : null,
-    info.totalCost > 0
-      ? `Spend $${info.totalCost.toFixed(4)} · ${formatTokenCount(info.completionTokens)} generated`
-      : null,
-    info.percentageUsed >= 70 ? "Older messages get summarized before the next send." : null,
-  ].filter(Boolean);
-
-  return [
-    `Context · ${modelId}`,
-    `${formatTokenCount(info.totalTokens)} of ${formatTokenCount(info.usableTokens)} usable tokens · ${info.percentageUsed}% · ${info.health}`,
-    "",
-    ...lines,
-    "",
-    ...foot,
-  ].join("\n");
-}
-
-/** Compact token count for text reports (matches the meter's units) */
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
-  return String(n);
+function toast(message: string, type: "success" | "error" | "info" = "info"): void {
+  useAppStore.getState().addToast({ message, type, duration: 5000 });
 }
 
 /** Menu sections — the order here is the order rendered */
@@ -135,8 +57,10 @@ export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 /** What a command may hand back to the composer */
 export interface CommandOutcome {
   /**
-   * Draft to leave in the composer. Default "" (cleared). "/help"
-   * returns "/" so the menu reopens on the full list.
+   * Draft to leave in the composer. Default "" (cleared). A command
+   * that cannot act on what it was given hands its prefix back
+   * ("/rename" with no title) so the user finishes typing rather
+   * than losing the words already on the line.
    */
   draft?: string;
 }
@@ -161,7 +85,7 @@ export interface ChatCommand {
   icon: LucideIcon;
   /** Menu section */
   group: CommandGroup;
-  /** Extra match terms the user might type ("ctx" for /context) */
+  /** Extra match terms the user might type ("regenerate" for /retry) */
   keywords?: readonly string[];
   /** Placeholder shown when the command expects an argument */
   argsHint?: string;
@@ -194,37 +118,8 @@ export function matchModelArg(
   );
 }
 
-/** Effective system prompt a turn would send (skills + rolling summary) */
-function effectiveSystemPrompt(conversationId: string): string {
-  const store = useChatStore.getState();
-  const conv = store.conversations.find((c) => c.id === conversationId);
-  if (!conv) return "";
-  const base = conv.systemPrompt?.trim() || store.settings.systemPrompt.trim() || "";
-  const composed = buildEffectiveSystemPrompt(base, store.settings.skills ?? []);
-  return composeSystemPrompt(composed, conv.summary, activeBindingIdOf(conv)) ?? "";
-}
-
 function activeConversation(conversationId: string) {
   return useChatStore.getState().conversations.find((c) => c.id === conversationId);
-}
-
-/**
- * Tool definitions the next turn of this conversation would carry —
- * the same condition the runner checks, so /context and /status charge
- * for exactly the schemas that will ride the request.
- *
- * Three callers must agree on this rule (here, ChatPage's meter, and
- * turn-prep). It is expressed once, in resolveToolSurface.
- */
-function contextToolsFor(conversationId: string): ToolDefinition[] | undefined {
-  const store = useChatStore.getState();
-  const conv = activeConversation(conversationId);
-  const { model, mode } = currentModelState();
-  const info = resolveModelInfo(model);
-  if (!modelSupportsTools(info)) return undefined;
-  const repoAttached = Boolean(conv?.repoContext && store.settings.github.token);
-  const tools = resolveToolSurface(mode, info, { repoAttached }).tools;
-  return tools.length > 0 ? tools : undefined;
 }
 
 /** Reasoning-effort aliases users actually type */
@@ -317,29 +212,6 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     run: ({ conversationId }) => void runCompactCommand(conversationId),
   },
   {
-    id: "context",
-    description: "Show what is in the context window",
-    icon: Gauge,
-    group: "Context",
-    keywords: ["ctx", "usage", "tokens", "budget"],
-    run: ({ conversationId }) => {
-      const conv = activeConversation(conversationId);
-      if (!conv) return;
-      const modelId = conv.model ?? useChatStore.getState().settings.defaultModel;
-      const info = getConversationContext({
-        conversation: conv,
-        effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
-        modelId,
-        tools: contextToolsFor(conversationId),
-      });
-      toast(
-        contextReport(info, modelId),
-        info.percentageUsed >= 85 ? "error" : "info",
-        true
-      );
-    },
-  },
-  {
     id: "clear",
     description: "Start this chat over — clear context, keep the history on disk",
     icon: Eraser,
@@ -388,86 +260,35 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     },
   },
   {
-    id: "tools",
-    description: "List the tools the agent can use",
-    icon: Braces,
+    // Mode belongs in this group, not with the model controls: it is what the
+    // agent may DO, which is the same axis as /undo. It used to sit after
+    // /effort while declaring group "Agent", so the menu rendered an "Agent"
+    // header a second time below "Model".
+    id: "mode",
+    description: "Switch agent mode (build edits code · plan is read-only)",
+    icon: Hammer,
     group: "Agent",
-    keywords: ["capabilities", "functions"],
-    run: () => {
-      const names = TOOL_REGISTRY.map((t) => t.name).join(", ");
-      toast(`Agent tools (${TOOL_REGISTRY.length}): ${names}`, "info");
-    },
-  },
-  {
-    id: "status",
-    description: "Report this session: model, transport, context, turn state",
-    icon: Signal,
-    group: "Agent",
-    keywords: ["health", "state", "session"],
-    run: ({ conversationId }) => {
+    keywords: ["plan", "build", "readonly", "agent"],
+    argsHint: "build · plan",
+    run: ({ conversationId, arg }) => {
       const store = useChatStore.getState();
-      const conv = activeConversation(conversationId);
-      const { model: modelId, effort, mode } = currentModelState();
-      const info = getConversationContext({
-        conversation: conv ?? {
-          id: conversationId,
-          title: "",
-          messages: [],
-          createdAt: 0,
-          updatedAt: 0,
-        },
-        effectiveSystemPrompt: effectiveSystemPrompt(conversationId),
-        modelId,
-        tools: contextToolsFor(conversationId),
-      });
-      const parts = [
-        modelId,
-        `effort: ${REASONING_EFFORT_META[effort].label.toLowerCase()}`,
-        `mode: ${mode}`,
-        `transport: ${sessionHost.available ? "session host" : "page-local"}`,
-        `streaming: ${store.isStreaming ? "yes" : "no"}${isTurnRunning() ? " (turn running)" : ""}`,
-        `context: ${info.percentageUsed}% of ${formatTokenCount(info.usableTokens)}`,
-        `tools: ${info.parts.find((p) => p.key === "tools")?.tokens.toLocaleString() ?? 0} tok`,
-        info.lastPromptTokens != null
-          ? `last request: ${info.lastPromptTokens.toLocaleString()} tok exact`
-          : "last request: none",
-        // coversCount is cumulative (see ConversationSummary): this is the
-        // memory the ledger currently stands for, not the last fold's size.
-        conv?.summary
-          ? `summary covers ${conv.summary.coversCount} messages (${formatTokenCount(conv.summary.freedTokens)} folded)`
-          : null,
-        `messages: ${conv?.messages.filter((m) => !m.hidden).length ?? 0}`,
-        conv?.pendingTurn ? "pending turn marker SET" : null,
-        conv?.repoContext ? `repo: ${conv.repoContext.owner}/${conv.repoContext.repo}` : null,
-      ].filter(Boolean);
-      toast(parts.join(" · "), "info");
-    },
-  },
-  {
-    id: "scorecard",
-    description: "How this agent is doing: turns, rounds, handoffs, questions",
-    icon: Gauge,
-    group: "Agent",
-    keywords: ["metrics", "quality", "stats", "premature", "handoff", "score"],
-    run: () => {
-      const store = useChatStore.getState();
-      const card = buildScorecard(store.conversations, getTurnLog());
-      toast(formatScorecard(card), "info", true);
-    },
-  },
-  {
-    id: "log",
-    description: "Print the turn log to the console (debug)",
-    icon: ScrollText,
-    group: "Agent",
-    keywords: ["debug", "trace", "diagnostics", "console"],
-    run: () => {
-      const entries = getTurnLog();
-      // eslint-disable-next-line no-console
-      console.log(formatTurnLog() || "(turn log is empty)");
+      const requested = arg.trim().toLowerCase();
+      if (!requested) {
+        const { mode } = currentModelState();
+        toast(`Agent mode: ${mode} — use /mode build or /mode plan.`, "info");
+        return;
+      }
+      const next = MODE_ALIASES[requested];
+      if (!next) {
+        toast(`Unknown mode “${requested}” — try build or plan.`, "error");
+        return { draft: "/mode " };
+      }
+      store.setConversationMode(conversationId, next);
       toast(
-        `${entries.length} turn-log entries printed to the console (window.__intabTurnLog).`,
-        "info"
+        next === "plan"
+          ? "Plan mode — the agent investigates read-only and proposes changes; edit tools are disabled."
+          : "Build mode — the agent can edit the workspace and ship through the push gate.",
+        "success"
       );
     },
   },
@@ -525,36 +346,6 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
       );
     },
   },
-  {
-    id: "mode",
-    description: "Switch agent mode (build edits code · plan is read-only)",
-    icon: Hammer,
-    group: "Agent",
-    keywords: ["plan", "build", "readonly", "agent"],
-    argsHint: "build · plan",
-    run: ({ conversationId, arg }) => {
-      const store = useChatStore.getState();
-      const requested = arg.trim().toLowerCase();
-      if (!requested) {
-        const { mode } = currentModelState();
-        toast(`Agent mode: ${mode} — use /mode build or /mode plan.`, "info");
-        return;
-      }
-      const next = MODE_ALIASES[requested];
-      if (!next) {
-        toast(`Unknown mode “${requested}” — try build or plan.`, "error");
-        return { draft: "/mode " };
-      }
-      store.setConversationMode(conversationId, next);
-      toast(
-        next === "plan"
-          ? "Plan mode — the agent investigates read-only and proposes changes; edit tools are disabled."
-          : "Build mode — the agent can edit the workspace and ship through the push gate.",
-        "success"
-      );
-    },
-  },
-
   // ── Session ──
   {
     id: "new",
@@ -628,28 +419,12 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     },
   },
   {
-    id: "skills",
-    description: "Manage skills and prompt modules",
-    icon: Shapes,
-    group: "Session",
-    keywords: ["modules", "library"],
-    run: () => useChatStore.getState().setSettingsOpen(true, "skills"),
-  },
-  {
     id: "settings",
     description: "Open chat settings",
     icon: Settings,
     group: "Session",
     keywords: ["key", "api", "preferences"],
     run: () => useChatStore.getState().setSettingsOpen(true),
-  },
-  {
-    id: "help",
-    description: "Show all commands",
-    icon: LifeBuoy,
-    group: "Session",
-    keywords: ["commands", "?"],
-    run: () => ({ draft: "/" }),
   },
 ];
 

@@ -95,30 +95,53 @@ GitHub already runs it.
 
 ## Not wired yet — the honest list
 
-1. **There is no capability-aware router.** `run_command` and
-   `verify_with_ci` are tools the model chooses, not a router that inspects a
-   `CapabilityRequest` and picks a tier. The policy modules that would feed
-   one (`ci-plan`, `command-policy`, the plan/detection side) exist; the
-   decision layer does not.
-2. **`run_checks` still reports manifest checks** and does not consult the
-   companion or CI, so the pane does not yet say *which tier* verified a
-   change.
+*(Items 1, 2, 4, 5 and 6 were closed after this file was written; what was
+fixed is stated with the fix, because a list that only ever grows stops being
+read. Items 3 and 7 are still open, and 8 is new.)*
+
+1. ~~**There is no capability-aware router.**~~ **Fixed.**
+   `lib/verification-plan.ts` is the decision layer: a pure router over
+   `{repoAttached, hasChanges, companion, pushed, evidence}` that returns the
+   tiers which can prove this change, which already have, and the one next
+   move — with the reason when the answer is "none". It is computed once per
+   turn and rides the turn note beside the environment facts, because the
+   failure was never that the tiers were missing, it was that the DECISION was
+   left to prose. 25 tests, including the case that mattered: a fresh FAILURE
+   outranks an older pass.
+2. ~~**`run_checks` still reports manifest checks**~~ **Fixed.** It now reports
+   the same plan: which tier verified what, what is stale, and what remains
+   unrun — so the pane says *who* proved the change rather than listing
+   commands that might have run.
 3. **The companion cannot answer prompts.** stdin is `ignore`, so a command
    that asks a question hangs until its timeout. A PTY is a real piece of
    work, not a flag.
-4. **The pairing token comes from `VITE_COMPANION_TOKEN`**, not the encrypted
-   settings store — so there is no UI for it, and an installed companion is
-   invisible to a user who has not edited their env.
-5. **No dependency cache.** Each tree installs its own `node_modules`, and
-   trees are capped at three. Content-addressing them by lockfile hash is the
-   obvious next win.
-6. **CI failures are a URL, not a reason.** The conclusion is read; the
-   failing job's log is not, so the agent cannot fix what CI reports without
-   the user pasting it.
+4. ~~**The pairing token comes from `VITE_COMPANION_TOKEN`**~~ **Fixed.** The
+   pairing lives in the encrypted settings store with its own settings tab, and
+   resolves settings → env → absent, so an install from before this change
+   keeps working while a new one needs no env edit. The companion also answers
+   the Private Network Access preflight it was missing — without that header a
+   public-origin page is blocked from reaching a loopback companion in current
+   Chrome, which would have made every command fail for a reason that looks
+   nothing like the cause.
+5. ~~**No dependency cache.**~~ **Fixed.** `companion/dependency-cache.ts`
+   content-addresses an installed tree by its lockfile hash, so the second
+   candidate on a repository reuses the first's `node_modules`. 18 tests.
+6. ~~**CI failures are a URL, not a reason.**~~ **Fixed.** A failing run's job
+   is read for its log, the failing step and step list are extracted, and the
+   tail of the log comes back with the verdict — the URL is still there as the
+   citation, but the agent can now act on what CI actually said.
 7. **The agent cannot see the running app at all.** With the preview gone,
    runtime behaviour is observable only through what the project's own
    commands report. A loopback URL the user opens themselves is the manual
    version of what the removed pane did.
+8. **The companion server is not started by `npm run dev`.** Four separate
+   pieces of copy told the model that it was, including a `run_command`
+   failure message. It is a separate process
+   (`node src/features/chat/companion/companion-server.ts`), and the messages
+   now say so. Worth recording *why* it drifted: the Vite plugin that used to
+   start it was deleted with the preview host, and the prose outlived the
+   plugin by several months — which is the same failure mode as this file's own
+   stale claims, and the reason both were audited together.
 
 ## Hardening the agent to use them
 
@@ -297,11 +320,20 @@ told it had (and one that has since been removed with the preview solution).
 
 ### Still not hardened
 
-- **The lean tool profile has no execution tier.** A small model gets
-  `run_checks` but not `run_command`, so the surface that most needs a way to
-  verify is the one without it.
-- **`run_checks` neither routes nor records.** It reports declared checks and
-  the in-browser type check; it does not choose a tier, and a passing
-  `run_command` does not mark the declared checks as satisfied.
-- **CI failures are still a URL, not a reason.** The conclusion is read; the
-  failing job's log is not, so the agent cannot act on what CI said.
+- **The lean tool profile has no execution tier at all.** This was previously
+  written as "gets `run_checks` but not `run_command`", which was simply wrong:
+  `LEAN_TOOL_NAMES` carries no verification tool — not `run_checks`, not
+  `run_command`, not `verify_with_ci`. So the surface most likely to assert
+  rather than check is the one with nothing to check with. It is a one-line
+  change, and it is deliberately not made here: handing a weak model a shell is
+  a behaviour change that needs an eval showing it *finishes* a verification
+  loop instead of looping on it, and `features/chat/evals/` is where that
+  answer belongs.
+- **A passing `run_command` does not mark the declared checks as satisfied.**
+  The ledger records the evidence and the plan reads it, but nothing connects
+  `npm test` having run to the manifest's `test` entry saying so — so the plan
+  can still say a check "has not been run" on a turn where an equivalent
+  command passed under another name.
+- **`read_ci_logs` and the CI verdict are two paths to one fact.** The verdict
+  now carries the failing log (§6 above), and the tool still exists separately;
+  the tool is the one a strong model should prefer, and nothing says so.

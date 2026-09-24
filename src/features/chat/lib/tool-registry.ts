@@ -21,6 +21,18 @@
 // UI-free and side-effect-free.
 
 import type { ChatMode, RepoContext, ToolDefinition, ToolName } from "../types";
+// Runtime import, and deliberately acyclic: arg-coercion imports only the
+// ArgSchema TYPE from this module, so the edge is erased at build time and the
+// registry stays readable from every layer (the leaf property this file's
+// header claims). Coercion belongs inside validation because validation is the
+// single gate every call passes through — a repair done by a caller would be a
+// repair the next caller forgets.
+import { coerceArguments } from "./arg-coercion";
+// The feature-family catalog is pure data with no imports of its own, so the
+// registry can build `read_app`'s description from it instead of re-listing the
+// families in prose — the same reason the tool documentation is generated from
+// the contracts. A family added to the catalog appears in the ad and the enum.
+import { APP_FAMILY_IDS, familyIndex } from "./app-surface";
 
 // ── Mini JSON-Schema subset (model argument validation) ──────
 
@@ -242,6 +254,38 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
       typeof args.subtree === "string" && args.subtree ? args.subtree + "/" : "full tree",
   },
   {
+    name: "find_files",
+    planSafe: true,
+    description:
+      "Find files by a NAME pattern — the question `list_repo_files` and `search_workspace` both answer badly. Supports *, **, ? and {a,b}, and a pattern with no slash matches a filename at any depth: `*.test.ts` finds tests anywhere, `src/**/*.ts` finds them under one directory. It sees files the agent has created this turn (the working copy is consulted first). Use `search_workspace` when you know the CONTENT you are looking for rather than the name.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: 'Glob for the path or filename, e.g. "**/*.test.ts", "*.spec.ts" or "src/**/*.css".',
+        },
+        subtree: {
+          type: "string",
+          maxLength: 256,
+          description: "Optional directory prefix to search within (e.g. 'src/features').",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum paths to return, 1-200 (default 60).",
+        },
+      },
+      required: ["pattern"],
+    },
+    kind: "read",
+    cacheable: true,
+    programmable: true,
+    summarize: (args) =>
+      typeof args.pattern === "string" ? `"${args.pattern}"` : "files by name",
+  },
+  {
     name: "read_file",
     planSafe: true,
     description:
@@ -272,6 +316,33 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
         ? `${path}:${from ?? 1}-${to ?? "end"}`
         : path;
     },
+  },
+  {
+    name: "read_files",
+    planSafe: true,
+    description:
+      "Read SEVERAL files in one call — the batched form of `read_file`, and the right shape when you already know which files a question needs. Returns each file's content keyed by path, within one shared result budget (files that do not fit are listed as not-read rather than dropped silently). Whole files only: for a window into one large file use `read_file` with startLine/endLine, and for paths you do not know yet use `find_files` or `search_workspace`.",
+    parameters: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          minItems: 1,
+          maxItems: 12,
+          description:
+            'Repo-relative paths to read, e.g. { "paths": ["src/a.ts", "src/b.ts"] }. At most 12 per call.',
+          items: { ...REPO_PATH_PARAM },
+        },
+      },
+      required: ["paths"],
+    },
+    kind: "read",
+    cacheable: true,
+    programmable: true,
+    summarize: (args) =>
+      Array.isArray(args.paths)
+        ? `${args.paths.length} file${args.paths.length === 1 ? "" : "s"}`
+        : "files",
   },
   {
     name: "search_web",
@@ -920,6 +991,253 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     summarize: (args) =>
       typeof args.workflow === "string" ? args.workflow : "the repository's CI",
   },
+  // ── GitHub collaboration: issues, pull requests, reviews ───
+  // The read half of the workflow the push chain starts. A review, an issue
+  // thread and a failing run are the three things a change gets sent back for,
+  // and until these existed the only way to learn what they said was for the
+  // user to paste them into the chat. The write half (create / comment /
+  // review / update) is gated the same way `http_write` is, because each one
+  // changes somebody else's repository and none can be undone from here.
+  {
+    name: "list_issues",
+    planSafe: true,
+    description:
+      "List issues in the attached repository, newest activity first (cap 30). Pull requests are EXCLUDED by default — GitHub's issues endpoint mixes them in, and a list titled 'issues' that returns the PR you just opened is how a report goes wrong; set `includePullRequests: true` when you want both. Each row carries the number, title, state, labels, author, comment count and a body preview; use `read_issue` for the thread itself. For open pull requests use `list_pull_requests`.",
+    parameters: {
+      type: "object",
+      properties: {
+        state: { type: "string", enum: ["open", "closed", "all"], description: "Default 'open'." },
+        labels: {
+          type: "string",
+          maxLength: 200,
+          description: "Comma-separated label names; an issue must have all of them.",
+        },
+        assignee: {
+          type: "string",
+          maxLength: 100,
+          description: "GitHub login, or 'none' for unassigned.",
+        },
+        includePullRequests: {
+          type: "boolean",
+          description: "Also return pull requests (they appear with isPullRequest: true).",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.state === "string" ? `${args.state} issues` : "open issues",
+  },
+  {
+    name: "read_issue",
+    planSafe: true,
+    description:
+      "Read one issue in full: its body, its labels, and the LAST 20 comments (earlier ones are summarised as a count — the tail is where a thread's current state lives). Use this before editing anything an issue describes, and before commenting on it: the thread usually already contains the decision. If the number is a pull request, the result says so and points at `read_pull_request`.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "number", description: "Issue number (the short one in the URL), e.g. 42." },
+      },
+      required: ["number"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.number === "number" ? `#${args.number}` : "an issue"),
+  },
+  {
+    name: "list_pull_requests",
+    planSafe: true,
+    description:
+      "List pull requests in the attached repository, newest activity first (cap 30). Filter by `head` (the source branch — pass it to find the PR for a branch you pushed), `base`, `state` or `author`. Use it to find a PR's number, then `read_pull_request` for the review, the checks and the files.",
+    parameters: {
+      type: "object",
+      properties: {
+        state: { type: "string", enum: ["open", "closed", "all"], description: "Default 'open'." },
+        head: {
+          type: "string",
+          maxLength: 200,
+          description: "Source branch name, e.g. 'agent/fix-login'. Matched only against branches in this repository.",
+        },
+        base: { type: "string", maxLength: 200, description: "Target branch name, e.g. 'main'." },
+        author: { type: "string", maxLength: 100, description: "Author GitHub login." },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.head === "string" ? `for ${args.head}` : "open pull requests",
+  },
+  {
+    name: "read_pull_request",
+    planSafe: true,
+    description:
+      "Read one pull request: title, body, the reviews, the INLINE review comments (`path:line`, newest first, each with the id to reply to), the last comments, the changed files (cap 50) and everything that reported a status on its head commit — check runs AND legacy commit statuses. The result includes a `verdict` object — whether everything is green, which reviewers are blocking, how many inline comments there are, and GitHub's own mergeability state — which is what to report rather than re-deriving. This is the tool for 'what did the reviewer ask for' and 'why is CI red on the PR'; `get_workspace_diff` shows YOUR unpushed local changes instead. For a long thread the result is fitted to the wire budget and SAYS what it left out (`trimmed`), so a partial read never reads as the whole story.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "number", description: "Pull request number, e.g. 17." },
+      },
+      required: ["number"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.number === "number" ? `#${args.number}` : "a pull request"),
+  },
+  {
+    name: "read_ci_logs",
+    planSafe: true,
+    description:
+      "Read WHY a workflow run failed: the failing job, the failing step and the error lines from its log (ANSI and GitHub's timestamp prefixes stripped, deduplicated). Chooses the newest FAILED run when you do not name one, so it works on a red branch without dispatching anything; pass `runId` to read a specific run, or `branch`/`workflow` to narrow the search. A run that is still going, or one that passed, reports that instead of inventing a failure — and when this thread has not pushed yet, the result says it read the BASE branch, so a red build there is not reported as this work's. Pairs with `verify_with_ci`, which says whether a push passed but not what broke.",
+    parameters: {
+      type: "object",
+      properties: {
+        runId: { type: "number", description: "Workflow run id, from a run URL (…/actions/runs/<id>)." },
+        branch: { type: "string", maxLength: 200, description: "Branch to read runs for; defaults to this thread's branch." },
+        workflow: {
+          type: "string",
+          maxLength: 200,
+          description: "Workflow path to narrow the search, e.g. '.github/workflows/ci.yml'.",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.runId === "number"
+        ? `run ${args.runId}`
+        : typeof args.branch === "string"
+          ? `${args.branch} CI`
+          : "latest failed run",
+  },
+  {
+    name: "create_issue",
+    planSafe: false,
+    description:
+      "Open a new issue in the attached repository. The user approves the title and body before it is created. Use it for a defect you found that is NOT the task you were asked to do — never to file a note about your own in-progress work. Filing is public: write the title as the symptom a maintainer would search for, and the body with steps to reproduce, expected and actual, so it can be acted on without you.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 256, description: "The symptom, not the fix." },
+        body: { type: "string", maxLength: 20000, description: "Markdown. Steps to reproduce, expected, actual." },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Label names that already exist in the repository (unknown ones are dropped by GitHub).",
+        },
+        assignees: {
+          type: "array",
+          items: { type: "string" },
+          description: "GitHub logins. Omit unless the user asked for someone specific.",
+        },
+        why: {
+          type: "string",
+          maxLength: 200,
+          description: "One line shown to the user in the approval dialog, saying why this issue is being filed.",
+        },
+      },
+      required: ["title"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.title === "string" ? args.title.slice(0, 50) : "a new issue",
+  },
+  {
+    name: "comment_on_issue",
+    planSafe: false,
+    description:
+      "Post a comment on an issue OR a pull request — GitHub posts both through the same endpoint, so this is the tool for answering an issue as well as a review thread. Pass `replyToCommentId` (from `read_pull_request`'s `inlineComments[].id`) to answer INSIDE that specific line-anchored thread instead of the general conversation, which is where a reviewer looks for the reply. The user approves the text first. It is the conversational move, not the decision: to formally approve or block a pull request use `review_pull_request`, which carries the review state. Never comment to narrate your own progress; comment when the thread needs an answer from you.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "number", description: "Issue or pull request number." },
+        body: { type: "string", minLength: 1, maxLength: 20000, description: "Markdown. Write what the reader needs, not what you did." },
+        replyToCommentId: {
+          type: "number",
+          description:
+            "An inline review comment id to reply to, from read_pull_request's inlineComments. Omit to post in the issue/pull-request conversation.",
+        },
+        why: { type: "string", maxLength: 200, description: "One line shown in the approval dialog." },
+      },
+      required: ["number", "body"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.number === "number"
+        ? typeof args.replyToCommentId === "number"
+          ? `reply on #${args.number}`
+          : `on #${args.number}`
+        : "a comment",
+  },
+  {
+    name: "review_pull_request",
+    planSafe: false,
+    description:
+      "Submit a pull-request review: APPROVE, REQUEST_CHANGES or COMMENT, with a body and optional inline comments anchored to a file and line. The user approves the review before it is submitted. REQUEST_CHANGES must say what to change. Only submit APPROVE when you have READ the change and can say what you verified — an approval is a claim on someone's behalf, and the checks being green is not the same as the change being right.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "number", description: "Pull request number." },
+        event: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"], description: "The review state." },
+        body: { type: "string", maxLength: 20000, description: "The review text. Required for REQUEST_CHANGES." },
+        comments: {
+          type: "array",
+          description: "Inline comments, each anchored to a file and a line of the diff.",
+          items: {
+            type: "object",
+            properties: {
+              path: { type: "string", description: "File path as it appears in the diff." },
+              line: { type: "number", description: "Line number in the file (the new side of the diff)." },
+              body: { type: "string", description: "The comment." },
+            },
+            required: ["path", "line", "body"],
+          },
+        },
+        why: { type: "string", maxLength: 200, description: "One line shown in the approval dialog." },
+      },
+      required: ["number", "event"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.number === "number"
+        ? `#${args.number} ${typeof args.event === "string" ? args.event.toLowerCase() : "review"}`
+        : "a review",
+  },
+  {
+    name: "update_pull_request",
+    planSafe: false,
+    description:
+      "Edit a pull request's title, body, state (open|closed) or base branch. The user approves the change first. Closing is NOT merging: it leaves the branch untouched and merges nothing. Rewriting the body is how a description that no longer matches the diff gets fixed after a review round — do that instead of opening a second pull request.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "number", description: "Pull request number." },
+        title: { type: "string", minLength: 1, maxLength: 256, description: "New title." },
+        body: { type: "string", maxLength: 20000, description: "New body (replaces the old one — read it first, then send the whole text)." },
+        state: { type: "string", enum: ["open", "closed"], description: "'closed' closes without merging; 'open' reopens." },
+        base: { type: "string", maxLength: 200, description: "New target branch." },
+        why: { type: "string", maxLength: 200, description: "One line shown in the approval dialog." },
+      },
+      required: ["number"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.number === "number"
+        ? `#${args.number}${typeof args.state === "string" ? ` → ${args.state}` : ""}`
+        : "a pull request",
+  },
   // ── App tools: the workstation's own features ──────────────
   // Available in EVERY tool-capable chat, repo or not — that is the whole
   // point. They are also ordered after the repository tools, so a model
@@ -1191,7 +1509,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     name: "create_diagram",
     planSafe: true,
     description:
-      "Draw a diagram on the DrawFlows canvas from a list of nodes and edges. Use it when a picture carries an explanation better than prose — an architecture, a request flow, a state machine, a data model — and especially when the user asks to SEE how something fits together. Supply stable short node ids, human labels, and the edges between them; the layout is computed for you. It opens on the canvas, so follow up with open_in_tool (target drawflows) to take the user to it, and describe what it shows in one line.",
+      "Draw a diagram on the DrawFlows canvas from a list of nodes and edges. Use it when a picture carries an explanation better than prose — an architecture, a request flow, a state machine, a data model — and especially when the user asks to SEE how something fits together. Supply stable short node ids, human labels, and the edges between them; the layout is computed for you. This CREATES a board and makes it the active one; to take the user to it, follow up with open_in_tool (target drawflows, no nodes — passing the same nodes again would draw a second copy of the same diagram), and describe what it shows in one line.",
     parameters: {
       type: "object",
       properties: {
@@ -1247,7 +1565,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     name: "open_in_tool",
     planSafe: true,
     description:
-      "Put content into one of this app's own tools and switch the user to it: a snippet into the Compiler, a change into the Diff Checker, two datasets into Comparators, a request into the API Tester, a node/edge spec onto the DrawFlows canvas, a search into the Library. Use it when the user should SEE or continue working with something in the tool built for it rather than read it in the transcript. Can target compiler, formatters, diff, comparators, api-tester, library or drawflows — not the chat itself.",
+      "Put content into one of this app's own tools and switch the user to it: a snippet into the Compiler, a change into the Diff Checker, two datasets into Comparators, a request into the API Tester, a node/edge spec onto the DrawFlows canvas, a search into the Library. Use it when the user should SEE or continue working with something in the tool built for it rather than read it in the transcript. Can target compiler, formatters, diff, comparators, api-tester, library or drawflows — not the chat itself. For drawflows, pass nodes to draw a NEW board, or omit nodes entirely to just show the canvas (which is what you want after create_diagram — the board already exists).",
     parameters: {
       type: "object",
       properties: {
@@ -1292,7 +1610,8 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
         nodes: {
           type: "array",
           maxItems: 40,
-          description: "drawflows: the same { id, label, detail? } boxes create_diagram takes.",
+          description:
+            "drawflows: the same { id, label, detail? } boxes create_diagram takes. Omit to show the canvas without drawing anything.",
           items: {
             type: "object",
             properties: {
@@ -1325,6 +1644,101 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     programmable: false,
     summarize: (args) =>
       typeof args.target === "string" ? `open in ${args.target}` : "open in tool",
+  },
+  // ── The app as a user, not just a target ────────────────────
+  //
+  // `open_in_tool` can put content IN FRONT of the user; it cannot read what
+  // the user already keeps in a feature, and it cannot change it. That left
+  // the agent unable to answer "why did this request 401 last week" or to fix
+  // a staging variable — a human can, and the difference was hands, not
+  // intelligence.
+  //
+  // Two tools carry every feature family instead of forty tools carrying one
+  // call each. The wire stays small (one read schema, one act schema, one
+  // catalog loader) and `describe_tools` delivers a family's action shapes
+  // when the turn actually needs them — the trick `read_skill` already
+  // proves: index always, body on demand.
+  {
+    name: "read_app",
+    planSafe: true,
+    description:
+      "Read one of THIS APP's own feature families — the user's work in it, not a repository. Use it before acting on a feature, and instead of asking which request, board, session or environment they mean: the answer is usually already there. Families:\n" +
+      familyIndex() +
+      "\nCall read_app with no family to list them. Credential-shaped values come back masked (`•••• (N chars hidden)`) — that is deliberate, so reference a secret as a {{variable}} where this app substitutes values instead of asking for it.",
+    parameters: {
+      type: "object",
+      properties: {
+        family: {
+          type: "string",
+          enum: [...APP_FAMILY_IDS],
+          description: "Which family to read. Omit to list every family with what it holds.",
+        },
+      },
+      required: [],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.family === "string" ? `read ${args.family}` : "read app state",
+  },
+  {
+    name: "act_app",
+    planSafe: false,
+    description:
+      "Change something in one of THIS APP's own feature families — the same actions the user performs: open and edit a tab, tidy a comparison or diff session, fix an environment variable, rename or delete a board, adjust an editor setting. Use it when the user asks you to change their work here rather than in a repository. Every write is recorded in the `activity` family and can be undone, so prefer acting over asking; `describe_tools` gives a family's action names and argument shapes, and `read_app` gives the ids they need. Do NOT use it to send requests or change anything outside this app.",
+    parameters: {
+      type: "object",
+      properties: {
+        family: {
+          type: "string",
+          enum: [...APP_FAMILY_IDS],
+          description: "Which family to act on.",
+        },
+        action: {
+          type: "string",
+          minLength: 1,
+          maxLength: 60,
+          description:
+            "The action name, exactly as `describe_tools` lists it (e.g. \"set_var\", \"update_content\", \"delete_board\").",
+        },
+        args: {
+          type: "object",
+          description:
+            "The action's arguments, as an OBJECT (never a JSON string) — e.g. { key: \"API_BASE\", value: \"https://staging…\" }. `describe_tools({ family })` gives the shape per action.",
+        },
+      },
+      required: ["family", "action"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.family === "string" && typeof args.action === "string"
+        ? `${args.family}.${args.action}`
+        : "change app state",
+  },
+  {
+    name: "describe_tools",
+    planSafe: true,
+    description:
+      "Load the detail for one feature family of this app: when to read it, what a read returns, and every action with its argument shape and whether it is destructive. Use it right before read_app or act_app on a family you have not used this conversation — the argument shapes are otherwise not in front of you. Call it with no family to describe them all.",
+    parameters: {
+      type: "object",
+      properties: {
+        family: {
+          type: "string",
+          enum: [...APP_FAMILY_IDS],
+          description: "Which family to describe. Omit for every family.",
+        },
+      },
+      required: [],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.family === "string" ? `describe ${args.family}` : "describe families",
   },
   {
     name: "run_tool_program",
@@ -1490,7 +1904,19 @@ export function summarizeToolCall(
 }
 
 /** Parsed-and-validated tool arguments, or a precise error message */
-export type ToolCallValidation = { ok: true; args: Record<string, unknown> } | { ok: false; error: string };
+export type ToolCallValidation =
+  | {
+      ok: true;
+      args: Record<string, unknown>;
+      /**
+       * Repairs applied to the arguments before validation (stringified
+       * object, numeric string, case-varied enum). Empty in the common case.
+       * The caller reports them — a repair the user cannot see is a call that
+       * silently changed meaning.
+       */
+      notes: string[];
+    }
+  | { ok: false; error: string };
 
 /**
  * Validates one model-emitted tool call BEFORE execution: unknown
@@ -1521,7 +1947,12 @@ export function validateToolCall(name: string, rawArguments: string): ToolCallVa
       };
     }
   }
-  const schemaErr = validateAgainstSchema(meta.parameters, args);
+  // Coerce BEFORE validating: a nested value that arrived as a JSON string, a
+  // numeric string or a case-varied enum is a call the model meant to make, so
+  // it is parsed rather than refused. A value the schema declares `string` is
+  // never touched, which is what keeps file content and file bodies intact.
+  const coerced = coerceArguments(meta.parameters, args);
+  const schemaErr = validateAgainstSchema(meta.parameters, coerced.args);
   if (schemaErr) return { ok: false, error: schemaErr };
-  return { ok: true, args };
+  return { ok: true, args: coerced.args, notes: coerced.notes };
 }

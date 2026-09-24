@@ -2,7 +2,7 @@
 // Main Layout — Collapsible navigation sidebar & content wrapper
 // ============================================================
 
-import { Link, useLocation, Outlet } from "react-router-dom";
+import { Link, useLocation, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useRef } from "react";
 import { Suspense } from "react";
 import { PageSkeleton } from "@/components/ui/page-skeleton";
@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app.store";
+import { useChatStore } from "@/stores/chat.store";
+import { ShellActivityPresence } from "@/features/chat/components/ActivityRail";
 import { useHandoffBridge } from "@/hooks/useHandoffBridge";
 import {
   Tooltip,
@@ -121,6 +123,18 @@ function NavItem({ to, icon, label, active, collapsed, onClick, staggered }: Nav
 
 export function MainLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
+  /**
+   * The agent's work, visible from anywhere in the app.
+   *
+   * The turn engine keeps running when this route unmounts, so before this the
+   * agent could be editing the user's repository with nothing on screen admitting
+   * it — no indicator, no completion notice, no way back. One pill in the chrome
+   * and one notice at the end is the whole fix, and the pill's click is also the
+   * way back: open the chat page and select the thread that is still working.
+   */
+  const chatVisible =
+    location.pathname === "/chat" || location.pathname === "/chatbot";
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const toggleCommandPalette = useAppStore((s) => s.toggleCommandPalette);
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
@@ -312,6 +326,20 @@ export function MainLayout() {
             onClick={toggleCommandPalette}
           />
         </div>
+
+        {/* A running turn is a fact about the app, not about one route: the pill
+            stays visible while the user is in the compiler, the diff checker or
+            anywhere else, and clicking it goes back to the thread doing the work.
+            Mounted unconditionally because its other half is the completion
+            notice, which has to fire while the pill itself is hidden. */}
+        <ShellActivityPresence
+          chatVisible={chatVisible}
+          showPill={!chatVisible}
+          onOpen={(conversationId) => {
+            useChatStore.getState().selectConversation(conversationId);
+            navigate("/chat");
+          }}
+        />
 
         {/* Cloud Sync — just above the footer divider */}
         <div className="activity-bar-cloudsync">

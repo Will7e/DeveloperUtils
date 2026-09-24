@@ -80,58 +80,161 @@ export interface CompanionDeps {
   signal?: AbortSignal;
 }
 
+/** The saved pairing, as the settings store holds it. Every field optional. */
+export interface SavedCompanion {
+  origin?: string | null;
+  token?: string | null;
+}
+
+/** Which source supplied the origin — the user is told, so a surprise is visible. */
+export type CompanionCredentialSource = "env" | "settings" | "default";
+
+export interface CompanionCredentials {
+  /** Where the companion is, or null when this build has none */
+  origin: string | null;
+  /** The pairing token, or null when it is missing */
+  token: string | null;
+  /** Who supplied the origin (null when nothing did) */
+  source: CompanionCredentialSource | null;
+  /**
+   * Why there is no usable pairing, in a sentence a user can act on, or null
+   * when both halves are present. This used to be hardcoded null, so every
+   * failure read as "no companion is running" at the call site — including
+   * the case where one is running and only the token is missing, which is a
+   * two-click fix and a totally different instruction.
+   */
+  error: string | null;
+}
+
+/** One instruction, used wherever the agent or the UI reports an unpaired build. */
+export const COMPANION_UNPAIRED_HELP =
+  "Pair a companion under Chat settings → Companion (start it with `npm run companion` and paste the token it prints), " +
+  "or set VITE_COMPANION_ORIGIN and VITE_COMPANION_TOKEN.";
+
 /**
- * The origin and token to talk to a companion with.
+ * Normalizes a user-supplied origin: trims, drops trailing slashes, and
+ * refuses anything that is not an http(s) URL.
  *
- * The pairing token is printed by the companion at startup and pasted into
- * `VITE_COMPANION_TOKEN`; `VITE_COMPANION_ORIGIN` names where it listens. A
- * build without the token simply has no companion, which is the safe default
- * — the agent then says its change is unverified instead of hanging.
+ * Refused rather than passed through, because the origin is pasted from a
+ * terminal and a typo would otherwise become a request to somewhere that
+ * cannot exist — a failure that reads like the companion is down when the
+ * real problem is a missing colon.
  */
-export async function companionCredentials(
-  env: Record<string, unknown> = import.meta.env as unknown as Record<string, unknown>
-): Promise<{ origin: string | null; token: string | null; error: string | null }> {
-  const envToken = configuredCompanionToken(env);
-  const envOrigin = configuredCompanionOrigin(env);
-  return { origin: envOrigin, token: envToken || null, error: null };
+export function normalizeCompanionOrigin(raw: string | null | undefined): string | null {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return value.replace(/\/+$/, "");
 }
 
 /**
- * The pairing token, from `VITE_COMPANION_TOKEN`.
+ * True when an origin is the machine the app is running on.
  *
- * Environment rather than settings for now: the token is printed by the
- * companion at startup and pasted once, and putting it in the encrypted
- * settings store (with the UI that implies) is its own change. Until then a
- * build without it simply cannot drive a companion, which is the safe
- * default rather than a silent half-configuration.
+ * Load-bearing for the settings copy: a loopback companion runs commands on
+ * the user's own machine, while a remote one runs them somewhere else. Those
+ * are different trust statements and the UI has to say which one is in play.
  */
-export function configuredCompanionToken(
-  env: Record<string, unknown> = import.meta.env as unknown as Record<string, unknown>
-): string {
-  return typeof env.VITE_COMPANION_TOKEN === "string"
-    ? (env.VITE_COMPANION_TOKEN as string).trim()
-    : "";
+export function isLoopbackOrigin(origin: string | null | undefined): boolean {
+  const value = (origin ?? "").trim();
+  if (!value) return true; // nothing configured is not a remote anything
+  try {
+    const host = new URL(value).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function envString(env: Record<string, unknown>, key: string): string {
+  return typeof env[key] === "string" ? (env[key] as string).trim() : "";
+}
+
+/**
+ * The origin and token to talk to a companion with.
+ *
+ * Resolution, in order, per half:
+ *
+ *   origin — `VITE_COMPANION_ORIGIN` → the saved pairing → the loopback
+ *            default in development → nothing.
+ *   token  — `VITE_COMPANION_TOKEN`    → the saved pairing → nothing.
+ *
+ * The env var wins because it is the dev-server override: a developer who
+ * exported it should not have a saved pairing silently redirect their commands
+ * somewhere else. The two halves resolve INDEPENDENTLY on purpose — the common
+ * real setup is the default port with a token pasted once, and requiring both
+ * from one source would make that look like no companion at all.
+ *
+ * Development still answers the default loopback port with no configuration at
+ * all, because that is where the companion runs when a developer starts it by
+ * hand; a hosted build does not, because a page cannot claim `127.0.0.1` on
+ * someone else's machine.
+ */
+export async function companionCredentials(
+  env: Record<string, unknown> = import.meta.env as unknown as Record<string, unknown>,
+  saved: SavedCompanion | null | undefined = null
+): Promise<CompanionCredentials> {
+  const envOrigin = normalizeCompanionOrigin(envString(env, "VITE_COMPANION_ORIGIN"));
+  const envToken = envString(env, "VITE_COMPANION_TOKEN");
+  const savedOrigin = normalizeCompanionOrigin(saved?.origin);
+  const savedToken = (saved?.token ?? "").trim();
+
+  const origin = envOrigin ?? savedOrigin ?? (env.DEV === true ? COMPANION_DEFAULT_ORIGIN : null);
+  const source: CompanionCredentialSource | null = envOrigin
+    ? "env"
+    : savedOrigin
+      ? "settings"
+      : env.DEV === true
+        ? "default"
+        : null;
+  const token = envToken || savedToken || null;
+
+  if (!origin) {
+    return { origin: null, token, source: null, error: `No companion is paired with this app. ${COMPANION_UNPAIRED_HELP}` };
+  }
+  if (!token) {
+    // One half present: named as what it is, because "no companion is running"
+    // for a running companion whose token is missing sends the user to restart
+    // a process that is already up.
+    return {
+      origin,
+      token: null,
+      source,
+      error: `A companion is configured at ${origin} but no pairing token is set, so it will refuse every command. ${COMPANION_UNPAIRED_HELP}`,
+    };
+  }
+  return { origin, token, source, error: null };
 }
 
 /**
  * `VITE_COMPANION_ORIGIN`, or the loopback default in development.
  *
- * Production with no variable set returns null rather than a URL that cannot
- * exist: a hosted page cannot reach `127.0.0.1` on the *user's* machine, so
- * claiming an origin there would turn "no companion" into a timeout.
+ * Kept for callers that only need the address (the settings tab prefills from
+ * it). Prefer `companionCredentials`, which resolves the token too and says
+ * WHICH source answered.
  */
 export function configuredCompanionOrigin(
   env: Record<string, unknown> = import.meta.env as unknown as Record<string, unknown>
 ): string | null {
-  const explicit =
-    typeof env.VITE_COMPANION_ORIGIN === "string" ? (env.VITE_COMPANION_ORIGIN as string).trim() : "";
-  if (explicit) return explicit.replace(/\/+$/, "");
-  return env.DEV === true ? COMPANION_DEFAULT_ORIGIN : null;
+  return normalizeCompanionOrigin(envString(env, "VITE_COMPANION_ORIGIN")) 
+    ?? (env.DEV === true ? COMPANION_DEFAULT_ORIGIN : null);
+}
+
+/** Whether the build itself names a companion through the environment */
+export function companionCredentialSource(
+  env: Record<string, unknown> = import.meta.env as unknown as Record<string, unknown>
+): CompanionCredentialSource | null {
+  return envString(env, "VITE_COMPANION_ORIGIN") ? "env" : null;
 }
 
 /** Whether the companion is running, and which protocol version it speaks. */
 export async function probeCompanion(
-  origin: string | null = configuredCompanionOrigin(),
+  origin: string | null = null,
   deps: CompanionDeps = {}
 ): Promise<CompanionProbe> {
   const doFetch = deps.fetch ?? fetch;
@@ -141,7 +244,7 @@ export async function probeCompanion(
       origin: "",
       protocolVersion: null,
       capabilities: null,
-      error: "No companion origin is configured for this build.",
+      error: `No companion is paired with this app. ${COMPANION_UNPAIRED_HELP}`,
     };
   }
   try {
@@ -166,13 +269,16 @@ export async function probeCompanion(
       protocolVersion: payload.protocolVersion ?? null,
       capabilities: payload.capabilities ?? null,
     };
-  } catch {
+  } catch (err) {
+    const isTimeout = err instanceof Error && /timed out/i.test(err.message);
     return {
       available: false,
       origin,
       protocolVersion: null,
       capabilities: null,
-      error: `Nothing is listening at ${origin}.`,
+      error: isTimeout
+        ? `Timed out reaching ${origin} after ${deps.timeoutMs ?? 2_000}ms.`
+        : `Nothing is listening at ${origin}.`,
     };
   }
 }

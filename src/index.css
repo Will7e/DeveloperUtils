@@ -224,6 +224,34 @@
   --text-2: var(--ds-gray-900);
   --text-3: var(--ds-gray-700);
 
+  /* ---- Chat sidebar (the conversation rail) ----------------------------
+     Its own surface, meta colour and row metrics, because the rail is a
+     different kind of surface from the canvas: a column you scan rather
+     than a page you read.
+
+     --chat-meta exists because --text-3 is 3.2:1 on white — fine for a
+     10px label in a docked panel, not fine for the ~11px line under every
+     conversation title. Raising it app-wide would repaint every secondary
+     line in the app, so the fix is scoped to the rail. Dark already passes
+     (5.9:1), which is exactly why the light value is its own token. */
+  --chat-sidebar-bg: #101010;
+  --chat-sidebar-edge: #ffffff1a;
+  --chat-meta: var(--ds-gray-700); /* 5.9:1 on --chat-sidebar-bg */
+  /* The Geist list item: 34px at rest, and one step taller while the row is
+     open so its context line has somewhere to live. */
+  --chat-row-h: 34px;
+  --chat-row-h-open: 52px;
+  --chat-hit: 24px;
+
+  /* ---- Overlay scrims --------------------------------------------------
+     The dim behind a modal, a sheet or a mobile drawer. Two weights: the
+     full-strength one for a dialog that owns the screen, the soft one for a
+     drawer that still shows the surface underneath. Defined here so every
+     overlay in the app dims by the same amount instead of each file pasting
+     its own rgba() literal. */
+  --ds-overlay-strong: rgba(0, 0, 0, 0.65);
+  --ds-overlay-soft: rgba(0, 0, 0, 0.5);
+
   --accent: #0070f3;
   --accent-dim: #0068d6;
   --accent-glow: rgba(0, 112, 243, 0.16);
@@ -405,6 +433,21 @@ html.light {
   --text-1: var(--ds-gray-1000);
   --text-2: var(--ds-gray-900);
   --text-3: var(--ds-gray-700);
+
+  /* ---- Chat sidebar (the conversation rail) ----------------------------
+     A real step off the white canvas (--bg-1 is #fafafa, a 2% shift that
+     reads as one continuous field), and a meta colour that survives both
+     the rail and the selected row's fill:
+       #666 on #f4f4f4 = 5.2:1, on the selected #ebebeb = 4.8:1 → AA.
+     The previous #8f8f8f was 3.2:1 and 2.7:1 — it failed on both. */
+  --chat-sidebar-bg: #f4f4f4;
+  --chat-sidebar-edge: #00000010;
+  --chat-meta: #666666;
+
+  /* A 65% black dim over a white page reads as a blackout, so both overlay
+     weights converge on one much lighter scrim in light mode. */
+  --ds-overlay-strong: rgba(0, 0, 0, 0.4);
+  --ds-overlay-soft: rgba(0, 0, 0, 0.4);
 
   --accent: #0070f3;
   --accent-dim: #0060df;

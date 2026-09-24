@@ -27,6 +27,15 @@
 import type { ChatConversation, ChatMessage } from "../types";
 import type { TurnLogEntry } from "../session/turn-log";
 import { isContinuationNudge, isHandoffNotice } from "./harness-notices";
+import {
+  FAILURE_KINDS,
+  FAILURE_LABEL,
+  classifyConversation,
+  taxonomyCounts,
+  type FailureFinding,
+  type FailureKind,
+  type TaxonomyCounts,
+} from "./failure-taxonomy";
 
 export interface ConversationScore {
   chats: number;
@@ -45,6 +54,18 @@ export interface ConversationScore {
 }
 
 export interface Scorecard extends ConversationScore {
+  /**
+   * WHY the failures happened, classified (lib/failure-taxonomy.ts).
+   *
+   * The counts above say how much the loop cost; these say which mechanism is
+   * producing the cost, which is the only version anybody can act on. Kept
+   * separate from `toolFailures` on purpose: one failed call can be one
+   * classified failure, none, or several (a withheld call that was then
+   * repeated is two).
+   */
+  failures: TaxonomyCounts;
+  /** The findings themselves, for the report's "most recent" lines */
+  findings: FailureFinding[];
   /** Handoffs as a share of turns, 0-100 (0 when there are no turns) */
   handoffRate: number;
   /** Tool rounds per turn, one decimal */
@@ -139,10 +160,18 @@ export function buildScorecard(
     }
   }
 
+  // Classified failures, from the same transcripts. Computed here rather than
+  // asked of the caller so a scorecard always has both halves and the two can
+  // never disagree about which conversations were counted.
+  const findings = conversations.flatMap((c) => classifyConversation(c));
+  const failures = taxonomyCounts(conversations, findings);
+
   const handoffRate = totals.turns > 0 ? (totals.handoffs / totals.turns) * 100 : 0;
   const roundsPerTurn = totals.turns > 0 ? totals.toolRounds / totals.turns : 0;
   return {
     ...totals,
+    failures,
+    findings,
     handoffRate,
     roundsPerTurn,
     turnsPerFailure: totals.toolFailures > 0 ? totals.turns / totals.toolFailures : Number.POSITIVE_INFINITY,
@@ -184,11 +213,28 @@ export function formatScorecard(card: Scorecard): string {
       }`,
     ],
   ];
+  // Only the kinds that fired: a report with ten rows of zero teaches the
+  // reader to skim, and the fix line beside each one is the actionable half.
+  const fired: Array<[FailureKind, number]> = FAILURE_KINDS.map(
+    (kind) => [kind, card.failures.byKind[kind]] as [FailureKind, number]
+  ).filter(([, n]) => n > 0);
+  if (fired.length > 0) {
+    rows.push(["", ""]);
+    for (const [kind, count] of fired.sort((a, b) => b[1] - a[1])) {
+      rows.push([FAILURE_LABEL[kind], String(count)]);
+    }
+  }
   const width = Math.max(...rows.map(([label]) => label.length));
+  const recent = card.findings.slice(0, 3);
+  const recentLines =
+    recent.length > 0
+      ? ["", "Most recent:", ...recent.map((f) => [`  turn ${f.turn}: ${f.detail}`.trimEnd()])]
+      : [];
   return [
     "Agent scorecard — every stored chat",
     "",
-    ...rows.map(([label, value]) => `${label.padEnd(width)}  ${value}`),
+    ...rows.map(([label, value]) => (label === "" ? "" : `${label.padEnd(width)}  ${value}`)),
+    ...recentLines,
     "",
     `This session (not persisted): ${card.session.events} turn-log events · ` +
       `${card.session.completionGates} gate continuations · ${card.session.failovers} failovers · ` +
@@ -199,8 +245,9 @@ export function formatScorecard(card: Scorecard): string {
 /** One-line version, for a status row or a toast subtitle */
 export function summarizeScorecard(card: Scorecard): string {
   if (card.turns === 0) return "no turns yet";
+  const failures = card.failures.total > 0 ? ` · ${card.failures.total} classified failure(s)` : "";
   return (
     `${card.turns} turns · ${card.roundsPerTurn.toFixed(1)} rounds/turn · ` +
-    `${pct(card.handoffRate)} handed back · ${card.questions} question(s)`
+    `${pct(card.handoffRate)} handed back · ${card.questions} question(s)${failures}`
   );
 }

@@ -90,6 +90,19 @@ export function DrawFlowDesigner() {
   const isUpdatingSceneRef = useRef<boolean>(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const prevWorkflowIdRef = useRef<string>(activeWorkflowId);
+  /**
+   * Which board the canvas content CURRENTLY belongs to.
+   *
+   * Not the same thing as `activeWorkflowId`, and the difference is a
+   * data-loss bug: selecting another tab re-renders (activeWorkflowId = B)
+   * and only THEN, in an effect, loads B's scene into the canvas. Any
+   * Excalidraw onChange in between — pointer, scroll, selection — used to
+   * record "this canvas is B" while the canvas still held A's scene, and the
+   * debounced save wrote A's content into B. An agent-created diagram was
+   * the visible victim: the board it just drew was overwritten by whatever
+   * the canvas happened to be showing first.
+   */
+  const sceneWorkflowIdRef = useRef<string>(activeWorkflowId);
 
   const pendingSaveRef = useRef<{
     workflowId: string;
@@ -124,6 +137,7 @@ export function DrawFlowDesigner() {
       const targetWorkflow = workflows.find((w) => w.id === activeWorkflowId);
       if (targetWorkflow) {
         isUpdatingSceneRef.current = true;
+        const loadedWorkflowId = activeWorkflowId;
         const cleanAppState = { ...(targetWorkflow.appState || {}) };
         delete cleanAppState.theme;
         const sanitizedElements = sanitizeWorkflowElements(targetWorkflow.elements || []);
@@ -140,6 +154,9 @@ export function DrawFlowDesigner() {
         }
 
         setTimeout(() => {
+          // Only now does the canvas hold the incoming board: adopt its id, so
+          // a later save can never be attributed to the board we left.
+          sceneWorkflowIdRef.current = loadedWorkflowId;
           isUpdatingSceneRef.current = false;
         }, 120);
       }
@@ -214,7 +231,11 @@ export function DrawFlowDesigner() {
   // Debounced handler for canvas changes (elements, appState, files)
   const handleChange: ExcalidrawOnChange = useCallback(
     (elements, appState, files) => {
-      if (!activeWorkflowId || isUpdatingSceneRef.current) return;
+      // The scene's OWNING board, not the selected one: see
+      // sceneWorkflowIdRef. A change made while another board is loading is
+      // dropped rather than filed under a board it does not belong to.
+      const workflowId = sceneWorkflowIdRef.current;
+      if (!workflowId || isUpdatingSceneRef.current) return;
 
       const savedAppState = {
         openSidebar: appState.openSidebar || null,
@@ -236,7 +257,7 @@ export function DrawFlowDesigner() {
       };
 
       pendingSaveRef.current = {
-        workflowId: activeWorkflowId,
+        workflowId,
         elements,
         appState: savedAppState,
         files: files ? { ...files } : undefined,
@@ -255,7 +276,7 @@ export function DrawFlowDesigner() {
         }
       }, 250);
     },
-    [activeWorkflowId, updateWorkflowDrawFlow]
+    [updateWorkflowDrawFlow]
   );
 
   // Handle library changes and persist globally

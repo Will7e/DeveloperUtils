@@ -722,8 +722,8 @@ export function Composer({
             : isStreaming
               ? "Replying… send to queue it for the next step · /stop ends the turn"
               : mode === "plan"
-                ? "Type / for commands · /build switches back to editing"
-                : "Type / for commands · /help lists them all · Responses may be inaccurate — verify important information."}
+                ? "Type / for commands · /mode build switches back to editing"
+                : "Type / for commands · Responses may be inaccurate — verify important information."}
         </span>
       </div>
       <span className="chat-sr-only" aria-live="polite">

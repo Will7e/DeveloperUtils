@@ -12,8 +12,9 @@
 //   2. token matches a command id         → command (arg = the rest)
 //   3. token is an unambiguous id prefix  → command (menu-style
 //      completion: "/comp" runs /compact — but only when ONE command
-//      matches, so "/s" never guesses between /status and /skills)
-//   4. token matches a command keyword    → command ("/ctx" → context)
+//      matches, so "/s" never guesses between /stop, /system and
+//      /settings)
+//   4. token matches a command keyword    → command ("/cancel" → stop)
 //   5. token is a bare word and unknown   → unknown (the caller keeps
 //      the draft and explains, never sends)
 //   6. unknown token WITH arguments       → message ("/usr/bin/env is

@@ -40,6 +40,8 @@ import "../workspace/repo-base";
 import "../workspace/workspace";
 import "../services/ask-user";
 import "../lib/repo-instructions";
+import "../lib/app-action-ledger";
+import "../services/turn-prep";
 
 const CHAT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -78,6 +80,9 @@ const REGISTERED: Record<string, string> = {
   "lib/tool-cache.ts:cache": "tool-cache.results",
   "lib/verification-ledger.ts:ledger": "verification-ledger.events",
   "services/ask-user.ts:waiters": "ask-user.parked-questions",
+  "services/turn-prep.ts:fingerprintCache": "turn-prep.project-fingerprint",
+  "lib/app-action-ledger.ts:entries": "app-action-ledger.entries",
+  "lib/skill-activity.ts:byConversation": "skill-activity.records",
 };
 
 /**
@@ -101,10 +106,24 @@ const EXEMPT: Record<string, string> = {
     "in-flight compaction promises, removed when they settle",
   "services/turn-prep.ts:warnedToolsIssues":
     "once-per-session warning dedupe over tool names, not over repository state",
+  "lib/availability.ts:observed":
+    "capability states (companion running, web search configured) with a one-minute TTL — facts about this machine, not copies of any repository's state",
   "session/session-host.worker.ts:ports":
     "worker port bookkeeping inside the companion worker",
   "session/turn-log.ts:subscribers":
     "pub/sub subscriber list, not a cache",
+  "lib/availability.ts:capabilityListeners":
+    "pub/sub subscriber list for the observed-capability notification; holds callbacks, never state — the states it notifies about are the already-exempt `observed` map beside it",
+  "lib/verification-ledger.ts:listeners":
+    "pub/sub subscriber list for the ledger's change notification, so the header chip re-reads without polling; holds callbacks, never evidence — the evidence itself is the registered `ledger` map above, and releasing one must not clear the other",
+  "lib/skill-activity.ts:listeners":
+    "pub/sub subscriber list for the skill-activity notification, so the header's skills card re-reads without polling; holds callbacks, never state — the records it notifies about are the registered `byConversation` map beside it",
+  "lib/model-catalog.ts:endpointsCache":
+    "serving facts about a MODEL — which providers offer it, their published prices, uptime and tool support — keyed by model id with a ten-minute TTL; a property of the provider, identical for every thread and every repository, so nothing a transition invalidates",
+  "lib/model-catalog.ts:endpointsInFlight":
+    "in-flight endpoint requests, keyed by model id and removed in the fetch's `finally`, so it empties itself and cannot hold repository state",
+  "lib/model-catalog.ts:endpointListeners":
+    "pub/sub subscriber list for the endpoints cache's change notification, so the header's serving line re-reads without polling; holds callbacks, never state — the answers it notifies about are the already-exempt `endpointsCache` map beside it",
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -141,11 +160,14 @@ describe("scoped-resource registry", () => {
     // and the source tree are checked against each other rather than each
     // against somebody's memory.
     expect(registeredResources().map((r) => r.name).sort()).toEqual([
+      "app-action-ledger.entries",
       "ask-user.parked-questions",
       "github-client.tree",
       "repo-base.tree",
       "repo.instructions",
+      "skill-activity.records",
       "tool-cache.results",
+      "turn-prep.project-fingerprint",
       "verification-ledger.events",
       "workspace.pending-saves",
     ]);

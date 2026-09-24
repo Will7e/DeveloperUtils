@@ -49,6 +49,15 @@ interface MessageItemProps {
   onRegenerate?: () => void;
   /** Full transcript — lets tool blocks find their paired results */
   allMessages?: ChatMessage[];
+  /**
+   * A live transcript search matched this message.
+   *
+   * `current` is the one Enter is standing on. Passed as a prop rather than
+   * applied to the DOM after the fact because the transcript re-renders on every
+   * streamed token, which is exactly when an imperatively-added class gets
+   * silently dropped.
+   */
+  findHit?: "match" | "current";
 }
 
 export const MessageItem = React.memo(function MessageItem({
@@ -59,6 +68,7 @@ export const MessageItem = React.memo(function MessageItem({
   canRegenerate = false,
   onRegenerate,
   allMessages = [],
+  findHit,
 }: MessageItemProps) {
   const [copied, setCopied] = React.useState(false);
   const [reasoningOpen, setReasoningOpen] = React.useState(false);
@@ -110,7 +120,12 @@ export const MessageItem = React.memo(function MessageItem({
   const cachedTokens = message.usage?.cachedTokens ?? 0;
 
   return (
-    <div className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"} ${message.error ? "chat-msg-error" : ""}`}>
+    <div
+      className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"} ${
+        message.error ? "chat-msg-error" : ""
+      } ${findHit === "current" ? "chat-msg-find-current" : findHit === "match" ? "chat-msg-find-hit" : ""}`}
+      data-message-id={message.id}
+    >
       <div className="chat-msg-meta">
         <span className="chat-msg-role">{isUser ? "You" : "Assistant"}</span>
         {message.model && !isUser && (
@@ -145,6 +160,23 @@ export const MessageItem = React.memo(function MessageItem({
           >
             <Zap className="h-3 w-3" />
             {formatTokens(cachedTokens)} cached
+          </span>
+        )}
+        {/* Which upstream provider answered. The same model id is served by
+            many providers at different prices and quality, and with routing and
+            failover the answer is not predictable from the request — so it is
+            reported per reply rather than assumed. `X-Provider-Name`, when the
+            deployment's CORS allows reading it. */}
+        {message.usage?.providerName && !isUser && (
+          <span
+            className="chat-msg-tokens chat-msg-provider"
+            title={
+              `Provider \`${message.usage.providerName}\` served this reply. The same ` +
+              "model is offered by many upstreams at different prices and quality, so the " +
+              "reply is attributed to the one that actually answered it."
+            }
+          >
+            {message.usage.providerName}
           </span>
         )}
         {tps !== null && !isUser && (

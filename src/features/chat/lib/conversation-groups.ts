@@ -101,15 +101,30 @@ function changesOf(conversation: ChatConversation): number {
  * number, and it was neither. Numbers are returned here so the caller can be
  * explicit about it, and the shape is testable without a DOM.
  */
+export interface RowMetaOptions {
+  /**
+   * Show the branch even when every thread in this repo is on the same one.
+   *
+   * The rule for a row at REST is "only when it tells you something apart" — a
+   * repo whose threads are all on `main` needs no chip on any of them. The row
+   * being READ is the exception, because it carries one line of context about
+   * the thread in front of you, and "which branch is this chat on?" is worth
+   * answering there even when the answer matches its neighbours'.
+   */
+  alwaysBranch?: boolean;
+}
+
 export function conversationRowMeta(
   group: ConversationGroup,
-  conversation: ChatConversation
+  conversation: ChatConversation,
+  options: RowMetaOptions = {}
 ): { branch: string | null; changed: number } {
   const identity = conversationRepoIdentity(conversation);
+  const branch = identity?.branch || null;
   return {
     // Only when this repo's threads are not all on one branch: otherwise the
     // header already says it, and a repeated chip is noise.
-    branch: group.branches.length > 1 ? identity?.branch || null : null,
+    branch: options.alwaysBranch || group.branches.length > 1 ? branch : null,
     changed: changesOf(conversation),
   };
 }

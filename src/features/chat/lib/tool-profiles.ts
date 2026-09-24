@@ -38,7 +38,15 @@ export type ToolProfileId = "full" | "lean";
  */
 export const LEAN_TOOL_NAMES: readonly string[] = [
   "list_repo_files",
+  // Both of these are in the lean surface on purpose. A weak model's most
+  // expensive habit is reading one file per round and paging through a tree to
+  // find a file it could have matched by name; two flat, single-argument calls
+  // (`{ paths: [...] }`, `{ pattern: "*.ts" }`) remove both loops without
+  // asking it to build the nested structure the lean profile deliberately
+  // withholds. Order follows the registry, like every other list here.
+  "find_files",
   "read_file",
+  "read_files",
   // A weak model is the one most likely to answer about a dependency from
   // memory, and these are reading tools with one flat argument each — the
   // same shape as read_file, so they add no loop the profile has to teach.
@@ -62,6 +70,21 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   // One flat schema, and the payoff is avoiding several wrong edits.
   "ask_user",
   "suggest_next",
+  // ── The GitHub reads a fix-up turn needs ──
+  // On the lean surface for the same reason `find_files` and `read_files` are:
+  // one flat argument (a number), and the alternative is worse. Without them a
+  // weak model told to "fix what the reviewer asked for" cannot read the review
+  // at all, so it guesses at what the reviewer wanted or asks the user to paste
+  // it in — which is the failure this whole surface exists to avoid.
+  //
+  // The WRITES stay off, by the same rule that keeps `http_write` off: an
+  // irreversible write behind a dialog is the pairing a small model handles
+  // worst. The LIST tools stay off too — searching issue rows is the kind of
+  // multi-step wandering this profile is shaped to prevent — so a number has to
+  // come from the user or from the push that just opened the pull request.
+  "read_issue",
+  "read_pull_request",
+  "read_ci_logs",
   // ── App tools ──
   // Listed in REGISTRY order, like everything else here (the app block sits
   // after the write tools in the registry). A weak model is the one that
@@ -71,15 +94,36 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   // repository, which is where a model that cannot call anything would
   // otherwise fall back to recall.
   //
-  // `http_write` and `create_diagram` are deliberately NOT here: one asks
-  // the user to approve an external write, the other builds a nested
-  // node/edge structure — exactly the two shapes a small model gets wrong.
+  // `http_write` is deliberately NOT here: it asks the user to approve an
+  // external write, and a small model that reaches for it on a turn that
+  // withheld it only produces a refusal.
+  //
+  // `create_diagram` + `open_in_tool` ARE here, and that is a deliberate
+  // reversal of the old rule that withheld `create_diagram` as "a nested
+  // node/edge structure a small model gets wrong". Withholding it did not
+  // stop the nested call — a free model told to draw reached for the only
+  // drawing-adjacent thing it had (`act_app`'s `drawflows` family), whose
+  // sole write action makes an EMPTY board, and invented `add_node`. The
+  // pair travels together because `create_diagram`'s result instructs the
+  // model to follow with `open_in_tool` to show the user the board; offering
+  // one without the other would send it at a tool this turn does not carry.
   "run_code",
   "format_code",
   "compare_data",
   "diff_text",
   "search_library",
   "http_request",
+  "create_diagram",
+  "open_in_tool",
+  // The app as a user of the app. Included on purpose: `read_app` is the
+  // cheapest possible answer to "which request do you mean", `describe_tools`
+  // is one flat string, and `act_app` takes one nested `args` object whose
+  // shape `describe_tools` prints — the shapes here are shallow, which is
+  // exactly what this profile is willing to ask a small model to build. A
+  // weak model with no hands at all is the case that guesses at stored state.
+  "read_app",
+  "act_app",
+  "describe_tools",
 ];
 
 /** Below this context length a model gets the lean surface */
@@ -128,7 +172,7 @@ export const REPO_FREE_PROFILE_NOTES: Record<ToolProfileId, string> = {
     "",
     "Keep the loop small and literal:",
     "- One tool call at a time, with the arguments the schema asks for.",
-    "- No repository is attached, so there are no project files to read or edit. The tools you have run and check things: run_code executes a snippet, format_code tidies text, compare_data and diff_text compare two inputs, search_library reads the ServiceNow reference, and fetch_url/search_web read the public web.",
+    "- No repository is attached, so there are no project files to read or edit. The tools you have run and check things: run_code executes a snippet, format_code tidies text, compare_data and diff_text compare two inputs, search_library reads the ServiceNow reference, fetch_url/search_web read the public web, and create_diagram draws a board on the DrawFlows canvas (follow it with open_in_tool, target \"drawflows\", to show the user).",
     "- Prefer running a snippet to reasoning about what it prints.",
     "- If a call fails, read the error and change the arguments. Repeating the same call will be refused.",
   ].join("\n"),

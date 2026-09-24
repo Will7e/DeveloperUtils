@@ -8,7 +8,7 @@
   z-index: 9998;
   display: flex;
   pointer-events: none;
-  background: color-mix(in srgb, var(--ds-background-0, #0a0a0a) 72%, transparent);
+  background: color-mix(in srgb, var(--ds-background-100) 72%, transparent);
   backdrop-filter: blur(3px);
 }
 

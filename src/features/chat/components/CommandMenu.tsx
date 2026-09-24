@@ -17,7 +17,12 @@
 
 import React from "react";
 import { Bot, Check, CornerDownLeft } from "lucide-react";
-import { formatContext, formatPrice } from "../lib/model-format";
+import {
+  formatContext,
+  formatPrice,
+  formatPriceTier,
+  routerNote,
+} from "../lib/model-format";
 import { CURATED_FALLBACK_MODELS } from "../constants";
 import type { ModelInfo } from "../types";
 import type { ChatCommand } from "../lib/commands";
@@ -57,8 +62,14 @@ function toRowMeta(m: ModelInfo): { name: string; id: string; badges: string[]; 
     name: m.name,
     id: m.id,
     badges: [
+      // Same three facts the picker shows, so the two ways of choosing a model
+      // cannot disagree about it — including the two that are easy to leave out
+      // and misleading to omit: a router is not a model, and a tiered price is
+      // not the flat price. See lib/model-format.ts.
+      routerNote(m.id) ? "ROUTER" : "",
       m.contextLength !== undefined ? formatContext(m.contextLength) : "",
       m.promptPrice !== undefined ? `${formatPrice(m.promptPrice)}/M in` : "",
+      formatPriceTier(m),
     ].filter(Boolean),
     free: Boolean(m.isFree),
   };

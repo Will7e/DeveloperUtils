@@ -24,6 +24,14 @@
 //      one-line rename would be nagged for a build. A check that ran
 //      and said no is a reason, because the agent edited past its own
 //      failing proof.
+//   3. UNTESTED CHANGE — source changed, a test command RAN GREEN, and no
+//      test file changed with it. This is the one rule that reaches past
+//      "unfinished" into "not proven", and it is deliberately the narrowest
+//      rule here: it needs a passing test command in the evidence, which is
+//      only possible in a turn that can actually run this project's tests. A
+//      conversation with no companion therefore never sees it, and neither
+//      does a documentation-only change — the gate asks for the test it knows
+//      the agent was able to write, in the moment it demonstrably could.
 //
 // Everything else is complete. Gating anything more — a stale pass, a
 // missing check, a heuristic read of the closing sentence — would turn
@@ -49,7 +57,16 @@
 import type { AgentPlan } from "../types";
 import { planProgress } from "./agent-plan";
 import { COMPLETION_NUDGE_PREFIX } from "./harness-notices";
+import { isNonSourcePath, isTestPath } from "./project-fingerprint";
 import { VERIFICATION_KIND_LABEL, type VerificationEvidence } from "./verification-ledger";
+
+/**
+ * A test command in a verification summary, in backticks as the ledger writes
+ * it: `` `npm test` exited 0 in 2100ms ``. Matched on the COMMAND, not on the
+ * word "test" appearing anywhere, because "test" shows up in branch names and
+ * file paths often enough to make a loose match fire on the wrong evidence.
+ */
+const TEST_COMMAND_RE = /`[^`]*(?:\b(?:vitest|jest|pytest|mocha|ava|rspec)\b|\btests?\b|\bspec\b|cargo test|go test)[^`]*`/i;
 
 /** Why the work is not finished, in the order the model sees it. */
 export type IncompleteReason =
@@ -66,6 +83,13 @@ export type IncompleteReason =
       summary: string;
       /** First failure lines, already capped by the producer */
       details: string[];
+    }
+  | {
+      kind: "untested-change";
+      /** The source files the change set touches, capped by the producer */
+      files: string[];
+      /** The (green) test command that proves tests are runnable here */
+      run: string;
     };
 
 export interface CompletionInput {
@@ -86,6 +110,14 @@ export interface CompletionInput {
   /** True when the user stopped this turn — a stop always wins */
   aborted: boolean;
   /**
+   * The change set in the workspace right now, and whether the project has
+   * tests at all (a test file exists by convention). Both are absent for a
+   * conversation with no workspace — and absent means SILENT: a rule that
+   * cannot judge must not guess.
+   */
+  changeSet?: Array<{ path: string; status: string }>;
+  projectHasTests?: boolean;
+  /**
    * True when the turn is parked on an `ask_user` question.
    *
    * Waiting is not stopping, and it is emphatically not unfinished work to
@@ -105,6 +137,12 @@ export type CompletionVerdict =
 export function describeReason(reason: IncompleteReason): string {
   if (reason.kind === "plan-unfinished") {
     return `your plan step ${reason.stepIndex} of ${reason.stepCount} is still open — "${reason.step}"`;
+  }
+  if (reason.kind === "untested-change") {
+    const files = reason.files.slice(0, 4).join(", ");
+    return `\`${reason.run}\` is green, but ${reason.files.length} source file(s) changed and no test did (${
+      files || "the change set"
+    })`;
   }
   const failures =
     reason.details.length > 0 ? ` (first failures: ${reason.details.slice(0, 3).join(" | ")})` : "";
@@ -127,6 +165,8 @@ export function completionNudge(reasons: IncompleteReason[]): string {
     ...reasons.map((r) => `- ${describeReason(r)}`),
     "",
     "Continue with the next unfinished step. If the remaining work needs a decision only I can make, call `ask_user` with the concrete options and the turn will wait for my answer — do not end the turn on a question in prose, and do not guess. If a recorded failure is expected or outside what I asked for, say so in one line, and clear the plan with `update_plan` (or mark the step done) so the stop is deliberate rather than a leftover.",
+    "",
+    "If the missing piece is a TEST, write the one that would have caught this: it must fail without your change and pass with it. If a test is genuinely not the right proof here (documentation, config, a rename) or the project has no test covering this area, say that in one line — that is a complete answer, not a refusal.",
   ].join("\n");
 }
 
@@ -175,11 +215,52 @@ export function evaluateCompletion(input: CompletionInput): CompletionVerdict {
     });
   }
 
+  // 3. Source changed, the suite is green, and nothing tests the change.
+  const untested = untestedChangeReason(input);
+  if (untested) reasons.push(untested);
+
   if (reasons.length === 0) return { complete: true };
   return {
     complete: false,
     reasons,
     nudge: completionNudge(reasons),
     summary: completionSummary(reasons),
+  };
+}
+
+/**
+ * The untested-change reason, or null when the gate has nothing to stand on.
+ *
+ * Every condition below is a way of NOT firing:
+ *
+ *   • no change set, or a project with no tests at all → cannot judge;
+ *   • a test file is already part of the change set → the agent did the thing;
+ *   • no source file changed (docs, config, lockfiles) → nothing to test;
+ *   • no GREEN test command in the evidence → the agent could not run tests
+ *     here, and asking for one would be asking for evidence it cannot produce.
+ *
+ * A deleted source file is not a change that needs a test, so deletions are
+ * excluded from the trigger — removing dead code is its own proof.
+ */
+function untestedChangeReason(input: CompletionInput): IncompleteReason | null {
+  const changeSet = input.changeSet;
+  if (!changeSet || changeSet.length === 0 || input.projectHasTests !== true) return null;
+  if (changeSet.some((c) => isTestPath(c.path))) return null;
+
+  const source = changeSet
+    .filter((c) => c.status !== "deleted" && !isTestPath(c.path) && !isNonSourcePath(c.path))
+    .map((c) => c.path);
+  if (source.length === 0) return null;
+
+  const green = input.evidence.find(
+    (e) => e.status === "fresh-pass" && e.kind === "command" && TEST_COMMAND_RE.test(e.summary)
+  );
+  if (!green) return null;
+
+  const match = TEST_COMMAND_RE.exec(green.summary);
+  return {
+    kind: "untested-change",
+    files: source.slice(0, 8),
+    run: match ? match[0].replace(/`/g, "") : "the test command",
   };
 }

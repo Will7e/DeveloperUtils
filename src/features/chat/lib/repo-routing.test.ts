@@ -8,7 +8,12 @@
 // pick that creates another one).
 
 import { describe, it, expect } from "vitest";
-import { isSameRepo, planRepoPick, type RouteCandidate } from "./repo-routing";
+import {
+  isSameRepo,
+  planRepoPick,
+  strandedChangeCount,
+  type RouteCandidate,
+} from "./repo-routing";
 import type { RepoContext } from "../types";
 
 const repo = (owner: string, name: string, branch = "main"): RepoContext => ({
@@ -157,6 +162,28 @@ describe("planRepoPick", () => {
         conversations: [current, billing],
       })
     ).toMatchObject({ action: "open-chat", conversationId: "b" });
+  });
+
+  it("states the work a move would leave behind, as a count", () => {
+    // The confirmation is only worth showing when there IS work to leave, and it
+    // has to be able to say how much: "3 changed files stay with this chat" is a
+    // decision, "unsaved changes" is a scare.
+    expect(strandedChangeCount(3)).toBe(3);
+    expect(strandedChangeCount(0)).toBe(0);
+    expect(strandedChangeCount(undefined)).toBe(0);
+  });
+
+  it("refuses to render a nonsensical count at a user", () => {
+    // `pendingChanges` is persisted with the conversation, so it arrives from
+    // storage as well as from the workspace. A corrupted value must not be able
+    // to keep a modal in front of the user forever, and "NaN changed files" is
+    // the kind of copy that makes someone distrust the whole feature.
+    expect(strandedChangeCount(NaN)).toBe(0);
+    expect(strandedChangeCount(-4)).toBe(0);
+    expect(strandedChangeCount(Infinity)).toBe(0);
+    // A fraction is still work, and it rounds down to a whole file rather than
+    // claiming more than exists.
+    expect(strandedChangeCount(2.7)).toBe(2);
   });
 
   it("opens a new chat for a repo whose only near-match is a different owner", () => {

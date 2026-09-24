@@ -48,7 +48,11 @@ import {
   reuseResultText,
   type CallLedgerEntry,
 } from "../lib/tool-repair";
-import { getCachedModelCatalog, modelDisplayName } from "../lib/model-catalog";
+import {
+  getCachedModelCatalog,
+  getCompetenceIndex,
+  modelDisplayName,
+} from "../lib/model-catalog";
 import {
   canEscalate,
   escalationNote,
@@ -58,8 +62,15 @@ import {
   type EscalationTargetChoice,
 } from "../lib/escalation";
 import { evaluateCompletion, type CompletionVerdict } from "../lib/completion-gate";
+import {
+  argumentRepairNote,
+  withContractHint,
+  withheldRefusal,
+} from "../lib/tool-surface";
 import { continuationExhaustedNotice, TOOL_LIMIT_NOTICE } from "../lib/harness-notices";
 import { verificationEvidence } from "../lib/verification-ledger";
+import { collectChanges } from "../workspace/workspace";
+import { isTestPath } from "../lib/project-fingerprint";
 import { recordUsageCalibration } from "../context/tokenizer-calibration";
 import { estimateTokens, estimateToolSchemaTokens } from "../context/tokenizer";
 import {
@@ -90,6 +101,17 @@ import {
   runWorkspaceDiff,
   runWriteFile,
 } from "../services/agent-actions";
+import {
+  runCommentOnIssue,
+  runCreateIssue,
+  runListIssues,
+  runListPullRequests,
+  runReadCiLogs,
+  runReadIssue,
+  runReadPullRequest,
+  runReviewPullRequest,
+  runUpdatePullRequest,
+} from "../services/github-collab-actions";
 import { runAppTool } from "../services/app-actions";
 import { runAskUser, runSuggestNext, settlePendingQuestion } from "../services/ask-user";
 import { sessionHost } from "./session-client";
@@ -152,6 +174,22 @@ export interface TurnSessionState {
   /** True once this turn spent its single escalation */
   escalated: boolean;
   /**
+   * Names of the tools the CURRENT round was sent.
+   *
+   * The surface is what the model was OFFERED, which is not the same as what is
+   * registered: a lean-profile turn withholds `http_write`, `create_diagram` and
+   * `open_in_tool`, and a plan turn withholds every mutating tool. A call for a
+   * name outside this set is refused by the executor, because a model that was
+   * never offered a tool cannot legitimately invoke it — that call is a
+   * hallucination or a stale transcript, and running it was how a free model
+   * reached a tool its own profile had deliberately removed.
+   *
+   * null means "unknown" (an adopted turn, or a path that never prepared a
+   * request): unknown does NOT refuse, because refusing on a guess would break
+   * real turns to catch a hypothetical one.
+   */
+  sentToolNames: Set<string> | null;
+  /**
    * Count of calls the repetition policy had to REFUSE this turn because
    * the model kept repeating a failing one. A refusal only happens after
    * the same call has failed twice and been demanded to change, so one
@@ -177,6 +215,7 @@ const session: TurnSessionState = {
   modelOverride: null,
   escalated: false,
   stuckRefusals: 0,
+  sentToolNames: null,
 };
 
 /** Identical executions allowed before the ledger takes over */
@@ -271,6 +310,10 @@ const defaultDeps: EngineDeps = {
   pickEscalation: (fromModel, opts) =>
     pickEscalationTarget(fromModel, {
       catalog: getCachedModelCatalog() ?? CURATED_FALLBACK_MODELS,
+      // The mid-turn switch happens because the model is stuck in a tool loop,
+      // so the axis that matters is tool-loop competence.
+      task: "agentic",
+      competence: getCompetenceIndex(),
       ...opts,
     }),
 };
@@ -411,8 +454,17 @@ export type RenderOutcome =
       usage?: UsageInfo;
       content: string;
       reasoning: string;
+      /** Structured reasoning blocks, replayed on the next tool round */
+      reasoningDetails?: unknown[];
     }
-  | { kind: "lost"; content: string; reasoning: string; modelId?: string; usage?: UsageInfo };
+  | {
+      kind: "lost";
+      content: string;
+      reasoning: string;
+      modelId?: string;
+      usage?: UsageInfo;
+      reasoningDetails?: unknown[];
+    };
 
 /**
  * Renders one transport turn into the store until END (or until the
@@ -437,6 +489,7 @@ async function renderTurn(
   let usage: UsageInfo | undefined;
   let endReason: HostEndReason | null = null;
   let endError: string | undefined;
+  let reasoningDetails: unknown[] | undefined;
   let lost = false;
 
   // Snapshot replay: seed what the transport already produced before
@@ -514,6 +567,9 @@ async function renderTurn(
           endError = event.payload.error;
           if (event.payload.usage) usage = event.payload.usage;
           if (event.payload.modelId) modelId = event.payload.modelId;
+          if (event.payload.reasoningDetails) {
+            reasoningDetails = event.payload.reasoningDetails;
+          }
           settle(false);
           break;
         }
@@ -537,7 +593,16 @@ async function renderTurn(
     bump();
   });
 
-  if (lost) return { kind: "lost", content, reasoning, modelId, usage };
+  if (lost) {
+    return {
+      kind: "lost",
+      content,
+      reasoning,
+      modelId,
+      usage,
+      ...(reasoningDetails ? { reasoningDetails } : {}),
+    };
+  }
   return {
     kind: "end",
     reason: endReason ?? "failed",
@@ -546,6 +611,7 @@ async function renderTurn(
     usage,
     content,
     reasoning,
+    ...(reasoningDetails ? { reasoningDetails } : {}),
   };
 }
 
@@ -561,7 +627,18 @@ function commitRender(
   // The model id IS the wire model now — no virtual-model masking.
   const model = outcome.modelId ?? fallbackModelId ?? undefined;
   const reasoning = (streamedReasoning || outcome.reasoning) || undefined;
-  const meta = { effort: session.effort, mode: session.mode };
+  const meta = {
+    effort: session.effort,
+    mode: session.mode,
+    // Reasoning blocks ride every commit path, including the aborted and
+    // tool-calls ones. A tool round is exactly the case that needs them: the
+    // next request replays the assistant message that requested the tools, and
+    // providers that interleave thinking with tool calls reject that round if
+    // its reasoning is missing.
+    ...(outcome.reasoningDetails && outcome.reasoningDetails.length > 0
+      ? { reasoningDetails: outcome.reasoningDetails }
+      : {}),
+  };
 
   if (outcome.kind === "lost") {
     api.discardStreaming();
@@ -700,6 +777,28 @@ async function runBridgeTool(
       return runShellCommand(conversationId, args, signal);
     case "verify_with_ci":
       return runCiVerification(conversationId, args, signal);
+    // GitHub collaboration. The reads are plain bridge calls; the four writes
+    // reach the user through the same approval gate `http_write` uses, and the
+    // gate lives in the executor so every caller (the engine, an eval) is
+    // gated by construction rather than by remembering to ask.
+    case "list_issues":
+      return runListIssues(conversationId, args);
+    case "read_issue":
+      return runReadIssue(conversationId, args);
+    case "list_pull_requests":
+      return runListPullRequests(conversationId, args);
+    case "read_pull_request":
+      return runReadPullRequest(conversationId, args);
+    case "read_ci_logs":
+      return runReadCiLogs(conversationId, args);
+    case "create_issue":
+      return runCreateIssue(conversationId, args);
+    case "comment_on_issue":
+      return runCommentOnIssue(conversationId, args);
+    case "review_pull_request":
+      return runReviewPullRequest(conversationId, args);
+    case "update_pull_request":
+      return runUpdatePullRequest(conversationId, args);
     // The two harness-interaction tools. `ask_user` parks this call until
     // the user answers (it needs the call id to pair the answer with its
     // request); `suggest_next` publishes chips and returns immediately.
@@ -761,6 +860,8 @@ async function executeToolPhase(
     /** The call as it will EXECUTE (arguments possibly repaired) */
     call: ToolCallRequest;
     cacheKey: string | null;
+    /** Set when the arguments were coerced, so the row says so */
+    argNote?: string;
   }
 
   /**
@@ -769,15 +870,21 @@ async function executeToolPhase(
    * argument failures — so the repetition policy sees the whole truth
    * rather than only the calls that reached the network.
    */
-  const record = (call: ToolCallRequest, result: ToolCallResult): void => {
+  const record = (call: ToolCallRequest, result: ToolCallResult): ToolCallResult => {
     const signature = callSignature(call.name, call.arguments);
     const prior = session.callLedger.get(signature);
+    // A failure the ledger has already seen once comes back with its tool's own
+    // contract attached (lib/tool-surface.ts): the first identical error is a
+    // fact, the second is evidence that the fact was not enough.
+    const repeated = (prior?.count ?? 0) >= 1;
+    const enriched = repeated && !result.ok ? withContractHint(result) : result;
     session.callLedger.set(signature, {
       count: (prior?.count ?? 0) + 1,
       ok: result.ok,
-      digest: result.summary ?? (result.ok ? "ok" : "failed"),
-      resultText: serializeToolResult(result).slice(0, LEDGER_RESULT_MAX_CHARS),
+      digest: enriched.summary ?? (result.ok ? "ok" : "failed"),
+      resultText: serializeToolResult(enriched).slice(0, LEDGER_RESULT_MAX_CHARS),
     });
+    return enriched;
   };
 
   const pending: PendingTool[] = [];
@@ -812,6 +919,33 @@ async function executeToolPhase(
       return;
     }
 
+    // ── Surface enforcement ──
+    // The model may only call what this round OFFERED it. Checked here, right
+    // after the repetition policy and before anything is parsed or executed, so
+    // a tool the profile withheld cannot be reached by hallucinating its name.
+    if (session.sentToolNames && session.sentToolNames.size > 0) {
+      const refusal = withheldRefusal(call.name, session.sentToolNames);
+      if (refusal) {
+        const blocked: ToolCallResult = {
+          callId: call.id,
+          name: call.name,
+          ok: false,
+          data: { error: refusal },
+          durationMs: 0,
+          summary: "tool not offered this turn",
+        };
+        results.set(idx, record(call, blocked));
+        session.stuckRefusals += 1;
+        logTurnEvent({
+          turnId: session.turnId,
+          conversationId,
+          phase: "tool-phase",
+          detail: `${call.name}: refused (not in this turn's tool surface)`,
+        });
+        return;
+      }
+    }
+
     // ── Argument repair ──
     // Repair first, validate second: a fence or a trailing comma should
     // cost this turn nothing, and the repaired text is what executes.
@@ -828,6 +962,17 @@ async function executeToolPhase(
     const normalized: ToolCallRequest = argsText === call.arguments ? call : { ...call, arguments: argsText };
 
     const validation = validateToolCall(normalized.name, normalized.arguments);
+    // Coercion notes are the harness having fixed the model's call; the model is
+    // told, because a silent repair teaches it that the shape was acceptable.
+    const argNote = validation.ok ? argumentRepairNote(validation.notes) : "";
+    if (argNote) {
+      logTurnEvent({
+        turnId: session.turnId,
+        conversationId,
+        phase: "tool-phase",
+        detail: `${call.name}: ${argNote}`,
+      });
+    }
     if (!validation.ok) {
       const failure: ToolCallResult = {
         callId: call.id,
@@ -837,18 +982,16 @@ async function executeToolPhase(
         durationMs: 0,
         summary: "invalid arguments",
       };
-      record(normalized, failure);
-      results.set(idx, failure);
+      results.set(idx, record(normalized, failure));
       return;
     }
     const cacheKey = repoContext ? toolCacheKey(normalized, repoContext) : null;
     const hit = lookupToolCache(cacheKey);
     if (hit) {
       const cached: ToolCallResult = { ...hit, callId: call.id, durationMs: 0 };
-      record(normalized, cached);
-      results.set(idx, cached);
+      results.set(idx, record(normalized, cached));
     } else {
-      pending.push({ idx, call: normalized, cacheKey });
+      pending.push({ idx, call: normalized, cacheKey, ...(argNote ? { argNote } : {}) });
     }
   });
   drainOrdered();
@@ -856,8 +999,10 @@ async function executeToolPhase(
   if (pending.length > 0) {
     const kindOf = (p: PendingTool) => getToolMeta(p.call.name)?.kind;
     const settle = (p: PendingTool) => (result: ToolCallResult) => {
-      record(p.call, result);
-      results.set(p.idx, result);
+      const noted = p.argNote
+        ? { ...result, summary: result.summary ? `${result.summary} · args repaired` : "args repaired" }
+        : result;
+      results.set(p.idx, record(p.call, noted));
       drainOrdered();
     };
 
@@ -1066,6 +1211,16 @@ async function runRound(
   // same tools the model was sent — never from what it claims it did.
   const agentTools =
     turn.mode === "build" && Array.isArray(turn.tools) && turn.tools.length > 0;
+  // The surface this round OFFERED, which is what the executor enforces
+  // (TurnSessionState.sentToolNames). Written per round because the surface is
+  // recomputed per round: a lean-profile model, a plan turn and a repo-free
+  // chat each get a different list, and a call is legal only against the list it
+  // was actually sent alongside.
+  session.sentToolNames = new Set(
+    (Array.isArray(turn.tools) ? turn.tools : [])
+      .map((t) => (t as { function?: { name?: string } }).function?.name ?? "")
+      .filter(Boolean)
+  );
   session.turnId = turnId;
   // Recorded on every committed message so the transcript shows the
   // state a reply was produced under.
@@ -1240,6 +1395,13 @@ function completionVerdictFor(conversationId: string, agentTools: boolean): Comp
   const state = useChatStore.getState();
   const conversation = state.conversations.find((c) => c.id === conversationId);
   const workspace = selectWorkspace(state, conversationId);
+  // The change set and "does this project have tests" are read HERE, at the
+  // stop, rather than threaded through the loop: both are properties of the
+  // workspace as it stands now, and a value captured when the round started
+  // would describe code the agent has since replaced.
+  const changeSet = workspace
+    ? collectChanges(workspace).map((c) => ({ path: c.path, status: c.status }))
+    : undefined;
   return evaluateCompletion({
     plan: conversation?.plan,
     evidence: verificationEvidence(conversationId, {
@@ -1247,6 +1409,8 @@ function completionVerdictFor(conversationId: string, agentTools: boolean): Comp
       // never equal a recorded revision, so nothing reads as fresh.
       workspaceUpdatedAt: workspace?.updatedAt ?? -1,
     }),
+    changeSet,
+    projectHasTests: workspace ? workspace.tree.some((e) => isTestPath(e.path)) : undefined,
     agentTools,
     // The stop is the user's, not the model's — a stop always wins.
     aborted: Boolean(session.abort?.signal.aborted),
@@ -1491,6 +1655,7 @@ export async function runTurn(
   session.modelOverride = null;
   session.escalated = false;
   session.stuckRefusals = 0;
+  session.sentToolNames = null;
 
   try {
     await runRounds(conversationId, resolved);
@@ -1529,6 +1694,7 @@ export async function runTurn(
     session.callLedger = new Map();
     session.recoveredTextCalls = false;
     session.recoveredNote = null;
+    session.sentToolNames = null;
     // Safety net: a question whose turn is over has nobody left to answer
     // it, and a waiter that outlives its turn would swallow the next answer
     // into a promise nothing is awaiting. On the reload path there is no
@@ -1620,6 +1786,9 @@ export async function adoptTurn(
   session.modelOverride = null;
   session.escalated = false;
   session.stuckRefusals = 0;
+  // The adopted turn's surface died with the page that prepared it, so it is
+  // unknown rather than empty — unknown does not refuse a call.
+  session.sentToolNames = null;
 
   logTurnEvent({
     turnId: snapshot.turnId,
@@ -1696,6 +1865,7 @@ export async function adoptTurn(
     session.callLedger = new Map();
     session.recoveredTextCalls = false;
     session.recoveredNote = null;
+    session.sentToolNames = null;
     if (adopted) useChatStore.getState().clearPendingTurn(conversationId);
   }
 }

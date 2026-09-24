@@ -20,7 +20,7 @@ import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
 import { listUserRepos, type GitHubRepo } from "../lib/github-client";
 import { describeRelativeTime, formatRelativeTime } from "../lib/relative-time";
-import type { RepoPickIntent } from "../lib/repo-routing";
+import { strandedChangeCount, type RepoPickIntent } from "../lib/repo-routing";
 import type { RepoContext } from "../types";
 
 /** GitHub's page size here, and the point at which the list admits it is cut */
@@ -80,6 +80,23 @@ export function RepoPicker({ repoContext, token, onSelect, onDetach }: RepoPicke
    * armed turns the next casual pick into the hijack this change removes.
    */
   const [switchInPlace, setSwitchInPlace] = React.useState(false);
+  /**
+   * A change of repository that would leave un-pushed work behind.
+   *
+   * Both ways of moving this chat away from its repository — the chip's detach
+   * and the menu's "switch this chat" — used to act immediately and explain
+   * afterwards, in a toast that faded in six seconds. The work is not lost (the
+   * workspace is kept per chat AND repository) but the user has to know that to
+   * read the toast as anything other than a loss, and six seconds is not long
+   * enough to decide whether they wanted to leave. So the consequence is stated
+   * BEFORE the act, as the decision it is, and only when there is something to
+   * leave behind: a chat with nothing unsaved still detaches in one click.
+   */
+  const [confirmMove, setConfirmMove] = React.useState<
+    { kind: "detach" } | { kind: "switch"; repo: RepoSelection } | null
+  >(null);
+  /** The work a move would leave behind, as a count the confirmation can say */
+  const stranded = strandedChangeCount(pendingChanges);
   const [attempt, setAttempt] = React.useState(0);
   /** Keyboard cursor into `filtered`; clamped at render, never trusted */
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -161,22 +178,47 @@ export function RepoPicker({ repoContext, token, onSelect, onDetach }: RepoPicke
       repoContext &&
         repoContext.owner.toLowerCase() === repo.owner.toLowerCase() &&
         repoContext.repo.toLowerCase() === repo.name.toLowerCase()
-    );
-
-  const handleSelect = (repo: GitHubRepo) => {
+    );  const handleSelect = (repo: GitHubRepo) => {
     // attachedAt is stamped by the store action on commit.
     const intent: RepoPickIntent = switchInPlace ? "switch" : "auto";
     if (switchInPlace) setSwitchInPlace(false);
-    onSelect(
-      {
-        owner: repo.owner,
-        repo: repo.name,
-        branch: repo.defaultBranch,
-      },
-      intent
-    );
+    const selection: RepoSelection = {
+      owner: repo.owner,
+      repo: repo.name,
+      branch: repo.defaultBranch,
+    };
+
+    // An explicit switch that strands un-pushed work is confirmed first. The
+    // menu closes either way: the question is about this chat's workspace, and
+    // it belongs on screen where the chip is, not inside the list.
     setOpen(false);
     setQuery("");
+    if (intent === "switch" && stranded > 0) {
+      setConfirmMove({ kind: "switch", repo: selection });
+      return;
+    }
+    onSelect(selection, intent);
+  };
+
+  /**
+   * The chip's detach. Asks only when there is work to leave behind: a chat with
+   * a clean workspace must keep detaching in one click, or the confirmation
+   * becomes noise and the one that matters is dismissed with it.
+   */
+  const requestDetach = () => {
+    if (stranded > 0) {
+      setConfirmMove({ kind: "detach" });
+      return;
+    }
+    onDetach();
+  };
+
+  const confirmMoveNow = () => {
+    const pending = confirmMove;
+    setConfirmMove(null);
+    if (!pending) return;
+    if (pending.kind === "detach") onDetach();
+    else onSelect(pending.repo, "switch");
   };
 
   /**
@@ -414,7 +456,7 @@ export function RepoPicker({ repoContext, token, onSelect, onDetach }: RepoPicke
           <button
             type="button"
             className="chat-repo-chip-btn"
-            onClick={onDetach}
+            onClick={requestDetach}
             aria-label="Detach repository"
           >
             <X className="h-3 w-3" />
@@ -422,6 +464,50 @@ export function RepoPicker({ repoContext, token, onSelect, onDetach }: RepoPicke
         </SimpleTooltip>
       </span>
         {menu}
+        {confirmMove && (
+          <>
+            <div
+              className="chat-repo-confirm-backdrop"
+              onClick={() => setConfirmMove(null)}
+              aria-hidden="true"
+            />
+            <div
+              className="chat-repo-confirm"
+              role="alertdialog"
+              aria-label={
+                confirmMove.kind === "detach" ? "Detach repository" : "Move this chat"
+              }
+            >
+              <div className="chat-repo-confirm-title">
+                {confirmMove.kind === "detach"
+                  ? `Detach ${repoContext.owner}/${repoContext.repo}?`
+                  : `Move this chat to ${confirmMove.repo.owner}/${confirmMove.repo}?`}
+              </div>
+              <p className="chat-repo-confirm-body">
+                {stranded} changed file{stranded === 1 ? "" : "s"} stay with this
+                chat, on {repoContext.owner}/{repoContext.repo} — they come back when
+                you re-attach it here.
+              </p>
+              <div className="chat-repo-confirm-actions">
+                <button
+                  type="button"
+                  className="chat-repo-confirm-cancel"
+                  onClick={() => setConfirmMove(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="chat-repo-confirm-go"
+                  onClick={confirmMoveNow}
+                  autoFocus
+                >
+                  {confirmMove.kind === "detach" ? "Detach" : "Move"}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }

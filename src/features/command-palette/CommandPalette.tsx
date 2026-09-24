@@ -22,11 +22,14 @@ import {
   Network,
   Code2,
   MessageSquareText,
+  Search,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
 import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
+import { useChatStore } from "@/stores/chat.store";
+import { downloadConversation } from "@/features/chat/services/export-conversation";
 import { LANGUAGE_CONFIGS } from "@/config";
 import type { Language } from "@/types";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -308,6 +311,74 @@ export function CommandPalette() {
         category: "File",
         icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
         action: () => navigate("/chat"),
+      },
+      // ── Chat actions ──
+      // The palette could already take you to /chat and nothing else; a chat is
+      // where the most work happens, and every one of these was previously reachable
+      // only by typing a slash command into the composer it belongs to.
+      {
+        id: "chat-new",
+        label: "Agents: start a new chat",
+        shortcut: "⌘⇧N",
+        category: "Agents",
+        icon: <MessageSquareText style={{ width: 14, height: 14 }} />,
+        action: () => {
+          const store = useChatStore.getState();
+          store.createConversation(store.settings.defaultModel);
+          navigate("/chat");
+        },
+      },
+      {
+        id: "chat-export",
+        label: "Agents: export this chat as Markdown",
+        category: "Agents",
+        icon: <Download style={{ width: 14, height: 14 }} />,
+        action: () => {
+          const { activeConversationId } = useChatStore.getState();
+          if (!activeConversationId) {
+            addToast({ message: "No chat is open to export.", type: "info" });
+            return;
+          }
+          downloadConversation(activeConversationId);
+        },
+      },
+      {
+        id: "chat-stop",
+        label: "Agents: stop the running turn",
+        category: "Agents",
+        icon: <StopCircle style={{ width: 14, height: 14 }} />,
+        action: () => {
+          const store = useChatStore.getState();
+          if (!store.isStreaming) {
+            addToast({ message: "No turn is running.", type: "info" });
+            return;
+          }
+          // Through the runner so the abort path is the same one /stop uses.
+          void import("@/features/chat/services/chat-runner").then((m) => m.stopChatStream());
+        },
+      },
+      {
+        id: "chat-settings",
+        label: "Agents: open agent settings",
+        category: "Agents",
+        icon: <Settings style={{ width: 14, height: 14 }} />,
+        action: () => {
+          useChatStore.getState().setSettingsOpen(true);
+          navigate("/chat");
+        },
+      },
+      {
+        id: "chat-find",
+        label: "Agents: find in this conversation",
+        shortcut: "⌘F",
+        category: "Agents",
+        icon: <Search style={{ width: 14, height: 14 }} />,
+        action: () => {
+          // The transcript owns the find bar, so this is a navigation and a
+          // keystroke rather than a second implementation of search.
+          navigate("/chat");
+          window.dispatchEvent(new CustomEvent("intab:chat-find"));
+        },
       },
       {
         id: "nav-dashboard",

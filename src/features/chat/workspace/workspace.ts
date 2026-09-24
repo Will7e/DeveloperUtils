@@ -70,6 +70,7 @@ export function createWorkspace(
     branch,
     baseCommitSha,
     workingBranch: null,
+    pushedAt: null,
     tree: [],
     files: {},
     updatedAt: Date.now(),
@@ -561,7 +562,7 @@ export function markPushed(
   // counter here would retire evidence about EXACTLY those bytes, and the
   // binding release (binding.moved / base-moved) already says that proof
   // recorded against the old base no longer applies.
-  return { ...ws, files, baseCommitSha: commitSha, mutations };
+  return { ...ws, files, baseCommitSha: commitSha, mutations, pushedAt: Date.now() };
 }
 
 // ── Push snapshots ───────────────────────────────────────────

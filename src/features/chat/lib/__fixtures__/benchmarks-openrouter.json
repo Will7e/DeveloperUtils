@@ -1,0 +1,136 @@
+{
+  "data": [
+    {
+      "source": "openrouter",
+      "model_permaslug": "sakana/fugu-ultra",
+      "display_name": "Fugu Ultra",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.9461279999999999,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 1.148739303030303,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-15T01:07:47.987Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "google/gemini-3.1-pro-preview-20260219",
+      "display_name": "Google: Gemini 3.1 Pro Preview",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.944444,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.20185933333333334,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-01T17:51:04.719Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "openai/gpt-6-astra-20260903",
+      "display_name": "OpenAI: GPT-6 Astra",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.9436415317919074,
+      "accuracy_stddev": 0.0020135000000000014,
+      "avg_cost_per_task": 0.09933485549132949,
+      "total_tasks": 346,
+      "last_run_timestamp": "2026-09-06T03:05:46.155Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "google/gemini-3.7-flash-20260813",
+      "display_name": "Google: Gemini 3.7 Flash",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.942761,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.030509156565656566,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-01T13:25:46.082Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "openai/gpt-5.5-20260423",
+      "display_name": "OpenAI: GPT-5.5",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.9377104999999999,
+      "accuracy_stddev": 0.005050499999999958,
+      "avg_cost_per_task": 0.30815713636363634,
+      "total_tasks": 396,
+      "last_run_timestamp": "2026-09-01T13:20:32.033Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "openai/gpt-5.6-sol-pro-20260709",
+      "display_name": "OpenAI: GPT-5.6 Sol Pro",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.93771,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.4446258484848485,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-08-01T08:45:01.642Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "sakana/fugu-ultra-v2",
+      "display_name": "Fugu Ultra V2",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.93266,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.5025571414141414,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-15T01:07:48.052Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "x-ai/grok-4.6-20260810",
+      "display_name": "SpaceXAI: Grok 4.6",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.93266,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.12205839393939394,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-01T13:22:57.685Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "google/gemini-3.6-flash-20260721",
+      "display_name": "Google: Gemini 3.6 Flash",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.928451,
+      "accuracy_stddev": 0.004209000000000018,
+      "avg_cost_per_task": 0.06683859343434344,
+      "total_tasks": 396,
+      "last_run_timestamp": "2026-09-01T17:57:17.668Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "google/gemini-3.5-flash-20260519",
+      "display_name": "Google: Gemini 3.5 Flash",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.927609,
+      "accuracy_stddev": 0.003367000000000009,
+      "avg_cost_per_task": 0.14183102777777779,
+      "total_tasks": 396,
+      "last_run_timestamp": "2026-09-01T18:06:42.346Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "openai/gpt-6-sol-20260922",
+      "display_name": "OpenAI: GPT-6 Sol",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.9242420000000001,
+      "accuracy_stddev": null,
+      "avg_cost_per_task": 0.026419161616161615,
+      "total_tasks": 198,
+      "last_run_timestamp": "2026-09-23T15:27:41.867Z"
+    },
+    {
+      "source": "openrouter",
+      "model_permaslug": "openai/gpt-5.6-sol-20260709",
+      "display_name": "OpenAI: GPT-5.6 Sol",
+      "benchmark_type": "gpqa_diamond",
+      "accuracy": 0.9191915,
+      "accuracy_stddev": 0.005050500000000013,
+      "avg_cost_per_task": 0.07126612626262625,
+      "total_tasks": 396,
+      "last_run_timestamp": "2026-09-01T13:21:08.334Z"
+    }
+  ]
+}

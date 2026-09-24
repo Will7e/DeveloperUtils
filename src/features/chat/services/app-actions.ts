@@ -45,6 +45,9 @@ import {
   searchLibraryTool,
 } from "../lib/app-tools";
 import { STOPPED_BY_USER } from "../companion/companion-client";
+import { isSecretHeader, maskValue, SECRET_HANDLING_RULE } from "../lib/sensitivity";
+import { APP_SURFACE } from "../lib/app-surface";
+import { describeToolFamilies, readAppFamily, runAppAction } from "./app-surface-actions";
 import type { HttpApprovalDecision, ToolCallResult, ToolName } from "../types";
 
 // ── Shared helpers ───────────────────────────────────────────
@@ -144,16 +147,20 @@ function validateRequest(
   return { ok: true, url: guard.normalizedUrl ?? url };
 }
 
-/** Header names whose VALUES must not be shown in an approval dialog */
-const SECRET_HEADER_RE = /^(authorization|cookie|set-cookie|proxy-authorization|x-api-key|api-key|x-auth-token)$/i;
-
-/** Copy of the headers with credential-shaped values masked (display only) */
+/**
+ * Copy of the headers with credential-shaped values masked (display only).
+ *
+ * The mask comes from lib/sensitivity.ts — the SAME rule that decides what the
+ * API Tester hides and what the agent may read — instead of a fourth regex that
+ * happened to agree. It also used to leak the first six characters of the
+ * secret into an approval dialog (and from there into a screenshot, a shared
+ * screen and the model's context); now it reports the length and nothing else,
+ * which is all a reviewer needs to recognize that a token is present.
+ */
 export function redactHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
-    out[key] = SECRET_HEADER_RE.test(key.trim())
-      ? `${value.slice(0, 6)}…[redacted]`
-      : value;
+    out[key] = isSecretHeader(key) ? maskValue(value).display : value;
   }
   return out;
 }
@@ -503,6 +510,12 @@ export async function runHttpWriteTool(
         timeoutMs,
       }),
       approved: true,
+      ...(decision.auto
+        ? {
+            autoApproved:
+              '"Run tools without asking" is on in the user\'s chat settings, so this request was sent without showing them a dialog. Say so when you report it — never describe it as reviewed.',
+          }
+        : {}),
       scope:
         "Sent to an EXTERNAL service at the user's request. Report what changed there — nothing in the workspace or on GitHub was affected.",
     },
@@ -535,7 +548,7 @@ type DiagramBuild =
  * element boilerplate live in utils/diagram-elements. Caps are enforced here
  * so a runaway spec cannot wedge the canvas.
  */
-function buildDiagram(args: Record<string, unknown>): DiagramBuild {
+function buildDiagram(args: Record<string, unknown>, scope?: string): DiagramBuild {
   const rawNodes = Array.isArray(args.nodes) ? args.nodes : [];
   const rawEdges = Array.isArray(args.edges) ? args.edges : [];
   if (rawNodes.length === 0) {
@@ -604,11 +617,14 @@ function buildDiagram(args: Record<string, unknown>): DiagramBuild {
 
   const title = (asString(args.name).trim() || asString(args.title).trim()).slice(0, 120);
   const name = title || `Diagram — ${nodes.length} nodes`;
-  const elements = buildDiagramElements({
-    nodes,
-    edges,
-    ...(title ? { title } : {}),
-  });
+  const elements = buildDiagramElements(
+    {
+      nodes,
+      edges,
+      ...(title ? { title } : {}),
+    },
+    scope ? { scope } : {}
+  );
 
   return {
     ok: true,
@@ -632,7 +648,11 @@ export function runCreateDiagramTool(
 
   if (signal?.aborted) return fail(name, STOPPED_BY_USER, "stopped", started);
 
-  const built = buildDiagram(args);
+  // Every call scopes its element ids. Two diagrams on one board used to
+  // merge into each other (identical ids mean identical elements to
+  // Excalidraw), which silently cost the second diagram its arrows.
+  const scope = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+  const built = buildDiagram(args, scope);
   if (!built.ok) return fail(name, built.error, built.summary, started);
 
   const workflowId = useAppStore.getState().createWorkflow(built.name, built.elements);
@@ -650,7 +670,8 @@ export function runCreateDiagramTool(
             note: `${built.droppedEdges.length} edge(s) named a node that is not in the diagram, so they were dropped. Add those nodes and run this again if they matter.`,
           }
         : {}),
-      where: "DrawFlows (the board is now open on the canvas). Call open_in_tool to take the user there.",
+      where:
+        "DrawFlows: the board was created and is now its active tab. Call open_in_tool with target drawflows and NO nodes to take the user to it — that navigates to this board, and passing the same nodes again would draw a second one.",
     },
     `${built.nodeCount} nodes, ${built.edgeCount} edges`,
     started
@@ -706,6 +727,17 @@ export function runOpenInToolTool(
   }
 
   let payload: HandoffPayload;
+  /**
+   * True when the call only moves the user to a tool that already holds the
+   * content.
+   *
+   * drawflows is the one target where that is meaningful: `create_diagram`
+   * has already drawn the board, and its own instructions tell the model to
+   * follow up here "to take the user there". Requiring nodes for that
+   * follow-up made the model pass the same spec again, and because this tool
+   * creates a board, the user got the SAME diagram twice in two tabs.
+   */
+  let navigateOnly = false;
   switch (target) {
     case "compiler": {
       const code = asString(args.code);
@@ -816,11 +848,17 @@ export function runOpenInToolTool(
     }
 
     case "drawflows": {
-      const built = buildDiagram(args);
+      // No nodes → show the canvas instead of drawing on it.
+      if (!Array.isArray(args.nodes) || args.nodes.length === 0) {
+        navigateOnly = true;
+        payload = { target };
+        break;
+      }
+      const built = buildDiagram(args, Date.now().toString(36));
       if (!built.ok) {
         return fail(
           name,
-          `${built.error} Or call create_diagram, which draws the board directly.`,
+          `${built.error} Or omit "nodes" entirely to just show the DrawFlows canvas.`,
           built.summary,
           started
         );
@@ -838,7 +876,7 @@ export function runOpenInToolTool(
       return fail(name, "Unsupported target.", "unknown target", started);
   }
 
-  const applied = applyHandoff(payload);
+  const applied = navigateOnly ? true : applyHandoff(payload);
   if (!applied) {
     return fail(
       name,
@@ -854,9 +892,88 @@ export function runOpenInToolTool(
     {
       target,
       opened: true,
-      note: `Loaded into ${target} and switched the user to it. Say what they will find there in one line — do not repeat the content in the reply.`,
+      ...(navigateOnly ? { navigated: true } : {}),
+      note: navigateOnly
+        ? `Switched the user to ${target}, which already holds the content you drew there. Say what they will find in one line — do not repeat it, and do not call this again for the same board.`
+        : `Loaded into ${target} and switched the user to it. Say what they will find there in one line — do not repeat the content in the reply.`,
     },
-    `opened in ${target}`,
+    navigateOnly ? `opened ${target}` : `opened in ${target}`,
+    started
+  );
+}
+
+// ── The app-surface trio ─────────────────────────────────────
+
+/**
+ * `read_app` — one feature family, or the index of all of them.
+ *
+ * No abort signal: a store read is synchronous and instantaneous, so there is
+ * nothing to interrupt and passing one would only suggest otherwise.
+ */
+function runReadAppTool(args: Record<string, unknown>): ToolCallResult {
+  const started = Date.now();
+  const outcome = readAppFamily(asString(args.family) || undefined);
+  return outcome.ok
+    ? ok("read_app", outcome.data, outcome.summary, started)
+    : fail("read_app", outcome.error, outcome.summary, started);
+}
+
+/**
+ * `act_app` — one declared action on one family.
+ *
+ * The family/action pair is validated against the catalog before anything is
+ * touched, so a typo in `action` comes back with that family's real action
+ * names instead of a silent no-op. `args` must be an object: a model that
+ * sends a JSON STRING here is describing the shape it thinks the action has,
+ * and telling it so is cheaper than guessing what it meant.
+ */
+async function runActAppTool(args: Record<string, unknown>): Promise<ToolCallResult> {
+  const started = Date.now();
+  const family = asString(args.family).trim();
+  const action = asString(args.action).trim();
+  if (!family) {
+    return fail(
+      "act_app",
+      `\`family\` is required. Families: ${APP_SURFACE.map((f) => f.id).join(", ")}.`,
+      "missing family",
+      started
+    );
+  }
+  if (!action) {
+    return fail("act_app", "`action` is required — describe_tools({ family }) lists them.", "missing action", started);
+  }
+  const rawArgs = args.args;
+  if (rawArgs !== undefined && (typeof rawArgs !== "object" || rawArgs === null || Array.isArray(rawArgs))) {
+    return fail(
+      "act_app",
+      "`args` must be an OBJECT (e.g. { key: \"API_BASE\", value: \"…\" }), not a JSON string or an array.",
+      "bad args shape",
+      started
+    );
+  }
+  const outcome = await runAppAction(family, action, (rawArgs as Record<string, unknown>) ?? {});
+  return outcome.ok
+    ? ok("act_app", outcome.data, outcome.summary, started)
+    : fail("act_app", outcome.error, outcome.summary, started);
+}
+
+/** `describe_tools` — a family's actions and argument shapes, on demand */
+function runDescribeToolsTool(args: Record<string, unknown>): ToolCallResult {
+  const started = Date.now();
+  const requested = asString(args.family).trim();
+  const { text, unknown } = describeToolFamilies(requested ? [requested] : undefined);
+  if (unknown.length > 0) {
+    return fail(
+      "describe_tools",
+      `No app family called "${unknown.join(", ")}". The families are: ${APP_SURFACE.map((f) => f.id).join(", ")}.`,
+      `unknown family: ${unknown.join(", ")}`,
+      started
+    );
+  }
+  return ok(
+    "describe_tools",
+    { detail: text, note: SECRET_HANDLING_RULE },
+    requested ? `describe ${requested}` : "describe families",
     started
   );
 }
@@ -898,6 +1015,18 @@ export async function runAppTool(
       return runCreateDiagramTool(args, signal);
     case "open_in_tool":
       return runOpenInToolTool(args, signal);
+
+    // ── The app as a user of every feature family ──
+    // Reads and writes dispatch into services/app-surface-actions.ts, which
+    // owns the per-family executors and the action ledger. Kept out of this
+    // switch's own body because a family is data, not a tool: the catalog in
+    // lib/app-surface.ts declares the actions and that module performs them.
+    case "read_app":
+      return runReadAppTool(args);
+    case "act_app":
+      return runActAppTool(args);
+    case "describe_tools":
+      return runDescribeToolsTool(args);
     default:
       return fail(
         name,

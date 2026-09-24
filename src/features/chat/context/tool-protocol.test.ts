@@ -15,7 +15,14 @@
 //  - folding a stale result keeps the pairing, only shortening text
 
 import { describe, it, expect } from "vitest";
-import { sanitizeToolProtocol, staleToolResultIds, prepareRequest, type WireMessage } from "./engine";
+import {
+  foldedTurnCutoff,
+  sanitizeToolProtocol,
+  staleToolResultIds,
+  prepareRequest,
+  type WireMessage,
+} from "./engine";
+import { TOOL_RESULT_FOLD_QUANTUM, TOOL_RESULT_FOLD_TURNS } from "../constants";
 import { toWireBodyMessage } from "../lib/openrouter-client";
 import type { ChatConversation, ChatMessage, ToolCallRequest } from "../types";
 
@@ -168,14 +175,19 @@ describe("prepareRequest wire shape", () => {
 
   it("keeps folding stale results but preserves the pairing", () => {
     const messages: ChatMessage[] = [user("go")];
-    for (let i = 0; i < 8; i++) {
+    // Long enough to fold at all under the QUANTIZED boundary: the cut is
+    // floor(excess / QUANTUM) * QUANTUM, so it stays 0 until the conversation is
+    // TOOL_RESULT_FOLD_TURNS + QUANTUM transcript turns deep. (Only the rows that
+    // carry prose count as turns — a tool-calls assistant row and its result are
+    // protocol rows.) A fixture sized for the old flat rule folds nothing.
+    for (let i = 0; i < 12; i++) {
       const id = `c${i}`;
       messages.push(assistant(`step ${i}`, [call(id)]));
       messages.push(result(id, "read_file", "X".repeat(500)));
       messages.push(assistant(`after ${i}`));
     }
-    // Keep the newest result visible (its assistant turn is inside the
-    // fold window) so at least one pair survives.
+    // Keep the newest results visible (their assistant turns are inside the
+    // fold window) so most pairs survive unfolded.
     const stale = staleToolResultIds(messages);
     const wire = wireFor(messages);
     const toolRows = wire.filter((m) => m.role === "tool");
@@ -188,5 +200,174 @@ describe("prepareRequest wire shape", () => {
     const folded = wire.filter((m) => m.role === "tool" && !String(m.content).startsWith("X"));
     expect(folded.length).toBeGreaterThan(0);
     expect(stale.size).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================
+// Fold boundary quantization — the prompt-cache contract
+// ============================================================
+// Folding rewrites the front of the wire message list, which is the region a
+// provider caches. If the boundary moves one turn at a time, the prefix differs
+// on every turn and no cache hit is possible for the whole conversation. These
+// tests pin the step behaviour, because a well-meaning "simplification" back to
+// a flat threshold would silently undo the caching work and nothing else would
+// notice.
+
+/**
+ * A conversation of exactly `turns` TRANSCRIPT turns, each with one folded
+ * candidate result. Only the `user` row counts as a transcript turn — the
+ * tool-calls assistant row and its result are protocol rows — which keeps the
+ * ordinal arithmetic in these tests legible.
+ */
+function conversationOf(turns: number): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  for (let i = 0; i < turns; i++) {
+    // Deterministic ids, NOT the shared uid() counter: these tests compare the
+    // folded set across two lengths of the same conversation, which is only
+    // meaningful if the same logical message keeps the same id.
+    messages.push({ id: `t${i}-user`, role: "user", content: `turn ${i}`, timestamp: i });
+    messages.push({
+      id: `t${i}-call`,
+      role: "assistant",
+      content: "",
+      timestamp: i,
+      toolCalls: { kind: "tool_calls" as const, calls: [call(`c${i}`)] },
+    });
+    messages.push({
+      id: `t${i}-result`,
+      role: "user",
+      content: "",
+      timestamp: i,
+      toolResult: {
+        kind: "tool_result" as const,
+        callId: `c${i}`,
+        name: "read_file" as const,
+        ok: true,
+        content: `payload-${i}`,
+        durationMs: 1,
+      },
+    });
+  }
+  return messages;
+}
+
+/** The transcript-turn ordinal the fold cut sits at */
+const cutoffOf = (turns: number) => foldedTurnCutoff(turns);
+
+describe("foldedTurnCutoff", () => {
+  it("folds nothing until the conversation is past the threshold", () => {
+    expect(foldedTurnCutoff(0)).toBe(0);
+    expect(foldedTurnCutoff(TOOL_RESULT_FOLD_TURNS)).toBe(0);
+    expect(foldedTurnCutoff(TOOL_RESULT_FOLD_TURNS + 1)).toBe(0);
+  });
+
+  it("holds the cut still for a full quantum of turns, then moves", () => {
+    // The property that makes caching possible: the conversation grows by
+    // QUANTUM turns and the front of the message list is byte-identical.
+    //
+    // The first fold lands at excess = QUANTUM, and the plateau that opens there
+    // is EXACTLY QUANTUM turns long — hence the assertion one turn past the end.
+    // A wider step would be a bigger lag than the documented bound, and a
+    // narrower one would move the prefix more often than this design promises.
+    const firstFolding = TOOL_RESULT_FOLD_TURNS + TOOL_RESULT_FOLD_QUANTUM;
+    const start = foldedTurnCutoff(firstFolding);
+    expect(start).toBeGreaterThan(0);
+    for (let i = 0; i < TOOL_RESULT_FOLD_QUANTUM; i++) {
+      expect(foldedTurnCutoff(firstFolding + i)).toBe(start);
+    }
+    expect(foldedTurnCutoff(firstFolding + TOOL_RESULT_FOLD_QUANTUM)).toBe(
+      start + TOOL_RESULT_FOLD_QUANTUM
+    );
+  });
+
+  it("advances the cut by exactly one quantum when it does move", () => {
+    let previous = foldedTurnCutoff(0);
+    const moves: number[] = [];
+    for (let turns = 1; turns <= 80; turns++) {
+      const current = foldedTurnCutoff(turns);
+      if (current !== previous) moves.push(current - previous);
+      previous = current;
+    }
+    expect(moves.length).toBeGreaterThan(0);
+    for (const delta of moves) expect(delta).toBe(TOOL_RESULT_FOLD_QUANTUM);
+  });
+
+  it("never moves the cut backwards, so nothing ever unfolds", () => {
+    // Quantizing the WINDOW length instead of the cut looks equivalent and fails
+    // exactly here: a window stepping 6 → 10 would unfurl four turns.
+    let previous = foldedTurnCutoff(0);
+    for (let turns = 1; turns <= 120; turns++) {
+      const current = foldedTurnCutoff(turns);
+      expect(current).toBeGreaterThanOrEqual(previous);
+      previous = current;
+    }
+  });
+
+  it("never cuts further than the old flat rule would have", () => {
+    // Quantization must be gentler, never harsher: the cut can lag the flat
+    // boundary but must never pass it, or the fold would be more aggressive than
+    // it was before this change.
+    for (let turns = 0; turns <= 100; turns++) {
+      expect(foldedTurnCutoff(turns)).toBeLessThanOrEqual(
+        Math.max(0, turns - TOOL_RESULT_FOLD_TURNS)
+      );
+    }
+  });
+});
+
+describe("staleToolResultIds under a quantized boundary", () => {
+  it("folds nothing in a conversation shorter than the threshold", () => {
+    expect(staleToolResultIds(conversationOf(3)).size).toBe(0);
+    expect(staleToolResultIds(conversationOf(TOOL_RESULT_FOLD_TURNS)).size).toBe(0);
+  });
+
+  it("keeps the folded set IDENTICAL while the cut holds still", () => {
+    // The cache contract, stated directly: across a quantum of growth the set of
+    // rewritten messages does not change at all, so the request prefix does not
+    // change either.
+    const firstFolding = TOOL_RESULT_FOLD_TURNS + TOOL_RESULT_FOLD_QUANTUM;
+    const cut = cutoffOf(firstFolding);
+    expect(cut).toBeGreaterThan(0);
+    const baseline = [...staleToolResultIds(conversationOf(firstFolding))];
+    expect(baseline.length).toBe(cut);
+    for (let extra = 1; extra < TOOL_RESULT_FOLD_QUANTUM; extra++) {
+      expect([...staleToolResultIds(conversationOf(firstFolding + extra))]).toEqual(baseline);
+    }
+  });
+
+  it("only ever folds MORE as the conversation grows, never less", () => {
+    let previous = staleToolResultIds(conversationOf(TOOL_RESULT_FOLD_TURNS + 1));
+    for (let turns = TOOL_RESULT_FOLD_TURNS + 2; turns <= 60; turns++) {
+      const current = staleToolResultIds(conversationOf(turns));
+      for (const id of previous) expect(current.has(id)).toBe(true);
+      previous = current;
+    }
+  });
+
+  it("folds whole exchanges, never a call without its result", () => {
+    const messages = conversationOf(30);
+    const stale = staleToolResultIds(messages);
+    for (const id of stale) {
+      const message = messages.find((m) => m.id === id)!;
+      expect(message.toolResult).toBeDefined();
+      expect(message.toolResult!.callId).toBeTruthy();
+    }
+  });
+
+  it("still folds the far past in a long conversation", () => {
+    const messages = conversationOf(30);
+    const stale = staleToolResultIds(messages);
+    expect(stale.size).toBeGreaterThan(0);
+    const oldest = messages.find((m) => m.toolResult?.content === "payload-0");
+    expect(oldest).toBeDefined();
+    expect(stale.has(oldest!.id)).toBe(true);
+  });
+
+  it("keeps the most recent turns verbatim", () => {
+    const messages = conversationOf(30);
+    const stale = staleToolResultIds(messages);
+    const newest = messages.find((m) => m.toolResult?.content === "payload-29");
+    // The exchange the model is currently working with must never be a digest.
+    expect(stale.has(newest!.id)).toBe(false);
   });
 });

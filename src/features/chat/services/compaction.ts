@@ -255,7 +255,7 @@ async function performCompaction(
         text,
         // Cumulative, by the type's own definition ("folded into `text`
         // and prior summaries"): the ledger in `text` now covers all of
-        // it, and the meter/status read this number as the memory size.
+        // it, and the meter reads this number as the memory size.
         coversCount: (priorSummary?.coversCount ?? 0) + foldCount,
         createdAt: Date.now(),
         model: modelId,

@@ -21,7 +21,9 @@ export const SKILL_INDEX_RULE =
   "and makes the rest of the turn more accurate. Match on what the user MEANS, not only on the " +
   "words listed: \"it is still broken\", \"doesn't work\" and \"fix this\" match a debugging or " +
   "verification skill, and a failing build or a change about to be shipped is exactly when " +
-  "loading one pays for itself.";
+  "loading one pays for itself. A skill whose instructions are ALREADY present because the " +
+  "harness loaded it for this request needs no fetch — read the ones below the request only " +
+  "when their triggers fit and their text is not already in front of you.";
 
 /**
  * Builtins that have been REMOVED from the shipped set.
@@ -77,6 +79,23 @@ export function buildSkillIndex(skills: ChatSkill[]): string | null {
 }
 
 /**
+ * One skill's body as the prompt presents it.
+ *
+ * Shared by the cached "Active Skills" block and the per-turn auto-loaded
+ * block so the two cannot drift: an always-on skill and a matched one should
+ * read identically to the model, because they mean the same thing — follow me.
+ */
+export function renderSkillBody(skill: ChatSkill): string {
+  return [
+    `### Skill: ${skill.name}`,
+    skill.description ? `_${skill.description}_` : "",
+    skill.content.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
  * Builds the effective system prompt: base prompt + enabled skill bodies
  * + an index of the skills that are available to load on demand.
  *
@@ -96,10 +115,7 @@ export function buildEffectiveSystemPrompt(
     .filter((s) => s.enabled && s.content.trim())
     .sort((a, b) => a.id.localeCompare(b.id));
 
-  const sections = enabled.map(
-    (s) =>
-      `### Skill: ${s.name}\n${s.description ? `_${s.description}_\n` : ""}${s.content.trim()}`
-  );
+  const sections = enabled.map(renderSkillBody);
 
   const blocks: string[] = [];
   if (sections.length > 0) {
@@ -134,23 +150,106 @@ export function findSkill(skills: ChatSkill[], nameOrId: string): ChatSkill | un
 }
 
 /**
- * Skills whose triggers or globs match a piece of text (the user's
- * message, or a file path). Used for discovery and observability — a
- * match is surfaced in the turn log and offered to the model as a
- * suggestion, never injected behind its back.
+ * True when a trigger appears in the text as a WORD or PHRASE.
+ *
+ * Substring matching was good enough while a match only produced a hint
+ * ("this looks like the Add Tests skill"), where a false positive cost the
+ * model one wasted read. It is not good enough now that a match LOADS A
+ * SKILL BODY: `spec` matched "inspect", `push` matched "pushback", and each
+ * would have injected several hundred tokens of the wrong instructions into
+ * the turn. So the rule is a phrase match anchored to WORD EDGES, with the
+ * common English suffixes allowed on the final word — "test" still finds
+ * "tests" and "fail" finds "failing" — while "inspect" no longer finds
+ * "spec".
+ *
+ * The anchors are lookarounds rather than `\b`: a trigger may START or END
+ * with a non-word character, and `\b` needs a word character on the relevant
+ * side. The shipped `.env` trigger is the proof — `\b\.env\b` cannot match
+ * `.env` at all, so "compare these two .env files" would have silently
+ * stopped loading the Compare Data skill.
+ */
+export function triggerMatches(text: string, trigger: string): boolean {
+  const needle = trigger.trim().toLowerCase();
+  if (!needle) return false;
+  const words = needle
+    .split(/\s+/)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  if (words.length === 0) return false;
+  const pattern = words
+    .map((w, i) => (i === words.length - 1 ? `${w}(?:s|es|ed|ing)?` : w))
+    .join("\\s+");
+  return new RegExp(`(?<!\\w)${pattern}(?!\\w)`, "i").test(text);
+}
+
+/**
+ * Skills whose triggers or globs match a piece of text (the user's message,
+ * or a file path). Used for discovery, for the turn log, and — through
+ * `selectAutoSkills` — to decide which bodies load themselves.
  */
 export function matchSkills(text: string, skills: ChatSkill[]): ChatSkill[] {
-  const haystack = text.toLowerCase();
-  if (!haystack.trim()) return [];
+  if (!text.trim()) return [];
   return skills.filter((s) => {
     if (!s.content.trim()) return false;
     const triggers = s.triggers ?? [];
     const globs = s.globs ?? [];
     return (
-      triggers.some((t) => t.trim() && haystack.includes(t.trim().toLowerCase())) ||
+      triggers.some((t) => triggerMatches(text, t)) ||
       globs.some((g) => globToRegExp(g).test(text))
     );
   });
+}
+
+/** How many skill bodies one turn may auto-load */
+export const AUTO_SKILL_MAX = 2;
+/** How many characters of skill body one turn may auto-load, in total */
+export const AUTO_SKILL_CHAR_BUDGET = 6_000;
+
+export interface AutoSkillSelection {
+  /** Bodies to inject into this turn, in deterministic (id) order */
+  loaded: ChatSkill[];
+  /** Matched but over the cap or the budget — named, so `read_skill` can still pull them */
+  deferred: ChatSkill[];
+}
+
+/**
+ * The skills a request turns on by itself.
+ *
+ * This is the harness making the decision rather than asking the model to: the
+ * triggers already answer "which skill does this look like", and a body the
+ * model has to fetch before it can follow is a body it frequently never
+ * fetches. Loading is capped twice — by count and by characters — because an
+ * instruction budget is the scarcest thing a turn has, and a skill that
+ * matches by accident must not be able to spend it. A body that alone exceeds
+ * the budget is deferred rather than skipping the rest, so one oversized
+ * skill cannot suppress a smaller, better match behind it.
+ *
+ * An `enabled` skill is excluded: it is already in the cached system prompt
+ * on every turn, and injecting it again would pay for it twice.
+ */
+export function selectAutoSkills(
+  text: string,
+  skills: ChatSkill[],
+  options: { max?: number; charBudget?: number } = {}
+): AutoSkillSelection {
+  const max = options.max ?? AUTO_SKILL_MAX;
+  const budget = options.charBudget ?? AUTO_SKILL_CHAR_BUDGET;
+  const matched = matchSkills(text, skills)
+    .filter((s) => !s.enabled)
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  const loaded: ChatSkill[] = [];
+  const deferred: ChatSkill[] = [];
+  let used = 0;
+  for (const skill of matched) {
+    const size = skill.content.trim().length;
+    if (loaded.length >= max || used + size > budget) {
+      deferred.push(skill);
+      continue;
+    }
+    loaded.push(skill);
+    used += size;
+  }
+  return { loaded, deferred };
 }
 
 /**

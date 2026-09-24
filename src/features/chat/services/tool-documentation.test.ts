@@ -90,6 +90,35 @@ describe("a repository-free turn documents exactly what it can call", () => {
   });
 });
 
+// ============================================================
+// The app block is generated FOR A SURFACE, not for the registry
+// ============================================================
+// The bug this file's header describes — a free model told about `http_write`
+// while its schema list withheld it — is prevented by generating the bullets
+// from the contracts AND filtering them by the surface actually sent. That
+// second half is asserted here, including for the family rule that names
+// `read_app`, `act_app` and `describe_tools` in prose.
+
+describe("the app block advertises only the surface it was sent", () => {
+  it("leaves out a tool the surface withheld", () => {
+    const lean = composeAppToolsPrompt(["run_code", "format_code", "read_app", "describe_tools"]);
+    expect(lean).toContain("- read_app:");
+    expect(lean).not.toContain("- http_write:");
+    expect(lean).not.toContain("- create_diagram:");
+    expect(lean).not.toContain("- open_in_tool:");
+  });
+
+  it("keeps the family rule only where the family tools are", () => {
+    // The rule names all three app-surface tools; a turn that offers none of
+    // them must not be told they exist, or it will plan around a capability
+    // it was never given.
+    expect(composeAppToolsPrompt()).toContain("Every feature of this app is a FAMILY");
+    const without = composeAppToolsPrompt(["run_code", "format_code"]);
+    expect(without).not.toContain("read_app");
+    expect(without).not.toContain("act_app");
+  });
+});
+
 describe("untrusted-result coverage", () => {
   it("wraps web page content, which is authored by strangers", () => {
     expect(isUntrustedTool("fetch_url")).toBe(true);

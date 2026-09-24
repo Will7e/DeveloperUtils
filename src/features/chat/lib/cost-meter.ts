@@ -143,6 +143,25 @@ export function shouldAttributeSpend(summary: SpendSummary): boolean {
   return summary.rows.length > 1 || summary.incomplete;
 }
 
+/**
+ * Share of this conversation's prompt tokens that the provider served from its
+ * cache (0–1), or null when there is nothing honest to report.
+ *
+ * The per-reply figure says "this request reused the prefix"; this one says
+ * whether the conversation is benefiting from it at all. That distinction is the
+ * whole point: a prefix that quietly stopped matching still shows a cache hit on
+ * the odd reply, and only the aggregate over many turns shows the rate is near
+ * zero. Null (not 0) when no reply ever reported a cache read — "we have no
+ * evidence either way" and "caching is not working" are different claims, and a
+ * provider that never reports `cached_tokens` would otherwise look broken.
+ */
+export function cacheReadRate(summary: SpendSummary): number | null {
+  let promptTokens = 0;
+  for (const row of summary.rows) promptTokens += row.promptTokens;
+  if (promptTokens <= 0 || summary.cachedTokens <= 0) return null;
+  return Math.min(1, summary.cachedTokens / promptTokens);
+}
+
 /** One-line honesty note for the spend card (empty when there is none) */
 export function spendNote(summary: SpendSummary): string {
   if (summary.rows.length === 0) return "";

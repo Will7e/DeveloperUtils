@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  cacheReadRate,
   costShare,
   formatSpend,
   shouldAttributeSpend,
@@ -117,6 +118,48 @@ describe("shouldAttributeSpend", () => {
   it("speaks up when the total is only a floor", () => {
     const summary = summarizeSpend([{ model: "a", usage: usage({ cost: null }) }]);
     expect(shouldAttributeSpend(summary)).toBe(true);
+  });
+});
+
+describe("cacheReadRate", () => {
+  it("is the conversation's cached share of every prompt token sent", () => {
+    const summary = summarizeSpend([
+      { model: "a", usage: usage({ promptTokens: 10_000, cachedTokens: 8_000 }) },
+      { model: "a", usage: usage({ promptTokens: 10_000, cachedTokens: 6_000 }) },
+    ]);
+    expect(cacheReadRate(summary)).toBeCloseTo(0.7);
+  });
+
+  it("sums across models, because the prefix is cached per provider", () => {
+    // Escalation and delegation route work to other models; a rate that only
+    // read the selected model's row would report a healthy cache on a
+    // conversation where the expensive model never hit one.
+    const summary = summarizeSpend([
+      { model: "cheap", usage: usage({ promptTokens: 1_000, cachedTokens: 0 }) },
+      { model: "strong", usage: usage({ promptTokens: 1_000, cachedTokens: 500 }) },
+    ]);
+    expect(cacheReadRate(summary)).toBeCloseTo(0.25);
+  });
+
+  it("is null when nothing reported a cache read", () => {
+    // Not 0: a provider that does not report `cached_tokens` at all is a
+    // different fact from a prefix that never matched, and the card says
+    // different things about them.
+    const summary = summarizeSpend([{ model: "a", usage: usage({ cachedTokens: 0 }) }]);
+    expect(cacheReadRate(summary)).toBeNull();
+  });
+
+  it("is null with no usage to read", () => {
+    expect(cacheReadRate(summarizeSpend([]))).toBeNull();
+  });
+
+  it("never exceeds the prompt tokens it divides by", () => {
+    // A provider reporting more cached reads than prompt tokens is reporting
+    // nonsense; the readout must not print 140%.
+    const summary = summarizeSpend([
+      { model: "a", usage: usage({ promptTokens: 1_000, cachedTokens: 1_400 }) },
+    ]);
+    expect(cacheReadRate(summary)).toBe(1);
   });
 });
 

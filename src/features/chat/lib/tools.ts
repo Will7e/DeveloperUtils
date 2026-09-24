@@ -34,6 +34,14 @@ import { WEB_MAX_TEXT_CHARS, flattenWebBody } from "./web-page";
 import { fetchWebDocument } from "./web-fetch";
 import { searchWeb } from "./search-client";
 import { SEARCH_DEFAULT_LIMIT } from "./search-providers";
+import { isWithinSubtree, matchesGlob } from "./path-glob";
+
+/** Files one `read_files` call may ask for (schema maxItems must agree) */
+const MAX_READ_FILES = 12;
+/** Paths `find_files` returns when the caller does not say */
+const FIND_FILES_DEFAULT_RESULTS = 60;
+/** Ceiling for `find_files` (the schema's maxResults must agree) */
+const FIND_FILES_MAX_RESULTS = 200;
 
 /**
  * Reads the installed skills (builtins + user) from the chat store.
@@ -104,6 +112,28 @@ function formatTreeListing(
     : "";
 
   return `Repository files${prefix ? ` under '${prefix}'` : " (root)"} — ${files.length} files:\n${lines.join("\n")}${dirNote}${omittedNote}${apiNote}`;
+}
+
+/**
+ * Paths from a tree that match a glob, optionally scoped to a subtree.
+ *
+ * Pure and exported so the matching rules are tested directly: a filename
+ * search whose rules are only observable through a network-backed tool is a
+ * search nobody will fix when it is subtly wrong. Ordering is by path depth
+ * then name, which puts the shallow, most-likely-intended hits first.
+ */
+export function findMatchingPaths(
+  entries: readonly { path: string; type: string }[],
+  pattern: string,
+  subtree?: string
+): string[] {
+  const scope = subtree?.trim() ?? "";
+  return entries
+    .filter((e) => e.type === "blob")
+    .map((e) => e.path)
+    .filter((path) => (scope ? isWithinSubtree(path, scope) : true))
+    .filter((path) => matchesGlob(path, pattern))
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b));
 }
 
 /**
@@ -315,6 +345,112 @@ export async function executeToolCall(
           },
           durationMs: Date.now() - started,
           summary: path,
+        };
+      }
+
+      case "read_files": {
+        const requested = Array.isArray(args.paths) ? args.paths : [];
+        const paths = requested
+          .filter((p): p is string => typeof p === "string" && p.trim() !== "")
+          .map((p) => p.trim());
+        if (paths.length === 0) {
+          return fail(
+            'read_files needs "paths": an array of repo-relative paths, e.g. { "paths": ["src/a.ts", "src/b.ts"] }.'
+          );
+        }
+        const files: Array<Record<string, unknown>> = [];
+        const notRead: string[] = [];
+        // ONE budget for the whole call. Twelve files' worth of text is a
+        // context blowout, and a file that did not fit is reported as unread
+        // rather than half-returned: a partial file is what makes a model
+        // rewrite code it never saw.
+        let budget = TOOL_RESULT_MAX_CHARS;
+        for (const path of paths.slice(0, MAX_READ_FILES)) {
+          if (signal?.aborted) return fail("Aborted by the user.");
+          // Delegated to read_file on purpose: the workspace-first rule, the
+          // binary and too-large cases, and the tail-truncation warning are
+          // implemented once, in one place, and a batch must behave exactly the
+          // way a single read does.
+          const one = await executeToolCall(
+            { id: `${call.id}:${path}`, name: "read_file", arguments: JSON.stringify({ path }) },
+            ctx
+          );
+          const payload = one.data as { content?: unknown } | undefined;
+          const size = typeof payload?.content === "string" ? payload.content.length : 0;
+          if (!one.ok || size > budget) {
+            notRead.push(path);
+            continue;
+          }
+          budget -= size;
+          files.push({ path, ...(one.data as Record<string, unknown>) });
+        }
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: {
+            files,
+            requested: paths.length,
+            ...(notRead.length > 0
+              ? {
+                  notRead,
+                  note:
+                    "These were NOT returned: the read failed, or the call's shared result budget ran out. Read one on its own with read_file rather than assuming what it holds.",
+                }
+              : {}),
+          },
+          durationMs: Date.now() - started,
+          summary: summarize(call.name, args, true),
+        };
+      }
+
+      case "find_files": {
+        const pattern = typeof args.pattern === "string" ? args.pattern.trim() : "";
+        if (!pattern) {
+          return fail(
+            'find_files needs "pattern", e.g. { "pattern": "**/*.test.ts" } or { "pattern": "*.spec.ts" }.'
+          );
+        }
+        const subtree = typeof args.subtree === "string" ? args.subtree : "";
+        const max =
+          typeof args.maxResults === "number" && Number.isFinite(args.maxResults)
+            ? Math.min(Math.max(1, Math.floor(args.maxResults)), FIND_FILES_MAX_RESULTS)
+            : FIND_FILES_DEFAULT_RESULTS;
+
+        // The working copy is consulted FIRST: a file the agent created this
+        // turn is a file it must be able to find again, and the repository tree
+        // does not know about it yet.
+        let entries: Array<{ path: string; type: string }> = [];
+        try {
+          const { selectWorkspace, useChatStore } = await import("@/stores/chat.store");
+          const ws = selectWorkspace(useChatStore.getState(), ctx.conversationId ?? "");
+          if (ws?.tree?.length) entries = ws.tree.map((e) => ({ path: e.path, type: e.type }));
+        } catch {
+          /* no store (tests, workers): fall through to the repository tree */
+        }
+        if (entries.length === 0) {
+          const tree = await getRepoTree(token, repo.owner, repo.repo, repo.branch);
+          if (signal?.aborted) return fail("Aborted by the user.");
+          entries = tree.map((e) => ({ path: e.path, type: e.type }));
+        }
+
+        const matched = findMatchingPaths(entries, pattern, subtree).slice(0, max);
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: {
+            pattern,
+            ...(subtree ? { subtree } : {}),
+            matches: matched,
+            totalMatches: matched.length,
+            note:
+              matched.length === 0
+                ? "No path matched. A pattern with no slash matches a filename at ANY depth (`*.test.ts`); `src/**/*.ts` searches below src."
+                : "Read the ones you need with read_file/read_files. To find what is INSIDE files, search_workspace finds content.",
+          },
+          durationMs: Date.now() - started,
+          summary: summarize(call.name, args, true),
         };
       }
 

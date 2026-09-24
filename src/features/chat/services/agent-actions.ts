@@ -61,17 +61,27 @@ import { describeBinding } from "../identity/identity";
 import { assessPushPolicy, policyWarnings } from "../lib/push-policy";
 import { assessCommandPolicy, summarizeCommandPolicy } from "../lib/command-policy";
 import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
+import { capabilityState, noteCompanionOutcome } from "../lib/availability";
+import { planVerification } from "../lib/verification-plan";
 import {
+  COMPANION_UNPAIRED_HELP,
   companionCredentials,
   probeCompanion,
   runOnCompanion,
   STOPPED_BY_USER,
 } from "../companion/companion-client";
 import { describeRejections, planMaterialization } from "../companion/materialize-plan";
+import {
+  announcePresence,
+  claimThreadPaths,
+  claimWarningLines,
+  threadIdentity,
+} from "../threads/session";
 import { readFileContent } from "../lib/github-client";
 import { CI_MAX_WAIT_MS, ciWorkflowPaths, planCiVerification } from "../lib/ci-plan";
 import {
   dispatchWorkflow,
+  fetchCiFailure,
   findDispatchedRun,
   waitForRun,
 } from "../lib/ci-client";
@@ -114,6 +124,74 @@ function publishWorkspace(conversationId: string, ws: WorkspaceState): Workspace
   useChatStore.getState().setWorkspace(conversationId, ws);
   void flushWorkspaceSave(conversationId, ws);
   return ws;
+}
+
+// ── Cross-thread claims on what a write just changed ─────────
+
+/**
+ * Records this thread's claim on the paths a write tool just changed, and
+ * returns the advisory notes a conflict produces.
+ *
+ * Claimed AFTER the write on purpose. Isolation (one branch per thread) is what
+ * makes concurrent edits safe; a claim only prevents wasted work, so the write
+ * must never wait on, or be refused by, a coordination step. What the claim buys
+ * is the note: the model finds out that another thread in this browser has the
+ * same file open while it can still choose to stop rewriting it.
+ *
+ * Never throws and never returns an error: a profile with no vault, no channel
+ * or no second thread gets an empty list, which is the normal case.
+ */
+async function claimChangedPaths(
+  conversationId: string,
+  paths: string[],
+  status: "editing" | "waiting-approval" = "editing"
+): Promise<string[]> {
+  const store = useChatStore.getState();
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  if (!conversation) return [];
+  const repo = conversation.repoContext;
+  const ws = selectWorkspace(store, conversationId);
+  return await announceThreadStatus(conversationId, status, paths);
+}
+
+/**
+ * Publishes this thread's status (and claims `paths`, when it has any to claim),
+ * and returns the advisory notes a conflict produces.
+ *
+ * Split out from the claim because a status can change without a path changing:
+ * the push gate parks a thread at `waiting-approval`, and that has to be cleared
+ * when the gate closes, or every peer reads "waiting for approval" for a thread
+ * that finished the decision minutes ago.
+ */
+async function announceThreadStatus(
+  conversationId: string,
+  status: "editing" | "waiting-approval" | "idle",
+  paths: string[] = []
+): Promise<string[]> {
+  const store = useChatStore.getState();
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  if (!conversation) return [];
+  const repo = conversation.repoContext;
+  const ws = selectWorkspace(store, conversationId);
+  const identity = threadIdentity({
+    conversationId,
+    title: conversation.title,
+    repo: repo ? { owner: repo.owner, repo: repo.repo, branch: repo.branch } : null,
+    workingBranch: ws?.workingBranch ?? null,
+    // No intent offered here: the turn announced one, and an empty value is
+    // merged as "nothing new" rather than as an erasure (see announcePresence).
+    intent: "",
+    status,
+  });
+  if (paths.length === 0) {
+    // Nothing to claim — only the status moves. The adapter's claim path is
+    // what re-announces a changed status, so asking for zero paths would be a
+    // no-op that reports a lie ("no conflicts") instead of doing the work.
+    await announcePresence(identity);
+    return [];
+  }
+  const { conflicts } = await claimThreadPaths(identity, paths);
+  return claimWarningLines(conflicts, Date.now());
 }
 
 // ── Evidence gathering for the approval gate ─────────────────
@@ -240,6 +318,7 @@ async function commitWrite(
   const file = ws.files[path];
   const status = file?.status ?? "added";
   const change = fileChange(ws, path);
+  const claimNotes = await claimChangedPaths(conversationId, [path]);
   return {
     callId: "",
     name: "write_file",
@@ -251,6 +330,7 @@ async function commitWrite(
       additions: change?.additions ?? 0,
       deletions: change?.deletions ?? 0,
       note: "File written to the workspace (not yet on GitHub).",
+      ...(claimNotes.length > 0 ? { notes: claimNotes } : {}),
     },
     uiChange: change,
     durationMs: Date.now() - started,
@@ -291,6 +371,7 @@ export async function runDeleteFile(
     useChatStore.getState().setWorkspace(conversationId, result.ws);
     clearToolCache();
     const change = fileChange(result.ws, path);
+    const claimNotes = await claimChangedPaths(conversationId, [path]);
     return {
       callId: "",
       name: "delete_file",
@@ -301,6 +382,7 @@ export async function runDeleteFile(
         additions: change?.additions ?? 0,
         deletions: change?.deletions ?? 0,
         note: "File deleted in the workspace (not yet on GitHub).",
+        ...(claimNotes.length > 0 ? { notes: claimNotes } : {}),
       },
       uiChange: change,
       durationMs: Date.now() - started,
@@ -313,6 +395,7 @@ export async function runDeleteFile(
   useChatStore.getState().setWorkspace(conversationId, result.ws);
   clearToolCache();
   const change = fileChange(result.ws, path);
+  const claimNotes = await claimChangedPaths(conversationId, [path]);
   return {
     callId: "",
     name: "delete_file",
@@ -323,6 +406,7 @@ export async function runDeleteFile(
       additions: change?.additions ?? 0,
       deletions: change?.deletions ?? 0,
       note: "File deleted in the workspace (not yet on GitHub).",
+      ...(claimNotes.length > 0 ? { notes: claimNotes } : {}),
     },
     uiChange: change,
     durationMs: Date.now() - started,
@@ -406,6 +490,7 @@ export async function runEditFile(
 
   const lines = outcome.content.split("\n").length;
   const change = fileChange(result.ws, path);
+  const claimNotes = await claimChangedPaths(conversationId, [path]);
   return {
     callId: "",
     name: "edit_file",
@@ -419,6 +504,7 @@ export async function runEditFile(
       additions: change?.additions ?? 0,
       deletions: change?.deletions ?? 0,
       note: "Edit applied to the workspace (not yet on GitHub).",
+      ...(claimNotes.length > 0 ? { notes: claimNotes } : {}),
     },
     uiChange: change,
     durationMs: Date.now() - started,
@@ -938,28 +1024,39 @@ export async function runShellCommand(
   if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
 
   const store = useChatStore.getState();
-  // Where the companion is, and the token to talk to it with. In an `npm run
-  // dev` session the dev server started it and publishes both; a deployed build
-  // reads them from the environment.
-  const credentials = await companionCredentials();
+  // Where the companion is, and the token to talk to it with: the pair saved in
+  // Chat settings → Companion, or the environment when that names one.
+  //
+  // The copy here used to say the dev server starts the companion and publishes
+  // both values, which stopped being true when the preview host (and its Vite
+  // plugin) were removed — so the single most consequential tool in the harness
+  // failed with an instruction that did not work, the agent reported UNVERIFIED,
+  // and the user had nothing to follow. Every message below now names a step
+  // that exists.
+  const credentials = await companionCredentials(undefined, store.settings.companion);
   if (!credentials.origin) {
+    const reason = credentials.error ?? COMPANION_UNPAIRED_HELP;
+    noteCompanionOutcome("down", reason);
     return fail(
-      `${command} was NOT RUN — ${credentials.error ?? "no companion is running"} Running real commands needs the ` +
-        "local companion, which `npm run dev` starts for you (or `npm run companion` by hand). Report this change as " +
-        "UNVERIFIED until it has run.",
+      `${command} was NOT RUN — no companion is paired with this app, so nothing ran and this change is ` +
+        `UNVERIFIED. ${COMPANION_UNPAIRED_HELP} Report this change as UNVERIFIED until it has run.`,
       "not run — unverified"
     );
   }
   const probe = await probeCompanion(credentials.origin);
   if (!probe.available) {
+    const reason = probe.error ?? `the companion at ${credentials.origin} did not answer`;
+    noteCompanionOutcome("down", reason);
     return fail(
-      `${command} was NOT RUN — ${probe.error ?? "no companion answered"} Running real commands needs the ` +
-        "local companion, which `npm run dev` starts for you. Report this change as " +
-        "UNVERIFIED until it has run.",
+      `${command} was NOT RUN — ${reason} Running real commands needs the local companion. ` +
+        "Start it with `npm run companion`, then paste the token it prints into Chat settings → Companion. " +
+        "Report this change as UNVERIFIED until it has run.",
       "not run — unverified"
     );
   }
   if (probe.protocolVersion !== null && probe.protocolVersion !== COMPANION_PROTOCOL_VERSION) {
+    const reason = `the companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}`;
+    noteCompanionOutcome("down", reason);
     return fail(
       `The companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}. ` +
         "It was NOT run: restart the companion so the two agree rather than letting it answer a request it does not understand.",
@@ -969,13 +1066,16 @@ export async function runShellCommand(
 
   const companionToken = credentials.token;
   if (!companionToken) {
+    const reason = credentials.error ?? "the pairing token is missing";
+    noteCompanionOutcome("down", reason);
     return fail(
-      `${command} was NOT RUN — ${credentials.error ?? "no pairing token"}. ` +
-        "In an `npm run dev` session the dev server provides one; a deployed build reads " +
-        "VITE_COMPANION_TOKEN.",
+      `${command} was NOT RUN — a companion answered at ${credentials.origin} but no pairing token is set, ` +
+        "so it would refuse the command anyway. Paste the token the companion printed at startup into " +
+        "Chat settings → Companion. This change is UNVERIFIED.",
       "not run — unpaired"
     );
   }
+  noteCompanionOutcome("up");
 
   // Only the workspace's own changes are written: with a repository ref the
   // companion checks out the base commit first, so the tree is the whole
@@ -1012,8 +1112,17 @@ export async function runShellCommand(
     ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
   }, signal ? { signal } : {});
 
-  if (!result.ok) return fail(`The command was not run: ${result.error}`, "not run — unverified");
+  if (!result.ok) {
+    // A transport failure learned by trying is the most reliable probe there
+    // is; the reason rides along so the next turn's note can name the cause
+    // instead of reporting a generic "companion down".
+    noteCompanionOutcome("down", result.error);
+    return fail(`The command was not run: ${result.error}`, "not run — unverified");
+  }
   if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
+  // It answered and it ran something: the next turn's note can say so, and a
+  // model that knows commands work is a model that verifies its change.
+  noteCompanionOutcome("up");
 
   const outcome = result.outcome;
   const passed = outcome.exitCode === 0;
@@ -1227,14 +1336,39 @@ export async function runCiVerification(
   // as "CI ran and FAILED", which is a different and wrong claim. Leaving it
   // unrecorded is what is honest: nothing then substantiates a green claim,
   // and the claim audit says so.
+  // A failure is read, not merely linked. `verify_with_ci` used to report a
+  // conclusion and a URL, so it told the agent THAT the change broke and never
+  // WHERE — and the agent cannot fix what it cannot see. The practical result
+  // was that a red CI run ended the turn and required the user to open the run
+  // and paste the log back in, which made the strongest tier useless at exactly
+  // the moment it mattered. Best-effort: a log we cannot read still leaves the
+  // job and step names, which is already an instruction.
+  const failure =
+    verdict.status === "failed" || verdict.status === "timed-out"
+      ? await fetchCiFailure(
+          { token, owner: ws.owner, repo: ws.repo, runId: run.id },
+          signal ? { signal } : {}
+        )
+      : null;
+
   if (verdict.status === "passed" || verdict.status === "failed" || verdict.status === "timed-out") {
     recordVerification(conversationId, {
       kind: "ci",
       at: Date.now(),
       workspaceUpdatedAt: ws.updatedAt,
       ok: verdict.status === "passed",
-      summary: `${plan.workflow.label} — ${verdict.status} (${verdict.evidence})`,
-      details: verdict.status === "passed" ? [] : [verdict.evidence],
+      summary: failure
+        ? `${plan.workflow.label} — ${verdict.status} in job "${failure.job}"${failure.step ? ` at step "${failure.step}"` : ""}`
+        : `${plan.workflow.label} — ${verdict.status} (${verdict.evidence})`,
+      details:
+        verdict.status === "passed"
+          ? []
+          : failure
+            ? [
+                ...failure.lines,
+                ...(failure.logUnavailable ? [failure.logUnavailable] : []),
+              ]
+            : [verdict.evidence],
       source: "verify_with_ci",
     });
   }
@@ -1257,6 +1391,18 @@ export async function runCiVerification(
       authoritativelyGreen: verdict.authoritativelyGreen,
       evidence: verdict.evidence,
       jobs: plan.workflow.jobs,
+      // What actually broke, so the next round can fix it instead of asking the
+      // user to go and read GitHub.
+      ...(failure
+        ? {
+            failure: {
+              job: failure.job,
+              step: failure.step,
+              lines: failure.lines,
+              ...(failure.logUnavailable ? { logUnavailable: failure.logUnavailable } : {}),
+            },
+          }
+        : {}),
       ...(unreadable.length > 0 ? { unreadableWorkflows: unreadable } : {}),
       cost: "Runs on the repository's own CI — no sandbox, no cloud compute.",
     },
@@ -1363,6 +1509,43 @@ async function runLocalTypecheck(
  * local typecheck still runs, and the tiers that need a machine — the
  * companion, CI — are the ones the agent is told to use.
  */
+/**
+ * The tier plan for a change set, in the shape the model reads.
+ *
+ * Extracted so `run_checks` and the turn note agree by construction: two
+ * descriptions of "which tier can prove this" is how the note comes to promise
+ * a command the tool just reported as unavailable.
+ */
+function verificationTiersFor(
+  conversationId: string,
+  ws: WorkspaceState
+): {
+  recommendedTool: string | null;
+  recommendedTier: string | null;
+  alreadyProven: string[];
+  tiers: Array<{ tier: string; tool: string; available: boolean; proves: string; blockedBy?: string }>;
+} {
+  const plan = planVerification({
+    repoAttached: true,
+    hasChanges: collectChanges(ws).length > 0,
+    companion: capabilityState("companion"),
+    pushed: Boolean(ws.pushedAt),
+    evidence: verificationEvidence(conversationId, { workspaceUpdatedAt: ws.updatedAt }),
+  });
+  return {
+    recommendedTool: plan.recommended?.tool ?? null,
+    recommendedTier: plan.recommended?.tier ?? null,
+    alreadyProven: plan.alreadyProven,
+    tiers: plan.steps.map((s) => ({
+      tier: s.tier,
+      tool: s.tool,
+      available: s.available,
+      proves: s.proves,
+      ...(s.blockedBy ? { blockedBy: s.blockedBy } : {}),
+    })),
+  };
+}
+
 export async function runRunChecks(
   conversationId: string,
   args: Record<string, unknown>
@@ -1419,6 +1602,7 @@ export async function runRunChecks(
         source: "run_checks",
       });
     }
+    const verification = verificationTiersFor(conversationId, ws);
     return {
       callId: "",
       name: "run_checks",
@@ -1429,6 +1613,7 @@ export async function runRunChecks(
           : wantsRun && !endpoint
             ? "not-executed-no-runner"
             : "declared",
+        verification,
         checks: checks.map((c) => ({ label: c.label, command: c.command, source: c.source })),
         // The statement now covers only what the local run could NOT do.
         statement: [
@@ -1449,9 +1634,14 @@ export async function runRunChecks(
           },
         ],
         ...(notes.length > 0 ? { notes } : {}),
+        // The declared checks are a LIST, not a result — and this is the line
+        // that stops them being read as one. It names the tool that would turn
+        // them into evidence, and states what to say when that tool cannot run.
         note:
-          "A type check is not a test run and not a build. The test, lint and build commands above still need a runner " +
-          "(Chat Settings → checks endpoint) or the user's own terminal, so report their outcome as unverified until then.",
+          "A type check is not a test run and not a build, and the checks listed above did NOT run — a declared check is " +
+          "not evidence. To prove the rest, call `" +
+          (verification.recommendedTool ?? "run_command") +
+          "`. If it reports that it could not run, say the change is UNVERIFIED instead of describing what the checks would do.",
       },
       durationMs: Date.now() - started,
       summary: typecheck.ok
@@ -1855,6 +2045,27 @@ export async function runPushChanges(
     // Advisory only — a failed probe must never block the gate.
   }
 
+  // ── Other agent threads holding these paths ──
+  //
+  // The claim does double duty. It tells peers that these paths are on their way
+  // to the base branch, and its conflicts answer the reviewer's question
+  // directly: the paths this thread could NOT claim are exactly the ones another
+  // thread is mid-rewrite on, which is where a merge will be needed and where an
+  // approval may be merging a file that is still moving.
+  //
+  // Claimed before the gate opens, and never allowed to fail it: a coordination
+  // outage must not be able to block a push the user is about to approve.
+  const threadOverlap = await claimChangedPaths(
+    conversationId,
+    changes.map((f) => f.path),
+    // The thread is parked on a human decision at this point, which is what a
+    // peer needs to know: it is not actively rewriting files while it waits.
+    "waiting-approval"
+  );
+  warnings.push(
+    ...threadOverlap.map((message) => ({ kind: "thread-overlap" as const, message }))
+  );
+
   // ── Policy + evidence warnings for the reviewer ──
   warnings.push(...policyWarnings(policy));
 
@@ -1930,6 +2141,15 @@ export async function runPushChanges(
     ...(warnings.length > 0 ? { warnings } : {}),
   });
   if (signal) signal.removeEventListener("abort", onAbort);
+
+  // The gate has closed, whichever way it closed: the thread is no longer
+  // parked on a human decision, and a peer reading "waiting for approval" for
+  // the rest of the turn would be reading the previous state as the current
+  // one. What it returns to is `editing` — the honest status at a moment when
+  // nobody can know yet whether this thread will go on to edit or to stop.
+  // Deliberately not awaited: the push chain below is what the user is waiting
+  // for, and coordination must never be the reason a commit is late.
+  void announceThreadStatus(conversationId, "editing");
 
   // The user stopped the turn while the gate was open. Reported as a stop, not
   // as a rejection: the change set was never judged.
@@ -2011,19 +2231,68 @@ export async function runPushChanges(
 
     let prUrl: string | undefined;
     let prNumber: number | undefined;
+    // Set when this push joined a pull request that already existed instead of
+    // opening one. The fix-up round (read the review, edit, push again) lands
+    // here every time, and GitHub refuses a second open pull request for the
+    // same head/base with a 422.
+    let prReused = false;
+    let prNote: string | undefined;
+    // Set when the PULL REQUEST step failed after the commit had already
+    // landed. It is deliberately not an error: reporting `ok: false, status:
+    // "failed"` for this says "the push failed" about a commit that is on
+    // GitHub, and the model then either retries the whole push or tells the
+    // user nothing shipped.
+    let prOpenError: string | undefined;
     if (openPr) {
       const { openPullRequest } = await import("../lib/github-write");
-      const pr = await openPullRequest(
-        store.settings.github.token,
-        ws.owner,
-        ws.repo,
-        result.branchName,
-        ws.branch,
-        prTitle,
-        withProof(prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(pushedDiffs)}`)
-      );
-      prUrl = pr.htmlUrl;
-      prNumber = pr.number;
+      const prBodyText = () =>
+        prBody ?? `Agent-generated changes pushed from InTab.\n\n${summarizeChanges(pushedDiffs)}`;
+      // Look first, so the common case never reaches the API's refusal. A
+      // lookup that fails is not a reason to block the push: the create below
+      // is still correct, and its own error path reports what happened.
+      const { findPullRequestForHead } = await import("../lib/github-collab");
+      const existing = await findPullRequestForHead(
+        { token: store.settings.github.token, owner: ws.owner, repo: ws.repo },
+        result.branchName
+      ).catch(() => null);
+
+      if (existing && existing.state === "open") {
+        prUrl = existing.url;
+        prNumber = existing.number;
+        prReused = true;
+        prNote = `Pushed to the existing pull request #${existing.number} — no second pull request was opened. Its description still says what it said; update it with update_pull_request if the fix changed the story.`;
+      } else {
+        try {
+          const pr = await openPullRequest(
+            store.settings.github.token,
+            ws.owner,
+            ws.repo,
+            result.branchName,
+            ws.branch,
+            prTitle,
+            withProof(prBodyText())
+          );
+          prUrl = pr.htmlUrl;
+          prNumber = pr.number;
+        } catch (err) {
+          // The commit is already on the branch — that is what makes this
+          // trap-and-look worth its complexity. A 422 here means a pull request
+          // for this head/base exists (the lookup missed a race, or found only
+          // a closed one), so the push is reported as the success it is.
+          const raced = await findPullRequestForHead(
+            { token: store.settings.github.token, owner: ws.owner, repo: ws.repo },
+            result.branchName
+          ).catch(() => null);
+          if (raced) {
+            prUrl = raced.url;
+            prNumber = raced.number;
+            prReused = true;
+            prNote = `The commit is pushed to ${result.branchName}, but no new pull request was opened: #${raced.number} already covers this branch (state: ${raced.state}). Report the PUSH as done and say which pull request holds it.`;
+          } else {
+            prOpenError = err instanceof Error ? err.message : "The pull request could not be opened.";
+          }
+        }
+      }
     }
 
     // Mark only the committed files as pushed and pin the new base. Files
@@ -2051,7 +2320,25 @@ export async function runPushChanges(
         commit: result.commitSha,
         prUrl,
         prNumber,
+        ...(prReused ? { prReused, prNote } : {}),
+        ...(prOpenError
+          ? {
+              prOpenError,
+              prNote:
+                `The COMMIT IS ON ${result.branchName} — the push succeeded. Only the pull request step failed: ${prOpenError} ` +
+                "Report the push as done, say the pull request could not be opened, and open it on GitHub (or ask the user to). Do not re-run push_changes to fix this.",
+            }
+          : {}),
         files: selection.push.length,
+        // No review happened: say so. "Run tools without asking" shipped this
+        // commit, and a model that reports "the user approved the diff" would
+        // be describing a dialog nobody saw.
+        ...(decision.auto
+          ? {
+              autoApproved:
+                '"Run tools without asking" is on in the user\'s chat settings, so this commit was pushed without an approval dialog. Report it as shipped without review.',
+            }
+          : {}),
         ...(verification.length > 0 ? { verification: verificationLines(verification) } : {}),
         ...(selection.excluded.length > 0
           ? {
@@ -2070,9 +2357,11 @@ export async function runPushChanges(
       durationMs: Date.now() - started,
       summary:
         prUrl ??
-        (selection.excluded.length > 0
-          ? `${result.branchName} (${selection.excluded.length} file(s) held back)`
-          : result.branchName),
+        (prOpenError
+          ? `${result.branchName} (no PR)`
+          : selection.excluded.length > 0
+            ? `${result.branchName} (${selection.excluded.length} file(s) held back)`
+            : result.branchName),
     };
   } catch (err) {
     const message =

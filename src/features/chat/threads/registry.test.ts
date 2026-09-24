@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_CLAIM_PATHS,
   MAX_THREADS,
   acceptRemote,
   claimPaths,
@@ -264,6 +265,37 @@ describe("claimPaths", () => {
     const before = JSON.stringify(registry);
     claimPaths(registry, { threadId: "thread-a", paths: ["src/a.ts"], now: T0 });
     expect(JSON.stringify(registry)).toBe(before);
+  });
+
+  it("bounds what one thread HOLDS, not just what it asks for", () => {
+    // MAX_CLAIM_PATHS capped a single call, which left the total unbounded: a
+    // session-long refactor accumulated a claim per file, and every one was
+    // persisted, broadcast and truncated back to 64 by every peer's parser.
+    let registry = withThreads({});
+    for (let round = 0; round < MAX_CLAIM_PATHS; round++) {
+      registry = claimPaths(registry, {
+        threadId: "thread-a",
+        paths: [`src/round-${round}.ts`],
+        now: T0 + round * 1000,
+      }).registry;
+    }
+    expect(registry.threads["thread-a"]!.claims).toHaveLength(MAX_CLAIM_PATHS);
+
+    // One more path, and the holdings stay capped — the claim that goes is the
+    // one nearest expiry, i.e. the least recently touched file.
+    const after = claimPaths(registry, {
+      threadId: "thread-a",
+      paths: ["src/newest.ts"],
+      now: T0 + MAX_CLAIM_PATHS * 1000,
+    });
+    const held = after.registry.threads["thread-a"]!.claims.map((c) => c.path);
+    expect(held).toHaveLength(MAX_CLAIM_PATHS);
+    expect(held).toContain("src/newest.ts");
+    expect(held).not.toContain("src/round-0.ts");
+    // The claim was still GRANTED — the cap trims what is remembered, never
+    // what the caller is told, or a caller would have to re-claim a path it
+    // already holds.
+    expect(after.granted).toEqual(["src/newest.ts"]);
   });
 });
 

@@ -94,6 +94,12 @@ export interface ActiveTurn {
   contentOffset: number;
   toolCalls: unknown[];
   usage: UsageInfo | null;
+  /** Structured reasoning blocks, completed at stream end (echo-back) */
+  reasoningDetails: unknown[];
+  /** The upstream provider that answered, from the response header */
+  providerName?: string;
+  /** OpenRouter's response-cache verdict for the last attempt */
+  cacheStatus?: string;
   winnerModelId: string | null;
   /** Last retryable-attempt error, surfaced if the list runs dry */
   lastError?: string;
@@ -181,6 +187,7 @@ export class HostTurnController {
       messages: payload.messages,
       tools: payload.tools,
       candidates: payload.candidates,
+      reasoningDetails: [],
       excluded: new Set(),
       seq: 0,
       content: "",
@@ -413,6 +420,20 @@ export class HostTurnController {
     const modelId = candidate.modelId;
     const contextLength = candidate.contextLength;
 
+    // In-request failover: the remaining candidates, handed to OpenRouter to
+    // walk INSIDE this request. The host still walks the list itself on the next
+    // attempt — this only removes the round trip where the gateway can do it
+    // faster, and it costs nothing when nothing fails.
+    //
+    // `excluded` is respected, so a model already rejected by this turn is not
+    // handed back to the gateway; the two failover mechanisms must not disagree
+    // about what has been ruled out.
+    const failoverModels = turn.candidates
+      .filter((c) => !turn.excluded.has(c.modelId))
+      .map((c) => c.modelId)
+      .filter((id, i, all) => all.indexOf(id) === i)
+      .slice(0, HOST_MAX_ATTEMPTS);
+
     await this.startStream({
       apiKey: turn.apiKey,
       model: modelId,
@@ -426,11 +447,49 @@ export class HostTurnController {
       requestUsage: true,
       requestState: candidate.requestState,
       signal: turn.controller.signal,
+      // One stable id per conversation, so the provider's prompt cache is warm
+      // for the whole conversation instead of only within a single request. This
+      // is the request half of what `turn-prep` already arranged its prompts for:
+      // the system prompt and the tool schemas are byte-stable precisely so they
+      // can be cached, and until now nothing ever asked for the cache.
+      sessionId: turn.conversationId,
+      ...(failoverModels.length > 1 ? { failoverModels } : {}),
       onChunk: (chunk) => this.appendDelta(turn, { content: chunk }),
       onReasoning: (chunk) => this.appendDelta(turn, { reasoning: chunk }),
       onToolCalls: (calls) => {
         turn.toolCalls = calls;
         this.emit({ type: "TOOL_CALLS", payload: { turnId: turn.turnId, calls } });
+      },
+      onServedModel: (served) => {
+        // The stream names the model that ACTUALLY answered. With failover in
+        // play this can differ from the candidate we asked for, and the
+        // transcript must not credit the wrong model.
+        turn.winnerModelId = served;
+        logTurnEvent({
+          turnId: turn.turnId,
+          conversationId: turn.conversationId,
+          phase: "failover",
+          modelId: served,
+          detail: served === modelId ? "requested model served" : `failed over to ${served}`,
+        });
+      },
+      onResponseMeta: (meta) => {
+        if (meta.providerName) turn.providerName = meta.providerName;
+        if (meta.cacheStatus) turn.cacheStatus = meta.cacheStatus;
+      },
+      onReasoningDetails: (details) => {
+        turn.reasoningDetails = details;
+      },
+      // A retry is visible in the turn log rather than silent: a 30-second
+      // Retry-After looks identical to a hung request otherwise.
+      onRetry: (failure, attemptNumber, delayMs) => {
+        logTurnEvent({
+          turnId: turn.turnId,
+          conversationId: turn.conversationId,
+          phase: "failover",
+          modelId,
+          detail: `retry ${attemptNumber} in ${Math.round(delayMs / 1000)}s — ${failure.message}`,
+        });
       },
       onUsage: (usage) => {
         turn.usage = usage;
@@ -495,9 +554,22 @@ export class HostTurnController {
               completionTokens: turn.usage.completionTokens,
               cost: turn.usage.cost,
               cachedTokens: turn.usage.cachedTokens ?? null,
+              reasoningTokens: turn.usage.reasoningTokens ?? null,
+              // Falls back to the header value when the stream carried no usage
+              // frame: attribution is useful even on a turn that failed, and the
+              // header arrives before the failure does.
+              ...(turn.usage.providerName ?? turn.providerName
+                ? { providerName: turn.usage.providerName ?? turn.providerName }
+                : {}),
+              ...(turn.usage.cacheStatus ?? turn.cacheStatus
+                ? { cacheStatus: turn.usage.cacheStatus ?? turn.cacheStatus }
+                : {}),
             }
           : undefined,
         latencyMs: startedAt ? Date.now() - startedAt : undefined,
+        ...(turn.reasoningDetails.length > 0
+          ? { reasoningDetails: turn.reasoningDetails }
+          : {}),
       },
     });
     this.clearOrphanTimer(turn);

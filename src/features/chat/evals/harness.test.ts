@@ -371,7 +371,15 @@ describe("promise: the agent asks instead of guessing, and a running turn stays 
     systemPrompt: "sys",
     temperature: 0.7,
     messages: [{ role: "user", content: "go" }],
-    tools: [{ type: "function", function: { name: "read_file" } }],
+    // The surface this stub turn OFFERS. The engine refuses a call for a tool
+    // the round did not send (session/turn-engine's sentToolNames), so a fixture
+    // that emits an ask must declare `ask_user` — and it belongs here anyway,
+    // since both tool profiles carry it on every tool-capable turn.
+    tools: [
+      { type: "function", function: { name: "read_file" } },
+      { type: "function", function: { name: "ask_user" } },
+      { type: "function", function: { name: "suggest_next" } },
+    ],
     sentTokens: 10,
     candidates: [{ modelId: "model-a" }],
   });

@@ -106,6 +106,12 @@ export interface HostUsage {
   cost: number | null;
   /** Prompt tokens served from the provider's cache (discounted) */
   cachedTokens?: number | null;
+  /** Output tokens spent on reasoning (starvation detection) */
+  reasoningTokens?: number | null;
+  /** The upstream provider that actually answered (`X-Provider-Name`) */
+  providerName?: string;
+  /** OpenRouter's response-cache verdict, when the header was readable */
+  cacheStatus?: string;
 }
 
 /** Outcome kinds mirrored from the in-page loop */
@@ -121,10 +127,23 @@ export interface HostEndPayload {
   reason: HostEndReason;
   /** Error message when reason === "failed" */
   error?: string;
-  /** Model that produced the final output (or last attempt) */
+  /**
+   * Model that produced the final output (or last attempt).
+   *
+   * This is the model that ANSWERED, not the one that was requested: with
+   * in-request failover the two can differ, and OpenRouter reports the real one
+   * in the stream. Attributing a reply to a model that did not write it is the
+   * one lie a multi-model harness cannot afford.
+   */
   modelId?: string;
   usage?: HostUsage;
   latencyMs?: number;
+  /**
+   * Structured reasoning blocks from this turn, for echo-back on the next
+   * request (see `ChatMessage.reasoningDetails`). Carried on END because the
+   * blocks are only complete once the stream is.
+   */
+  reasoningDetails?: unknown[];
 }
 
 /**

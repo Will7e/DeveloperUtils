@@ -22,8 +22,6 @@ export interface ToastProps
   onClose?: () => void;
   /** When true, plays the exit animation (managed by ToastContainer) */
   leaving?: boolean;
-  /** Fixed-width report message: keeps newlines, monospaced, left-aligned */
-  multiline?: boolean;
 }
 
 const variantIcons: Record<ToastVariant, React.ReactNode | null> = {
@@ -44,7 +42,6 @@ export const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
       action,
       onClose,
       leaving = false,
-      multiline = false,
       className,
       ...props
     },
@@ -83,13 +80,7 @@ export const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
               {title}
             </div>
           )}
-          <div
-            className={cn(
-              "text-[13px] text-[var(--ds-gray-1000)] leading-5 break-words select-text font-normal",
-              multiline &&
-                "font-mono text-[11.5px] leading-[1.65] whitespace-pre text-left"
-            )}
-          >
+          <div className="text-[13px] text-[var(--ds-gray-1000)] leading-5 break-words select-text font-normal">
             {message}
           </div>
         </div>

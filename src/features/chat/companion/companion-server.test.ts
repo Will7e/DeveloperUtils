@@ -51,6 +51,22 @@ describe("reachability and pairing", () => {
     expect(body.protocolVersion).toBe(COMPANION_PROTOCOL_VERSION);
   });
 
+  it("answers /health with CORS headers for allowed app origin", async () => {
+    const res = await fetch(`${server.origin}/health`, {
+      headers: { origin: APP_ORIGIN },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe(APP_ORIGIN);
+    expect(res.headers.get("access-control-allow-private-network")).toBe("true");
+  });
+
+  it("refuses /health from a disallowed origin", async () => {
+    const res = await fetch(`${server.origin}/health`, {
+      headers: { origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+  });
+
   it("binds loopback only", async () => {
     expect(server.origin.startsWith("http://127.0.0.1:")).toBe(true);
   });

@@ -195,6 +195,17 @@ export const TURN_INACTIVITY_TIMEOUT_MS = 90_000;
 // ── Tool-result folding (agent context efficiency) ────────
 /** Tool results older than this many turns fold to digests in wire requests */
 export const TOOL_RESULT_FOLD_TURNS = 6;
+/**
+ * The fold boundary moves in steps of this many turns, not one at a time.
+ *
+ * Folding rewrites the front of the message list, and the front of the list is
+ * exactly what a provider's prompt cache matches on — so a boundary that shifts
+ * every turn means a cacheable prefix that is never actually reused. Stepping
+ * the boundary costs at most `QUANTUM - 1` turns of extra tool-result payload
+ * and buys a prefix that holds still long enough to be worth caching.
+ * See `foldWindow` in context/engine.ts.
+ */
+export const TOOL_RESULT_FOLD_QUANTUM = 4;
 /** A folded result keeps at most this many characters of digest */
 export const TOOL_RESULT_DIGEST_MAX_CHARS = 240;
 
@@ -218,6 +229,18 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
     login: null,
     avatarUrl: null,
     connectedAt: null,
+  },
+
+  // Unpaired by default. An empty origin is the honest value for "no companion
+  // is configured": the probe then reports it as absent and the agent says its
+  // change is unverified, instead of the app inventing a loopback URL that may
+  // or may not answer.
+  companion: {
+    origin: "",
+    token: "",
+    protocolVersion: null,
+    connectedAt: null,
+    localOnly: true,
   },
 };
 

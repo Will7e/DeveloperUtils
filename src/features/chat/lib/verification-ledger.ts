@@ -80,6 +80,44 @@ const ledger = new Map<string, Map<VerificationKind, VerificationEvent>>();
 /** Conversation ceiling: the ledger is a cache of what a human may be shown. */
 const MAX_CONVERSATIONS = 40;
 
+// ── Subscriptions ────────────────────────────────────────────
+// The ledger is read by the UI now, not only by the push gate, and it is a
+// module-level map with nothing to re-render on. Polling would have been the
+// alternative and it is the wrong one: evidence lands in bursts (at the end of
+// a run) and a stale badge for four seconds is exactly the window in which a
+// user reads "Verified" about code they just changed.
+//
+// The version counter is what `useSyncExternalStore` compares, because the
+// evidence array is rebuilt per read and an array identity would never be
+// stable.
+
+const listeners = new Set<() => void>();
+let version = 0;
+
+/** Subscribe to ledger mutations. Returns the unsubscribe function. */
+export function subscribeVerification(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/** Monotonic revision of the ledger itself, for snapshot comparison. */
+export function verificationVersion(): number {
+  return version;
+}
+
+function notifyVerification(): void {
+  version += 1;
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      // A failing subscriber must not break evidence recording for the rest.
+    }
+  }
+}
+
 export function recordVerification(
   conversationId: string,
   event: VerificationEvent
@@ -104,6 +142,7 @@ export function recordVerification(
     bindingId: event.bindingId ?? bindingIdOf(conversationId),
     details: event.details?.slice(0, 20),
   });
+  notifyVerification();
 }
 
 /**
@@ -148,16 +187,22 @@ export function verificationEvent(
 export function clearVerification(conversationId?: string): void {
   if (conversationId) ledger.delete(conversationId);
   else ledger.clear();
+  notifyVerification();
 }
 
 /** Drops every entry recorded for one binding, across every thread */
 export function clearVerificationForBinding(bindingId: string): void {
+  let changed = false;
   for (const [conversationId, byKind] of ledger) {
     for (const [kind, event] of byKind) {
-      if (event.bindingId === bindingId) byKind.delete(kind);
+      if (event.bindingId === bindingId) {
+        byKind.delete(kind);
+        changed = true;
+      }
     }
     if (byKind.size === 0) ledger.delete(conversationId);
   }
+  if (changed) notifyVerification();
 }
 
 /**

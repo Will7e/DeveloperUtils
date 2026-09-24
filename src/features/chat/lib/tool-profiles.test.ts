@@ -96,14 +96,20 @@ describe("resolveToolProfile", () => {
     expect(ordered).toEqual(names);
   });
 
-  it("withholds the app tools a weak model would misuse", () => {
+  it("withholds the app tool a weak model would misuse, but keeps the diagram pair", () => {
     const names = resolveToolProfile("build", small).tools.map((t) => t.function.name);
     expect(names).toContain("run_code");
     expect(names).toContain("search_library");
-    // One asks the user to approve an external write; the other builds a
-    // nested node/edge structure — both shapes a small model gets wrong.
+    // http_write asks the user to approve an external write — a shape a small
+    // model can do nothing useful with once the turn refuses it.
     expect(names).not.toContain("http_write");
-    expect(names).not.toContain("create_diagram");
+    // create_diagram/open_in_tool ARE offered. Withholding create_diagram left
+    // a free model told to draw with only act_app's empty-board create_board,
+    // so it invented add_node and failed; the tool it needed was the one that
+    // was removed. The pair travels together — create_diagram's result tells
+    // the model to follow with open_in_tool.
+    expect(names).toContain("create_diagram");
+    expect(names).toContain("open_in_tool");
   });
 });
 
@@ -145,7 +151,7 @@ describe("resolveToolSurface", () => {
 
   it("still narrows a repo-free turn by profile and by mode", () => {
     const lean = resolveToolSurface("build", small, { repoAttached: false });
-    expect(lean.tools.map((t) => t.function.name)).not.toContain("create_diagram");
+    expect(lean.tools.map((t) => t.function.name)).toContain("create_diagram");
     expect(lean.note).toMatch(/No repository is attached/);
 
     const plan = resolveToolSurface("plan", full, { repoAttached: false });

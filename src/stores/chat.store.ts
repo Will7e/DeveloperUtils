@@ -105,7 +105,39 @@ export interface ChatStoreState {
   reconnecting: boolean;
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
-  settingsTab: "connection" | "chat" | "skills" | "github" | null;
+  settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
+  /**
+   * A user-initiated verification run, while it is in flight.
+   *
+   * In the store rather than in the Changes pane's own state because the pane is
+   * not the only surface that has to know: a type check over a large workspace
+   * takes tens of seconds, and the activity rail above the composer claiming the
+   * agent is idle during it is exactly the "is it hung?" question the rail exists
+   * to answer. Keyed by conversation so a run cannot make another thread look busy.
+   */
+  checkRun: { conversationId: string; startedAt: number } | null;
+
+  /**
+   * When each thread was last on screen, for the list's "finished while you were
+   * away" dot.
+   *
+   * Session-only, and absent from `partialize` on purpose: it is a fact about
+   * THIS visit rather than about the work, and a timestamp persisted three weeks
+   * ago deciding whether a dot shows today is a lie either way it lands. It also
+   * cannot be derived from the conversation, because "you were looking at a
+   * different chat when this finished" is not written down anywhere in it.
+   */
+  lastSeenAt: Record<string, number>;
+  /** Records that a thread is on screen right now (see lastSeenAt) */
+  markConversationSeen: (id: string) => void;
+  /**
+   * Stamps every thread that has not been on screen yet as seen as of now.
+   *
+   * Called once when the list mounts. Activity AFTER you arrived is news;
+   * history that predates the session is not, and a cold start over thirty old
+   * chats must not look like thirty alerts.
+   */
+  seedConversationSeen: () => void;
 
   // ── Composer (transient, per thread) ──
   /** conversationId → what is typed and attached, not yet sent */
@@ -282,15 +314,20 @@ export interface ChatStoreState {
 
   // ── Settings ──
   updateSettings: (patch: Partial<ChatSettings>) => void;
-  setSettingsOpen: (open: boolean, tab?: "connection" | "chat" | "skills" | "github") => void;
-  setSettingsTab: (tab: "connection" | "chat" | "skills" | "github") => void;
+  setSettingsOpen: (
+    open: boolean,
+    tab?: "connection" | "chat" | "skills" | "github" | "companion"
+  ) => void;
+  setSettingsTab: (tab: "connection" | "chat" | "skills" | "github" | "companion") => void;
   setSettingsModalState: (state: {
     settingsOpen: boolean;
-    settingsTab: "connection" | "chat" | "skills" | "github" | null;
+    settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
   }) => void;  /** Hydration-time cleanup of stale pending-turn markers */
   cleanupStalePendingTurns: () => void;
   /** Toggles the reconnecting banner (resume retries) */
   setReconnecting: (value: boolean) => void;
+  /** Marks a user-run verification as started/finished for one conversation */
+  setCheckRun: (conversationId: string, running: boolean) => void;
 
   // ── Skills ──
   addSkill: (skill: ChatSkill) => void;
@@ -361,6 +398,8 @@ export const useChatStore = create<ChatStoreState>()(
       reconnecting: false,
       settingsOpen: false,
       settingsTab: null,
+      checkRun: null,
+      lastSeenAt: {},
 
       composerDrafts: {},
       workspaces: {},
@@ -481,8 +520,16 @@ export const useChatStore = create<ChatStoreState>()(
           return { workspaces: next };
         }),
 
-      requestPushApproval: (pending) =>
-        new Promise((resolve) => {
+      requestPushApproval: (pending) => {
+        // "Run tools without asking" (settings.autoApproveTools): the user has
+        // pre-approved the agent's gated actions, so the gate resolves at once
+        // and no dialog is mounted. Defaults match the dialog's own — a
+        // pull request is opened, every changed file ships — and the decision
+        // is marked `auto` so the tool result can say nobody was asked.
+        if (get().settings.autoApproveTools === true) {
+          return Promise.resolve({ approved: true, openPr: true, auto: true });
+        }
+        return new Promise((resolve) => {
           set({
             pendingPush: pending,
             pushGate: {
@@ -490,7 +537,8 @@ export const useChatStore = create<ChatStoreState>()(
               resolve: (decision) => resolve(decision),
             },
           });
-        }),
+        });
+      },
 
       resolvePushApproval: (approved, note, openPr, excludePaths) =>
         set((s) => {
@@ -515,8 +563,14 @@ export const useChatStore = create<ChatStoreState>()(
           return { pendingPush: null, pushGate: null };
         }),
 
-      requestHttpApproval: (pending) =>
-        new Promise((resolve) => {
+      requestHttpApproval: (pending) => {
+        // Same pre-approval as the push gate: no dialog, decision marked
+        // `auto`, and the request still validated by the executor before it
+        // is sent (auto-approve skips the QUESTION, never the checks).
+        if (get().settings.autoApproveTools === true) {
+          return Promise.resolve({ approved: true, auto: true });
+        }
+        return new Promise((resolve) => {
           set({
             pendingHttp: pending,
             httpGate: {
@@ -524,7 +578,8 @@ export const useChatStore = create<ChatStoreState>()(
               resolve: (decision) => resolve(decision),
             },
           });
-        }),
+        });
+      },
 
       resolveHttpApproval: (approved, note) =>
         set((s) => {
@@ -576,7 +631,40 @@ export const useChatStore = create<ChatStoreState>()(
         return id;
       },
 
-      selectConversation: (id) => set({ activeConversationId: id }),
+      // Selecting a thread is also the moment it stops being news: the dot in
+      // the list means "there is something here you have not looked at", so the
+      // lookup and the clearing are the same action.
+      selectConversation: (id) =>
+        set((s) => ({
+          activeConversationId: id,
+          lastSeenAt: { ...s.lastSeenAt, [id]: Date.now() },
+        })),
+
+      markConversationSeen: (id) =>
+        set((s) => {
+          const conversation = s.conversations.find((c) => c.id === id);
+          // Nothing has landed since the last stamp, so rewriting it would only
+          // move a clock nobody reads. The guard is what lets the page stamp on
+          // every settle (and every render that recomputes a status) without
+          // the stamp becoming a render loop.
+          if (!conversation || (s.lastSeenAt[id] ?? 0) >= conversation.updatedAt) return {};
+          return { lastSeenAt: { ...s.lastSeenAt, [id]: Date.now() } };
+        }),
+
+      seedConversationSeen: () =>
+        set((s) => {
+          const now = Date.now();
+          const seen = { ...s.lastSeenAt };
+          let changed = false;
+          for (const conversation of s.conversations) {
+            if (seen[conversation.id] === undefined) {
+              seen[conversation.id] = now;
+              changed = true;
+            }
+          }
+          // A no-op write would re-render every subscriber for nothing.
+          return changed ? { lastSeenAt: seen } : {};
+        }),
 
       renameConversation: (id, title) =>
         set((s) => ({
@@ -625,8 +713,37 @@ export const useChatStore = create<ChatStoreState>()(
           ...source,
           id: newId,
           title: `${source.title} (copy)`,
-          // A pending marker belongs to the original's turn, not the copy
+          // The copy is a fork of the TRANSCRIPT, never of the unfinished turn.
+          //
+          // The spread above carries every field of the source, and several of
+          // them describe work that is happening in the source right now rather
+          // than anything the copy has. On the copy they are not merely stale,
+          // they are false, and each one is user-visible:
+          //
+          //   pendingTurn     a reload of the copy would offer to resume the
+          //                   source's turn against the copy's (empty) log
+          //   pendingQuestion answering the card would resume a tool loop in a
+          //                   conversation that never asked the question
+          //   queued          messages waiting for a round boundary in the
+          //                   source's turn, which the copy will never reach
+          //   plan            a live plan with steps the copy is not running
+          //
+          // Dropping them is the same rule the pending marker already followed,
+          // applied to the rest of the set instead of just the one field. The
+          // configuration (model, effort, mode, system prompt), the repository
+          // binding and the summary are properties of the chat, not of a turn,
+          // so they stay.
           pendingTurn: undefined,
+          pendingQuestion: undefined,
+          queued: undefined,
+          plan: undefined,
+          // `pendingChanges` is a SUMMARY derived at the one choke point that
+          // owns workspaces (`setWorkspace`). The copy owns no workspace yet —
+          // its id keys nothing in `workspaces` and nothing in IndexedDB — so
+          // inheriting the source's count put a "3 changed" badge on a chat
+          // with no changes at all, and clicking it opened an empty pane. Zero
+          // is the honest answer, and the first `setWorkspace` will correct it.
+          pendingChanges: undefined,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           messages: source.messages.map((m) => ({ ...m, id: generateId() })),
@@ -1078,6 +1195,17 @@ export const useChatStore = create<ChatStoreState>()(
       updateSettings: (patch) =>
         set((s) => ({ settings: { ...s.settings, ...patch } })),
 
+      setCheckRun: (conversationId, running) =>
+        set((s) => ({
+          // Only this conversation's run may clear the flag: a stale finally()
+          // from an abandoned run must not blank a newer one's indicator.
+          checkRun: running
+            ? { conversationId, startedAt: Date.now() }
+            : s.checkRun?.conversationId === conversationId
+              ? null
+              : s.checkRun,
+        })),
+
       setSettingsOpen: (open, tab) =>
         set({ settingsOpen: open, settingsTab: open ? tab ?? null : null }),
 
@@ -1144,6 +1272,14 @@ export const useChatStore = create<ChatStoreState>()(
               ...DEFAULT_CHAT_SETTINGS.github,
               ...settings?.github,
             },
+            // Same treatment as GitHub: a stored pairing missing a field
+            // added later must fill from the default rather than arrive as
+            // undefined, or the probe reads `origin: undefined` and reports
+            // "no companion configured" for a user who paired one.
+            companion: {
+              ...DEFAULT_CHAT_SETTINGS.companion,
+              ...settings?.companion,
+            },
             skills: reconciled ?? skills,
           },
           // Same migration for per-conversation overrides: a stored
@@ -1158,6 +1294,7 @@ export const useChatStore = create<ChatStoreState>()(
           reconnecting: false,
           settingsOpen: false,
           settingsTab: null,
+          checkRun: null,
           workspaces: {},
           pendingPush: null,
           pushGate: null,

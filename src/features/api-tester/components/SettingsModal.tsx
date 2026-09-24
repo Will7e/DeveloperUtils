@@ -16,6 +16,10 @@ import {
 } from "lucide-react";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+// One definition of "this value is a secret", shared with the agent's read
+// tools (features/chat/lib/sensitivity.ts). It used to be an inline regex here:
+// the same rule written twice is the same rule that drifts apart.
+import { isSecretKey } from "@/features/chat/lib/sensitivity";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -598,11 +602,7 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
 
                       <div className="api-settings-cell-input" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                         <input
-                          type={
-                            /token|secret|password|key|auth|cert|credential|private/i.test(v.key) && !revealedVarIndices.has(i)
-                              ? "password"
-                              : "text"
-                          }
+                          type={isSecretKey(v.key) && !revealedVarIndices.has(i) ? "password" : "text"}
                           className="api-settings-input"
                           placeholder="Value"
                           value={v.value}
@@ -615,7 +615,7 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                             updateVars(newVars);
                           }}
                         />
-                        {/token|secret|password|key|auth|cert|credential|private/i.test(v.key) && (
+                        {isSecretKey(v.key) && (
                           <SimpleTooltip content={revealedVarIndices.has(i) ? "Mask secret" : "Reveal secret"}>
                             <button
                               type="button"

@@ -43,6 +43,138 @@ function input(over: Partial<CompletionInput> = {}): CompletionInput {
   return { evidence: [], agentTools: true, aborted: false, ...over };
 }
 
+// ============================================================
+// The one rule that reaches past "unfinished" into "not proven"
+// ============================================================
+// `untested-change` fires only where the agent demonstrably COULD write the
+// test: a green test command is in the evidence. Every condition below is a way
+// of NOT firing, because a gate that asks for a test the turn had no way to run
+// is the kind of nudge that teaches everyone to ignore the gate.
+
+describe("untested-change — source changed while the suite went green", () => {
+  const testRun = [evidence("command", "fresh-pass", { summary: "`npm test` exited 0 in 2100ms" })];
+  const changed = (paths: Array<[string, string]>) =>
+    paths.map(([path, status]) => ({ path, status }));
+
+  it("fires when source changed, the suite is green, and no test did", () => {
+    const verdict = evaluateCompletion(
+      input({ evidence: testRun, changeSet: changed([["src/api.ts", "modified"]]), projectHasTests: true })
+    );
+    expect(verdict.complete).toBe(false);
+    const reason = !verdict.complete ? verdict.reasons.find((r) => r.kind === "untested-change") : undefined;
+    expect(reason).toBeDefined();
+    if (reason?.kind === "untested-change") {
+      expect(reason.files).toEqual(["src/api.ts"]);
+      expect(reason.run).toBe("npm test");
+      expect(describeReason(reason)).toContain("src/api.ts");
+    }
+    expect(!verdict.complete && verdict.summary).toMatch(/npm test/);
+  });
+
+  it("stays silent when a test file changed with it", () => {
+    const verdict = evaluateCompletion(
+      input({
+        evidence: testRun,
+        changeSet: changed([
+          ["src/api.ts", "modified"],
+          ["src/api.test.ts", "modified"],
+        ]),
+        projectHasTests: true,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("stays silent when no test command ran, because the agent could not run one", () => {
+    const verdict = evaluateCompletion(
+      input({
+        // A type check is not a test run: it proves the code compiles, not that
+        // its behaviour is covered — and it does not tell us the agent could
+        // have written a test it never ran.
+        evidence: [evidence("typecheck", "fresh-pass", { summary: "0 errors across 41 file(s)" })],
+        changeSet: changed([["src/api.ts", "modified"]]),
+        projectHasTests: true,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("stays silent when the test run FAILED (that is the check-failing rule)", () => {
+    const verdict = evaluateCompletion(
+      input({
+        evidence: [evidence("command", "fresh-fail", { ok: false, summary: "`npm test` exited 1 in 2100ms" })],
+        changeSet: changed([["src/api.ts", "modified"]]),
+        projectHasTests: true,
+      })
+    );
+    expect(!verdict.complete && verdict.reasons.map((r) => r.kind)).toEqual(["check-failing"]);
+  });
+
+  it("stays silent for documentation and manifest changes", () => {
+    const verdict = evaluateCompletion(
+      input({
+        evidence: testRun,
+        changeSet: changed([
+          ["README.md", "modified"],
+          ["docs/usage.mdx", "added"],
+          ["package.json", "modified"],
+        ]),
+        projectHasTests: true,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("stays silent for a deletion, which is its own proof", () => {
+    const verdict = evaluateCompletion(
+      input({
+        evidence: testRun,
+        changeSet: changed([["src/dead-code.ts", "deleted"]]),
+        projectHasTests: true,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("stays silent when the project has no tests at all", () => {
+    const verdict = evaluateCompletion(
+      input({
+        evidence: testRun,
+        changeSet: changed([["src/api.ts", "modified"]]),
+        projectHasTests: false,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("stays silent with no workspace to judge", () => {
+    const verdict = evaluateCompletion(input({ evidence: testRun }));
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("does not mistake a test-shaped file path in a command for a test run", () => {
+    // "test" appears in branch names, file paths and script names. The rule
+    // matches the COMMAND the agent ran, so a build that merely mentions a test
+    // path is not evidence that tests ran.
+    const verdict = evaluateCompletion(
+      input({
+        evidence: [evidence("command", "fresh-pass", { summary: "`npm run build` exited 0 in 2100ms" })],
+        changeSet: changed([["src/api.ts", "modified"]]),
+        projectHasTests: true,
+      })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("names the test in the nudge, so the model knows what was green", () => {
+    const nudge = completionNudge([
+      { kind: "untested-change", files: ["src/api.ts"], run: "npx vitest run" },
+    ]);
+    expect(nudge).toContain("npx vitest run");
+    expect(nudge).toMatch(/must fail without your change/);
+  });
+});
+
 describe("evaluateCompletion — what counts as finished", () => {
   it("never gates a turn the user stopped", () => {
     const verdict = evaluateCompletion(

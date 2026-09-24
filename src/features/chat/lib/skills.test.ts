@@ -16,8 +16,10 @@ import {
   matchSkills,
   parseSkillFile,
   reconcileBuiltins,
+  selectAutoSkills,
   serializeSkillFile,
   skillFromParsed,
+  triggerMatches,
 } from "./skills";
 import { BUILTIN_SKILLS } from "../constants";
 import type { ChatSkill } from "../types";
@@ -131,6 +133,77 @@ describe("globToRegExp / matchSkills", () => {
   it("ignores empty text and body-less skills", () => {
     expect(matchSkills("", [skill({ id: "a", triggers: ["x"] })])).toEqual([]);
     expect(matchSkills("x", [skill({ id: "a", content: "", triggers: ["x"] })])).toEqual([]);
+  });
+
+  // Auto-loading made these the difference between a helpful turn and hundreds
+  // of tokens of the wrong instructions, so they are pinned rather than
+  // assumed. A substring match turned "inspect" into a spec-writing skill.
+  it("matches a trigger as a WORD, not as a substring", () => {
+    expect(triggerMatches("please inspect the file", "spec")).toBe(false);
+    expect(triggerMatches("write a spec for this", "spec")).toBe(true);
+    expect(triggerMatches("we hit pushback", "push")).toBe(false);
+    expect(triggerMatches("i pushed it up", "push")).toBe(true);
+  });
+
+  it("allows the common suffixes on a trigger's last word", () => {
+    expect(triggerMatches("add tests here", "test")).toBe(true);
+    expect(triggerMatches("the build is failing", "fail")).toBe(true);
+    expect(triggerMatches("open a pr please", "open a pr")).toBe(true);
+    expect(triggerMatches("opening a pr", "open a pr")).toBe(false);
+  });
+
+  // A trigger that cannot match ITSELF is dead weight no user phrase can ever
+  // reach — the failure mode word-boundary matching introduces for a trigger
+  // that ends in punctuation (`c++`, `vs.`), where the closing \b has no
+  // boundary to sit on. Shipped triggers are the ones that must clear this.
+  it("every shipped trigger can match itself", () => {
+    for (const s of BUILTIN_SKILLS) {
+      for (const t of s.triggers ?? []) {
+        expect(triggerMatches(t, t), `${s.id}: "${t}"`).toBe(true);
+      }
+    }
+  });
+});
+
+describe("selectAutoSkills", () => {
+  const spec = skill({ id: "a-spec", name: "Spec", content: "spec body", triggers: ["spec"] });
+  const tests = skill({ id: "b-tests", name: "Tests", content: "test body", triggers: ["tests"] });
+  const third = skill({ id: "c-third", name: "Third", content: "third body", triggers: ["spec"] });
+
+  it("loads the bodies a request matches", () => {
+    const { loaded, deferred } = selectAutoSkills("write a spec", [spec, tests]);
+    expect(loaded.map((s) => s.id)).toEqual(["a-spec"]);
+    expect(deferred).toEqual([]);
+  });
+
+  it("never re-loads an always-on skill — it is already in the prompt", () => {
+    const pinned = skill({ id: "pinned", content: "body", triggers: ["spec"], enabled: true });
+    const { loaded } = selectAutoSkills("write a spec", [pinned, spec]);
+    expect(loaded.map((s) => s.id)).toEqual(["a-spec"]);
+  });
+
+  it("defers matches over the count cap rather than dropping them", () => {
+    const { loaded, deferred } = selectAutoSkills("write tests for the spec", [spec, tests, third]);
+    expect(loaded.map((s) => s.id)).toEqual(["a-spec", "b-tests"]);
+    expect(deferred.map((s) => s.id)).toEqual(["c-third"]);
+  });
+
+  it("defers a body that alone exceeds the char budget, and still loads a smaller one behind it", () => {
+    const huge = skill({ id: "a-huge", content: "x".repeat(50), triggers: ["spec"] });
+    const small = skill({ id: "b-small", content: "tiny", triggers: ["spec"] });
+    const { loaded, deferred } = selectAutoSkills("write a spec", [huge, small], { charBudget: 10 });
+    expect(loaded.map((s) => s.id)).toEqual(["b-small"]);
+    expect(deferred.map((s) => s.id)).toEqual(["a-huge"]);
+  });
+
+  it("is deterministic, so the same turn always costs the same", () => {
+    const first = selectAutoSkills("write a spec", [third, spec, tests]);
+    const second = selectAutoSkills("write a spec", [spec, third, tests]);
+    expect(first.loaded.map((s) => s.id)).toEqual(second.loaded.map((s) => s.id));
+  });
+
+  it("loads nothing when the request matches nothing", () => {
+    expect(selectAutoSkills("hello there", [spec, tests]).loaded).toEqual([]);
   });
 });
 

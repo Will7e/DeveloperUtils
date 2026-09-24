@@ -215,6 +215,23 @@ describe("create_diagram", () => {
     expect(result.ok).toBe(false);
     expect(String((result.data as { error: string }).error)).toMatch(/at least one/);
   });
+
+  it("scopes element ids per call, so two diagrams never merge on one board", () => {
+    // Unscoped ids collide by construction (every diagram wanted
+    // `agent-edge-0`), and Excalidraw treats elements with the same id as the
+    // same element — the second diagram silently lost its arrows.
+    const spec = {
+      nodes: [{ id: "a", label: "A" }],
+      edges: [{ from: "a", to: "a" }],
+    };
+    runCreateDiagramTool(spec);
+    runCreateDiagramTool(spec);
+    const first = createWorkflow.mock.calls[0]![1] as { id: string }[];
+    const second = createWorkflow.mock.calls[1]![1] as { id: string }[];
+    const idsOf = (els: { id: string }[]) => els.map((e) => e.id);
+    expect(first.length).toBeGreaterThan(0);
+    expect(idsOf(second).some((id) => idsOf(first).includes(id))).toBe(false);
+  });
 });
 
 describe("open_in_tool", () => {
@@ -262,6 +279,34 @@ describe("open_in_tool", () => {
     const result = runOpenInToolTool({ target: "diff", original: "a", modified: "b" });
     expect(result.ok).toBe(false);
     expect(String((result.data as { error: string }).error)).toMatch(/did not accept/);
+  });
+
+  it("navigates to drawflows without nodes instead of drawing a second board", () => {
+    // The follow-up create_diagram tells the model to make. Requiring nodes
+    // here made it pass the same spec again, and this tool CREATES a board —
+    // so the user got the same diagram twice in two tabs.
+    const result = runOpenInToolTool({ target: "drawflows" });
+    expect(result.ok).toBe(true);
+    expect(createWorkflow).not.toHaveBeenCalled();
+    expect(applyHandoff).not.toHaveBeenCalled();
+    expect(result.data).toMatchObject({ target: "drawflows", navigated: true });
+  });
+
+  it("still draws a board when nodes are given", () => {
+    const result = runOpenInToolTool({
+      target: "drawflows",
+      name: "Flow",
+      nodes: [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+      edges: [{ from: "a", to: "b" }],
+    });
+    expect(result.ok).toBe(true);
+    expect(applyHandoff).toHaveBeenCalledTimes(1);
+    const payload = applyHandoff.mock.calls[0]![0] as { workflow?: { elements: unknown[] } };
+    expect(payload.workflow?.elements.length).toBe(6);
+    expect(result.data).not.toMatchObject({ navigated: true });
   });
 });
 

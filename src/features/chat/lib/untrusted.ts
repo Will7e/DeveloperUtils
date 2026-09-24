@@ -71,6 +71,16 @@ export const UNTRUSTED_TOOLS: ReadonlySet<string> = new Set([
   "http_request",
   "http_write",
   "search_library",
+  // GitHub's collaborative surface. An issue body, a comment and a failing CI
+  // log are all text written by people this app has no relationship with, and
+  // the agent reads them with `push_changes` in reach — the exact combination
+  // the delimiter exists for. A review body is the likeliest of all: it is
+  // prose addressed to whoever is about to change that code.
+  "list_issues",
+  "read_issue",
+  "list_pull_requests",
+  "read_pull_request",
+  "read_ci_logs",
 ]);
 
 export function isUntrustedTool(name: string): boolean {

@@ -1,0 +1,21 @@
+{
+  "unauthorized": {
+    "error": {
+      "message": "User not found.",
+      "code": 401
+    }
+  },
+  "badRequest": {
+    "error": {
+      "message": "Input required: specify \"prompt\" or \"messages\"",
+      "code": 400
+    },
+    "user_id": "user_3Jjrn4sC231JsTszNWcq2SSlLHZ"
+  },
+  "notFound": {
+    "error": {
+      "message": "Model not found: definitely/not-a-real-model",
+      "code": 404
+    }
+  }
+}

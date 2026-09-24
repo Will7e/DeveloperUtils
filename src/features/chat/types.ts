@@ -17,6 +17,27 @@ export interface UsageInfo {
    * billed at a discount, so this is the savings number worth showing.
    */
   cachedTokens?: number | null;
+  /**
+   * Output tokens spent on reasoning
+   * (`usage.completion_tokens_details.reasoning_tokens`).
+   *
+   * Billed as output and, on most providers, counted against `max_tokens` — so
+   * a turn that answers nothing may simply have thought until it ran out of
+   * room. Comparing this with `completionTokens` is how that is told apart from
+   * a genuinely empty response.
+   */
+  reasoningTokens?: number | null;
+  /**
+   * The upstream provider that actually served this response
+   * (`X-Provider-Name`). Answers "who answered?" — which matters because the
+   * same model id is served by many providers at different prices and quality.
+   */
+  providerName?: string;
+  /**
+   * OpenRouter's response-cache verdict for this request, when readable.
+   * Only observable through the proxy, which re-exposes the header.
+   */
+  cacheStatus?: string;
 }
 
 /**
@@ -65,7 +86,9 @@ export interface RepoContext {
 /** Name of a tool the agent can call (see lib/tool-registry.ts) */
 export type ToolName =
   | "list_repo_files"
+  | "find_files"
   | "read_file"
+  | "read_files"
   | "search_code"
   | "search_workspace"
   | "get_repo_overview"
@@ -91,6 +114,19 @@ export type ToolName =
   | "call_mcp_tool"
   | "run_command"
   | "verify_with_ci"
+  // ── GitHub collaboration: the conversation around the code. `verify_with_ci`
+  //    can say whether the push passed; these say what a reviewer asked for,
+  //    what the failing log contains, and what the thread already decided —
+  //    the half of the workflow the push chain could not read back.
+  | "list_issues"
+  | "read_issue"
+  | "list_pull_requests"
+  | "read_pull_request"
+  | "read_ci_logs"
+  | "create_issue"
+  | "comment_on_issue"
+  | "review_pull_request"
+  | "update_pull_request"
   | "search_web"
   | "fetch_url"
   // ── App tools: the workstation's own features (lib/app-tools.ts,
@@ -105,7 +141,15 @@ export type ToolName =
   | "http_request"
   | "http_write"
   | "create_diagram"
-  | "open_in_tool";
+  | "open_in_tool"
+  // ── App-surface tools: the agent as a USER of this app. `read_app` and
+  //    `act_app` are the two hands (one read per feature family, one
+  //    dispatcher for every declared action) and `describe_tools` loads the
+  //    argument shapes on demand — the same trick `read_skill` plays, so full
+  //    reach does not mean forty schemas on every request.
+  | "read_app"
+  | "act_app"
+  | "describe_tools";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {
@@ -189,6 +233,15 @@ export interface ChatMessage {
   usage?: UsageInfo;
   /** Chain-of-thought text captured from reasoning models (assistant) */
   reasoning?: string;
+  /**
+   * Structured reasoning blocks, replayed verbatim on the next request.
+   *
+   * Distinct from `reasoning` (the human-readable text): this is the protocol
+   * object a provider needs back to continue a chain of thought across tool
+   * rounds. Some providers reject a tool round that omits the `reasoning_details`
+   * of the assistant message that requested the tools.
+   */
+  reasoningDetails?: unknown[];
   /** Time spent emitting reasoning tokens, when reported (assistant) */
   reasoningMs?: number;
   /** Number of earlier messages hidden by compaction (marker message) */
@@ -492,6 +545,20 @@ export interface WorkspaceState {
   baseCommitSha: string;
   /** Remote working branch created for pushes (null until created) */
   workingBranch: string | null;
+  /**
+   * When the change set was last pushed to the working branch (null until it
+   * has been).
+   *
+   * Load-bearing for the verification plan: the CI tier dispatches a workflow
+   * ON a pushed branch, so before the first push it is not merely slower — it
+   * cannot run at all. A plan that offered it anyway would send the model
+   * looking for a branch that does not exist yet.
+   *
+   * Deliberately NOT part of `updatedAt`: it records that bytes left this
+   * machine, which changes nothing about what the workspace contains, and
+   * bumping the revision here would retire evidence about exactly those bytes.
+   */
+  pushedAt?: number | null;
   /** Repo structure snapshot (paths only; contents load lazily) */
   tree: WorkspaceTreeEntry[];
   /** File contents held locally (read or edited) */
@@ -583,7 +650,15 @@ export interface PushWarning {
     /** The agent's summary claims something the turn's evidence does not support */
     | "evidence"
     /** Checks this repository declares that nothing in this workspace can run */
-    | "checks";
+    | "checks"
+    /**
+     * Another agent thread in this browser holds one of these paths right now.
+     *
+     * Distinct from "base-moved" (someone already pushed) and from "evidence"
+     * (what the summary claims): this one is about a change that has not
+     * happened yet, in a tab the reviewer can go and look at.
+     */
+    | "thread-overlap";
   message: string;
 }
 
@@ -591,6 +666,8 @@ export interface PushWarning {
 export interface PushDecision {
   approved: boolean;
   note?: string;
+  /** True when "run tools without asking" approved it, with no dialog shown */
+  auto?: boolean;
   /** Whether to open a pull request after the push (default true) */
   openPr?: boolean;
   /**
@@ -628,6 +705,8 @@ export interface PendingHttpRequest {
 export interface HttpApprovalDecision {
   approved: boolean;
   note?: string;
+  /** True when "run tools without asking" approved it, with no dialog shown */
+  auto?: boolean;
 }
 
 /** Result of the approved GitHub push chain */
@@ -703,6 +782,47 @@ export type GitHubConnectionState =
   | { status: "connected"; login: string; avatarUrl: string | null; mode: GitHubAuthMode }
   | { status: "error"; message: string };
 
+/**
+ * Local companion pairing — the connection to the process that can actually
+ * run this project's own commands.
+ *
+ * It lives in the settings because it is a CREDENTIAL, and it lives in the
+ * ENCRYPTED settings doc for the same reason the GitHub token does. Before
+ * this, the origin and pairing token came only from
+ * `VITE_COMPANION_ORIGIN`/`VITE_COMPANION_TOKEN`, which meant the app could
+ * not reach a companion at all unless somebody edited `.env` and restarted
+ * the dev server — so the one tier that can actually PROVE a change (a real
+ * `npm test` in a real tree) was invisible to every user who had not read the
+ * source. An unpaired companion is not a missing feature; it is the most
+ * common configuration of this product, and it has to be a two-click setup.
+ *
+ * The env vars still win when set: they are the dev-server override, and a
+ * developer who has them pointing somewhere should not have to clear a saved
+ * pairing to use them.
+ */
+export interface CompanionSettings {
+  /**
+   * Where the companion listens, e.g. `http://127.0.0.1:5280`.
+   * Empty means "use the environment, or the loopback default in dev".
+   */
+  origin: string;
+  /** Pairing token printed by the companion at startup (encrypted at rest) */
+  token: string;
+  /** Protocol version observed at pairing time (null until a probe succeeds) */
+  protocolVersion: number | null;
+  /** When pairing was established (null when never paired) */
+  connectedAt: number | null;
+  /**
+   * Local-only, as a saved FACT rather than a re-derived guess.
+   *
+   * A loopback origin is the companion on this machine. Anything else is a
+   * companion someone else runs, which is a legitimate setup and a different
+   * trust statement — the UI says so plainly instead of leaving the user to
+   * work out where their commands would execute.
+   */
+  localOnly: boolean;
+}
+
 export interface ChatSettings {
   defaultModel: string;
   /** Model state applied to new chats (each chat remembers its own) */
@@ -729,6 +849,12 @@ export interface ChatSettings {
   /** GitHub OAuth/PAT credentials for agent mode (encrypted at rest) */
   github: GitHubSettings;
   /**
+   * Local companion pairing (encrypted at rest). There is no "unset" state
+   * to distinguish from "unpaired": an empty origin means this build has not
+   * been paired, which is what the probe reports and what the agent is told.
+   */
+  companion: CompanionSettings;
+  /**
    * When a turn stalls — the model repeats the same FAILING tool call, or
    * the provider refuses the request — continue it on a capably stronger
    * model instead of giving up. Default on; every switch is announced in
@@ -742,6 +868,22 @@ export interface ChatSettings {
    * choice they were equipped to make.
    */
   autoEscalate?: boolean;
+  /**
+   * "Run tools without asking": resolve every agent approval gate as
+   * approved, without showing a dialog.
+   *
+   * Two gates listen to this flag — `http_write` (a request that changes
+   * someone else's system) and `push_changes` (a commit and pull request on
+   * the connected repository). Turning it on means the agent can send those
+   * writes while you are reading, so it is off unless you ask for it, the
+   * dialog copy says what it will skip, and every auto-approved action is
+   * reported as such in the transcript and in the tool result the model
+   * reads — an approval nobody gave must never be described as one.
+   *
+   * Deliberately NOT extended to anything that would recreate the gate by
+   * another name: the flag covers the two dialogs above and nothing else.
+   */
+  autoApproveTools?: boolean;
 }
 
 /** Reasoning capability metadata advertised by the OpenRouter catalog */
@@ -771,6 +913,88 @@ export interface ModelInfo {
   supportedParameters?: string[];
   /** Reasoning capability metadata (supported efforts, defaults) */
   reasoning?: ModelReasoningMetadata;
+  /**
+   * The publisher's canonical id, which usually carries a date suffix the
+   * catalog `id` omits (`z-ai/glm-5.3-flash` vs `…-20260826`). Needed to join
+   * against `/benchmarks`, whose rows key on exactly that dated form.
+   */
+  canonicalSlug?: string;
+  /** USD per 1M tokens for a prompt-cache READ (a hit) */
+  cacheReadPrice?: number;
+  /** USD per 1M tokens to WRITE to the prompt cache */
+  cacheWritePrice?: number;
+  /**
+   * Tiered pricing. Above `minPromptTokens`, these rates REPLACE the base ones.
+   *
+   * This is a real cost cliff, not a rounding detail: a model can double its
+   * prompt price past a threshold, so a long-context turn estimated from the
+   * base rate can be understated by 2×. Live on 76 of 459 catalog models.
+   */
+  priceOverrides?: ModelPriceOverride[];
+  /**
+   * The provider's own output ceiling (`top_provider.max_completion_tokens`) —
+   * the number `max_tokens` must stay under, which is often lower than the
+   * context window suggests.
+   */
+  maxCompletionTokens?: number;
+  /** True when the leading provider moderates inputs */
+  isModerated?: boolean;
+  /** ISO date this model stops being served, when it is being retired */
+  expirationDate?: string;
+}
+
+/**
+ * One way a model is actually SERVED — a provider, and sometimes a service tier
+ * within that provider (`tag: "openai/flex"`).
+ *
+ * This is the level at which the facts that decide a turn's cost, speed and
+ * reliability live, and none of them are properties of the model id:
+ *
+ *   • the same model is offered by several providers at different prices — the
+ *     capture that motivated this type shows a 2.2× spread on prompt price and
+ *     a 3.5× spread on p50 latency for one id;
+ *   • `supportedParameters` is per ENDPOINT, so whether `tools` is honoured is a
+ *     routing question, not a model question;
+ *   • `supportsImplicitCaching` says whether the provider caches on its own —
+ *     the difference between the prompt-cache work landing and silently not;
+ *   • uptime and throughput are measured, published, and refreshed, unlike
+ *     anything in the catalog row.
+ */
+export interface ModelEndpointInfo {
+  providerName: string;
+  /** Service tier slug when the provider offers more than one ("openai/flex") */
+  tag?: string;
+  /** What this endpoint will read — often below the model's own window */
+  contextLength?: number;
+  maxPromptTokens?: number;
+  maxCompletionTokens?: number;
+  /** USD per 1M prompt tokens at this provider */
+  promptPrice?: number;
+  /** USD per 1M completion tokens at this provider */
+  completionPrice?: number;
+  /** USD per 1M cached prompt tokens (a hit) at this provider */
+  cacheReadPrice?: number;
+  /** Quantization served ("fp8", "int4", "unknown") */
+  quantization?: string;
+  /** Parameters THIS provider declares support for */
+  supportedParameters?: string[];
+  /** The provider caches prompts without being asked to */
+  supportsImplicitCaching?: boolean;
+  /** Rolling uptime percentages, absent when the provider reports none */
+  uptimeLast5m?: number;
+  uptimeLast30m?: number;
+  /** p50 latency in ms, and p50 throughput in tokens/sec */
+  latencyP50?: number;
+  throughputP50?: number;
+}
+
+/** One pricing tier, active once the prompt exceeds `minPromptTokens` */
+export interface ModelPriceOverride {
+  minPromptTokens: number;
+  promptPrice?: number;
+  completionPrice?: number;
+  cacheReadPrice?: number;
+  cacheWritePrice?: number;
 }
 
 /** OpenAI-compatible content part for multimodal requests */

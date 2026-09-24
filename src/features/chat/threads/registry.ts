@@ -159,6 +159,34 @@ export function pathsOverlap(a: string, b: string): boolean {
   return false;
 }
 
+/** Where a thread's work lives, as one comparable string */
+export function repoIdentityOf(thread: Pick<AgentThread, "owner" | "repo">): string {
+  return `${thread.owner ?? ""}/${thread.repo ?? ""}`.toLowerCase();
+}
+
+/**
+ * Do two threads work on the same repository?
+ *
+ * Claims are PATH-scoped, and a path is only meaningful inside a repository: two
+ * threads on different repos both touching `src/a.ts` are editing two different
+ * files. Comparing them reported a conflict that cannot happen — which is worse
+ * than noise, because a warning that is usually wrong is a warning the reader
+ * learns to skip, and the one real conflict arrives in exactly the same voice.
+ *
+ * An EMPTY identity counts as a match. Presence written before the identity was
+ * carried, or by an older build, is not evidence of a different repository, and
+ * for a warning the safe direction is to show it.
+ */
+export function sameRepository(
+  a: Pick<AgentThread, "owner" | "repo">,
+  b: Pick<AgentThread, "owner" | "repo">
+): boolean {
+  const left = repoIdentityOf(a);
+  const right = repoIdentityOf(b);
+  if (left === "/" || right === "/") return true;
+  return left === right;
+}
+
 function isClaimExpired(claim: PathClaim, now: number): boolean {
   return !Number.isFinite(claim.expiresAt) || claim.expiresAt <= now;
 }
@@ -265,10 +293,12 @@ export function claimPaths(
     if (path && !requested.includes(path)) requested.push(path);
   }
 
-  // Peers that still hold live claims, excluding our own thread.
+  // Peers that still hold live claims, excluding our own thread and any thread
+  // that is on a different repository — see sameRepository.
   const holders: Array<{ claim: PathClaim; thread: AgentThread }> = [];
   for (const other of Object.values(pruned.threads)) {
     if (other.threadId === threadId) continue;
+    if (!sameRepository(thread, other)) continue;
     for (const claim of other.claims) {
       if (!isClaimExpired(claim, now)) holders.push({ claim, thread: other });
     }
@@ -301,7 +331,24 @@ export function claimPaths(
     merged.set(path, { path, threadId, expiresAt: now + ttlMs });
   }
 
-  const updated: AgentThread = { ...thread, claims: [...merged.values()] };
+  // A thread's HOLDINGS are bounded too, not just its request.
+  //
+  // `MAX_CLAIM_PATHS` capped one call, which left the total unbounded: a
+  // conversation that rewrites a hundred files over a session accumulated a
+  // hundred claims, and every one of them was persisted, broadcast and read
+  // back by every peer (whose parser then silently truncated them at 64 anyway,
+  // so the extra ones bought nothing). Dropping the ones that expire soonest
+  // drops the ones least recently renewed, which is what "this thread is done
+  // with that file" looks like from here — and a dropped claim can always be
+  // re-claimed by the next write to that path.
+  const holdings =
+    merged.size <= MAX_CLAIM_PATHS
+      ? [...merged.values()]
+      : [...merged.values()]
+          .sort((a, b) => b.expiresAt - a.expiresAt)
+          .slice(0, MAX_CLAIM_PATHS);
+
+  const updated: AgentThread = { ...thread, claims: holdings };
   return {
     registry: {
       revision: pruned.revision + 1,
@@ -360,9 +407,13 @@ export function conflictsFor(
     .filter((p): p is string => p !== null);
   if (requested.length === 0) return [];
 
+  const self = registry.threads[request.threadId];
   const out: ClaimConflict[] = [];
   for (const thread of Object.values(registry.threads)) {
     if (thread.threadId === request.threadId) continue;
+    // Scoped by repository like every other conflict check: a claim only
+    // describes a path inside the repository it was made in.
+    if (self && !sameRepository(self, thread)) continue;
     for (const claim of thread.claims) {
       if (isClaimExpired(claim, request.now)) continue;
       const hit = requested.find((p) => pathsOverlap(claim.path, p));

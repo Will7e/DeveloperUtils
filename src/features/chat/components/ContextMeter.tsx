@@ -14,8 +14,29 @@
 
 import { AlertTriangle, Check } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { costShare, formatSpend, spendNote, shouldAttributeSpend } from "../lib/cost-meter";
-import type { ContextBreakdown, ContextPart } from "../types";
+import {
+  cacheReadRate,
+  costShare,
+  formatSpend,
+  spendNote,
+  shouldAttributeSpend,
+} from "../lib/cost-meter";
+import { REASONING_EFFORT_META } from "../lib/model-state";
+import { endpointNotes, type EndpointSummary } from "../lib/model-endpoints";
+import type { ChatMode, ContextBreakdown, ContextPart, ReasoningEffort } from "../types";
+
+/**
+ * The session behind the numbers: what is answering, how hard it thinks and
+ * what it may do. These lived in two places that could disagree — a status
+ * read-out and the header pickers — so they are stated once here, beside the
+ * window they explain.
+ */
+export interface ContextSessionReadout {
+  /** Exact model id (the picker shows a display name, not the id) */
+  model: string;
+  effort: ReasoningEffort;
+  mode: ChatMode;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -30,7 +51,23 @@ const HEALTH_LABEL: Record<ContextBreakdown["health"], string> = {
   exceeded: "Compacting on next send",
 };
 
-export function ContextMeter({ context }: { context: ContextBreakdown }) {
+export function ContextMeter({
+  context,
+  session,
+  endpoints,
+}: {
+  context: ContextBreakdown;
+  session?: ContextSessionReadout;
+  /**
+   * Who serves the selected model, when it is known.
+   *
+   * Sits beside the session readout because it explains the session: the same
+   * id is served by several providers at different prices, with different
+   * parameter support and their own caching behaviour, and the header names the
+   * id while only this can say what will actually answer it.
+   */
+  endpoints?: EndpointSummary | null;
+}) {
   const pct = Math.min(100, context.percentageUsed);
   const isZero = pct < 0.5;
   const denominator = Math.max(1, context.usableTokens);
@@ -48,7 +85,7 @@ export function ContextMeter({ context }: { context: ContextBreakdown }) {
     <SimpleTooltip
       side="bottom"
       className="chat-ctx-card"
-      content={<ContextCard context={context} />}
+      content={<ContextCard context={context} session={session} endpoints={endpoints} />}
     >
       <div
         className="chat-ctx-meter"
@@ -87,7 +124,18 @@ export function ContextMeter({ context }: { context: ContextBreakdown }) {
 }
 
 /** The hover/focus card: attribution, exact counts, cache, spend. */
-function ContextCard({ context }: { context: ContextBreakdown }) {
+function ContextCard({
+  context,
+  session,
+  endpoints,
+}: {
+  context: ContextBreakdown;
+  session?: ContextSessionReadout;
+  endpoints?: EndpointSummary | null;
+}) {
+  // Only worth stating when a tool turn can actually be routed somewhere, and
+  // only for the facts that are unusual — see `endpointNotes`.
+  const servingNotes = endpoints ? endpointNotes(endpoints, { toolRequirement: true }) : [];
   const denominator = Math.max(1, context.usableTokens);
   // Spend rows first (fixed order), free space always closes the list.
   const freeRow = context.parts.find((p) => p.key === "free");
@@ -120,6 +168,51 @@ function ContextCard({ context }: { context: ContextBreakdown }) {
         </span>
       </div>
 
+      {session && (
+        <div className="chat-ctx-card-session">
+          <span className="chat-ctx-card-session-model" title={session.model}>
+            {session.model}
+          </span>
+          <span className="chat-ctx-card-session-sep">·</span>
+          <span>effort {REASONING_EFFORT_META[session.effort].label.toLowerCase()}</span>
+          <span className="chat-ctx-card-session-sep">·</span>
+          <span>{session.mode} mode</span>
+        </div>
+      )}
+
+      {/* What serves it. The cheapest endpoint is named because that is the
+          app's whole premise — routing to the cheapest capable provider — and
+          the spread is stated when it is large enough to matter. */}
+      {endpoints && endpoints.endpoints > 0 && (
+        <div className="chat-ctx-serving">
+          <span className="chat-ctx-serving-line">
+            Served by <strong>{endpoints.providers}</strong>{" "}
+            {endpoints.providers === 1 ? "provider" : "providers"}
+            {endpoints.endpoints > endpoints.providers
+              ? ` (${endpoints.endpoints} services)`
+              : ""}
+            {endpoints.cheapest && (
+              <>
+                {" · cheapest "}
+                <strong title={endpoints.cheapest.providerName}>
+                  {endpoints.cheapest.providerName}
+                  {endpoints.cheapest.tag ? ` ${endpoints.cheapest.tag}` : ""}
+                </strong>{" "}
+                at ${endpoints.cheapest.promptPrice.toFixed(2)}/M in
+              </>
+            )}
+            {endpoints.fastestP50Ms !== undefined && (
+              <> · quickest {(endpoints.fastestP50Ms / 1000).toFixed(1)}s to first token</>
+            )}
+          </span>
+          {servingNotes.map((note) => (
+            <span key={note} className="chat-ctx-serving-note">
+              {note}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="chat-ctx-card-rows">
         {rows.map((part) => (
           <ContextRow key={part.key} part={part} denominator={denominator} />
@@ -146,6 +239,19 @@ function ContextCard({ context }: { context: ContextBreakdown }) {
             <strong>{cached.toLocaleString()}</strong> of those were served from
             the prompt cache{context.lastPromptTokens ? ` (${cacheRatio}%)` : ""}{" "}
             — billed at a discount
+          </span>
+        )}
+
+        {/* The conversation's cache rate, not this reply's. Any single reply can
+            show a hit; only the aggregate says whether the cacheable prefix is
+            actually being reused, which is the number that catches a prefix that
+            quietly stopped matching. */}
+        {context.spend && cacheReadRate(context.spend) !== null && (
+          <span className="chat-ctx-card-line">
+            <span className="chat-ctx-card-cache-dot" />
+            Across this conversation, <strong>{Math.round(cacheReadRate(context.spend)! * 100)}%</strong>{" "}
+            of prompt tokens ({formatTokens(context.spend.cachedTokens)}) were cache
+            reads — the rest were sent fresh
           </span>
         )}
 

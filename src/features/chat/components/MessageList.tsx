@@ -20,6 +20,10 @@ import { useChatStore } from "@/stores/chat.store";
 import { MessageItem } from "./MessageItem";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { QuestionCard } from "./QuestionCard";
+import { TranscriptFind } from "./TranscriptFind";
+import { TurnDiagnostics } from "./TurnDiagnostics";
+import { useVerificationReadout } from "./useVerificationReadout";
+import { turnDiagnostics, type TurnDiagnostic } from "../lib/turn-diagnostics";
 import { visibleMessages } from "../types";
 import type { ChatMessage, ConversationSummary } from "../types";
 import { resumeUserTurn } from "../services/chat-runner";
@@ -116,6 +120,34 @@ export function MessageList({
     const conv = s.conversations.find((c) => c.id === s.activeConversationId);
     return conv?.pendingTurn?.outcome === "unresumable";
   });
+
+  // ── Turn diagnostics ──
+  // The harness's own account of each finished turn (lib/turn-diagnostics), from
+  // the same classifier the eval harness uses. Derived here once per committed
+  // change rather than per turn, and suppressed where the verification ledger has
+  // already answered the finding: the header chip says "Verified", so the
+  // transcript must not say "wrote code without running anything" about the same
+  // revision.
+  const activeConversation = useChatStore((s) =>
+    s.conversations.find((c) => c.id === s.activeConversationId)
+  );
+  const { verifiedRevision } = useVerificationReadout(activeId);
+  const diagnostics = React.useMemo(() => {
+    const map = new Map<string, TurnDiagnostic>();
+    if (!activeConversation) return map;
+    const all = turnDiagnostics({ conversation: activeConversation, verifiedRevision });
+    // While a turn is running, the newest one is withheld: it is still being
+    // written, and a note about a turn in progress would change under the reader
+    // ("wrote code without running anything" is not yet a fact about it). Earlier
+    // turns keep theirs — a note that vanished every time the agent started
+    // working again would be unreadable.
+    const inProgressTurn = isStreamingHere && all.length > 0 ? all[all.length - 1]!.turn : -1;
+    for (const diagnostic of all) {
+      if (diagnostic.turn === inProgressTurn) continue;
+      map.set(diagnostic.endMessageId, diagnostic);
+    }
+    return map;
+  }, [activeConversation, verifiedRevision, isStreamingHere]);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const innerRef = React.useRef<HTMLDivElement>(null);
@@ -216,6 +248,70 @@ export function MessageList({
   // Soft-deleted messages (regenerate) stay in storage but never render.
   const visible = React.useMemo(() => visibleMessages(messages), [messages]);
 
+  // ── Find in transcript (⌘F) ──
+  // Matches are MESSAGES, not substrings: see components/TranscriptFind.tsx for
+  // why marking the message is the honest version of this on rendered markdown.
+  const [findOpen, setFindOpen] = React.useState(false);
+  const [findQuery, setFindQuery] = React.useState("");
+  const [findIndex, setFindIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "f") return;
+      // Only while the transcript is on screen: the browser's own find has no
+      // idea what is inside a scroll region it cannot read message by message.
+      e.preventDefault();
+      setFindOpen(true);
+    };
+    window.addEventListener("keydown", handler);
+    // The command palette opens this bar through an event rather than by mounting
+    // a second search of its own: one implementation, two ways in.
+    const openEvent = () => setFindOpen(true);
+    window.addEventListener("intab:chat-find", openEvent);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      window.removeEventListener("intab:chat-find", openEvent);
+    };
+  }, []);
+
+  const findMatches = React.useMemo(() => {
+    const needle = findQuery.trim().toLowerCase();
+    if (needle === "") return [] as ChatMessage[];
+    return visible.filter((message) => {
+      if (message.content.toLowerCase().includes(needle)) return true;
+      // A tool step is searchable by what it acted on, which is how a user looks
+      // for "the file it edited" rather than for a shell command's stdout.
+      if (message.toolResult) {
+        return (message.toolResult.summary ?? "").toLowerCase().includes(needle);
+      }
+      if (message.toolCalls) {
+        return message.toolCalls.calls.some((call) =>
+          `${call.name} ${call.arguments}`.toLowerCase().includes(needle)
+        );
+      }
+      return false;
+    });
+  }, [visible, findQuery]);
+
+  // Clamp the cursor when the query narrows the match set under it.
+  const currentMatch = findMatches.length > 0 ? findMatches[Math.min(findIndex, findMatches.length - 1)] : undefined;
+
+  const step = React.useCallback(
+    (delta: number) => {
+      if (findMatches.length === 0) return;
+      setFindIndex((i) => (i + delta + findMatches.length) % findMatches.length);
+    },
+    [findMatches.length]
+  );
+
+  // Scrolling is done through the DOM because the match may be far outside the
+  // rendered window; the data attribute is on every message root for this reason.
+  React.useEffect(() => {
+    if (!currentMatch) return;
+    const el = scrollRef.current?.querySelector(`[data-message-id="${CSS.escape(currentMatch.id)}"]`);
+    el?.scrollIntoView({ block: "center", behavior: reducedMotion ? "auto" : "smooth" });
+  }, [currentMatch, reducedMotion]);
+
   const showStreamingBubble = isStreamingHere && streamingContent !== "";
   const showThinking = isStreamingHere && streamingContent === "";
 
@@ -230,8 +326,28 @@ export function MessageList({
     );
   }
 
+  const findHitOf = (message: ChatMessage): "match" | "current" | undefined => {
+    if (!findOpen || findMatches.length === 0) return undefined;
+    if (currentMatch?.id === message.id) return "current";
+    return findMatches.some((m) => m.id === message.id) ? "match" : undefined;
+  };
+
   return (
     <div className="chat-message-list-wrap">
+      {findOpen && (
+        <TranscriptFind
+          query={findQuery}
+          onQueryChange={(next) => {
+            setFindQuery(next);
+            setFindIndex(0);
+          }}
+          count={findMatches.length}
+          index={Math.min(findIndex, Math.max(0, findMatches.length - 1))}
+          onPrev={() => step(-1)}
+          onNext={() => step(1)}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
       {reconnecting && (
         <div className="chat-reconnect-banner" role="status">
           <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
@@ -267,15 +383,23 @@ export function MessageList({
           aria-label="Conversation transcript"
         >
           {summary && <SummaryBlock summary={summary} />}
-          {visible.map((message, idx) => (
-            <MessageItem
-              key={message.id}
-              message={message}
-              allMessages={visible}
-              canRegenerate={!isStreamingHere && idx === lastAssistantIdx}
-              onRegenerate={onRegenerate}
-            />
-          ))}
+          {visible.map((message, idx) => {
+            const diagnostic = diagnostics.get(message.id);
+            return (
+              <React.Fragment key={message.id}>
+                <MessageItem
+                  message={message}
+                  allMessages={visible}
+                  canRegenerate={!isStreamingHere && idx === lastAssistantIdx}
+                  onRegenerate={onRegenerate}
+                  findHit={findHitOf(message)}
+                />
+                {/* Rendered OUTSIDE the bubble: it is the harness speaking
+                    about the turn, not the assistant's own reply. */}
+                {diagnostic && <TurnDiagnostics diagnostic={diagnostic} />}
+              </React.Fragment>
+            );
+          })}
 
           {/* A parked turn's question sits at the END of the transcript,
               where the user is already looking, and the answer is one click.

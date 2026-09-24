@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
+import { useModalDialog } from "./useModalDialog";
 
 export const PushApprovalModal = React.memo(function PushApprovalModal() {
   const pendingPush = useChatStore((s) => s.pendingPush);
@@ -50,6 +51,10 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
       setExecuting(false);
     }
   }, [pendingCreatedAt]);
+
+  // Declared before the early return so the hook order is stable: this modal
+  // unmounts whenever no push is pending.
+  const panelRef = useModalDialog<HTMLDivElement>({ onDismiss: clearPendingPush });
 
   if (!pendingPush) return null;
 
@@ -101,7 +106,13 @@ export const PushApprovalModal = React.memo(function PushApprovalModal() {
 
   return (
     <div className="chat-modal-overlay" role="dialog" aria-modal="true" aria-label="Approve push">
-      <div className="chat-approval-panel">
+      {/* The dialog owns the keyboard: Tab stays inside it, Escape means Reject
+          (clearPendingPush refuses the gate, so the agent's push call resolves as
+          declined instead of hanging), and the page behind it does not scroll.
+          A push approval is the highest-stakes answer in the app, and focus
+          escaping to the transcript behind the overlay is how a keyboard user
+          ends up unable to ship or to leave. */}
+      <div className="chat-approval-panel" ref={panelRef} tabIndex={-1}>
         <div className="chat-approval-header">
           <ShieldCheck className="h-4 w-4 chat-approval-shield" aria-hidden="true" />
           <div>

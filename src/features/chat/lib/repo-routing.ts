@@ -61,6 +61,22 @@ export interface RouteCandidate {
 }
 
 /**
+ * How many un-pushed files a move off this repository would leave behind.
+ *
+ * A count, not a boolean, because the confirmation has to say how much work is
+ * staying: "3 changed files stay with this chat" is a decision, "you have
+ * unsaved changes" is a scare. Non-finite input becomes 0 deliberately — the
+ * count is persisted with the conversation, and a corrupted or NaN value must
+ * not be able to keep a modal in front of the user forever (a comparison
+ * against NaN is false, but the count is also rendered, and "NaN changed
+ * files" is the kind of copy that makes a user distrust the whole app).
+ */
+export function strandedChangeCount(pendingChanges: number | undefined): number {
+  const count = Math.floor(pendingChanges ?? 0);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+/**
  * Same repository, ignoring case and the branch.
  *
  * Branch is excluded deliberately: the sidebar groups chats BY REPOSITORY, so

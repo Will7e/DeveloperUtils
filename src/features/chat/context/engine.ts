@@ -11,7 +11,7 @@
 // one-line digests (kept verbatim in stored history), so long agent
 // loops stop re-paying 12k-char payloads on every iteration.
 
-import { TOOL_RESULT_FOLD_TURNS } from "../constants";
+import { TOOL_RESULT_FOLD_QUANTUM, TOOL_RESULT_FOLD_TURNS } from "../constants";
 import { COMPACTION_THRESHOLD } from "../constants";
 import type {
   ChatConversation,
@@ -150,22 +150,69 @@ interface ToolResultMessageForFold {
 }
 
 /**
- * Marks which stored messages are "stale" tool results: any tool
- * result more than TOOL_RESULT_FOLD_TURNS user/assistant exchanges
- * from the end of the conversation. Pure — never mutates input.
+ * Where the fold cuts, as a transcript-turn ORDINAL counted from the start.
+ *
+ * Tool results before this ordinal fold to digests; everything after stays
+ * verbatim. This used to be "more than TOOL_RESULT_FOLD_TURNS back from the end",
+ * and the difference is a prompt cache.
+ *
+ * The fold rewrites the FRONT of the wire message list, which is the region a
+ * provider caches. A distance-from-the-end threshold moves by one message every
+ * time a turn is appended, so the prefix differed on every single turn — and a
+ * cache only hits on a matching prefix. So every conversation long enough to fold
+ * was also a conversation that could never reuse the prefix `turn-prep` keeps
+ * byte-stable on purpose. Folding and caching were pulling against each other.
+ *
+ * Quantizing the cut fixes that: the cut is `floor(excess / QUANTUM) * QUANTUM`, so
+ * it holds still for `QUANTUM` turns and then advances by exactly `QUANTUM`. Two
+ * properties fall out and both are load-bearing:
+ *
+ *   • the cut never decreases, so a folded message never unfolds — the prefix
+ *     only ever gets shorter, which is the direction that helps;
+ *   • the prefix is byte-identical for `QUANTUM` consecutive turns, which is what
+ *     makes it worth caching at all.
+ *
+ * (Note the failure mode this avoids: quantizing the *window length* instead looks
+ * equivalent and is not — a window jumping from 6 to 10 unfurls four turns, so the
+ * folded set would SHRINK at every step and the prefix would grow back.)
+ *
+ * The price is bounded and stated: folding now begins up to `QUANTUM - 1` turns
+ * later than the old flat rule, so at most three extra turns of full tool results
+ * ride along. A small fixed cost against a prefix that can actually be reused.
+ */
+export function foldedTurnCutoff(transcriptTurns: number): number {
+  const excess = transcriptTurns - TOOL_RESULT_FOLD_TURNS;
+  if (excess <= 0) return 0;
+  return Math.floor(excess / TOOL_RESULT_FOLD_QUANTUM) * TOOL_RESULT_FOLD_QUANTUM;
+}
+
+/**
+ * Marks which stored messages are "stale" tool results: those belonging to a
+ * transcript turn before the quantized cut. Pure — never mutates input.
  */
 export function staleToolResultIds(messages: ChatMessage[]): Set<string> {
   const stale = new Set<string>();
-  // Count user-visible exchanges from the end: a walk over messages
-  // that increments on each user-role transcript turn (attachments
-  // and tool results excluded — they are protocol rows, not turns).
-  let turnsFromEnd = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]!;
+  // Counted from the START, because the cut is an ordinal and the walk must know
+  // each result's turn before it can decide about it.
+  let transcriptTurns = 0;
+  for (const m of messages) {
+    if ((m.role === "user" && !m.toolResult) || (m.role === "assistant" && !m.toolCalls)) {
+      transcriptTurns++;
+    }
+  }
+  const cutoff = foldedTurnCutoff(transcriptTurns);
+  if (cutoff === 0) return stale;
+
+  // Walk forward tracking which transcript turn each protocol row belongs to. A
+  // tool result inherits the ordinal of the turn it answers, so an exchange folds
+  // or survives as a whole — never split between its call and its result, which
+  // providers reject.
+  let ordinal = -1;
+  for (const m of messages) {
     const isTranscriptTurn =
       (m.role === "user" && !m.toolResult) || (m.role === "assistant" && !m.toolCalls);
-    if (isTranscriptTurn) turnsFromEnd++;
-    if (m.toolResult && turnsFromEnd > TOOL_RESULT_FOLD_TURNS) {
+    if (isTranscriptTurn) ordinal++;
+    if (m.toolResult && ordinal >= 0 && ordinal < cutoff) {
       stale.add(m.id);
     }
   }
@@ -193,6 +240,12 @@ function wireMessage(message: ChatMessage, fold: boolean): WireMessage {
         type: "function" as const,
         function: { name: c.name, arguments: c.arguments },
       })),
+      // Replayed on the assistant message that REQUESTED the tools, which is
+      // where the interleaved-thinking protocol expects it — the chain of
+      // thought has to continue across the tool round, not restart after it.
+      ...(message.reasoningDetails && message.reasoningDetails.length > 0
+        ? { reasoning_details: message.reasoningDetails }
+        : {}),
     } as unknown as WireMessage;
   }
   if (message.toolResult) {
@@ -203,7 +256,15 @@ function wireMessage(message: ChatMessage, fold: boolean): WireMessage {
       content: fold ? toolResultDigestText(tr) : tr.content,
     };
   }
-  return { role: message.role, content: wireContent(message) };
+  return {
+    role: message.role,
+    content: wireContent(message),
+    ...(message.role === "assistant" &&
+    message.reasoningDetails &&
+    message.reasoningDetails.length > 0
+      ? { reasoning_details: message.reasoningDetails }
+      : {}),
+  } as unknown as WireMessage;
 }
 
 /**
@@ -521,8 +582,13 @@ export function getConversationContext(params: {
       key: "tools",
       label: "Tool schemas",
       tokens: toolTokens,
+      // The names ride along in the row's tooltip: the count says how much of
+      // the window the schemas cost, and the names answer the question the
+      // count raises ("which ones?") without a command to list them.
       detail: params.tools?.length
-        ? `${params.tools.length} tool definitions available this turn`
+        ? `${params.tools.length} tool definitions available this turn: ${params.tools
+            .map((tool) => tool.function.name)
+            .join(", ")}`
         : "No tools on this turn",
     },
     {

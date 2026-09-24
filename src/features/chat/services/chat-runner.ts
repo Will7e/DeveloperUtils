@@ -34,8 +34,13 @@ import { planResume, danglingToolRange } from "../session/resume-plan";
 // Model metadata resolution lives in a leaf module so the compaction
 // service can use it without an import cycle. Re-exported here for
 // existing UI imports.
-import { resolveModelInfo, ensureModelCatalog, modelDisplayName } from "../lib/model-catalog";
-export { resolveModelInfo, ensureModelCatalog };
+import {
+  resolveModelInfo,
+  ensureModelCatalog,
+  ensureCompetenceIndex,
+  modelDisplayName,
+} from "../lib/model-catalog";
+export { resolveModelInfo, ensureModelCatalog, ensureCompetenceIndex };
 
 /** UI-facing model name (no masking) — defined in the leaf catalog module */
 export { modelDisplayName };
@@ -91,7 +96,7 @@ export function sendUserMessage(
       models: getCachedModelCatalog() ?? [],
       isStreaming: live.isStreaming && live.streamingConversationId === conversationId,
     }).then((outcome) => {
-      // An explicit draft (/help reopens the command menu) is honored here
+      // An explicit draft (a command handing its prefix back) is honored here
       // too. Only an explicit one: this entry point is not the composer, so
       // it must never blank text the user is still typing.
       if (outcome && typeof outcome === "object" && typeof outcome.draft === "string") {

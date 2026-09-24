@@ -13,7 +13,14 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useClickOutside } from "@/features/api-tester/hooks/useClickOutside";
 import { CURATED_FALLBACK_MODELS, PINNED_MODEL_IDS } from "../constants";
 import { ProviderMark } from "./ProviderLogo";
-import { formatContext, formatModelLabel, formatPrice } from "../lib/model-format";
+import {
+  formatContext,
+  formatModelLabel,
+  formatPrice,
+  formatPriceTier,
+  priceTierTitle,
+  routerNote,
+} from "../lib/model-format";
 import type { ModelInfo } from "../types";
 
 const DROPDOWN_WIDTH = 340;
@@ -258,6 +265,14 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
                       <span className="chat-model-item-id">{m.id}</span>
                     </div>
                     <div className="chat-model-item-meta">
+                      {routerNote(m.id) && (
+                        <span
+                          className="chat-model-badge chat-model-badge-router"
+                          title={routerNote(m.id)}
+                        >
+                          ROUTER
+                        </span>
+                      )}
                       {m.isFree && (
                         <span className="chat-model-badge chat-model-badge-free">FREE</span>
                       )}
@@ -269,6 +284,17 @@ export function ModelPicker({ value, models, isLoading, onChange }: ModelPickerP
                       {m.promptPrice !== undefined && (
                         <span className="chat-model-badge">
                           {formatPrice(m.promptPrice)}/M in
+                        </span>
+                      )}
+                      {/* The price above is the ENTRY rate. Where the model
+                          charges more past a threshold, that cliff belongs on
+                          the row that is being chosen between. */}
+                      {formatPriceTier(m) && (
+                        <span
+                          className="chat-model-badge chat-model-badge-tier"
+                          title={priceTierTitle(m)}
+                        >
+                          {formatPriceTier(m)}
                         </span>
                       )}
                       {isSelected && <Check className="h-3.5 w-3.5 chat-model-check" />}

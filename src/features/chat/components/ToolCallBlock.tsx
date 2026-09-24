@@ -13,30 +13,9 @@
 
 import React from "react";
 import {
-  AlignLeft,
-  ArrowLeftRight,
-  BookOpen,
-  Bot,
-  Brain,
-  CheckCheck,
   ChevronDown,
   CircleAlert,
-  FileDiff,
-  FileMinus2,
-  FilePen,
-  FileText,
-  FolderTree,
-  GitBranch,
-  GitPullRequest,
-  Globe,
-  Info,
-  ListTree,
   Loader2,
-  Play,
-  Plug,
-  Search,
-  Send,
-  Shapes,
   SquareArrowOutUpRight,
 } from "lucide-react";
 import { DiffView } from "./DiffView";
@@ -46,124 +25,11 @@ import {
   summarizeToolStep,
   sumStepChanges,
 } from "../lib/tool-step-summary";
-import type { ChatMessage, ToolName } from "../types";
-
-function toolIcon(name: ToolName): React.ComponentType<{ className?: string }> {
-  switch (name) {
-    case "list_repo_files":
-      return FolderTree;
-    case "read_file":
-      return FileText;
-    case "search_code":
-    case "search_workspace":
-      return Search;
-    case "get_repo_overview":
-      return ListTree;
-    case "write_file":
-      return FilePen;
-    case "edit_file":
-      return FileDiff;
-    case "delete_file":
-      return FileMinus2;
-    case "get_workspace_diff":
-      return FileDiff;
-    case "run_checks":
-      return CheckCheck;
-    case "create_working_branch":
-      return GitBranch;
-    case "push_changes":
-      return GitPullRequest;
-    case "delegate":
-      return Bot;
-    case "remember":
-      return Brain;
-    case "list_mcp_tools":
-    case "call_mcp_tool":
-      return Plug;
-    // ── This app's own tools ──
-    case "run_code":
-      return Play;
-    case "format_code":
-      return AlignLeft;
-    case "compare_data":
-      return ArrowLeftRight;
-    case "diff_text":
-      return FileDiff;
-    case "search_library":
-      return BookOpen;
-    case "http_request":
-      return Globe;
-    case "http_write":
-      return Send;
-    case "create_diagram":
-      return Shapes;
-    case "open_in_tool":
-      return SquareArrowOutUpRight;
-    default:
-      return Info;
-  }
-}
-
-/** Human verb for a step, in the past tense the transcript reads in */
-function toolVerb(name: ToolName): string {
-  switch (name) {
-    case "list_repo_files":
-      return "Listed files";
-    case "read_file":
-      return "Read";
-    case "search_code":
-      return "Searched repo";
-    case "search_workspace":
-      return "Searched working copy";
-    case "get_repo_overview":
-      return "Surveyed repo";
-    case "write_file":
-      return "Wrote";
-    case "edit_file":
-      return "Edited";
-    case "delete_file":
-      return "Deleted";
-    case "get_workspace_diff":
-      return "Reviewed diff";
-    case "run_checks":
-      return "Ran checks";
-    case "create_working_branch":
-      return "Created branch";
-    case "push_changes":
-      return "Pushed";
-    case "delegate":
-      return "Delegated";
-    case "remember":
-      return "Remembered";
-    case "run_tool_program":
-      return "Ran tool program";
-    case "list_mcp_tools":
-      return "Listed MCP tools";
-    case "call_mcp_tool":
-      return "Called MCP tool";
-    // ── This app's own tools ──
-    case "run_code":
-      return "Ran code";
-    case "format_code":
-      return "Formatted";
-    case "compare_data":
-      return "Compared";
-    case "diff_text":
-      return "Diffed";
-    case "search_library":
-      return "Searched reference";
-    case "http_request":
-      return "Requested";
-    case "http_write":
-      return "Sent request";
-    case "create_diagram":
-      return "Drew diagram";
-    case "open_in_tool":
-      return "Opened in tool";
-    default:
-      return name;
-  }
-}
+// The tool's icon and verb live in lib/tool-labels.ts, shared with the activity
+// rail: one table, so a step row and the live rail cannot name the same call two
+// different ways.
+import { toolIcon, toolVerb } from "../lib/tool-labels";
+import type { ChatMessage } from "../types";
 
 function formatDuration(ms: number): string {
   return ms >= 1_000 ? `${(ms / 1_000).toFixed(1)}s` : `${ms}ms`;

@@ -210,6 +210,27 @@ describe("conversationRowMeta", () => {
     expect(conversationRowMeta(single, single.conversations[0]!).branch).toBeNull();
   });
 
+  it("shows the branch on the row being READ even when its neighbours agree", () => {
+    // The open row is the one place the branch is context rather than noise:
+    // "which branch is this chat on?" is a question about the thread in front,
+    // and it is asked of a repo whose threads are all on `main` too.
+    const groups = groupConversationsByRepository([
+      conversation({ id: "a", repoContext: onRepo("acme", "web", "main") }),
+      conversation({ id: "b", repoContext: onRepo("acme", "web", "main") }),
+    ]);
+    const group = groups[0]!;
+    const first = group.conversations.find((c) => c.id === "a")!;
+    expect(conversationRowMeta(group, first)).toEqual({ branch: null, changed: 0 });
+    expect(conversationRowMeta(group, first, { alwaysBranch: true }).branch).toBe("main");
+  });
+
+  it("still reports no branch to show for a chat with no repository", () => {
+    // `alwaysBranch` asks for the branch, it does not invent one.
+    const groups = groupConversationsByRepository([conversation({ id: "none" })]);
+    const group = groups[0]!;
+    expect(conversationRowMeta(group, group.conversations[0]!, { alwaysBranch: true }).branch).toBeNull();
+  });
+
   it("shows the changed count on the thread that holds the work", () => {
     const groups = groupConversationsByRepository([
       conversation({ id: "a", repoContext: onRepo("acme", "web"), pendingChanges: 3 }),

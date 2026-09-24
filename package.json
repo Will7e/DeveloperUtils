@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "probe:openrouter": "node --env-file-if-exists=.env.local scripts/openrouter-probe.mjs",
     "companion": "node --env-file-if-exists=.env.local src/features/chat/companion/companion-server.ts"
   },
   "dependencies": {

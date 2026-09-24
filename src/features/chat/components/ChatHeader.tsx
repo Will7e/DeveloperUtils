@@ -5,6 +5,7 @@
 import React from "react";
 import {
   Blocks,
+  Download,
   Menu,
   SlidersHorizontal,
   X,
@@ -14,6 +15,8 @@ import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { ModeToggle } from "./ModeToggle";
 import { ContextMeter } from "./ContextMeter";
+import { useModelEndpoints } from "./useModelEndpoints";
+import { VerificationChip } from "./VerificationChip";
 import { RepoPicker, type RepoSelection } from "./RepoPicker";
 import type { RepoPickIntent } from "../lib/repo-routing";
 import type {
@@ -23,6 +26,7 @@ import type {
   ReasoningEffort,
   RepoContext,
 } from "../types";
+import type { SkillActivity } from "../lib/skill-activity";
 
 interface ChatHeaderProps {
   model: string;
@@ -44,8 +48,18 @@ interface ChatHeaderProps {
   hasMessages?: boolean;
   /** Per-conversation system prompt indicator */
   hasConversationPrompt: boolean;
-  /** Number of enabled skills (0 hides the chip) */
-  activeSkillCount: number;
+  /**
+   * Skills sent with every message (the ones switched "Always on").
+   *
+   * A count alone was the misleading part: it described only this mode, so a
+   * turn that loaded three skills from triggers still showed "2". The chip is
+   * fed the whole picture now, and the hover card names each state.
+   */
+  alwaysOnSkills: string[];
+  /** Skills that activate themselves on their triggers (not always-on) */
+  availableSkillCount: number;
+  /** What the last prepared turn auto-activated (lib/skill-activity) */
+  skillActivity: SkillActivity | null;
   onOpenSkills: () => void;
   /** Attached GitHub repo (agent mode); undefined = none */
   repoContext?: RepoContext;
@@ -58,6 +72,22 @@ interface ChatHeaderProps {
   /** Toggle the off-canvas sidebar drawer (narrow widths) */
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
+  /**
+   * The facts the verification chip's tier plan needs. Absent when the chat has
+   * no repository, in which case there is nothing to verify and no chip.
+   *
+   * The evidence itself is NOT passed down: the chip reads the ledger through
+   * the shared hook, so the revision comparison happens in one place instead of
+   * at every caller between here and the header.
+   */
+  verification?: {
+    conversationId: string;
+    repoAttached: boolean;
+    hasChanges: boolean;
+    pushed: boolean;
+  };
+  /** Deep-link into Chat settings → Companion */
+  onOpenCompanionSettings: () => void;
 }
 
 export function ChatHeader({
@@ -72,7 +102,9 @@ export function ChatHeader({
   onModeChange,
   context,
   hasConversationPrompt,
-  activeSkillCount,
+  alwaysOnSkills,
+  availableSkillCount,
+  skillActivity,
   onOpenSkills,
   repoContext,
   githubToken,
@@ -80,7 +112,23 @@ export function ChatHeader({
   onRepoDetach,
   onToggleSidebar,
   isSidebarOpen,
+  verification,
+  onOpenCompanionSettings,
+  hasMessages,
+  onExport,
 }: ChatHeaderProps) {
+  const canExport = Boolean(hasMessages && onExport);
+  // Who serves the selected model. Fetched here rather than in the card so the
+  // facts are already there when the card opens — see useModelEndpoints.
+  const endpoints = useModelEndpoints(model);
+  // "In play" = always sent PLUS whatever the last turn loaded from triggers.
+  // The count used to be the always-on half only, which under-reported every
+  // turn where a skill activated itself.
+  const autoActive = skillActivity?.auto ?? [];
+  const deferredSkills = skillActivity?.deferred ?? [];
+  const inEffect = alwaysOnSkills.length + autoActive.length;
+  const hasSkills = alwaysOnSkills.length + availableSkillCount > 0;
+
   return (
     <div className="chat-header">
       <div className="chat-header-left">
@@ -126,7 +174,7 @@ export function ChatHeader({
             disabled={!repoContext}
           />
         </div>
-        <ContextMeter context={context} />
+        <ContextMeter context={context} session={{ model, effort, mode }} endpoints={endpoints} />
       </div>
 
       <div className="chat-header-right">
@@ -138,22 +186,48 @@ export function ChatHeader({
             </span>
           </SimpleTooltip>
         )}
-        {activeSkillCount > 0 && (
+        {hasSkills && (
           <SimpleTooltip
-            content={
-              activeSkillCount === 1
-                ? "1 skill active — click to manage"
-                : `${activeSkillCount} skills active — click to manage`
-            }
             side="bottom"
+            className="chat-skills-card"
+            content={
+              <SkillsCard
+                alwaysOn={alwaysOnSkills}
+                auto={autoActive}
+                deferred={deferredSkills}
+                availableSkillCount={availableSkillCount}
+              />
+            }
           >
             <button
               type="button"
               className="chat-header-prompt-badge chat-header-skills-btn"
               onClick={onOpenSkills}
+              aria-label={
+                inEffect > 0
+                  ? `${inEffect} skill${inEffect === 1 ? "" : "s"} in play — hover to see which, click to manage`
+                  : "No skills in play for the latest turn — hover for details, click to manage"
+              }
             >
               <Blocks className="h-3 w-3 chat-header-skills-icon" />
-              {activeSkillCount}
+              {inEffect > 0 && inEffect}
+            </button>
+          </SimpleTooltip>
+        )}
+        {verification && <VerificationChip {...verification} onOpenCompanionSettings={onOpenCompanionSettings} />}
+        {/* Export was reachable only as `/export` while these props sat unused
+            here: the affordance existed, the wiring did not. It lives in the
+            header rather than the sidebar because it exports the chat you are
+            looking at, and the header already describes which chat that is. */}
+        {canExport && (
+          <SimpleTooltip content="Export this chat as Markdown" side="bottom">
+            <button
+              type="button"
+              className="chat-header-btn chat-header-export-btn"
+              onClick={onExport}
+              aria-label="Export this chat as Markdown"
+            >
+              <Download className="h-3.5 w-3.5" />
             </button>
           </SimpleTooltip>
         )}
@@ -163,6 +237,93 @@ export function ChatHeader({
           onSelect={onRepoSelect}
           onDetach={onRepoDetach}
         />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The hover card: which skills are in play, and WHY each one is.
+ *
+ * Informational, like the context card it sits beside — the chip itself is the
+ * click target that opens Skills, because a button inside tooltip content is
+ * not reachable by the time the pointer gets there. Each row names the reason
+ * (always sent / matched this request / matched but not loaded) rather than
+ * repeating the word "active", which is the ambiguity this card exists to end.
+ */
+function SkillsCard({
+  alwaysOn,
+  auto,
+  deferred,
+  availableSkillCount,
+}: {
+  alwaysOn: string[];
+  auto: string[];
+  deferred: string[];
+  availableSkillCount: number;
+}) {
+  const inEffect = alwaysOn.length + auto.length;
+  const rows: Array<{ title: string; note: string; names: string[]; tone: string }> = [
+    {
+      title: "Always on",
+      note: "sent with every message",
+      names: alwaysOn,
+      tone: "always",
+    },
+    {
+      title: "Auto-activated",
+      note: "matched your last message",
+      names: auto,
+      tone: "auto",
+    },
+    {
+      title: "Matched, not loaded",
+      note: "the agent can still load these with read_skill",
+      names: deferred,
+      tone: "deferred",
+    },
+  ];
+
+  return (
+    <div className="chat-skills-card-inner">
+      <div className="chat-skills-card-head">
+        <span className="chat-skills-card-title">Skills</span>
+        <span className="chat-skills-card-sub">
+          {inEffect} in play
+        </span>
+      </div>
+
+      {inEffect === 0 && deferred.length === 0 && (
+        <div className="chat-skills-card-empty">
+          Nothing is active for the latest turn. Skills load themselves when your
+          request matches their triggers.
+        </div>
+      )}
+
+      {rows.map((row) =>
+        row.names.length === 0 ? null : (
+          <div key={row.title} className="chat-skills-card-row">
+            <div className="chat-skills-card-row-head">
+              <span className={`chat-skills-card-dot chat-skills-card-dot-${row.tone}`} />
+              <span className="chat-skills-card-row-title">{row.title}</span>
+              <span className="chat-skills-card-row-count">{row.names.length}</span>
+            </div>
+            <div className="chat-skills-card-row-note">{row.note}</div>
+            <div className="chat-skills-card-names">
+              {row.names.map((name) => (
+                <span key={name} className="chat-skills-card-name">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )
+      )}
+
+      <div className="chat-skills-card-foot">
+        {availableSkillCount > 0
+          ? `${availableSkillCount} more activate on their own triggers · click to manage`
+          : "Click to manage skills"}
       </div>
     </div>
   );
