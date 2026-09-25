@@ -23,15 +23,19 @@
 //     ARE fetched, but as BYTES through `readBinary` (the preview serves them;
 //     a restaurant site without its photos is a broken page, not a preview).
 //     Only per-asset size caps and anything over the byte budget are skipped.
-//   • secret-shaped paths — decided once, in mount-plan.ts, but skipped early
-//     here too so the bytes are never even fetched.
+//   • key-material paths (`id_rsa`, `.pem`, `secrets.json`) — secret even when
+//     a repository commits them, and skipped early so the bytes are never even
+//     fetched. A committed ENV FILE is a different case now (see `mount-plan.ts`):
+//     it is part of the pinned commit, already public to that commit's readers,
+//     and fetched like any other source file so the project can run the way it
+//     runs on the laptop it was written on.
 //
 // Reads go through an injected `read` so this stays testable without a network,
 // and so the caller decides what a failure to read MEANS (a 404 and a rate limit
 // are the same shape at this layer, and different problems to a user).
 // ============================================================
 
-import { classifyPath } from "../lib/sensitivity";
+import { isCommittedEnvFilePath, secretPathKindOf } from "../lib/sensitivity";
 
 export interface TreeEntryLike {
   path: string;
@@ -148,9 +152,18 @@ export async function hydrateTree(input: {
       skipped.push({ path: entry.path, reason: excluded.reason });
       continue;
     }
-    if (classifyPath(entry.path) === "secret") {
-      skipped.push({ path: entry.path, reason: "secret-shaped path: never fetched into a workspace" });
-      continue;
+    if (secretPathKindOf(entry.path) !== null) {
+      // Two very different files wear the same "secret" label, and the
+      // difference is the whole point: committed env files are FETCHED (they
+      // fall through to the normal text path below — they are part of this
+      // revision, and the point of the overlay is to run it), while key
+      // material is never fetched in any form. Reporting both as one
+      // "secret-shaped" skip was how a repo's own working `.env` read as a
+      // policy violation rather than as the project's configuration.
+      if (!isCommittedEnvFilePath(entry.path)) {
+        skipped.push({ path: entry.path, reason: "key material: never fetched into a workspace" });
+        continue;
+      }
     }
     // Binary assets are a different CLASS from here on: fetched as bytes, with
     // their own ceiling and their own reader. The exclusion list above it is the
@@ -211,25 +224,15 @@ export async function hydrateTree(input: {
   // note that could claim more files were dropped than the listing held.
   let assetOverByteCap = 0;
 
-  // Assets hydrate first: a byte budget spent on text before photos means the
-  // preview's images are the things dropped, and the images are what the user
-  // SEES missing. The budget is shared, so text still wins when it would not
-  // both fit — but the cap order says which loss is the acceptable one.
-  await pool(assets, input.concurrency ?? HYDRATE_CONCURRENCY, async (path) => {
-    const bytes8 = await input.readBinary!(path);
-    if (bytes8 === null || bytes8.byteLength === 0) {
-      unread.push({ path, reason: "the asset's bytes could not be read" });
-      return;
-    }
-    if (bytes + bytes8.byteLength > maxBytes) {
-      assetOverByteCap += 1;
-      skipped.push({ path, reason: `beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget` });
-      return;
-    }
-    bytes += bytes8.byteLength;
-    base.push({ path, content: bytes8 });
-  });
-
+  // TEXT hydrates first, with the whole budget to itself; assets get the
+  // remainder. The order used to be reversed — assets first, because "the images
+  // are what the user SEES missing" — and an image-heavy repo spent the entire
+  // budget on photographs before the text pass began: the preview then rendered
+  // the static hero baked into `index.html` while every React-mounted section
+  // below it stayed blank (the JS was never mounted), and a Next.js project,
+  // which renders nothing statically, went blank altogether. A page with broken
+  // images is a damaged page; a page whose source never arrived is no app at
+  // all, and no amount of photography compensates for that.
   await pool(selected, input.concurrency ?? HYDRATE_CONCURRENCY, async (path) => {
     const content = await input.read(path);
     if (content === null) {
@@ -268,6 +271,23 @@ export async function hydrateTree(input: {
     base.push({ path, content });
   });
 
+  // Assets take what the source left: their per-asset cap still holds, and a
+  // budget already spent is simply one they find exhausted.
+  await pool(assets, input.concurrency ?? HYDRATE_CONCURRENCY, async (path) => {
+    const bytes8 = await input.readBinary!(path);
+    if (bytes8 === null || bytes8.byteLength === 0) {
+      unread.push({ path, reason: "the asset's bytes could not be read" });
+      return;
+    }
+    if (bytes + bytes8.byteLength > maxBytes) {
+      assetOverByteCap += 1;
+      skipped.push({ path, reason: `beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget` });
+      return;
+    }
+    bytes += bytes8.byteLength;
+    base.push({ path, content: bytes8 });
+  });
+
   base.sort((a, b) => a.path.localeCompare(b.path));
   const complete = overFileCap === 0 && overByteCap === 0 && assetOverByteCap === 0;
   const notes: string[] = [];
@@ -283,12 +303,29 @@ export async function hydrateTree(input: {
     if (overFileCap > 0) overParts.push(`${overFileCap} beyond the ${maxFiles}-file budget`);
     if (overByteCap > 0) overParts.push(`${overByteCap} beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget`);
     const overClause = overParts.length > 0 ? ` (${overParts.join(", ")})` : "";
-    let note =
-      `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files; it is too large to mount in full${overClause}. A command that needs a file which is not here will fail for that reason, not because of the change — say so rather than reporting that failure as real.`;
-    if (assetOverByteCap > 0) {
-      note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace.`;
+    // When every candidate arrived, the mount is NOT "too large to mount in
+    // full" — the source tree is complete, and saying otherwise (the note the
+    // sulkasnickeri preview shipped: "113 of 113 candidate text files; it is
+    // too large to mount in full") contradicts itself in one breath and sends
+    // the reader looking for missing source that does not exist. What was cut
+    // there was assets alone, so that is all the note says.
+    const textDropped = candidates.length - textMounted;
+    if (textDropped === 0) {
+      let note =
+        `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files, all of them present.`;
+      if (assetOverByteCap > 0) {
+        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace — a page may show missing images for them, and a command that needs one of those files will fail for that reason, not because of the change.`;
+      }
+      notes.push(note);
+      // Unread entries still get their own note below; nothing else to add.
+    } else {
+      let note =
+        `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files; it is too large to mount in full${overClause}. A command that needs a file which is not here will fail for that reason, not because of the change — say so rather than reporting that failure as real.`;
+      if (assetOverByteCap > 0) {
+        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace.`;
+      }
+      notes.push(note);
     }
-    notes.push(note);
   }
   if (unread.length > 0) {
     // NAMED, not counted. A count is enough to say the tree is partial, but the

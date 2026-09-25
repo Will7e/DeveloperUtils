@@ -23,9 +23,13 @@ import {
   Code2,
   MessageSquareText,
   Search,
+  PanelLeft,
+  HardDrive,
+  ALargeSmall,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatCode, supportsFormatting } from "@/services/formatter.service";
+import { FONT_OPTIONS } from "@/features/settings/font-options";
 import { useAppStore } from "@/stores/app.store";
 import { useApiTesterStore } from "@/stores/api-tester.store";
 import { useChatStore } from "@/stores/chat.store";
@@ -57,8 +61,8 @@ export function CommandPalette() {
   const addToast = useAppStore((s) => s.addToast);
   const isRunning = useAppStore((s) => s.isRunning);
   const updateFileContent = useAppStore((s) => s.updateFileContent);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const toggleSidebarCollapse = useAppStore((s) => s.toggleSidebarCollapse);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const createFormatterFile = useAppStore((s) => s.createFormatterFile);
   const createComparatorSession = useAppStore((s) => s.createComparatorSession);
   const createDiffSession = useAppStore((s) => s.createDiffSession);
@@ -231,15 +235,78 @@ export function CommandPalette() {
           updateEditorSettings({ theme: editorSettings.theme === "dark" ? "light" : "dark" });
         },
       },
+      // Font size: a thumb-slider lives in Settings, but nudging one step is
+      // the common case — worth having at the speed of the palette.
+      {
+        id: "increase-font",
+        label: `Editor Font Size: Increase (${editorSettings.fontSize}px → ${Math.min(24, editorSettings.fontSize + 1)}px)`,
+        category: "Settings",
+        icon: <ALargeSmall style={{ width: 14, height: 14 }} />,
+        action: () => {
+          updateEditorSettings({ fontSize: Math.min(24, editorSettings.fontSize + 1) });
+        },
+      },
+      {
+        id: "decrease-font",
+        label: `Editor Font Size: Decrease (${editorSettings.fontSize}px → ${Math.max(10, editorSettings.fontSize - 1)}px)`,
+        category: "Settings",
+        icon: <ALargeSmall style={{ width: 14, height: 14 }} />,
+        action: () => {
+          updateEditorSettings({ fontSize: Math.max(10, editorSettings.fontSize - 1) });
+        },
+      },
+      ...FONT_OPTIONS.map(
+        (font): PaletteAction => ({
+          id: `set-font-${font.label.toLowerCase().replace(/\s+/g, "-")}`,
+          label: `Editor Font: ${font.label}`,
+          category: "Settings",
+          icon: <ALargeSmall style={{ width: 14, height: 14 }} />,
+          action: () => {
+            updateEditorSettings({ fontFamily: font.value });
+          },
+        })
+      ),
       {
         id: "toggle-sidebar",
-        label: "Toggle Sidebar",
+        label: sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar",
         shortcut: "⌘B",
         category: "View",
-        icon: <Settings style={{ width: 14, height: 14 }} />,
+        icon: <PanelLeft style={{ width: 14, height: 14 }} />,
         action: () => {
+          // ⌘B in useKeyboardShortcuts toggles both legacy sidebar flags for
+          // the compiler page's file rail; the app-wide navigation rail is
+          // only the collapse flag, so the palette mirrors that directly.
           toggleSidebarCollapse();
-          toggleSidebar();
+        },
+      },
+      {
+        id: "clear-saved-data",
+        label: "Clear Stored Credentials & Data",
+        category: "Actions",
+        icon: <Trash2 style={{ width: 14, height: 14, color: "var(--red)" }} />,
+        action: () => {
+          // Deep-link: Settings → Security owns the confirmation flow; the
+          // palette should route to the danger zone, not re-implement it.
+          window.dispatchEvent(
+            new CustomEvent("intab:open-settings", { detail: { tab: "security" } })
+          );
+          if (!useAppStore.getState().settingsOpen) {
+            useAppStore.getState().toggleSettings();
+          }
+        },
+      },
+      {
+        id: "clean-inactive-tabs",
+        label: "Free Up Storage (Clean Inactive Tabs)",
+        category: "Actions",
+        icon: <HardDrive style={{ width: 14, height: 14 }} />,
+        action: () => {
+          window.dispatchEvent(
+            new CustomEvent("intab:open-settings", { detail: { tab: "security" } })
+          );
+          if (!useAppStore.getState().settingsOpen) {
+            useAppStore.getState().toggleSettings();
+          }
         },
       },
       {
@@ -482,23 +549,43 @@ export function CommandPalette() {
 
     return list;
   }, [
-    activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings, 
-    createFile, updateEditorSettings, addToast, updateFileContent, toggleSidebar, 
-    toggleSidebarCollapse,
+    activeFile, editorSettings, isRunning, toggleOutputPanel, toggleSettings,
+    createFile, updateEditorSettings, addToast, updateFileContent,
+    toggleSidebarCollapse, sidebarCollapsed,
     createFormatterFile, createComparatorSession, createDiffSession,
     createWorkflow, addApiTesterTab, navigate
   ]);
 
-  // Filter actions by query
+  // Filter actions by query. Matching is substring OR in-order subsequence
+  // ("gdsh" → "Go to Dashboard"), and results rank exact-prefix matches
+  // ahead of word-prefix ahead of looser matches so the top hit is the one
+  // the query actually names, not merely the first registered.
   const filtered = useMemo(() => {
-    if (!query.trim()) return actions;
-    const q = query.toLowerCase();
-    return actions.filter(
-      (a) =>
-        a.label.toLowerCase().includes(q) ||
-        a.category.toLowerCase().includes(q) ||
-        (a.shortcut && a.shortcut.toLowerCase().includes(q))
-    );
+    const q = query.trim().toLowerCase();
+    if (!q) return actions;
+
+    const scoreOf = (a: PaletteAction): number => {
+      const label = a.label.toLowerCase();
+      if (label.startsWith(q)) return 3;
+      const wordStart = label.split(/\s+/).some((w) => w.startsWith(q));
+      if (wordStart) return 2;
+      if (label.includes(q)) return 1;
+      // In-order subsequence, anchored at the first character so "xyz"
+      // cannot match "Go to Dashboard" through scattered letters.
+      let i = 0;
+      for (const ch of label) {
+        if (ch === q[i]) i++;
+        if (i === q.length) break;
+      }
+      if (i === q.length && label.includes(q[0]!)) return 0;
+      return -1;
+    };
+
+    return actions
+      .map((a) => ({ a, score: scoreOf(a) }))
+      .filter((x): x is { a: PaletteAction; score: number } => x.score >= 0)
+      .sort((x, y) => y.score - x.score)
+      .map((x) => x.a);
   }, [actions, query]);
 
   // Group by category and build flatOrdered in exact visual order
@@ -663,6 +750,19 @@ export function CommandPalette() {
               </div>
             ))
           )}
+        </div>
+
+        <div className="palette-footer">
+          <span className="palette-footer-hint">
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> to navigate
+          </span>
+          <span className="palette-footer-hint">
+            <kbd>↵</kbd> to run
+          </span>
+          <span className="palette-footer-count">
+            {flatOrdered.length} of {actions.length} commands
+          </span>
         </div>
       </div>
     </div>

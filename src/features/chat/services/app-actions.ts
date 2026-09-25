@@ -19,6 +19,15 @@
 // five are routed through it too, so the routing table has a single home and
 // a single test can prove it covers the whole registry (see app-actions.test).
 
+import {
+  convertDataTool,
+  encodeDecodeTool,
+  generateCsvTool,
+  hashTextTool,
+  regexTestTool,
+  timestampConvertTool,
+  uuidGenerateTool,
+} from "../lib/utility-tools";
 import { useAppStore } from "@/stores/app.store";
 import { useChatStore } from "@/stores/chat.store";
 import { validateUrlForSSRF } from "@/utils/ssrfGuard";
@@ -1018,6 +1027,23 @@ export async function runAppTool(
       return runCreateDiagramTool(args, signal);
     case "open_in_tool":
       return runOpenInToolTool(args, signal);
+
+    // ── Pure utility executors (lib/utility-tools) ──
+    // Same family as the block above: sandboxed, local, side-effect-free.
+    case "generate_csv":
+      return generateCsvTool(args);
+    case "convert_data":
+      return convertDataTool(args);
+    case "encode_decode":
+      return encodeDecodeTool(args);
+    case "hash_text":
+      return hashTextTool(args);
+    case "regex_test":
+      return regexTestTool(args);
+    case "timestamp_convert":
+      return timestampConvertTool(args);
+    case "uuid_generate":
+      return uuidGenerateTool(args);
 
     // ── The app as a user of every feature family ──
     // Reads and writes dispatch into services/app-surface-actions.ts, which

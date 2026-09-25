@@ -3,10 +3,12 @@ import {
   SECRET_KEY_PATTERN,
   classifyKey,
   classifyPath,
+  isCommittedEnvFilePath,
   isSecretKey,
   isVariableReference,
   maskValue,
   redactRecord,
+  secretPathKindOf,
 } from "./sensitivity";
 
 /**
@@ -51,7 +53,7 @@ describe("secret classification", () => {
 
 describe("path classification", () => {
   it("marks env files and key material secret", () => {
-    for (const path of [".env", ".env.local", "config/.env.production", "id_rsa", "server.pem", "secrets.json"]) {
+    for (const path of [".env", ".env.local", "config/.env.production", ".npmrc", "id_rsa", "server.pem", "secrets.json"]) {
       expect(classifyPath(path), path).toBe("secret");
     }
   });
@@ -60,6 +62,24 @@ describe("path classification", () => {
     for (const path of [".env.example", "src/env.ts", "docs/environment.md", "src/App.tsx"]) {
       expect(classifyPath(path), path).toBe("project");
     }
+  });
+
+  it("splits the secret shapes: a committed env file is not key material", () => {
+    // The distinction the workspace mount runs on: a `.env` IN the commit is the
+    // repository's own published configuration, while key material is a
+    // credential whatever commit carries it.
+    for (const path of [".env", ".env.local", "config/.env.production"]) {
+      expect(secretPathKindOf(path), path).toBe("env-file");
+      expect(isCommittedEnvFilePath(path), path).toBe(true);
+    }
+    for (const path of ["id_rsa", "server.pem", "secrets.json", ".npmrc"]) {
+      expect(secretPathKindOf(path), path).toBe("key-material");
+      expect(isCommittedEnvFilePath(path), path).toBe(false);
+    }
+  });
+
+  it("does not mistake the template for a committed env file", () => {
+    expect(isCommittedEnvFilePath(".env.example")).toBe(false);
   });
 });
 

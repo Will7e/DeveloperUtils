@@ -22,15 +22,17 @@ import {
   isStrandCall,
   shouldForkStrands,
   pickStrandModels,
+  pickCheaperStrandModels,
   STRAND_TOOL_NAMES,
   STRAND_MAX_ROUNDS,
   strandRefusalText,
 } from "./strand";
-import { rebuildBraidState, renderBraidState } from "./state-file";
+import { rebuildBraidState, renderBraidState, probeFindingsFromTranscript } from "./state-file";
 import { strandCheckOk } from "./strand-exec";
 import { strandForkIsStale } from "./strand-launch";
+import { buildCompetenceIndex, normalizeModelSlug } from "../lib/model-benchmarks";
 import type { TypecheckResult } from "../lib/typecheck-client";
-import type { WorkspaceState, AgentPlan } from "../types";
+import type { WorkspaceState, AgentPlan, ModelInfo } from "../types";
 import type { VerificationEvidence } from "../lib/verification-ledger";
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -517,5 +519,152 @@ describe("no-op strand protection", () => {
       [{ label: "strand A", modelId: "m", verified: true, stats: stats(2, 12, 1) }]
     );
     expect(decision.winner).toBe("strand");
+  });
+});
+
+// ── Wiring: catalog-driven cheaper strand models ─────────────
+
+describe("pickCheaperStrandModels", () => {
+  const catalog = (rows: Array<[string, number | undefined, string[]?]>): ModelInfo[] =>
+    rows.map(([id, completionPrice, params]) => ({
+      id,
+      name: id,
+      ...(completionPrice !== undefined ? { completionPrice } : {}),
+      ...(params ? { supportedParameters: params } : {}),
+    }));
+
+  it("returns cheaper, tool-capable models, cheapest first", () => {
+    const models = pickCheaperStrandModels("vendor/premium", {
+      catalog: catalog([
+        ["vendor/premium", 10],
+        ["vendor/mid", 5],
+        ["vendor/cheap", 1],
+        ["vendor/pricey", 9],
+      ]),
+      competence: null,
+      count: 2,
+    });
+    // 70% of $10 is $7: mid and cheap qualify, pricey does not; ordered by price.
+    expect(models).toEqual(["vendor/cheap", "vendor/mid"]);
+  });
+
+  it("never suggests the conversation's own model, however cheap the field", () => {
+    const models = pickCheaperStrandModels("vendor/cheap", {
+      catalog: catalog([
+        ["vendor/cheap", 1],
+        ["vendor/cheaper", 0.1],
+      ]),
+      competence: null,
+      count: 2,
+    });
+    expect(models).toEqual(["vendor/cheaper"]);
+  });
+
+  it("excludes unpriced models — unknown is not cheaper", () => {
+    const models = pickCheaperStrandModels("vendor/premium", {
+      catalog: catalog([
+        ["vendor/premium", 10],
+        ["vendor/mystery", undefined],
+        ["vendor/cheap", 1],
+      ]),
+      competence: null,
+      count: 3,
+    });
+    expect(models).toEqual(["vendor/cheap"]);
+  });
+
+  it("drops measured models below the agentic floor, keeps unmeasured ones", () => {
+    const index = buildCompetenceIndex([
+      {
+        source: "artificial-analysis",
+        slug: normalizeModelSlug("vendor/weak"),
+        rawSlug: "vendor/weak",
+        agenticIndex: 3,
+        
+      },
+      {
+        source: "artificial-analysis",
+        slug: normalizeModelSlug("vendor/strong"),
+        rawSlug: "vendor/strong",
+        agenticIndex: 55,
+        
+      },
+    ]);
+    const models = pickCheaperStrandModels("vendor/premium", {
+      catalog: catalog([
+        ["vendor/premium", 10],
+        ["vendor/weak", 1],
+        ["vendor/strong", 2],
+        ["vendor/unmeasured", 1.5],
+      ]),
+      competence: index,
+      count: 3,
+    });
+    // Unmeasured is kept (no evidence it cannot do the job), the weak one
+    // is dropped; ordered by price: unmeasured $1.5 before strong $2.
+    expect(models).toEqual(["vendor/unmeasured", "vendor/strong"]);
+  });
+
+  it("a model that does not declare tools is still strand-eligible (optimistic, like escalation)", () => {
+    const models = pickCheaperStrandModels("vendor/premium", {
+      catalog: [
+        ...catalog([["vendor/premium", 10]]),
+        { id: "vendor/unknown-params", name: "vendor/unknown-params", completionPrice: 1, supportedParameters: [] },
+      ],
+      competence: null,
+      count: 3,
+    });
+    expect(models).toEqual(["vendor/unknown-params"]);
+  });
+
+  it("returns nothing on a cold catalog — callers fall back to the conversation model", () => {
+    expect(pickCheaperStrandModels("vendor/premium", { catalog: [] })).toEqual([]);
+  });
+});
+
+// ── Wiring: probe findings recovered from the transcript ─────
+
+describe("probeFindingsFromTranscript", () => {
+  const note = (lines: string[]) => ({ role: "assistant", content: lines.join("\n") });
+  const user = (text = "fix it") => ({ role: "user", content: text });
+
+  it("reads the dash lines out of this turn's probe notes", () => {
+    const findings = probeFindingsFromTranscript([
+      user(),
+      note([
+        "[harness probe] diagnostics NOT in the baseline:",
+        "- src/a.ts:3 TS2304: Cannot find name 'x'",
+        "- src/b.ts:9 TS2345: Argument of type 'string'",
+      ]),
+    ]);
+    expect(findings).toEqual([
+      "src/a.ts:3 TS2304: Cannot find name 'x'",
+      "src/b.ts:9 TS2345: Argument of type 'string'",
+    ]);
+  });
+
+  it("stops at the newest user message — last turn's probes are not this turn's", () => {
+    const findings = probeFindingsFromTranscript([
+      user("previous task"),
+      note(["[harness probe] old:", "- old finding"]),
+      user(),
+    ]);
+    expect(findings).toEqual([]);
+  });
+
+  it("ignores tool results and other assistant rows", () => {
+    const findings = probeFindingsFromTranscript([
+      user(),
+      { role: "user", content: "{ok: true}", toolResult: { kind: "run_checks" } },
+      { role: "assistant", content: "I'll fix src/a.ts next" },
+    ]);
+    expect(findings).toEqual([]);
+  });
+
+  it("is capped at six findings", () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `- finding ${i}`);
+    const findings = probeFindingsFromTranscript([user(), note(["[harness probe] x:", ...lines])]);
+    expect(findings).toHaveLength(6);
+    expect(findings[0]).toBe("finding 0");
   });
 });

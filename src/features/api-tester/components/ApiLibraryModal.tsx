@@ -492,7 +492,7 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
                           {preset.platform === "custom" && (
                             <SimpleTooltip content="Delete Custom Preset">
                               <button
-                                className="api-library-card-icon-btn text-red hover:bg-red-500/10"
+                                className="api-library-card-icon-btn text-red hover:bg-[var(--red-dim)]"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   store.deleteCustomPreset(preset.id);
@@ -762,8 +762,8 @@ export function ApiLibraryModal({ isOpen, onClose, onOpenSettings }: ApiLibraryM
                         <span
                           className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded ${
                             inspectingPreset.sampleResponse.status < 300
-                              ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                              : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                              ? "bg-[var(--green-dim)] text-[var(--ds-green-700)] border border-[var(--ds-green-500)]"
+                              : "bg-[var(--yellow-dim)] text-[var(--ds-amber-800)] border border-[var(--ds-amber-500)]"
                           }`}
                         >
                           {inspectingPreset.sampleResponse.status} {inspectingPreset.sampleResponse.statusText}

@@ -496,6 +496,73 @@ export const GOLDEN_CASES: readonly GoldenCase[] = [
     repoAttached: true,
     expect: "create_issue",
   },
+  // ── The pure utility tools, and the two asymmetry gaps ────
+  // The utility cases pin the family rule that justifies their existence:
+  // a conversion, an encoding or a check is a TOOL, not a run_code snippet
+  // the model must compose (and get subtly wrong from recall). The gap
+  // cases pin the closes: PRs could be reviewed but not opened; memory
+  // could be written but not searched.
+  {
+    id: "export-the-data",
+    why: "a spreadsheet request is a serialization, not a snippet to compose — and the result must land in the change set, not in the reply",
+    prompt: "export this list of users as a CSV I can review",
+    profile: "lean",
+    repoAttached: true,
+    expect: "generate_csv",
+    forbid: ["run_code"],
+  },
+  {
+    id: "convert-the-paste",
+    why: "row data in the wrong shape is a conversion tool's job; compare_data answers what DIFFERS, not what it looks like in another format",
+    prompt: "turn this CSV paste into JSON so I can see the rows",
+    profile: "full",
+    repoAttached: false,
+    expect: "convert_data",
+    forbid: ["compare_data"],
+  },
+  {
+    id: "decode-the-token",
+    why: "reading a JWT's claims is a decode, and the result must say the signature was not verified",
+    prompt: "what does this JWT contain? eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.c2ln",
+    profile: "lean",
+    repoAttached: false,
+    expect: "encode_decode",
+  },
+  {
+    id: "check-the-pattern",
+    why: "a regex about to ship is dry-run against a sample, not reasoned about — the over-match is the bug reasoning misses",
+    prompt: "does my regex ^\\\\d{4}-\\\\d{2} match the date in 'id=2026-03-x'?",
+    profile: "lean",
+    repoAttached: false,
+    expect: "regex_test",
+    forbid: ["run_code"],
+  },
+  {
+    id: "scan-before-the-gate",
+    why: "a config file was just written; scanning the change set for credentials BEFORE push_changes turns the gate's block into a formality",
+    prompt: "I finished the config changes — check them over and push",
+    profile: "lean",
+    repoAttached: true,
+    expect: "secrets_scan",
+  },
+  {
+    id: "open-the-pr",
+    why: "the commit is on the branch and the user held the PR back at the gate — opening it is a separate write with its own approval, not a re-push",
+    prompt: "the commit is pushed; now open the pull request for the branch",
+    profile: "full",
+    repoAttached: true,
+    expect: "create_pull_request",
+    forbid: ["push_changes"],
+  },
+  {
+    id: "ask-memory-first",
+    why: "how this repo tests may already be recorded — searching memory is one flat call, rediscovering it is a round of file reads",
+    prompt: "how do I run the tests in this project?",
+    profile: "lean",
+    repoAttached: true,
+    expect: "memory_search",
+    forbid: ["remember"],
+  },
 ];
 
 // ── Drafting the next case from a real transcript ─────────────
@@ -597,6 +664,7 @@ export const LEAN_SURFACE_TODAY: readonly ToolName[] = [
   "read_issue",
   "read_pull_request",
   "read_ci_logs",
+  "memory_search",
   // Runtime evidence joined the lean surface: two no-argument preview reads
   // and one flat process read. A weak model is the one most tempted to
   // answer "does it work" from hope, and these are flat calls with no
@@ -605,4 +673,16 @@ export const LEAN_SURFACE_TODAY: readonly ToolName[] = [
   "read_preview",
   "wait_for_preview",
   "read_process",
+  // The pure utility tools and the pre-push scan joined for the same
+  // flatness reason: one flat call, a local computation, a text answer.
+  // A weak model asked for an export, an encoding check or a secrets
+  // review can DO it instead of hallucinating the answer.
+  "generate_csv",
+  "convert_data",
+  "encode_decode",
+  "hash_text",
+  "regex_test",
+  "timestamp_convert",
+  "uuid_generate",
+  "secrets_scan",
 ];

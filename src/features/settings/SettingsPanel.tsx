@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Toggle } from "@/components/ui/toggle";
+import { FONT_OPTIONS } from "./font-options";
 
 interface SettingsDropdownProps<T extends string | number> {
   value: T;
@@ -54,13 +55,21 @@ function SettingsDropdown<T extends string | number>({
   onChange,
   className = "w-[130px]",
 }: SettingsDropdownProps<T>) {
-  const selectedOption = options.find((o) => o.value === value) || options[0];
+  // A value that matches no option (e.g. a font stack hand-edited in another
+  // surface, or a renamed preset) still needs a visible label; falling back
+  // to options[0] would silently show the wrong state and one click would
+  // then persist that wrong value.
+  const selectedOption = options.find((o) => o.value === value);
+  const label = selectedOption?.label ?? String(value);
 
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <button className={`settings-select flex items-center justify-between ${className}`}>
-          <span className="truncate">{selectedOption?.label}</span>
+        <button
+          className={`settings-select flex items-center justify-between ${className}`}
+          title={selectedOption ? undefined : String(value)}
+        >
+          <span className="truncate">{label}</span>
           <ChevronDown className="h-3 w-3 opacity-50 ml-2 flex-shrink-0" />
         </button>
       </DropdownMenuTrigger>
@@ -69,7 +78,6 @@ function SettingsDropdown<T extends string | number>({
           <DropdownMenuItem
             key={String(opt.value)}
             onSelect={() => onChange(opt.value)}
-            onClick={() => onChange(opt.value)}
             className="cursor-pointer text-xs"
           >
             {opt.label}
@@ -396,20 +404,13 @@ export function SettingsPanel() {
                 <div className="settings-row">
                   <div className="settings-row-info">
                     <label className="settings-label">Font Family</label>
-                    <span className="settings-sublabel">Primary font family for all code editors</span>
+                    <span className="settings-sublabel">Monospace fonts for code editors — JetBrains Mono, Cascadia and Liberation ship with the app</span>
                   </div>
                   <div className="settings-control">
                     <SettingsDropdown
                       value={editorSettings.fontFamily}
                       onChange={(v) => updateEditorSettings({ fontFamily: v })}
-                      options={[
-                        {
-                          label: "Monospace",
-                          value: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-                        },
-                        { label: "System UI", value: "system-ui, sans-serif" },
-                        { label: "Courier", value: "'Courier New', Courier, monospace" },
-                      ]}
+                      options={FONT_OPTIONS}
                       className="w-[130px]"
                     />
                   </div>
@@ -558,7 +559,7 @@ export function SettingsPanel() {
                         {editorSettings.theme === "dark" ? (
                           <Moon className="w-3.5 h-3.5 text-accent" />
                         ) : (
-                          <Sun className="w-3.5 h-3.5 text-yellow-500" />
+                          <Sun className="w-3.5 h-3.5 text-[var(--yellow)]" />
                         )}
                         Application Theme
                       </span>
@@ -849,10 +850,6 @@ export function SettingsPanel() {
                           setShowResetConfirm(false);
                           setPendingCleanup("all");
                         }}
-                        onClick={() => {
-                          setShowResetConfirm(false);
-                          setPendingCleanup("all");
-                        }}
                         disabled={totalInactive === 0}
                         className="flex items-center justify-between cursor-pointer py-1.5 text-xs font-medium"
                       >
@@ -869,10 +866,6 @@ export function SettingsPanel() {
 
                       <DropdownMenuItem
                         onSelect={() => {
-                          setShowResetConfirm(false);
-                          setPendingCleanup("comparators");
-                        }}
-                        onClick={() => {
                           setShowResetConfirm(false);
                           setPendingCleanup("comparators");
                         }}
@@ -893,10 +886,6 @@ export function SettingsPanel() {
                           setShowResetConfirm(false);
                           setPendingCleanup("diff");
                         }}
-                        onClick={() => {
-                          setShowResetConfirm(false);
-                          setPendingCleanup("diff");
-                        }}
                         disabled={inactiveDiffs === 0}
                         className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
                       >
@@ -914,10 +903,6 @@ export function SettingsPanel() {
                           setShowResetConfirm(false);
                           setPendingCleanup("formatters");
                         }}
-                        onClick={() => {
-                          setShowResetConfirm(false);
-                          setPendingCleanup("formatters");
-                        }}
                         disabled={inactiveFormatters === 0}
                         className="flex items-center justify-between cursor-pointer py-1.5 text-xs"
                       >
@@ -932,10 +917,6 @@ export function SettingsPanel() {
 
                       <DropdownMenuItem
                         onSelect={() => {
-                          setShowResetConfirm(false);
-                          setPendingCleanup("files");
-                        }}
-                        onClick={() => {
                           setShowResetConfirm(false);
                           setPendingCleanup("files");
                         }}
@@ -958,7 +939,7 @@ export function SettingsPanel() {
                 {pendingCleanup && (
                   <div className="settings-vault-subform">
                     <div className="settings-subform-title text-accent">
-                      <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+                      <AlertTriangle size={14} className="text-[var(--yellow)] flex-shrink-0" />
                       <span>Confirm Clean Up: {cleanupTargetsConfig[pendingCleanup].label}</span>
                     </div>
                     <p className="settings-subform-warning">

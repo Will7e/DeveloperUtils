@@ -197,7 +197,10 @@ export function WorkspacePreview({ repoKey }: WorkspacePreviewProps) {
 
       {running ? (
         <>
-          {/* ── Browser chrome: back / forward / reload · URL · open ── */}
+          {/* ── Browser chrome, one compact row: back / forward / reload ·
+              URL · viewport · open. The device picker is icon-only and lives
+              here rather than in its own row: three stacked bars cost the
+              preview a third of its height before the page rendered at all. ── */}
           <div className="chat-preview-chrome">
             <div className="chat-preview-nav">
               <SimpleTooltip content={canBack ? "Back" : "Nothing to go back to"} side="bottom">
@@ -258,6 +261,55 @@ export function WorkspacePreview({ repoKey }: WorkspacePreviewProps) {
                 placeholder="Preview URL"
               />
             </form>
+            {/* Device modes as a compact icon segment — the labels were the
+                widest thing on the bar, and each icon already has a tooltip
+                and an aria-label saying what it picks. */}
+            <div className="chat-preview-devicebar" role="group" aria-label="Viewport size">
+              <SimpleTooltip content="Responsive — fill the pane" side="bottom">
+                <button
+                  type="button"
+                  className={`chat-preview-device ${viewport === "responsive" ? "chat-preview-device-active" : ""}`}
+                  onClick={() => setViewport("responsive")}
+                  aria-pressed={viewport === "responsive"}
+                  aria-label="Responsive — fill the pane"
+                >
+                  <Maximize2 className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip content="Desktop — 1280px, scaled to fit" side="bottom">
+                <button
+                  type="button"
+                  className={`chat-preview-device ${viewport === "desktop" ? "chat-preview-device-active" : ""}`}
+                  onClick={() => setViewport("desktop")}
+                  aria-pressed={viewport === "desktop"}
+                  aria-label="Desktop — 1280px, scaled to fit"
+                >
+                  <Monitor className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip content="Tablet — 768px, scaled to fit" side="bottom">
+                <button
+                  type="button"
+                  className={`chat-preview-device ${viewport === "tablet" ? "chat-preview-device-active" : ""}`}
+                  onClick={() => setViewport("tablet")}
+                  aria-pressed={viewport === "tablet"}
+                  aria-label="Tablet — 768px, scaled to fit"
+                >
+                  <Tablet className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </SimpleTooltip>
+              <SimpleTooltip content="Mobile — 390px, scaled to fit" side="bottom">
+                <button
+                  type="button"
+                  className={`chat-preview-device ${viewport === "mobile" ? "chat-preview-device-active" : ""}`}
+                  onClick={() => setViewport("mobile")}
+                  aria-pressed={viewport === "mobile"}
+                  aria-label="Mobile — 390px, scaled to fit"
+                >
+                  <Smartphone className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </SimpleTooltip>
+            </div>
             {currentUrl && (
               <SimpleTooltip content="Open the preview in a new tab" side="bottom">
                 <a
@@ -271,50 +323,6 @@ export function WorkspacePreview({ repoKey }: WorkspacePreviewProps) {
                 </a>
               </SimpleTooltip>
             )}
-          </div>
-
-          {/* ── Device row: how wide the page believes it is ── */}
-          <div className="chat-preview-devices" role="group" aria-label="Viewport size">
-            <button
-              type="button"
-              className={`chat-preview-device ${viewport === "responsive" ? "chat-preview-device-active" : ""}`}
-              onClick={() => setViewport("responsive")}
-              aria-pressed={viewport === "responsive"}
-              title="Responsive — fill the pane"
-            >
-              <Maximize2 className="h-3 w-3" aria-hidden="true" />
-              Responsive
-            </button>
-            <button
-              type="button"
-              className={`chat-preview-device ${viewport === "desktop" ? "chat-preview-device-active" : ""}`}
-              onClick={() => setViewport("desktop")}
-              aria-pressed={viewport === "desktop"}
-              title="Desktop — 1280px, scaled to fit"
-            >
-              <Monitor className="h-3 w-3" aria-hidden="true" />
-              Desktop
-            </button>
-            <button
-              type="button"
-              className={`chat-preview-device ${viewport === "tablet" ? "chat-preview-device-active" : ""}`}
-              onClick={() => setViewport("tablet")}
-              aria-pressed={viewport === "tablet"}
-              title="Tablet — 768px, scaled to fit"
-            >
-              <Tablet className="h-3 w-3" aria-hidden="true" />
-              Tablet
-            </button>
-            <button
-              type="button"
-              className={`chat-preview-device ${viewport === "mobile" ? "chat-preview-device-active" : ""}`}
-              onClick={() => setViewport("mobile")}
-              aria-pressed={viewport === "mobile"}
-              title="Mobile — 390px, scaled to fit"
-            >
-              <Smartphone className="h-3 w-3" aria-hidden="true" />
-              Mobile
-            </button>
           </div>
 
           {/* The page itself, at the width the mode chose. The iframe keeps the

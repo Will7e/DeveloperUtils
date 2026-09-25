@@ -40,6 +40,7 @@ import {
   listPullRequests,
   readIssue,
   readPullRequest,
+  findPullRequestForHead,
   replyToReviewComment,
   reviewPullRequest,
   updatePullRequest,
@@ -955,6 +956,137 @@ export async function runUpdatePullRequest(
       started
     );
   } catch (err) {
+    return fail(name, describeError(err), "write failed", started);
+  }
+}
+
+// ── create_pull_request ─────────────────────────────────
+
+/**
+ * Opens a pull request for THIS thread's working branch. The commit
+ * comes first — push_changes is what puts commits on the branch and it
+ * normally opens the PR itself, so this executor's job is the
+ * deliberate "open it separately" case: a user-held PR, a re-open
+ * after the push-time step failed, or a draft.
+ *
+ * Order of operations is the safety story: look for an existing PR for
+ * the head branch BEFORE asking the user to approve anything (an
+ * approval for a call GitHub would refuse with a 422 is a wasted
+ * dialog), then gate the exact title/body, then create.
+ */
+export async function runCreatePullRequest(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const name = "create_pull_request";
+  const ctx = await repoContext(conversationId);
+  if (!ctx.ok) return fail(name, ctx.error, "no repository", started);
+
+  const title = optionalArg(args, "title");
+  if (!title) return fail(name, "`title` is required — the change, as a reviewer would search for it.", "bad argument", started);
+  const body = optionalArg(args, "body") ?? "";
+  const draft = args.draft === true;
+  const base = optionalArg(args, "base") || ctx.ws.branch;
+
+  if (!ctx.ws.workingBranch) {
+    return fail(
+      name,
+      "Nothing has been pushed from this conversation yet — there is no working branch to open a pull request FROM. Call push_changes first (it opens the pull request itself unless the user holds it back).",
+      "no working branch",
+      started
+    );
+  }
+  const head = ctx.ws.workingBranch;
+  if (head === base) {
+    return fail(
+      name,
+      `The working branch IS the base branch (${base}) — a pull request needs two different branches. push_changes would have created a working branch; attach a workspace and push first.`,
+      "same branch",
+      started
+    );
+  }
+
+  // Look before asking: an existing open PR for this head is the answer.
+  try {
+    const existing = await findPullRequestForHead(ctx.repo, head);
+    if (existing && existing.state === "open") {
+      return toResult(
+        name,
+        {
+          ok: true,
+          data: {
+            status: "already-open",
+            number: existing.number,
+            url: existing.url,
+            note: `Pull request #${existing.number} already covers ${head} — no duplicate was created. Update its description with update_pull_request if the story changed.`,
+          },
+          summary: `already open: #${existing.number}`,
+        },
+        started
+      );
+    }
+  } catch {
+    // A failed lookup must not block the create: GitHub's own 422 is the backstop.
+  }
+
+  const gate = await approveWrite(conversationId, {
+    method: "POST",
+    url: `${GITHUB_API}/repos/${ctx.repo.owner}/${ctx.repo.repo}/pulls`,
+    body: { title, head, base, body, draft },
+    why: (optionalArg(args, "why") ?? "").trim() || `open a pull request: ${title}`,
+  });
+  if (!gate.ok) return fail(name, gate.error, "declined", started);
+
+  try {
+    const { openPullRequest } = await import("../lib/github-write");
+    const pr = await openPullRequest(ctx.repo.token, ctx.repo.owner, ctx.repo.repo, head, base, title, body);
+    return toResult(
+      name,
+      {
+        ok: true,
+        data: {
+          status: "opened",
+          number: pr.number,
+          url: pr.htmlUrl,
+          head,
+          base,
+          ...(draft ? { draft: true } : {}),
+          approved: true,
+          ...writeScope(gate.auto),
+        },
+        summary: `opened PR #${pr.number}`,
+      },
+      started
+    );
+  } catch (err) {
+    // The classic race: the lookup missed a PR created between the look
+    // and the post. GitHub refuses the duplicate with a 422; report the
+    // existing PR instead of a failure.
+    const message = err instanceof Error ? err.message : String(err);
+    if (/already exists|422/i.test(message)) {
+      try {
+        const raced = await findPullRequestForHead(ctx.repo, head);
+        if (raced) {
+          return toResult(
+            name,
+            {
+              ok: true,
+              data: {
+                status: "already-open",
+                number: raced.number,
+                url: raced.url,
+                note: `A pull request for ${head} already exists (#${raced.number}, state: ${raced.state}) — GitHub refused the duplicate.`,
+              },
+              summary: `already open: #${raced.number}`,
+            },
+            started
+          );
+        }
+      } catch {
+        /* fall through to the raw error */
+      }
+    }
     return fail(name, describeError(err), "write failed", started);
   }
 }

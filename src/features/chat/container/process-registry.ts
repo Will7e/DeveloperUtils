@@ -38,6 +38,8 @@ import {
 } from "./container-host";
 import { prepareWorkspace, ensureDependencies, serializeWorkspaceWork } from "./container-executor";
 import type { MountPlan } from "./mount-plan";
+import { spawnEnvFor } from "./runtime-env";
+import { PREVIEW_BASE_ENV } from "./preview-bridge";
 
 /** Scripts that START a server — refused here, because the preview owns them */
 const DEV_SCRIPTS = ["dev", "start", "serve", "preview"] as const;
@@ -178,6 +180,8 @@ export async function startProcess(input: {
   plan: MountPlan;
   revision: number;
   owner: WorkspaceOwner;
+  /** The repository this process runs against (`owner/repo`), for the runtime env */
+  repoKey?: string | null;
 }): Promise<StartProcessOutcome> {
   if (isDevServerCommand(input.command)) {
     return {
@@ -257,8 +261,13 @@ export async function startProcess(input: {
 
   let spawned: ContainerProcessHandle;
   try {
+    // The repo's runtime env reaches background processes too: a watcher or a
+    // seed script is exactly the thing that needs a key the dev server already
+    // got — including the commit's own env-file variables. One merge function
+    // across all three spawn sites.
+    const processEnv = await spawnEnvFor(PREVIEW_BASE_ENV, input.repoKey ?? null, input.plan.tree);
     spawned = await instance.spawn("jsh", ["-c", input.command], {
-      env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", BROWSER: "none" },
+      env: processEnv,
     });
   } catch (error) {
     processes.delete(id);

@@ -604,6 +604,27 @@ function SettingsModalInner({
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-braid-state-file">
+                      Fixed working state (Braid)
+                    </label>
+                    <span className="settings-sublabel">
+                      Each round rebuilds a capped goal / decisions / facts /
+                      open threads / next action block from the plan, check
+                      results and probe findings — the round-to-round picture
+                      of the work without a growing ledger. No model calls.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-braid-state-file"
+                      size="sm"
+                      checked={settings.braidStateFile !== false}
+                      onCheckedChange={(checked) => onUpdate({ braidStateFile: checked })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
                     <label className="settings-label" htmlFor="chat-braid-strands">
                       Strand rollouts on stuck turns (Braid)
                     </label>

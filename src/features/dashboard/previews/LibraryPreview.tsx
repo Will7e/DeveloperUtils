@@ -197,7 +197,7 @@ export function LibraryPreview() {
             title="Copy snippet"
           >
             {copied ? (
-              <Check className="h-3 w-3 text-emerald-400" />
+              <Check className="h-3 w-3 text-[var(--green)]" />
             ) : (
               <Copy className="h-3 w-3" />
             )}

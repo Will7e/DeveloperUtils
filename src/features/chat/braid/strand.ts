@@ -29,6 +29,10 @@
 //     against the fork's snapshot value, never against the store.
 
 import type { ToolCallRequest, ToolCallResult, ToolName } from "../types";
+import { getCachedModelCatalog, getCompetenceIndex } from "../lib/model-catalog";
+import { competenceFor, competenceScore } from "../lib/model-benchmarks";
+import { effectiveCompletionPrice } from "../lib/model-pricing";
+import { modelSupportsTools } from "../lib/model-state";
 
 /** The tools a strand may be offered and may call — nothing else */
 export const STRAND_TOOL_NAMES: ReadonlySet<ToolName> = new Set<ToolName>([
@@ -116,8 +120,6 @@ export interface StrandResult {
   summary: string;
   /** Number of model rounds spent */
   rounds: number;
-  /** Files the strand changed in its fork (paths) */
-  touchedPaths: string[];
   /** "aborted" when the user's stop reached the strand */
   endedBy: "verified" | "cap" | "done" | "aborted" | "error";
   error?: string;
@@ -133,7 +135,6 @@ export interface StrandResult {
  * stop signal honored between every step.
  */
 export async function runStrand(config: StrandConfig): Promise<StrandResult> {
-  const touched = new Set<string>();
   let verified = false;
   let lastSummary = "";
   let rounds = 0;
@@ -202,7 +203,6 @@ export async function runStrand(config: StrandConfig): Promise<StrandResult> {
       ) {
         if (result.ok) verified = false;
       }
-      touched.add(normalized.name);
       wireMessages.push(wireToolCall(normalized), wireToolResult(normalized, result));
       if (config.signal.aborted) return finish("aborted");
     }
@@ -217,7 +217,6 @@ export async function runStrand(config: StrandConfig): Promise<StrandResult> {
       verified,
       summary: lastSummary.slice(0, 2_000),
       rounds,
-      touchedPaths: [...touched],
       endedBy,
       ...(error ? { error } : {}),
     };
@@ -275,8 +274,7 @@ export function shouldForkStrands(signals: StrandRiskSignals): { fork: boolean; 
   }
   if (signals.probeFailures >= 2) {
     return { fork: true, reason: "the mid-turn probe found new type diagnostics twice" };
-  }
-  if (signals.checkFailing) {
+  }    if (signals.checkFailing) {
     return { fork: true, reason: "a check failed against the current revision" };
   }
   if (
@@ -311,4 +309,80 @@ export function pickStrandModels(
   }
   while (models.length < count) models.push(conversationModel);
   return models.slice(0, count);
+}
+
+// ── Cheaper-model sourcing (catalog-driven) ──────────────────
+
+/** A strand candidate must be cheaper than the conversation model by at least this factor */
+const STRAND_CHEAPER_FACTOR = 0.7;
+/** …or by this absolute margin when the conversation model is free/unknown-priced */
+const STRAND_CHEAPER_MARGIN = 0.5;
+/** A candidate must be at least this competent (agentic index), when measured */
+const STRAND_MIN_AGENTIC_INDEX = 20;
+
+export interface CheaperStrandModelOptions {
+  /** Catalog override (tests); defaults to the live cached catalog */
+  catalog?: import("../types").ModelInfo[];
+  /**
+   * Competence-index override (tests). `null` means "explicitly no
+   * measurements"; omitting the field reads the live cached index.
+   */
+  competence?: import("../lib/model-benchmarks").CompetenceIndex | null;
+  /** How many candidates to return (the strand slots to fill) */
+  count?: number;
+}
+
+/**
+ * Picks cheaper models strands may run on, from the same published facts the
+ * escalation picker ranks on — so a fork spends less than the turn it is
+ * rescuing, without spending competence the catalog cannot vouch for.
+ *
+ * Filters, in order: not the conversation model itself, not a duplicate, able
+ * to call tools (a strand is a tool loop), cheaper than the conversation
+ * model at the size this turn sends (70% of its rate, or at least half a
+ * dollar per million cheaper — a free ceiling admits only genuinely free
+ * models), and — when the benchmark index has a score for it — not a model
+ * measured far below agent-grade, because a cheap rollout that cannot work
+ * the tool loop is not insurance, it is a lottery ticket.
+ *
+ * Ordering is price, cheapest first: the point of the ceiling is economy.
+ * Unpriced models (no completion rate published) are excluded — "unknown"
+ * is not "cheaper". Returns at most `count` ids; an empty result is normal
+ * (cold catalog, no published prices) and every caller must treat the
+ * conversation's own model as the filler — which `pickStrandModels` does.
+ */
+export function pickCheaperStrandModels(
+  conversationModel: string,
+  opts: CheaperStrandModelOptions = {}
+): string[] {
+  const count = opts.count ?? STRAND_MAX_CONCURRENT;
+  if (count <= 0) return [];
+  const catalog = opts.catalog ?? getCachedModelCatalog() ?? [];
+  const from = catalog.find((m) => m.id === conversationModel);
+  const ceiling = effectiveCompletionPrice(from, 0);
+  // `undefined` = not supplied → live index; `null` = supplied as empty, so
+  // tests can pin the no-measurements behaviour deterministically.
+  const index = opts.competence === undefined ? getCompetenceIndex() : opts.competence;
+
+  return catalog
+    .filter((m) => m.id !== conversationModel)
+    .filter((m) => modelSupportsTools(m))
+    .filter((m) => {
+      const price = effectiveCompletionPrice(m, 0);
+      if (!(price > 0)) return false; // unpriced is not cheaper
+      return ceiling > 0
+        ? price <= ceiling * STRAND_CHEAPER_FACTOR
+        : price <= STRAND_CHEAPER_MARGIN; // unpriced ceiling → only genuinely cheap models
+    })
+    .filter((m) => {
+      const score = competenceScore(competenceFor(index, m.id), "agentic");
+      return score === undefined ? true : score >= STRAND_MIN_AGENTIC_INDEX;
+    })
+    .sort(
+      (a, b) =>
+        effectiveCompletionPrice(a, 0) - effectiveCompletionPrice(b, 0) ||
+        a.id.localeCompare(b.id)
+    )
+    .slice(0, count)
+    .map((m) => m.id);
 }

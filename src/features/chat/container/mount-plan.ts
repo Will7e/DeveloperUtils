@@ -11,10 +11,18 @@
 // `npm ci` postinstall script, a dev server asked for a path, a dependency the
 // agent installed. That is not a property of the container being untrusted; it is
 // a property of it being a real filesystem where third-party code runs, which is
-// also true of a laptop and is exactly why the app already classifies paths. A
-// secret-shaped file is therefore NOT mounted, and the omission is REPORTED
-// rather than silent, because a build that genuinely needs `.env` must fail
-// loudly instead of quietly succeeding against a tree we edited behind it.
+// also true of a laptop and is exactly why the app already classifies paths. KEY
+// MATERIAL (`id_rsa`, `.pem`, `secrets.json`) is therefore NOT mounted, and the
+// omission is REPORTED rather than silent.
+//
+// A committed ENV FILE is the deliberate exception. It is part of the repository
+// at the pinned commit — already public to everyone who can see that commit — so
+// refusing to run the project without it is stricter than the user's laptop,
+// where the same `npm install` that runs here can read the very same file. The
+// policy follows the commit: what the repository ships, the workspace runs with.
+// A user-PASTED env file never enters a mount (it lives in the runtime-env
+// store and travels only through spawn env), so "secret because I typed it" and
+// "public because the repo published it" stay two different things.
 //
 // Path containment and the `.git` rule are not re-implemented here. They live in
 // materialize-plan.ts beside this file, they are tested there, and a second copy
@@ -24,7 +32,7 @@
 // ============================================================
 
 import type { DirectoryNode, FileNode, FileSystemTree } from "@webcontainer/api";
-import { classifyPath } from "../lib/sensitivity";
+import { secretPathKindOf } from "../lib/sensitivity";
 import {
   planMaterialization,
   type MaterializeBaseFile,
@@ -100,11 +108,17 @@ export function planMount(input: {
 
   const files: { path: string; content: string | Uint8Array; bytes: number }[] = [];
   for (const write of composed.writes) {
-    if (classifyPath(write.path) === "secret") {
+    // A committed env file rides the mount; key material never does. The
+    // distinction is the commit, not the shape: the same `.env` PASTED into the
+    // workspace by the agent never reaches this path as a base file (it is a
+    // change), and a change that merely rewrites a committed env file still
+    // mounts — the commit already published the values, and the user's own edit
+    // to their own checkout is exactly the work this tier exists to run.
+    if (secretPathKindOf(write.path) === "key-material") {
       skipped.push({
         path: write.path,
         code: "secret",
-        message: `"${write.path}" looks like key material or an env file, so it is not mounted: every dependency script and dev server in the workspace can read everything mounted here. Report anything that needs it rather than asking for it to be mounted.`,
+        message: `"${write.path}" looks like key material, so it is not mounted: every dependency script and dev server in the workspace can read everything mounted here. Report anything that needs it rather than asking for it to be mounted.`,
       });
       continue;
     }

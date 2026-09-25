@@ -154,7 +154,7 @@ export function FormattersPreview() {
             title="Copy formatted output"
           >
             {copied ? (
-              <Check className="h-3 w-3 text-emerald-400" />
+              <Check className="h-3 w-3 text-[var(--green)]" />
             ) : (
               <Copy className="h-3 w-3" />
             )}
@@ -186,7 +186,7 @@ export function FormattersPreview() {
       <div className="dash-fmt-footer">
         {error ? (
           <span className="dash-fmt-error">
-            <AlertCircle className="h-3 w-3 text-rose-400" />
+            <AlertCircle className="h-3 w-3 text-[var(--red)]" />
             <span>{error}</span>
           </span>
         ) : (

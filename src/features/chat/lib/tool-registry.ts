@@ -641,6 +641,58 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
       typeof args.fact === "string" ? args.fact.slice(0, 60) : "project memory",
   },
   {
+    name: "memory_search",
+    planSafe: true,
+    description:
+      "Search the project memory this harness has already recorded (.intab/memory.md in the workspace — facts `remember` wrote). Use it BEFORE rediscovering anything about how this repository builds, tests or behaves: the answer may already be on file, and a fact read from memory is a fact you do not have to spend a round re-deriving. Keyword match across recorded facts; pass `query` to narrow, or no arguments to list every fact.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          maxLength: 200,
+          description: 'Space-separated keywords, all matched case-insensitively, e.g. "tests vitest". Omit to list all facts.',
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.query === "string" && args.query ? `"${args.query.slice(0, 40)}"` : "memory index",
+  },
+  {
+    name: "set_env",
+    planSafe: false,
+    description:
+      "Store environment variables for THIS repository's browser workspace, so its dev server and commands run with the configuration the user's laptop has. Use it when the user pastes an env file or a key in chat, or to store a hosted service URL the project needs. Values live in this browser per repo — they are never written into repository files, never mounted, never pushed, and never appear in output. After storing, say the variable NAMES and that they will reach the next dev-server start; never repeat the values back.",
+    parameters: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description:
+            "The env text to parse: `KEY=value` lines (tolerates `export ` prefixes, quotes and comments) — typically the user's pasted `.env`. Exactly one of content/key must be given.",
+          maxLength: 20_000,
+        },
+        key: {
+          type: "string",
+          description: "A single variable name when setting one variable (with `value`). Exactly one of content/key must be given.",
+          maxLength: 120,
+        },
+        value: {
+          type: "string",
+          description: "The value for `key`. Omit `value` (with `key`) to REMOVE the variable.",
+          maxLength: 8_000,
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.key === "string" && args.key ? args.key : "env variables"),
+  },
+  {
     name: "list_mcp_tools",
     planSafe: true,
     description:
@@ -910,6 +962,44 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
       Array.isArray(args.suggestions)
         ? `${args.suggestions.length} next step(s)`
         : "next steps",
+  },
+  // ── Guardrail tools: the agent scanning its own work ──
+  // secrets_scan is the agent-facing half of the push gate's policy
+  // engine (lib/push-policy.ts): the gate BLOCKS on the same patterns, so
+  // a call here is a chance to fix the diff BEFORE the gate has to stop
+  // it. license_check reads what the project depends on and reports the
+  // licenses, so a dependency conversation starts from facts.
+  {
+    name: "secrets_scan",
+    planSafe: true,
+    description:
+      'Scan text or the pending change set for credential-shaped values (private keys, cloud and service tokens, hard-coded password assignments). Values are REDACTED in the result — the shape is reported, never the secret. Use it after writing files that hold configuration, before push_changes: the push gate runs this same scan and will BLOCK the push, so finding it here is a chance to fix the file rather than have the gate refuse. To REMOVE a finding, edit the file to read the value from an environment variable and rotate the exposed credential.',
+    parameters: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          maxLength: 500_000,
+          description: "Specific text to scan (e.g. a file you just wrote). Omit to scan the whole pending change set.",
+        },
+      },
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.text === "string" && args.text ? "scan text" : "scan change set",
+  },
+  {
+    name: "license_check",
+    planSafe: true,
+    description:
+      'Read the dependency manifests in the workspace and report each direct dependency\'s declared license, flagging the licenses most teams disallow (GPL-family, AGPL, unknown). Use it before adding a dependency to answer "can we ship this", and after a dependency change to keep the picture current. Reads package manifests only — it does not fetch registries or audit advisories.',
+    parameters: { type: "object", properties: {} },
+    kind: "read",
+    cacheable: true,
+    programmable: false,
+    summarize: () => "dependency licenses",
   },
   {
     name: "run_checks",
@@ -1237,6 +1327,36 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
       typeof args.number === "number"
         ? `#${args.number}${typeof args.state === "string" ? ` → ${args.state}` : ""}`
         : "a pull request",
+  },
+  {
+    name: "create_pull_request",
+    planSafe: false,
+    description:
+      "Open a pull request from THIS thread's working branch into the base branch. Requires the change to be pushed first: call push_changes, then this (push_changes with openPr:false, or re-running after it opened nothing, are the paths that leave the PR to you). The title is the change a reviewer would search for and the body says what changed and why — GitHub's own template advice. The user approves the exact title and body before it opens. If a pull request already exists for the branch, the existing one is reported instead of a duplicate being created.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 256, description: "The change, as a reviewer would search for it." },
+        body: {
+          type: "string",
+          maxLength: 20000,
+          description: "What changed, why, and what was verified. Markdown.",
+        },
+        base: {
+          type: "string",
+          maxLength: 200,
+          description: "Target branch (default: the branch the workspace was created from).",
+        },
+        draft: { type: "boolean", description: "Open as a draft (default false)." },
+        why: { type: "string", maxLength: 200, description: "One line shown in the approval dialog." },
+      },
+      required: ["title"],
+    },
+    kind: "bridge",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.title === "string" ? `open PR: ${args.title.slice(0, 50)}` : "open pull request",
   },
   // ── App tools: the workstation's own features ──────────────
   // Available in EVERY tool-capable chat, repo or not — that is the whole
@@ -1644,6 +1764,182 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     programmable: false,
     summarize: (args) =>
       typeof args.target === "string" ? `open in ${args.target}` : "open in tool",
+  },
+  // ── Utility tools: pure local conversions and checks ──
+  // Each is a computation the model otherwise burns a run_code round on
+  // (and gets subtly wrong from recall): a serializer, an encoding, a
+  // digest, a regex dry-run, a timezone, an id. All pure, all repo-free,
+  // all plan-safe, all in lib/utility-tools.ts.
+  {
+    name: "generate_csv",
+    planSafe: true,
+    description:
+      "Serialize an array of flat objects into CSV or TSV text (RFC 4180 quoting handled). Use it when the user asks for a spreadsheet/export or a report of structured data — the result is text you then save into the workspace so it lands in the change set and is reviewed with everything else. Rows must be flat: nested objects and arrays are refused, not silently stringified.",
+    parameters: {
+      type: "object",
+      properties: {
+        data: {
+          type: "array",
+          minItems: 1,
+          maxItems: 5_000,
+          description: "The rows, each a flat object of scalar values. A JSON string of an array is also accepted.",
+          items: { type: "object" },
+        },
+        format: { type: "string", enum: ["csv", "tsv"], description: "Output dialect (default csv)." },
+        delimiter: {
+          type: "string",
+          maxLength: 1,
+          description: "Optional custom delimiter for csv (ignored for tsv, which is always tab).",
+        },
+        columns: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional explicit column order; defaults to first-seen key order across rows.",
+        },
+      },
+      required: ["data"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (Array.isArray(args.data) ? `${args.data.length} row(s)` : "rows → csv"),
+  },
+  {
+    name: "convert_data",
+    planSafe: true,
+    description:
+      "Convert row-shaped data between json, csv, tsv and xml. Delimited parsing is RFC 4180-aware (quoted cells, embedded delimiters, newlines inside quotes); XML out is flat rows under a root element. Use it on API exports, spreadsheet pastes and config blobs — the same job the Comparators' parse-leniency does interactively. A single JSON object converts as one row, which is the common API-response case.",
+    parameters: {
+      type: "object",
+      properties: {
+        data: { type: "string", maxLength: 500_000, description: "The text to convert (raw, not escaped)." },
+        from: { type: "string", enum: ["json", "csv", "tsv", "xml"], description: "The input format." },
+        to: { type: "string", enum: ["json", "csv", "tsv", "xml"], description: "The output format." },
+        delimiter: {
+          type: "string",
+          maxLength: 1,
+          description: "Optional custom delimiter for csv inputs/outputs (default ',').",
+        },
+        root: { type: "string", maxLength: 60, description: "xml: the root element name (default 'data')." },
+      },
+      required: ["data", "from", "to"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.from === "string" && typeof args.to === "string" ? `${args.from} → ${args.to}` : "convert",
+  },
+  {
+    name: "encode_decode",
+    planSafe: true,
+    description:
+      "Apply a text encoding: base64 or hex encode/decode, URL encode/decode, or JWT DECODE (payload claims, exp/iat surfaced as dates). Decoding a JWT does NOT verify its signature — the result says so; never treat a decoded token as authenticated. Use it instead of recalling what a base64 payload decodes to, which is exactly the kind of guess this surface exists to replace with a check.",
+    parameters: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          enum: ["base64-encode", "base64-decode", "url-encode", "url-decode", "hex-encode", "hex-decode", "jwt-decode"],
+          description: "Which encoding to apply.",
+        },
+        text: { type: "string", maxLength: 500_000, description: "The text to operate on." },
+      },
+      required: ["operation", "text"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.operation === "string" ? args.operation : "encode/decode"),
+  },
+  {
+    name: "hash_text",
+    planSafe: true,
+    description:
+      "Compute a SHA digest (SHA-1/256/384/512) of a piece of text via WebCrypto, returned as hex and base64. Use it to check that two payloads really are identical, to fingerprint a generated artifact, or to confirm which of several versions a hash refers to. A digest is one-way: this hashes, it never decrypts.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: { type: "string", maxLength: 500_000, description: "The text to hash (exact bytes of the string, UTF-8)." },
+        algorithm: {
+          type: "string",
+          enum: ["SHA-1", "SHA-256", "SHA-384", "SHA-512"],
+          description: "Digest algorithm (default SHA-256).",
+        },
+      },
+      required: ["text"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.algorithm === "string" ? args.algorithm : "SHA-256",
+  },
+  {
+    name: "regex_test",
+    planSafe: true,
+    description:
+      "Dry-run a regular expression against sample text and get every match with its index, capture groups and named groups. Use it BEFORE shipping a pattern into code — a regex reasoned about instead of run is how subtle over-matching ships. Only g/i/m/s/u flags are honored; catastrophic-backtracking patterns are bounded at 200 matches.",
+    parameters: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", minLength: 1, maxLength: 2_000, description: "The regex body (no slash delimiters)." },
+        flags: {
+          type: "string",
+          maxLength: 10,
+          description: 'Flags to apply, e.g. "gi". Without "g", only the first match is reported.',
+        },
+        text: { type: "string", maxLength: 500_000, description: "The sample text to run against." },
+      },
+      required: ["pattern", "text"],
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) => (typeof args.pattern === "string" ? `"${args.pattern.slice(0, 40)}"` : "regex dry-run"),
+  },
+  {
+    name: "timestamp_convert",
+    planSafe: true,
+    description:
+      "Convert between unix epoch seconds/milliseconds, ISO 8601 and a timezone-aware readable form, plus a relative age. Bare numbers under 10^11 are read as seconds, above as milliseconds — the result states which interpretation it chose, so an off-by-1000 is visible instead of silent. Called with no timestamp it reports NOW, which is how a model that cannot see a clock gets the date right.",
+    parameters: {
+      type: "object",
+      properties: {
+        timestamp: {
+          type: "string",
+          maxLength: 40,
+          description: 'Epoch seconds/ms (number or numeric string) or an ISO/text date string, e.g. "1770000000" or "2026-03-15T12:00:00Z". Omit for the current time.',
+        },
+        timeZone: {
+          type: "string",
+          maxLength: 60,
+          description: 'IANA zone for the readable form, e.g. "Europe/Berlin" (default UTC).',
+        },
+      },
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: () => "time conversion",
+  },
+  {
+    name: "uuid_generate",
+    planSafe: true,
+    description:
+      "Generate identifiers: v4 UUIDs (crypto-random), ULIDs (lexicographically sortable, timestamp-prefixed) or 12-char short ids. Use it for fixture ids, seed data and example rows instead of inventing values that look random but are not.",
+    parameters: {
+      type: "object",
+      properties: {
+        format: { type: "string", enum: ["v4", "ulid", "short"], description: "Id shape (default v4)." },
+        count: { type: "number", description: "How many to generate, 1-50 (default 1)." },
+      },
+    },
+    kind: "app",
+    cacheable: false,
+    programmable: false,
+    summarize: (args) =>
+      typeof args.format === "string" ? `${args.count ?? 1} ${args.format} id(s)` : "new ids",
   },
   // ── The app as a user, not just a target ────────────────────
   //

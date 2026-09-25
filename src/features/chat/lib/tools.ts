@@ -37,6 +37,7 @@ import { fetchWebDocument } from "./web-fetch";
 import { searchWeb } from "./search-client";
 import { SEARCH_DEFAULT_LIMIT } from "./search-providers";
 import { isWithinSubtree, matchesGlob } from "./path-glob";
+import { licenseReport } from "./license-report";
 
 /** Files one `read_files` call may ask for (schema maxItems must agree) */
 const MAX_READ_FILES = 12;
@@ -465,6 +466,28 @@ export async function executeToolCall(
                 ? "No path matched. A pattern with no slash matches a filename at ANY depth (`*.test.ts`); `src/**/*.ts` searches below src."
                 : "Read the ones you need with read_file/read_files. To find what is INSIDE files, search_workspace finds content.",
           },
+          durationMs: Date.now() - started,
+          summary: summarize(call.name, args, true),
+        };
+      }
+
+      case "license_check": {
+        // Reads the WORKING COPY's manifests (the agent's own view, including
+        // uncommitted dependency changes), falling back to the repository
+        // manifests when the workspace has none.
+        const { selectWorkspace, useChatStore } = await import("@/stores/chat.store");
+        const ws = selectWorkspace(useChatStore.getState(), ctx.conversationId ?? "");
+        const read = (path: string): string | null => {
+          const local = ws?.files[path];
+          if (local && local.status !== "deleted") return local.content;
+          return null; // remote fallback is not fetched: report what is known
+        };
+        const report = licenseReport(read("package.json"), read("package-lock.json"));
+        return {
+          callId: call.id,
+          name: call.name,
+          ok: true,
+          data: report,
           durationMs: Date.now() - started,
           summary: summarize(call.name, args, true),
         };

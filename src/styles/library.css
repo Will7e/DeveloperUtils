@@ -1613,7 +1613,7 @@ html.light .lib-excal-preview-wrap {
   position: fixed;
   inset: 0;
   z-index: 99999;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--ds-overlay-strong);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;

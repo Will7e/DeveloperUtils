@@ -528,6 +528,45 @@
   color: var(--text-1);
 }
 
+/* The Detach button on a repo row — the one gesture that removes the row.
+   A 22px ghost target (a step under the `+` beside it): the row's least-used
+   action should also be its quietest, and a plain circle-minus glyph needs no
+   bigger a hit area to be found. Red on hover only, because what it removes
+   is the repository's place in this sidebar (its chats stay). */
+.chat-repo-group-detach {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--chat-meta);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.chat-repo-group-detach:hover {
+  background: var(--red-dim);
+  color: var(--red);
+}
+
+.chat-repo-group-detach:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* The body of an EMPTY repo row: one line of prose where chats would be, so
+   the row reads as a kept place rather than a rendering bug. */
+.chat-repo-group-empty-body {
+  padding: 6px 8px 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--chat-meta);
+}
+
 /* The rows sit under their header without a rail: the rail was 15px of 1px
    grey that read as noise, and the accent rail now means "this is the chat you
    are in" (see .chat-conv-item-active). */
@@ -6489,14 +6528,36 @@ typography rather than looking like a control of its own */
   min-width: 0;
 }
 
-/* Browser chrome: back / forward / reload · address bar · open-in-tab */
+/* Browser chrome: back / forward / reload · address bar · viewport · open-in-tab.
+   One row, tightly packed — the preview pane is height the page needs. */
 .chat-preview-chrome {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 8px;
+  padding: 3px 6px 3px 4px;
   border-bottom: 1px solid var(--border-1);
   flex-shrink: 0;
+}
+
+/* Icon-only viewport segment inside the chrome row: a joined pill group, so
+   four device modes cost the width of one old text label. */
+.chat-preview-devicebar {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--bg-1);
+}
+
+.chat-preview-devicebar .chat-preview-device {
+  border-radius: 0;
+  padding: 3px 6px;
+}
+
+.chat-preview-devicebar .chat-preview-device + .chat-preview-device {
+  border-left: 1px solid var(--border-1);
 }
 
 .chat-preview-nav {
@@ -6517,7 +6578,7 @@ typography rather than looking like a control of its own */
 .chat-preview-url {
   flex: 1;
   min-width: 0;
-  padding: 4px 10px;
+  padding: 3px 9px;
   border: 1px solid var(--border-1);
   border-radius: var(--radius-full);
   background: var(--bg-1);
@@ -6532,29 +6593,18 @@ typography rather than looking like a control of its own */
 }
 .chat-preview-url::placeholder { color: var(--text-3); }
 
-/* Device-width row: which width the page believes it is. */
-.chat-preview-devices {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--border-1);
-  flex-shrink: 0;
-  overflow-x: auto;
-}
-
+/* Viewport mode buttons: icon-only, joined into `.chat-preview-devicebar`. */
 .chat-preview-device {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-full);
+  padding: 3px 6px;
+  border: none;
+  border-radius: 0;
   background: transparent;
   color: var(--text-3);
-  font-size: 10.5px;
   cursor: pointer;
-  white-space: nowrap;
 }
 .chat-preview-device:hover {
   color: var(--text-1);
@@ -6563,10 +6613,10 @@ typography rather than looking like a control of its own */
 .chat-preview-device:focus-visible {
   outline: none;
   box-shadow: var(--ds-focus-ring);
+  z-index: 1;
 }
 .chat-preview-device-active {
   color: var(--text-1);
-  border-color: var(--border-1);
   background: var(--bg-2);
 }
 
@@ -6582,10 +6632,16 @@ typography rather than looking like a control of its own */
   justify-content: center;
 }
 
+/* The stage is a flex column so the frame STRETCHES to the full stage height
+   in every mode. It must not be a block box: the frame's only height rule is
+   `flex: 1`, which is inert in block layout — the iframe then collapses to its
+   intrinsic 150px and the page below the first fold is cropped to white. */
 .chat-preview-viewport {
   position: relative;
   transform-origin: top center;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-preview-viewport-fill {
@@ -6593,17 +6649,19 @@ typography rather than looking like a control of its own */
   height: 100%;
 }
 
+/* The title row: kept slim — it labels the pane, it is not a page heading,
+   and every pixel here comes off the running app's viewport. */
 .chat-preview-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border-1);
   flex-shrink: 0;
 }
 
 .chat-preview-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-1);
 }
@@ -6614,7 +6672,7 @@ typography rather than looking like a control of its own */
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-3);
-  max-width: 140px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6682,8 +6740,11 @@ typography rather than looking like a control of its own */
 }
 
 .chat-preview-frame {
+  /* The frame is a flex child of `.chat-preview-viewport` (see that rule): its
+     height comes from stretching, never from an intrinsic iframe height. */
   flex: 1;
   width: 100%;
+  height: auto;
   border: 0;
   /* The backdrop the app paints over. A token rather than white: the frame is
      empty until the dev server's first byte, and a hard-coded white flash in

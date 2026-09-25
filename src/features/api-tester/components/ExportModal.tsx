@@ -39,15 +39,15 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
               gap: "8px",
               margin: "12px 0 14px",
               padding: "9px 12px",
-              background: sanitizeSecrets ? "rgba(16, 185, 129, 0.08)" : "rgba(239, 68, 68, 0.08)",
-              border: `1px solid ${sanitizeSecrets ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 68, 68, 0.25)"}`,
-              borderRadius: "6px",
+              background: sanitizeSecrets ? "var(--green-dim)" : "var(--red-dim)",
+              border: `1px solid ${sanitizeSecrets ? "var(--ds-green-500)" : "var(--ds-red-500)"}`,
+              borderRadius: "var(--radius-sm)",
               transition: "all 0.15s ease",
             }}
           >
             <ShieldCheck
               className="h-4 w-4 shrink-0"
-              style={{ color: sanitizeSecrets ? "#34d399" : "#f87171" }}
+              style={{ color: sanitizeSecrets ? "var(--green)" : "var(--red)" }}
             />
             <label
               style={{
@@ -56,7 +56,7 @@ export function ExportModal({ isOpen, onClose }: ExportModalProps) {
                 gap: "8px",
                 cursor: "pointer",
                 fontSize: "12px",
-                color: "var(--text-secondary)",
+                color: "var(--text-2)",
                 userSelect: "none",
                 flex: 1,
               }}

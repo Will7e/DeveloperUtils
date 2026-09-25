@@ -27,9 +27,14 @@ import {
   STRAND_MAX_ROUNDS,
   type StrandResult,
 } from "./strand";
-import { braidNote, decideBraid, workspaceChangeStats, type BraidDecision } from "./braid-decide";
+import {
+  adoptStrandWorkspace,
+  braidNote,
+  decideBraid,
+  workspaceChangeStats,
+  type BraidDecision,
+} from "./braid-decide";
 import { TOOL_REGISTRY } from "../lib/tool-registry";
-import { nextRevision } from "../identity/revision";
 import { selectWorkspace, useChatStore } from "@/stores/chat.store";
 import type { ToolDefinition, WorkspaceState } from "../types";
 
@@ -239,10 +244,7 @@ async function joinStrands(
       // Materialize the winner: the strand's exact bytes, revision bumped
       // strictly past both the strand's and the live workspace's, so any
       // evidence recorded against the replaced state goes stale.
-      useChatStore.getState().setWorkspace(
-        conversationId,
-        nextRevisionValue(strandFinal, currentWs)
-      );
+      useChatStore.getState().setWorkspace(conversationId, adoptStrandWorkspace(strandFinal, currentWs));
     } else if (strandFinal) {
       const note = braidNote(
         { winner: "main", reason: "the workspace moved while the strands were being joined" },
@@ -257,10 +259,6 @@ async function joinStrands(
   const note = braidNote(decision, results.map((r) => r.label));
   if (note) onNote(note);
   return note;
-}
-
-function nextRevisionValue(strandFinal: WorkspaceState, live: WorkspaceState): WorkspaceState {
-  return { ...strandFinal, updatedAt: nextRevision(Math.max(strandFinal.updatedAt, live.updatedAt)) };
 }
 
 /**

@@ -47,6 +47,11 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "find_files",
   "read_file",
   "read_files",
+  // Reading back what `remember` recorded is the flat-call alternative to
+  // rediscovering a fact with a round of file reads — exactly the loop this
+  // surface exists to keep small. (remember itself stays off: writes are
+  // withheld from lean, reads are not.)
+  "memory_search",
   // A weak model is the one most likely to answer about a dependency from
   // memory, and these are reading tools with one flat argument each — the
   // same shape as read_file, so they add no loop the profile has to teach.
@@ -70,6 +75,12 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   // One flat schema, and the payoff is avoiding several wrong edits.
   "ask_user",
   "suggest_next",
+  // The agent-facing half of the push gate's scan (lib/push-policy.ts):
+  // one optional string argument, plan-safe, read-only. Finding a
+  // credential BEFORE the gate blocks on it is a cheaper turn for
+  // everyone, and a weak model is the one most likely to paste a secret
+  // into a config file.
+  "secrets_scan",
   // ── The GitHub reads a fix-up turn needs ──
   // On the lean surface for the same reason `find_files` and `read_files` are:
   // one flat argument (a number), and the alternative is worse. Without them a
@@ -115,6 +126,20 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "http_request",
   "create_diagram",
   "open_in_tool",
+  // The pure utility tools join the lean surface for the same reason
+  // `format_code` is here: one flat call, a local computation, a text
+  // answer — no structure a small model has to build. A weak model asked
+  // for an export or an encoding check can now DO it instead of
+  // hallucinating a spreadsheet. secrets_scan rides too: a no-arg scan of
+  // the change set that can only prevent a blocked push. Registry order
+  // preserved (they sit between open_in_tool and read_app).
+  "generate_csv",
+  "convert_data",
+  "encode_decode",
+  "hash_text",
+  "regex_test",
+  "timestamp_convert",
+  "uuid_generate",
   // The app as a user of the app. Included on purpose: `read_app` is the
   // cheapest possible answer to "which request do you mean", `describe_tools`
   // is one flat string, and `act_app` takes one nested `args` object whose

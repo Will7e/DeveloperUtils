@@ -293,7 +293,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                 <DropdownMenuSeparator className="my-1" />
 
                 <DropdownMenuItem onClick={handleExportPNG} className="cursor-pointer gap-2.5 px-2 py-2 rounded-md">
-                  <div className="w-7 h-7 rounded-md bg-emerald-500/15 text-emerald-400 flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded-md bg-[var(--green-dim)] text-[var(--ds-green-700)] flex items-center justify-center shrink-0">
                     <FileImage className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col min-w-0">
@@ -303,7 +303,7 @@ export function DrawFlowToolbar({ excalidrawAPI }: DrawFlowToolbarProps) {
                 </DropdownMenuItem>
 
                 <DropdownMenuItem onClick={handleExportSVG} className="cursor-pointer gap-2.5 px-2 py-2 rounded-md">
-                  <div className="w-7 h-7 rounded-md bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded-md bg-[var(--teal-dim)] text-[var(--ds-teal-700)] flex items-center justify-center shrink-0">
                     <FileCode className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col min-w-0">

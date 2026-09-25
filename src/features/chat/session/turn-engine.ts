@@ -123,7 +123,10 @@ import {
   runReadPreview,
   runReadProcess,
   runRemember,
+  runMemorySearch,
+  runSetEnv,
   runRunChecks,
+  runSecretsScan,
   runCiVerification,
   runSearchWorkspace,
   runShellCommand,
@@ -136,6 +139,7 @@ import {
 import {
   runCommentOnIssue,
   runCreateIssue,
+  runCreatePullRequest,
   runListIssues,
   runListPullRequests,
   runReadCiLogs,
@@ -158,12 +162,13 @@ import {
   type ProbeBaseline,
 } from "../braid/probe";
 import { maybeLaunchStrands, type StrandLaunchHandle } from "../braid/strand-launch";
-import { distillTurn, estimateDistillTokens } from "../braid/distill";
+import { pickCheaperStrandModels } from "../braid/strand";
+import { distillTurn, DISTILL_MODEL_FALLBACK, estimateDistillTokens } from "../braid/distill";
 import type { StrategyEntry } from "../braid/strategy-store";
 import { sessionHost } from "./session-client";
 import { HostTurnSource, LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
 import { getTurnLog, logTurnEvent } from "./turn-log";
-import { clearEnvSkillState } from "../services/turn-prep";
+import { clearEnvSkillState, clearToolSignalState } from "../services/turn-prep";
 import type {
   HostEndReason,
   HostEvent,
@@ -231,6 +236,13 @@ export interface TurnSessionState {
   effortOverride: ReasoningEffort | null;
   /** True once this turn spent its single effort bump */
   effortBumped: boolean;
+  /**
+   * Total ROUNDS this turn has run, across every batch — the number the
+   * strand fork policy's "plan stalled with rounds burning" rung consumes.
+   * Incremented per round, so it is exact rather than inferred from the
+   * batch count (a batch can end early when the model stops itself).
+   */
+  roundsSpent: number;
   /** The latest difficulty assessment for this turn (turn log, tests) */
   difficulty: DifficultyAssessment | null;
   /** Probe baseline captured at turn start (Braid P1); null until the first run */
@@ -292,6 +304,7 @@ function idleSession(conversationId: string | null): TurnSessionState {
     escalated: false,
     effortOverride: null,
     effortBumped: false,
+    roundsSpent: 0,
     difficulty: null,
     stuckRefusals: 0,
     probeBaseline: null,
@@ -909,6 +922,10 @@ async function runBridgeTool(
       return runWorkspaceDiff(conversationId, args);
     case "remember":
       return runRemember(conversationId, args);
+    case "memory_search":
+      return runMemorySearch(conversationId, args);
+    case "set_env":
+      return runSetEnv(conversationId, args);
     case "delegate":
       return runDelegate(conversationId, args);
     case "create_working_branch":
@@ -967,6 +984,8 @@ async function runBridgeTool(
       return runReadCiLogs(conversationId, args);
     case "create_issue":
       return runCreateIssue(conversationId, args);
+    case "create_pull_request":
+      return runCreatePullRequest(conversationId, args);
     case "comment_on_issue":
       return runCommentOnIssue(conversationId, args);
     case "review_pull_request":
@@ -980,6 +999,8 @@ async function runBridgeTool(
       return runAskUser(conversationId, args, { callId: opts.callId ?? "", signal });
     case "suggest_next":
       return runSuggestNext(conversationId, args);
+    case "secrets_scan":
+      return runSecretsScan(conversationId, args);
     default: {
       // Registry-consistency guard: a tool marked kind:"bridge" must
       // have a case here.
@@ -1784,6 +1805,7 @@ async function runBatch(
     // the conversation HERE, at the boundary between two rounds.
     deliverQueuedMessages(conversationId);
 
+    session.roundsSpent += 1;
     const result = await runRound(conversationId, runner.source, deps);
 
     // Transport refused (another conversation owns the host) or went
@@ -1975,13 +1997,15 @@ async function runBatch(
     }
 
     // ── Braid P2: risk-signaled strand rollouts (shadow, joined at the stop) ──
-    // Fired once per turn, only when the fork policy's risk signals say the
-    // turn is losing: stuck refusals or repeated probe findings. Strands run
-    // page-side on forks while the main loop CONTINUES — nothing pauses.
+    // Fired once per turn, when the fork policy's risk signals say the turn
+    // is losing. The policy (strand.ts shouldForkStrands) is the SINGLE
+    // decision point — its four rungs each get live inputs from this engine:
+    // stuck refusals, repeated probe findings, a fresh-fail check at the
+    // current revision, and the rounds actually spent. Strands run page-side
+    // on forks while the main loop CONTINUES — nothing pauses.
     if (
       !session.strandHandle &&
-      useChatStore.getState().settings.braidStrandRollouts !== false &&
-      (session.stuckRefusals > 0 || session.probeFailures >= 2)
+      useChatStore.getState().settings.braidStrandRollouts !== false
     ) {
       const state = useChatStore.getState();
       const conversation = state.conversations.find((c) => c.id === conversationId);
@@ -1991,14 +2015,25 @@ async function runBatch(
         const task =
           [...visibleMessages(conversation.messages)].reverse().find((m) => m.role === "user")
             ?.content ?? "";
+        // Live inputs for the policy's OTHER two rungs: a fresh-fail check
+        // recorded against THIS revision (the same source the completion
+        // gate and the verification readout read), and the rounds the loop
+        // has actually spent.
+        const freshFail = verificationEvidence(conversationId, {
+          workspaceUpdatedAt: ws.updatedAt,
+        }).some((e) => e.status === "fresh-fail");
         const handle = maybeLaunchStrands(
           {
             conversationId,
             conversationModel:
               session.modelOverride ?? conversation.model ?? state.settings.defaultModel,
-            // The pick function fills shortfalls with the conversation's own
-            // model; a catalog-driven cheaper list can replace this later.
-            cheaperModels: [],
+            // Catalog-driven cheaper list: the same published prices and
+            // agentic scores the escalation picker ranks on, so a rescue
+            // costs less than the turn it rescues. `pickStrandModels`
+            // fills any shortfall with the conversation's own model.
+            cheaperModels: pickCheaperStrandModels(
+              session.modelOverride ?? conversation.model ?? state.settings.defaultModel
+            ),
             apiKey: state.settings.apiKey.trim(),
             token: state.settings.github.token,
             repoLabel: `${repo.owner}/${repo.repo}@${repo.branch}`,
@@ -2006,12 +2041,12 @@ async function runBatch(
             signals: {
               stuckRefusals: session.stuckRefusals,
               probeFailures: session.probeFailures,
-              checkFailing: false,
+              checkFailing: freshFail,
               plan: {
                 total: conversation.plan?.steps.length ?? 0,
                 done: conversation.plan?.steps.filter((s) => s.status === "done").length ?? 0,
               },
-              roundsSpent: 0,
+              roundsSpent: session.roundsSpent,
             },
             signal: session.abort.signal,
           },
@@ -2200,7 +2235,12 @@ async function distillTurnOutcome(conversationId: string, session: TurnSessionSt
         ? "failed"
         : "stopped";
 
-  const modelId = conversation.model ?? state.settings.defaultModel;
+  // Distillation runs on the cheap, tool-less fallback model — never the
+  // conversation's own (possibly premium) one: a background learning call
+  // must not ride the model the user picked to do the work. The budget
+  // guard below is computed against this same id, so the estimate matches
+  // what will actually be sent.
+  const modelId = DISTILL_MODEL_FALLBACK;
   const input = { task, outcomeNotes: notes, outcome };
   // Budget guard: a distill must never outspend the turn it learned from.
   if (estimateDistillTokens(input, modelId) > 6_000) return;
@@ -2261,6 +2301,7 @@ export async function runTurn(
   session.escalated = false;
   session.effortOverride = null;
   session.effortBumped = false;
+  session.roundsSpent = 0;
   session.difficulty = null;
   session.stuckRefusals = 0;
   session.probeBaseline = null;
@@ -2269,6 +2310,7 @@ export async function runTurn(
   session.strandHandle = null;
   session.sentToolNames = null;
   clearEnvSkillState(conversationId);
+  clearToolSignalState(conversationId);
 
   // ── Adaptive initial effort ──
   // AFTER the reset block above: this writes `session.effortOverride`, and

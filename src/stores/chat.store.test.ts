@@ -122,48 +122,74 @@ describe("workspace summary in the chat list", () => {
     expect(store().workspaces[id]).toBeUndefined();
   });
 
-  it("replaces the last chat with one that keeps its repository", () => {
-    // Deleting the final chat emptied the store, and the fresh chat the page
-    // spun up to keep the composer usable inherited NOTHING — with no active
-    // chat left, there was nothing to inherit from, so the repository
-    // silently detached the moment the user tidied up their chat list.
-    useChatStore.setState({ conversations: [], activeConversationId: null });
+  it("keeps the repository pinned to the sidebar when its last chat is deleted", () => {
+    // The reported bug, twice over: deleting the last chat on a repo used to
+    // spin up a detached replacement (the repo "vanished"), and the repo row
+    // itself existed only while a chat sat on it. Now the row is a pin in the
+    // sidebar: deleting a chat never removes it — only the row's own Detach
+    // does (covered below).
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
     const id = store().createConversation("model-a", { repo: WEB });
     store().deleteConversation(id);
 
-    const fresh = store().conversations[0];
-    expect(fresh).toBeDefined();
-    expect(fresh?.repoContext).toEqual(WEB);
+    expect(store().conversations).toHaveLength(0);
+    expect(store().pinnedRepos).toEqual([
+      { owner: WEB.owner, repo: WEB.repo, branch: WEB.branch, pinnedAt: expect.any(Number) },
+    ]);
   });
 
-  it("replaces the last chat with a detached one only when it was detached", () => {
-    // `repo: null` is a deliberate seed, not a fallback: the store keeps what
-    // the deleted chat had, even when that was nothing.
-    useChatStore.setState({ conversations: [], activeConversationId: null });
-    const id = store().createConversation("model-a");
+  it("keeps a deleted chat's repository pinned even when other chats remain", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
+    const bound = store().createConversation("model-a", { repo: WEB });
+    const loose = store().createConversation("model-a");
+    store().deleteConversation(bound);
+    store().deleteConversation(loose);
+
+    expect(store().conversations).toHaveLength(0);
+    expect(store().pinnedRepos.map((p) => p.repo)).toEqual([WEB.repo]);
+  });
+
+  it("detaches the repository from the sidebar only when the row's Detach is used", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
+    const id = store().createConversation("model-a", { repo: WEB });
     store().deleteConversation(id);
+    expect(store().pinnedRepos).toHaveLength(1);
 
-    const fresh = store().conversations[0];
-    expect(fresh).toBeDefined();
-    expect(fresh?.repoContext).toBeUndefined();
+    store().unpinRepoFromSidebar(WEB.owner, WEB.repo);
+
+    expect(store().pinnedRepos).toHaveLength(0);
   });
 
-  it("does not spawn a replacement when other chats remain", () => {
-    useChatStore.setState({ conversations: [], activeConversationId: null });
-    const kept = store().createConversation("model-a", { repo: WEB });
-    const deleted = store().createConversation("model-a");
-    store().deleteConversation(deleted);
+  it("unpinning is a sidebar edit only — chats and their bindings are untouched", () => {
+    // The pin is a bookmark on the sidebar, not the thread binding. Detaching
+    // a repo row must not reach into any conversation.
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
+    const id = store().createConversation("model-a", { repo: WEB });
+    store().unpinRepoFromSidebar(WEB.owner, WEB.repo);
 
-    expect(store().conversations.map((c) => c.id)).toEqual([kept]);
+    expect(store().conversations.find((c) => c.id === id)?.repoContext).toEqual(WEB);
   });
 
-  it("carries the deleted chat's mode into the replacement", () => {
-    useChatStore.setState({ conversations: [], activeConversationId: null });
-    const id = store().createConversation("model-a", { repo: WEB, mode: "plan" });
-    store().setConversationMode(id, "plan");
-    store().deleteConversation(id);
+  it("keeps one row per repository when several chats share it, and refreshes the branch", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
+    store().createConversation("model-a", { repo: WEB });
+    store().createConversation("model-a", { repo: WEB });
+    const moved: RepoContext = { ...WEB, branch: "feature/x" };
+    store().createConversation("model-a", { repo: moved });
 
-    expect(store().conversations[0]?.mode).toBe("plan");
+    expect(store().pinnedRepos).toHaveLength(1);
+    expect(store().pinnedRepos[0]?.branch).toBe("feature/x");
+  });
+
+  it("is case-insensitive about repository names, like GitHub", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null, pinnedRepos: [] });
+    store().pinRepoToSidebar({ owner: "Acme", repo: "Web", branch: "main" });
+    store().pinRepoToSidebar({ owner: "acme", repo: "web", branch: "dev" });
+
+    expect(store().pinnedRepos).toHaveLength(1);
+    expect(store().pinnedRepos[0]?.branch).toBe("dev");
+    store().unpinRepoFromSidebar("ACME", "WEB");
+    expect(store().pinnedRepos).toHaveLength(0);
   });
 
   it("never hands back a workspace from another repository", async () => {

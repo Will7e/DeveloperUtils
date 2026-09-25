@@ -37,6 +37,7 @@ import {
   Globe,
   Hammer,
   Info,
+  Key,
   LibraryBig,
   ListChecks,
   ListTree,
@@ -124,6 +125,7 @@ const LABELS: Partial<Record<ToolName, ToolLabel>> = {
   update_plan: { icon: ListChecks, past: "Updated plan", active: "Updating plan", phase: "thinking" },
   read_skill: { icon: BookOpen, past: "Read skill", active: "Reading skill", phase: "reading" },
   remember: { icon: Brain, past: "Remembered", active: "Remembering", phase: "writing" },
+  set_env: { icon: Key, past: "Stored env vars", active: "Storing env vars", phase: "writing" },
   delegate: { icon: Bot, past: "Delegated", active: "Delegating", phase: "delegating" },
   run_tool_program: {
     icon: Play,

@@ -38,6 +38,10 @@ export const REPO_READ_GROUP: readonly ToolName[] = [
   "read_process",
   "run_tool_program",
   "delegate",
+  // Reads of the agent's own state and scans: memory is a file read,
+  // license_check reads manifests — both read-only, so they belong here.
+  "memory_search",
+  "license_check",
 ];
 
 /** Repository tools that CHANGE the working copy */
@@ -46,6 +50,7 @@ export const REPO_CHANGE_GROUP: readonly ToolName[] = [
   "write_file",
   "delete_file",
   "remember",
+  "set_env",
   "get_workspace_diff",
   "update_plan",
 ];
@@ -82,15 +87,27 @@ export const REPO_COLLAB_GROUP: readonly ToolName[] = [
   "comment_on_issue",
   "review_pull_request",
   "update_pull_request",
+  "create_pull_request",
 ];
 
 /** The user's connected MCP servers (external services) */
 export const REPO_MCP_GROUP: readonly ToolName[] = ["list_mcp_tools", "call_mcp_tool"];
 
+/**
+ * The repo-side guardrail scan. The pure utility tools (generate_csv,
+ * convert_data, encode_decode, …) are deliberately NOT here: they are
+ * repo-free, so the registry predicate places them in the app block, and
+ * a group that straddles the two blocks would break the disjointness the
+ * contract test enforces. secrets_scan scans the pending CHANGE SET, so
+ * it is repo-side; it rides with the verify tools because its job is
+ * pre-push verification.
+ */
+export const REPO_GUARDRAIL_GROUP: readonly ToolName[] = ["secrets_scan"];
+
 const REPO_GROUPS: ReadonlyArray<{ title: string; tools: readonly ToolName[] }> = [
   { title: "Reading and exploring:", tools: REPO_READ_GROUP },
   { title: "Changing your working copy (never GitHub directly):", tools: REPO_CHANGE_GROUP },
-  { title: "Verifying and shipping:", tools: REPO_VERIFY_GROUP },
+  { title: "Verifying and shipping:", tools: [...REPO_VERIFY_GROUP, ...REPO_GUARDRAIL_GROUP] },
   { title: "Reading GitHub itself — issues, pull requests, reviews, CI logs:", tools: REPO_COLLAB_GROUP },
   { title: "The user's connected MCP servers:", tools: REPO_MCP_GROUP },
 ];

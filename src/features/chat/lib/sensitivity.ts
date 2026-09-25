@@ -63,8 +63,20 @@ export function isSecretHeader(name: string): boolean {
   return isSecretKey(name) || SECRET_HEADER_NAMES.test(name.trim());
 }
 
-/** Paths that are secret by NAME alone (.env files hold credentials) */
-const SECRET_PATH_PATTERN = /(^|\/)\.env($|\.)|(^|\/)\.npmrc$|(^|\/)id_(rsa|ed25519)$|\.pem$|\.p12$|\.keystore$|(^|\/)secrets?\.(json|ya?ml)$/i;
+/**
+ * Env-file paths, KEY material paths, and secret manifests — the three shapes
+ * that used to be one "secret" class.
+ *
+ * The env-file half was split off when the browser workspace started reading a
+ * repository's own committed env files: an `.env` that is part of the repository
+ * at the pinned commit is already public to everyone who can see that commit, so
+ * running the project without it is stricter than the user's laptop (where an
+ * `npm install` postinstall script can read the very same file). Key material
+ * and secret manifests are a different matter — they are credentials even when
+ * committed, almost always by mistake.
+ */
+const ENV_FILE_PATH_PATTERN = /(^|\/)\.env($|\.)/i;
+const SECRET_PATH_PATTERN = /(^|\/)\.npmrc$|(^|\/)id_(rsa|ed25519)$|\.pem$|\.p12$|\.keystore$|(^|\/)secrets?\.(json|ya?ml)$/i;
 
 /**
  * Env-file TEMPLATES, which look like the real thing and hold no values.
@@ -75,10 +87,36 @@ const SECRET_PATH_PATTERN = /(^|\/)\.env($|\.)|(^|\/)\.npmrc$|(^|\/)id_(rsa|ed25
  */
 const ENV_TEMPLATE_PATH = /\.env\.(example|sample|template|dist|test)$/i;
 
+/** True when the path is a `.env`-family file the commit itself carries (not a template, not `.npmrc`) */
+export function isCommittedEnvFilePath(path: string): boolean {
+  return ENV_TEMPLATE_PATH.test(path) ? false : ENV_FILE_PATH_PATTERN.test(path);
+}
+
+/**
+ * Which rule a secret-shaped path matches — the difference between "the repo
+ * already published this" (an env file in the commit) and "this is key material
+ * even the repo should not have".
+ */
+export type SecretPathKind = "env-file" | "key-material";
+
+/**
+ * Why a path is secret-shaped, or null when it is not secret at all.
+ *
+ * `.npmrc` deliberately lands on "key-material" although its NAME is env-like:
+ * its contents are registry AUTH TOKENS, which are credentials even when a
+ * repository commits them — the opposite of an app's `.env`, whose anon keys
+ * are public by design.
+ */
+export function secretPathKindOf(path: string): SecretPathKind | null {
+  if (SECRET_PATH_PATTERN.test(path)) return "key-material";
+  if (ENV_FILE_PATH_PATTERN.test(path)) return "env-file";
+  return null;
+}
+
 /** Class of a file path: real env files, key material and secret manifests */
 export function classifyPath(path: string): SensitivityClass {
   if (ENV_TEMPLATE_PATH.test(path)) return "project";
-  return SECRET_PATH_PATTERN.test(path) ? "secret" : "project";
+  return secretPathKindOf(path) !== null ? "secret" : "project";
 }
 
 /** What a masked value reports: that it exists and how big it is, nothing else */

@@ -98,16 +98,16 @@ const statusColors: Record<StatusDotVariant, { bg: string; ring: string }> = {
     ring: "ring-[var(--ds-blue-500)]",
   },
   success: {
-    bg: "bg-[#0070f3]",
-    ring: "ring-[#0070f3]/40",
+    bg: "bg-[var(--ds-blue-700)]",
+    ring: "ring-[var(--ds-blue-700)]/40",
   },
   building: {
     bg: "bg-[var(--ds-amber-700)]",
     ring: "ring-[var(--ds-amber-500)]",
   },
   warning: {
-    bg: "bg-[#f5a623]",
-    ring: "ring-[#f5a623]/40",
+    bg: "bg-[var(--ds-amber-700)]",
+    ring: "ring-[var(--ds-amber-700)]/40",
   },
   error: {
     bg: "bg-[var(--ds-red-800)]",

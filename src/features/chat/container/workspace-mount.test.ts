@@ -48,19 +48,30 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     if (!result.ok) return;
 
     const paths = result.result.plan.files.map((file) => file.path);
-    expect(paths).toEqual(["package.json", "src/index.ts"]);
+    expect(paths).toEqual([".env", "package.json", "src/index.ts"]);
     // What was left out is stated, by reason, in the same breath as the size — a
     // command that fails on a missing file would otherwise be reported as a
     // failing CHANGE, which is the expensive mistake here.
     const notes = result.result.notes.join("\n");
     expect(notes).toContain("were not fetched into the browser workspace");
-    // Secret-shaped paths are named rather than counted: that is the omission a
-    // dev server would trip over, and the agent has to say so instead of asking
-    // for the file to be mounted.
-    expect(notes).toContain(".env");
     // npm dependencies and build output are never fetched at all: the install
     // creates one and the commands in this tier regenerate the other.
     expect(paths).not.toContain("node_modules/left-pad/index.js");
+  });
+
+  it("fetches the committed env file and SAYS the workspace runs with the repo's own configuration", async () => {
+    const result = await planWorkspaceMount({
+      ws: workspace(),
+      read: async (path) => READ[path] ?? null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The positive counterpart of the omission notes: the agent's standing rule
+    // says env files never reach the workspace, so a mounted `.env` must be
+    // announced or the agent will keep reporting a configuration that exists.
+    const notes = result.result.notes.join("\n");
+    expect(notes).toContain("committed env file");
+    expect(notes).toContain("mounted");
   });
 
   it("refuses rather than mounting a tree with nothing in it", async () => {
@@ -101,7 +112,7 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const contents = new Map(result.result.plan.files.map((file) => [file.path, null]));
-    expect([...contents.keys()]).toEqual(["package.json", "src/index.ts", "src/new.ts"]);
+    expect([...contents.keys()]).toEqual([".env", "package.json", "src/index.ts", "src/new.ts"]);
   });
 
   it("counts an empty read for a non-empty blob as a FAILED read, and names it", async () => {
@@ -116,7 +127,7 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     // the file — "there is a package.json", "there is a lockfile, so install with
     // the frozen command" — and the failure lands in the install, where it reads as
     // a broken repository. Naming it here keeps the two apart.
-    expect(result.result.plan.files.map((file) => file.path)).toEqual(["src/index.ts"]);
+    expect(result.result.plan.files.map((file) => file.path)).toEqual([".env", "src/index.ts"]);
     const notes = result.result.notes.join("\n");
     expect(notes).toContain("package.json");
     expect(notes).toContain("20 bytes");
@@ -159,10 +170,8 @@ describe("planWorkspaceMount — what the container actually gets", () => {
   });
 
   it("hydrates package.json even when the assets have already eaten the byte budget", async () => {
-    // The screenshot's failure, reduced: a photo-heavy Next.js repo whose assets
-    // spend the whole 8 MiB before the text pass begins. The budget may still
-    // leave the manifest out today, but the mount must never answer "declares no
-    // dev script" for a project whose manifest simply was not mounted.
+    // The screenshot's failure, reduced: a photo-heavy Next.js repo. The
+    // manifests ride in first by construction now; this pins that guarantee.
     const photos = Array.from({ length: 60 }, (_, i) => ({
       path: `public/photos/photo-${i}.jpg`,
       type: "blob" as const,
@@ -211,8 +220,44 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     // One candidate, mounted. The asset overage is stated separately, not folded
     // into a count of files that were never candidates.
     expect(notes).toContain("1 of 1 candidate text files");
-    expect(notes).not.toContain("0 beyond");
+    // No empty overage clause — the text budget dropped nothing here.
+    expect(notes).not.toContain("(0 beyond");
     expect(notes).toMatch(/\b20\b.*left out of the workspace/);
+  });
+
+  it("hydrates the source before the photos, when the two cannot both fit", async () => {
+    // The second screenshot's failure, reduced: assets hydrated FIRST spent the
+    // whole 8 MiB — 64 × 128 KiB is exactly the budget — so the text pass found
+    // nothing left, `src/` never mounted, and the preview showed only what was
+    // baked into `index.html` while React rendered nothing below it. Source
+    // first, photos with the remainder: a page with broken images is damaged,
+    // a page whose code never arrived is no app at all.
+    const photos = Array.from({ length: 64 }, (_, i) => ({
+      path: `public/photos/photo-${i}.jpg`,
+      type: "blob" as const,
+      size: 128 * 1024,
+    }));
+    const result = await planWorkspaceMount({
+      ws: workspace({
+        tree: [
+          { path: "package.json", type: "blob", size: 600 },
+          { path: "src/index.ts", type: "blob", size: 20 },
+          ...photos,
+        ],
+      }),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async () => new Uint8Array(128 * 1024),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const paths = result.result.plan.files.map((file) => file.path);
+    expect(paths).toContain("package.json");
+    expect(paths).toContain("src/index.ts");
+    // The photos the remainder could not hold are stated, not silent — and the
+    // text note counts only the candidates, so no asset number bleeds into it.
+    const notes = result.result.notes.join("\n");
+    expect(notes).toContain("left out of the workspace");
+    expect(notes).toContain("2 of 2 candidate text files");
   });
 
   it("never fetches archives or executables even with a byte reader", async () => {

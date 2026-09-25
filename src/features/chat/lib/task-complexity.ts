@@ -122,10 +122,16 @@ const TRIVIAL_MARKERS = [
   "capitalize",
 ];
 
-// The `g` flag is load-bearing: without it `match` returns only the FIRST
-// path, and "two distinct paths named" — a real deep signal — could never
-// fire.
-const FILE_PATH_RE = /(?:[\w.-]+\/)+[\w.-]+\.\w{1,4}\b/g;
+// A path-shaped TOKEN, tested against whitespace/delimiter-split pieces of
+// the message. Anchored (`^…$`) on purpose: the previous form ran an
+// unanchored `text.match()` over the whole message, and on a long run of
+// word characters with no `.` in it (a minified paste, a base64 blob) the
+// greedy `[\w.-]+` backtracked from every position — O(n²), measured 4.8s
+// on 100KB, and this classifier runs on EVERY send. Splitting first bounds
+// the backtracking to one token's length.
+const PATH_TOKEN_RE = /^(?:[\w.-]+\/)+[\w.-]+\.\w{1,4}$/;
+/** A token longer than this cannot be a path worth counting */
+const PATH_TOKEN_MAX_CHARS = 200;
 
 /** Enough prose that the request is carrying real instructions */
 const LONG_REQUEST_CHARS = 600;
@@ -179,7 +185,14 @@ export function classifyRequest(input: ComplexityInput): {
   const deepHits = countAny(text, DEEP_WORK_MARKERS);
   const multiStepHits = countAny(text, MULTI_STEP_MARKERS);
   const trivialHits = countAny(text, TRIVIAL_MARKERS);
-  const fileRefs = new Set(text.match(FILE_PATH_RE) ?? []).size;
+  // Split on anything that cannot appear in a path, then test each piece
+  // against the anchored token shape. `foo=src/a.ts` still yields "src/a.ts";
+  // `src/App.tsx:42:11` still yields "src/App.tsx".
+  const fileRefs = new Set(
+    text
+      .split(/[^\w./\\-]+/)
+      .filter((tok) => tok.length > 0 && tok.length <= PATH_TOKEN_MAX_CHARS && PATH_TOKEN_RE.test(tok))
+  ).size;
 
   // ── Deep signals ──
   if (deepHits > 0) reasons.push(`deep-work phrasing (${deepHits})`);

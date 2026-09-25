@@ -405,7 +405,7 @@ html.light .comparator-divider {
 }
 
 html.light .list-comparator-results {
-  background: #ffffff;
+  background: var(--ds-background-100);
   border-top-color: var(--border-1);
 }
 
@@ -422,82 +422,82 @@ html.light .results-tab {
 
 html.light .results-tab:hover {
   color: var(--text-1);
-  background: rgba(15, 23, 42, 0.05);
+  background: var(--ds-gray-alpha-100);
 }
 
 html.light .results-tab.active {
-  background: #ffffff;
+  background: var(--ds-background-100);
   color: var(--text-1);
-  border-color: rgba(15, 23, 42, 0.12);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  border-color: var(--ds-gray-alpha-400);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 html.light .results-tab.tab-aOnly.active {
-  background: #ffffff;
-  border-color: rgba(5, 150, 105, 0.35);
-  color: #047857;
-  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.08);
+  background: var(--ds-background-100);
+  border-color: var(--border-accent);
+  color: var(--green);
+  box-shadow: 0 1px 3px var(--accent-glow);
 }
 html.light .results-tab.tab-aOnly.active .tab-badge {
-  background: rgba(5, 150, 105, 0.12);
-  color: #047857;
+  background: var(--green-dim);
+  color: var(--green);
 }
 
 html.light .results-tab.tab-bOnly.active {
-  background: #ffffff;
-  border-color: rgba(220, 38, 38, 0.35);
-  color: #b91c1c;
-  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.08);
+  background: var(--ds-background-100);
+  border-color: var(--border-accent);
+  color: var(--red);
+  box-shadow: 0 1px 3px var(--accent-glow);
 }
 html.light .results-tab.tab-bOnly.active .tab-badge {
-  background: rgba(220, 38, 38, 0.12);
-  color: #b91c1c;
+  background: var(--red-dim);
+  color: var(--red);
 }
 
 html.light .results-tab.tab-both.active {
-  background: #ffffff;
-  border-color: rgba(37, 99, 235, 0.35);
-  color: #1d4ed8;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+  background: var(--ds-background-100);
+  border-color: var(--border-accent);
+  color: var(--blue);
+  box-shadow: 0 1px 3px var(--accent-glow);
 }
 html.light .results-tab.tab-both.active .tab-badge {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: var(--blue-dim);
+  color: var(--blue);
 }
 
 html.light .results-tab.tab-union.active {
-  background: #ffffff;
-  border-color: rgba(124, 58, 237, 0.35);
-  color: #6d28d9;
-  box-shadow: 0 1px 3px rgba(124, 58, 237, 0.08);
+  background: var(--ds-background-100);
+  border-color: var(--border-accent);
+  color: var(--purple);
+  box-shadow: 0 1px 3px var(--accent-glow);
 }
 html.light .results-tab.tab-union.active .tab-badge {
-  background: rgba(124, 58, 237, 0.12);
-  color: #6d28d9;
+  background: var(--purple-dim);
+  color: var(--purple);
 }
 
 html.light .results-tab.tab-modified.active,
 html.light .results-tab.tab-mismatch.active {
-  background: #ffffff;
-  border-color: rgba(217, 119, 6, 0.35);
-  color: #b45309;
-  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.08);
+  background: var(--ds-background-100);
+  border-color: var(--border-accent);
+  color: var(--yellow);
+  box-shadow: 0 1px 3px var(--accent-glow);
 }
 html.light .results-tab.tab-modified.active .tab-badge,
 html.light .results-tab.tab-mismatch.active .tab-badge {
-  background: rgba(217, 119, 6, 0.12);
-  color: #b45309;
+  background: var(--yellow-dim);
+  color: var(--yellow);
 }
 
 html.light .tab-badge {
-  background: #e8ecf1;
+  background: var(--ds-gray-200);
   color: var(--text-2);
-  border: 1px solid rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--ds-gray-alpha-300);
 }
 
 html.light .results-search {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.12);
+  background: var(--ds-background-100);
+  border-color: var(--ds-gray-alpha-400);
   color: var(--text-1);
 }
 
@@ -572,34 +572,34 @@ html.light .comparator-path-code {
 
 html.light .comparator-tag-badge.tag-added,
 html.light .comparator-tag-badge.tag-matched {
-  background: rgba(5, 150, 105, 0.10);
-  color: #047857;
-  border-color: rgba(5, 150, 105, 0.25);
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: var(--ds-green-500);
 }
 
 html.light .comparator-tag-badge.tag-removed,
 html.light .comparator-tag-badge.tag-missing {
-  background: rgba(220, 38, 38, 0.10);
-  color: #b91c1c;
-  border-color: rgba(220, 38, 38, 0.25);
+  background: var(--red-dim);
+  color: var(--red);
+  border-color: var(--ds-red-500);
 }
 
 html.light .comparator-tag-badge.tag-modified,
 html.light .comparator-tag-badge.tag-mismatch {
-  background: rgba(217, 119, 6, 0.10);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.25);
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  border-color: var(--ds-amber-500);
 }
 
 html.light .comparator-tag-badge.tag-type-changed,
 html.light .comparator-tag-badge.tag-extra {
-  background: rgba(124, 58, 237, 0.10);
-  color: #6d28d9;
-  border-color: rgba(124, 58, 237, 0.25);
+  background: var(--purple-dim);
+  color: var(--purple);
+  border-color: var(--ds-purple-700);
 }
 
 html.light .results-footer-bar {
-  background: #f8fafc;
+  background: var(--ds-background-200);
   border-top-color: var(--border-1);
   color: var(--text-3);
 }
@@ -621,11 +621,11 @@ html.light .toolbar-btn:hover:not(:disabled) {
 
 /* Dashboard preview cards in light mode */
 html.light .dash-comp-topbar {
-  background: rgba(15, 23, 42, 0.02);
+  background: var(--ds-gray-alpha-100);
 }
 
 html.light .dash-comp-row {
-  background: rgba(15, 23, 42, 0.03);
+  background: var(--ds-gray-alpha-100);
 }
 
 html.light .dash-comp-row code {
@@ -633,20 +633,17 @@ html.light .dash-comp-row code {
 }
 
 html.light .dash-comp-badge.match {
-  background: rgba(5, 150, 105, 0.12);
-  color: #047857;
+  background: var(--green-dim);
+  color: var(--green);
 }
 
 html.light .dash-comp-badge.diff {
-  background: rgba(217, 119, 6, 0.12);
-  color: #b45309;
+  background: var(--yellow-dim);
+  color: var(--yellow);
 }
 
 html.light .dash-comp-badge.missing {
-  background: rgba(220, 38, 38, 0.12);
-  color: #b91c1c;
+  background: var(--red-dim);
+  color: var(--red);
 }
 
-/* ============================================================
-   COMPARATORS
-   ============================================================ */

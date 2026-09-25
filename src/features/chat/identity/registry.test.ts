@@ -144,6 +144,8 @@ const EXEMPT: Record<string, string> = {
     "pending auto-verify debounce timers keyed by conversation id; each removes itself when it fires or is cancelled, and holds no repository state — the check reads the store at run time",
   "services/auto-verify.ts:inFlight":
     "in-flight auto-verify promises, removed in the run's `finally`, so it empties itself and cannot hold repository state",
+  "container/preview-bridge.ts:reloadRestartPending":
+    "one-shot auto-restart offers (repo keys) seeded once per page load from the persisted preview records; each entry is consumed by the page's claim or simply never claimed — it holds no repository state and nothing here can be served as if current",
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

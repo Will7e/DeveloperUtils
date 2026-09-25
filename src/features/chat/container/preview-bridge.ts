@@ -43,6 +43,7 @@ import {
   type WorkspaceOwner,
 } from "./container-host";
 import { registerScopedResource } from "../identity/scoped-resources";
+import { sendPreviewControl, snapshotFrom } from "./preview-control-bridge";
 import {
   fileInTree,
   prepareWorkspace,
@@ -52,6 +53,8 @@ import {
 import type { MountPlan } from "./mount-plan";
 import { normalizePackageManager } from "./run-plan";
 import { injectPreviewControl } from "./preview-control-bridge";
+import { spawnEnvFor } from "./runtime-env";
+import { readValue, writeValue } from "@/services/idb-storage.service";
 
 /**
  * The runtime's own message types, spelled as literals.
@@ -92,7 +95,7 @@ type StartupOutcome =
 export type PreviewStatus = "idle" | "starting" | "running" | "failed" | "stopped";
 
 export interface PreviewIssue {
-  kind: "console-error" | "uncaught" | "unhandled-rejection";
+  kind: "console-error" | "uncaught" | "unhandled-rejection" | "blank-page";
   message: string;
   at: number;
 }
@@ -125,6 +128,23 @@ export function repoKeyOf(owner: string | null | undefined, repo: string | null 
   if (!o || !r) return null;
   return `${o}/${r}`;
 }
+
+/**
+ * The dev server's non-interactive base env — the executor's base plus the one
+ * variable a preview specifically wants (`BROWSER=none`: a dev server that
+ * tries to open a tab inside a runtime has nowhere to open it).
+ *
+ * Named rather than inlined at the spawn so the merge reads as what it is: the
+ * base layer of the same env the executor builds, not a second definition of
+ * "how a workspace process is configured".
+ */
+export const PREVIEW_BASE_ENV: Record<string, string> = {
+  CI: "1",
+  NO_COLOR: "1",
+  FORCE_COLOR: "0",
+  TERM: "dumb",
+  BROWSER: "none",
+};
 
 /** One repo's remembered preview, shown again when the user returns to it */
 interface RepoSession {
@@ -216,6 +236,20 @@ let outputUnreadable: string | null = null;
  * their dev script is broken.
  */
 let startToken = 0;
+
+/**
+ * Whether the revision this server serves carries the control bootstrap.
+ *
+ * The bootstrap rides `index.html` at mount time, and a project whose dev
+ * server generates the document it serves (Next.js, Nuxt, an API server) has
+ * no index.html to inject into. Rendering the smoke probe against such a page
+ * produces a guaranteed 6s timeout — and the issue it then wrote ("wedged, or
+ * this build predates the control bootstrap") told the user to reload a
+ * preview that no reload could ever fix, because the build will NEVER carry
+ * the bootstrap. Probing a page known to be unprobed-able is the failure, so
+ * this flag is what the probe reads before it sends anything.
+ */
+let controlInjected = false;
 
 /**
  * Ends the readiness wait in flight, if there is one.
@@ -339,8 +373,15 @@ export function setPreviewView(key: string | null): void {
   // follows the live session (the common case: only one repo has ever run);
   // when the view was on an archived repo, that repo's record is already
   // current in the map and the live state belongs to `liveKey`.
+  //
+  // EXCEPT on a page that has not started anything yet — the restored page
+  // after a reload. There the live `state` scalar is a placeholder (INITIAL),
+  // not evidence, and archiving it would overwrite the record the previous
+  // page left behind with a blank "idle". Nothing has happened here, so there
+  // is nothing to archive: the restored record is the current truth.
+  const liveIsPlaceholder = state === INITIAL && process === null;
   const outgoing = viewKey ?? liveKey;
-  if (outgoing) {
+  if (outgoing && !(liveIsPlaceholder && sessions.has(outgoing))) {
     const existing = sessions.get(outgoing);
     const isLiveView = viewKey === null || viewKey === liveKey;
     sessions.set(outgoing, {
@@ -358,6 +399,7 @@ export function setPreviewView(key: string | null): void {
       // A UI subscriber is not allowed to break the bridge.
     }
   }
+  schedulePreviewRecordSave();
 }
 
 /** Test seam: forget everything, including the server process */
@@ -365,6 +407,9 @@ export function resetPreview(): void {
   process = null;
   outputTail = "";
   outputUnreadable = null;
+  controlInjected = false;
+  runningProcessExited = null;
+  lastPlan = null;
   startToken = 0;
   abortStartup = null;
   ownerThreadId = null;
@@ -372,8 +417,267 @@ export function resetPreview(): void {
   viewKey = null;
   sessions.clear();
   state = INITIAL;
+  reloadRestartPending.clear();
   revision += 1;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
 }
+// ============================================================
+// Reload survival — what a session record owes the next page load
+// ============================================================
+// The dev server CANNOT survive a reload: it is a process inside this page's
+// WebContainer, and the container dies with the document that booted it. What
+// CAN survive is the record — which repo's preview was live, what it said, and
+// what its console had caught. So every session change is mirrored to
+// IndexedDB, and the next load folds the records back in: the repo the user
+// was looking at shows its own history instead of a blank panel, and the live
+// session's record is offered as an automatic restart rather than a mystery.
+// ============================================================
+
+/** IndexedDB key the session records live under (same store as the workspaces) */
+const PREVIEW_RECORDS_KEY = "intab_preview_sessions";
+
+/** The persisted shape. Versioned so an old record can never parse as a new one */
+interface PreviewRecordsSnapshot {
+  v: 1;
+  /** The repo whose session was LIVE when the page last changed state */
+  live: string | null;
+  records: Record<
+    string,
+    { state: PreviewState; ownerThreadId: string | null; changedAt: number }
+  >;
+}
+
+/**
+ * What a reload means for the one record that was running.
+ *
+ * Stated where the status is restored, so every surface that reads the record
+ * tells the same true story: the server is not "stopped by the user" and not
+ * "failed" — it died because the page holding it went away.
+ */
+const RELOAD_END_NOTE =
+  "The dev server ended because the page was reloaded — a browser workspace and everything running in it live on this page only. It restarts automatically.";
+
+/** Bounds the persisted record: notes and console issues are capped in memory too */
+function sanitizedForStorage(state: PreviewState): PreviewState {
+  return {
+    ...state,
+    notes: state.notes.slice(-8),
+    issues: state.issues.slice(-MAX_PREVIEW_ISSUES),
+  };
+}
+
+/** The whole record set, as it would be written right now */
+function previewRecordSnapshot(): PreviewRecordsSnapshot {
+  const records: PreviewRecordsSnapshot["records"] = {};
+  for (const [key, session] of sessions) {
+    records[key] = {
+      state: sanitizedForStorage(session.state),
+      ownerThreadId: session.ownerThreadId,
+      changedAt: session.changedAt,
+    };
+  }
+  // The live state is mirrored into its repo's record by `setState`, but the
+  // mirror has exactly one writer; a missing entry here would silently drop the
+  // one record this whole feature exists for.
+  if (liveKey && !records[liveKey]) {
+    records[liveKey] = { state: sanitizedForStorage(state), ownerThreadId, changedAt: Date.now() };
+  }
+  return { v: 1, live: liveKey, records };
+}
+
+/** Persists the record set. Never throws — persistence is the backup plan, not the primary copy */
+export async function persistPreviewRecords(): Promise<void> {
+  try {
+    await writeValue(PREVIEW_RECORDS_KEY, JSON.stringify(previewRecordSnapshot()));
+  } catch {
+    /* Unavailable storage degrades to the pre-persistence behaviour: records
+       live in memory for the page's lifetime, and nothing else breaks. */
+  }
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Debounced save. Every status change, console issue and view switch funnels
+ * here; a hot-reloading preview can produce a burst of issues, and writing one
+ * small JSON document per burst (not per event) keeps this off the hot path.
+ */
+function schedulePreviewRecordSave(): void {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void persistPreviewRecords();
+  }, 400);
+}
+
+/**
+ * A restart the page has not yet claimed.
+ *
+ * Set at restore time for the repo whose session was LIVE when the page last
+ * changed state; the page (ChatPage) consumes it for whichever conversation is
+ * active and holds that repository. A claim is one-shot: once taken (or once
+ * the user navigated away), the offer does not come back.
+ */
+const reloadRestartPending = new Set<string>();
+
+/**
+ * Reloads pending a restart, read by the page.
+ *
+ * The claim is consumed before acting, so a conversation switch cannot restart
+ * a preview the user already declined or stopped.
+ */
+
+/** The repo whose live preview a reload ended, when no restart has claimed it yet */
+export function reloadEndedPreviewRepo(): string | null {
+  return [...reloadRestartPending][0] ?? null;
+}
+
+/**
+ * Claims the pending auto-restart for one repo.
+ *
+ * True means "you are the restart": the caller should start that repo's dev
+ * server. The claim is consumed either way, so a switch away and back never
+ * restarts a preview the candidate window already offered.
+ */
+export function claimReloadEndedPreview(repoKey: string): boolean {
+  if (!reloadRestartPending.delete(repoKey)) return false;
+  return true;
+}
+
+/** Resolves once any persisted records have been folded in; callers that read restored state await it */
+let recordsRestored: Promise<void> = Promise.resolve();
+export function previewRecordsRestored(): Promise<void> {
+  return recordsRestored;
+}
+
+/** Coerces a persisted status into one that can be true after a reload */
+function restoredStatus(raw: unknown): PreviewStatus {
+  if (raw === "failed" || raw === "stopped" || raw === "idle") return raw;
+  // "running" and "starting" describe a process that no longer exists. The
+  // record is still worth showing — its console, its notes, its command — but
+  // the status must say what a reader can act on.
+  return "stopped";
+}
+
+function restoredIssue(raw: unknown): PreviewIssue | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as Record<string, unknown>;
+  if (typeof entry.message !== "string") return null;
+  const kind =
+    entry.kind === "console-error" ||
+    entry.kind === "uncaught" ||
+    entry.kind === "unhandled-rejection" ||
+    entry.kind === "blank-page"
+      ? entry.kind
+      : null;
+  if (!kind) return null;
+  return { kind, message: entry.message.slice(0, 400), at: typeof entry.at === "number" ? entry.at : 0 };
+}
+
+/** A persisted state that can be true after a reload, or null when it is not one */
+function restoredPreviewState(raw: unknown): PreviewState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as Record<string, unknown>;
+  // ANY status that describes a live process is untrue after a reload — the
+  // container died with the page, and an ARCHIVED "running" record describes
+  // the same dead process the live record does. All of them become "stopped"
+  // with the reload note, so no surface can show a server that cannot answer.
+  const wasLive = entry.status === "running" || entry.status === "starting";
+  const status = restoredStatus(entry.status);
+  const notes = Array.isArray(entry.notes)
+    ? entry.notes.filter((note): note is string => typeof note === "string").slice(-8)
+    : [];
+  if (wasLive) notes.push(RELOAD_END_NOTE);
+  const issues = Array.isArray(entry.issues)
+    ? entry.issues.map(restoredIssue).filter((issue): issue is PreviewIssue => issue !== null)
+    : [];
+  return {
+    status,
+    url: null,
+    port: null,
+    command: typeof entry.command === "string" ? entry.command : null,
+    notes,
+    issues: issues.slice(-MAX_PREVIEW_ISSUES),
+    // "Serving since" described a process the page no longer has; the reload
+    // note above is the honest record of when and why it ended.
+    startedAt: wasLive ? null : typeof entry.startedAt === "number" ? entry.startedAt : null,
+  };
+}
+
+/**
+ * Folds the persisted records into the fresh page's session map.
+ *
+ * Runs once, at module load, before any surface can read state: a panel that
+ * rendered first and learned second would show an empty preview for a frame
+ * and then flash the restored one. Never throws — a malformed record is a
+ * missing backup, not a broken app.
+ */
+function restorePreviewRecords(): Promise<void> {
+  return (async () => {
+    let raw: string | null;
+    try {
+      raw = await readValue(PREVIEW_RECORDS_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") return;
+    const snapshot = parsed as Record<string, unknown>;
+    if (snapshot.v !== 1) return;
+    const records = snapshot.records;
+    if (!records || typeof records !== "object") return;
+
+    const restoredLive = typeof snapshot.live === "string" ? snapshot.live : null;
+    let restored = 0;
+    for (const [key, entry] of Object.entries(records as Record<string, unknown>)) {
+      if (!key.includes("/")) continue;
+      const record = entry as Record<string, unknown>;
+      const restoredState = restoredPreviewState(record.state);
+      if (!restoredState) continue;
+      // What the record claimed BEFORE the reload degraded it — the only
+      // evidence that this repo's server was the one the page was running.
+      const rawStatus =
+        record.state && typeof record.state === "object"
+          ? (record.state as Record<string, unknown>).status
+          : undefined;
+      const ownerThreadId = typeof record.ownerThreadId === "string" ? record.ownerThreadId : null;
+      sessions.set(key, {
+        state: restoredState,
+        ownerThreadId,
+        changedAt: typeof record.changedAt === "number" ? record.changedAt : Date.now(),
+      });
+      restored += 1;
+      // Only a session that was LIVE (or starting) when the page went away
+      // restarts: an archived record was not running anywhere the user was
+      // looking, and a FAILED record's diagnosis IS the answer — restarting it
+      // would bury the reason it failed under a fresh attempt. The owner is
+      // not required: the page restarts through whichever conversation is
+      // active and holds the repo.
+      const wasLive = rawStatus === "running" || rawStatus === "starting";
+      if (key === restoredLive && wasLive) reloadRestartPending.add(key);
+    }
+    // The view follows the live repo AFTER the records are in the map — with
+    // nothing restored there is nothing to point at, and pointing at a repo
+    // whose record failed to parse would render a blank record over a real one.
+    if (restoredLive && sessions.has(restoredLive)) {
+      liveKey = restoredLive;
+      if (!viewKey) viewKey = restoredLive;
+    }
+    if (restored > 0) emitRevision();
+  })().catch(() => undefined);
+}
+
+recordsRestored = restorePreviewRecords();
+
 function setState(next: Partial<PreviewState>): void {
   state = { ...state, ...next };
   // The live state IS its repo's record: whatever repo owns the server reads
@@ -387,6 +691,7 @@ function setState(next: Partial<PreviewState>): void {
     });
   }
   emitRevision();
+  schedulePreviewRecordSave();
 }
 
 /** Bumps the store revision and wakes the subscribers — the notify half of both setState and the session bookkeeping */
@@ -535,8 +840,8 @@ function runnerFor(packageManager: string | null): string {
  * this project?" has to be answered BEFORE anything is started, and asking the
  * runtime would mean a boot for a question the plan already answers.
  */
-export function packageJsonOf(plan: MountPlan): string | null {
-  return fileInTree(plan.tree, "package.json");
+export function packageJsonOf(plan: MountPlan | null): string | null {
+  return plan ? fileInTree(plan.tree, "package.json") : null;
 }
 
 /**
@@ -559,6 +864,12 @@ export async function startPreview(input: {
   if (state.status === "starting") return { ok: false, error: "the preview is already starting" };
 
   const attempt = (startToken += 1);
+  // Decided again for every start: the previous revision may have carried the
+  // bootstrap and this one may not (or the injection may fail this time).
+  controlInjected = false;
+  // The plan the session serves, for the post-ready failure report's
+  // alternative-scripts hint — the manifest outlives the caller that mounted it.
+  lastPlan = input.plan;
 
   // Claimed BEFORE the prepare below, so the release event a takeover emits for
   // the thread being evicted is never mistaken for this thread losing its own
@@ -638,6 +949,7 @@ export async function startPreview(input: {
   // there is nothing to inject into, and that is a normal outcome, not a
   // failure (the interaction tools report the missing capability honestly).
   const control = injectPreviewControl(input.plan);
+  controlInjected = control.injected;
   if (control.note) setState({ notes: [...state.notes, control.note] });
 
   const prepared = await serializeWorkspaceWork(async () => {
@@ -664,8 +976,15 @@ export async function startPreview(input: {
   outputUnreadable = null;
   let spawned: ContainerProcessHandle;
   try {
+    // The repo's runtime env rides the dev server too: this is the spawn that
+    // bakes `VITE_*`/`NEXT_PUBLIC_*` into the app the preview serves, and the
+    // spawn whose `process.env` carries every committed env-file variable —
+    // which is how a NON-prefixed name works here the way it works on a
+    // laptop. One merge function with the executor's path, so precedence can
+    // never disagree.
+    const devServerEnv = await spawnEnvFor(PREVIEW_BASE_ENV, input.repoKey ?? null, input.plan.tree);
     spawned = await instance.spawn("jsh", ["-c", detected.command], {
-      env: { CI: "1", NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", BROWSER: "none" },
+      env: devServerEnv,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -689,6 +1008,7 @@ export async function startPreview(input: {
 
   process = spawned;
   const pump = pumpOutput(spawned);
+  watchRunningProcess(spawned);
 
   const outcome = await waitForServerReady(spawned, PREVIEW_START_TIMEOUT_MS);
 
@@ -718,6 +1038,7 @@ export async function startPreview(input: {
       // Already gone.
     }
     process = null;
+    runningProcessExited = null;
 
     const tail = outputTail.trim();
     const note = `\`${detected.command}\` ${outcome.error}`;
@@ -738,7 +1059,169 @@ export async function startPreview(input: {
   }
 
   setState({ status: "running", url: outcome.url, port: outcome.port });
+  // Fire-and-forget render smoke check: a server that answers is not yet a page
+  // that renders, and the difference is exactly what this surface exists to
+  // catch (a blank viewport under a green "running"). Failures land as issues,
+  // where the user and the evidence note both read them.
+  void probePreviewRender().catch(() => undefined);
   return { ok: true, url: outcome.url, port: outcome.port };
+}
+
+/**
+ * How long after a running server exits the failure report waits, so the tail
+ * the server printed last is the one the report reads.
+ */
+export const PREVIEW_POST_READY_DRAIN_MS = 750;
+
+/**
+ * Explains a dev server that DIED AFTER answering.
+ *
+ * `waitForServerReady` ends at the first `server-ready`, and nothing else was
+ * watching `spawned.exit` from there — the crash the screenshot showed (a Next.js
+ * dev server that binds its port, answers `server-ready`, and dies a moment
+ * later when the first request needs a binding this runtime cannot load) left the
+ * status "running" over a dead port, and the user read "Unable to connect to
+ * port 3111" under a green light. Same report the startup failure path gives:
+ * the command, the exit status, the diagnosis, and the server's own last words.
+ *
+ * Never throws, and never reports a deliberate stop: the token is bumped by
+ * every stop and takeover, so a process this module killed itself lands on a
+ * stale token and is dropped here.
+ */
+async function reportPostReadyExit(
+  spawned: ContainerProcessHandle,
+  exitCode: number | null
+): Promise<void> {
+  const attempt = startToken;
+  // Captured BEFORE the drain, so a stop landing during it reads as one: the
+  // token has moved by the time the wait ends.
+  await new Promise<void>((resolve) => setTimeout(resolve, PREVIEW_POST_READY_DRAIN_MS));
+  // A stop, a takeover, a workspace release, or a new start ended this server on
+  // purpose; the token has moved, and this exit is not the project's failure.
+  if (attempt !== startToken) return;
+  if (process !== spawned) return;
+
+  process = null;
+  runningProcessExited = null;
+  const command = state.command ?? "the dev server";
+  const tail = outputTail.trim();
+  const status = exitCode === null ? "its exit status is unknown" : `exit status ${exitCode}`;
+  const note = `\`${command}\` died after it started serving (${status}) — the port it answered on is gone, which is why the frame reports it cannot connect.`;
+  const hint = diagnoseDevServerFailure(tail, exitCode, declaredScripts(lastPlan));
+  setState({
+    status: "failed",
+    url: null,
+    port: null,
+    notes: [
+      ...state.notes,
+      note,
+      ...(hint ? [hint] : []),
+      ...(tail ? [`The dev server's output:\n${tail}`] : []),
+      ...(outputUnreadable
+        ? [`Its output could not be read (${outputUnreadable}), so the exit status is all the evidence there is.`]
+        : []),
+    ],
+  });
+}
+
+/**
+ * Watches a started process for its exit, once.
+ *
+ * Attached the moment the dev server is spawned and resolved by nothing here —
+ * `reportPostReadyExit` decides whether an exit is a failure or a deliberate
+ * stop. One watcher exists at a time, keyed to the process it watches: a
+ * stop-and-restart in quick succession leaves the old process's exit promise
+ * still pending, and when it resolves it must not consume the NEW watcher's
+ * delivery slot — the exit is delivered only when it belongs to the watched
+ * handle. The slot is cut by `resetPreview` and by the startup failure path;
+ * the garbage from an abandoned watcher is a promise nobody holds, not a live
+ * subscription.
+ */
+let runningProcessExited: { handle: ContainerProcessHandle; deliver: (code: number | null) => void } | null =
+  null;
+
+function watchRunningProcess(spawned: ContainerProcessHandle): void {
+  void spawned.exit
+    .then((code) => {
+      const watcher = runningProcessExited;
+      if (!watcher || watcher.handle !== spawned) return;
+      runningProcessExited = null;
+      watcher.deliver(code ?? null);
+    })
+    .catch(() => undefined);
+  runningProcessExited = {
+    handle: spawned,
+    deliver: (code) => void reportPostReadyExit(spawned, code).catch(() => undefined),
+  };
+}
+
+/**
+ * The mount plan this session is serving, kept for the post-ready failure
+ * report — the alternative-scripts hint it feeds comes from the manifest, and
+ * by the time a running server dies the caller that held the plan is long gone.
+ */
+let lastPlan: MountPlan | null = null;
+
+/** Let the app mount before asking whether it rendered anything */
+export const PREVIEW_RENDER_SMOKE_DELAY_MS = 4_000;
+
+/**
+/**
+ * Asks the running page whether it rendered anything, and records a named
+ * issue when it did not.
+ *
+ * The server being up and the app being alive are different claims: a JS
+ * exception during mount leaves the dev server healthy over an empty root —
+ * the "green status, blank preview" state that otherwise says nothing until a
+ * human stares at it. The control bootstrap (injected into every previewed
+ * index.html at mount time) answers a get-tree snapshot; an outline with zero
+ * nodes is the named symptom, and a timeout means the page never answered at
+ * all — wedged, or a build without the bootstrap.
+ *
+ * The probe only runs when the mount actually injected the bootstrap: for a
+ * project that serves a generated document (Next.js, Nuxt, an API server)
+ * there is nothing to inject into, and a probe against such a page is a
+ * guaranteed timeout naming two causes that are both false — skipped in
+ * silence, because there is genuinely nothing to check.
+ *
+ * Never throws: every failure shape is a recorded issue or a silence, never an
+ * unhandled rejection from a fire-and-forget call.
+ */
+export async function probePreviewRender(input: { delayMs?: number } = {}): Promise<boolean> {
+  const delayMs = input.delayMs ?? PREVIEW_RENDER_SMOKE_DELAY_MS;
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  // The probe owns no lifecycle: a server stopped during the wait has nothing
+  // left to probe, and reporting its ghost would overwrite the real record.
+  if (state.status !== "running") return false;
+  // A revision that carries no bootstrap (Next.js et al. — no index.html to
+  // inject into) can never answer, and the timeout it would report names two
+  // causes neither of which is true and a fix (reload) that cannot work.
+  // Unprobed here means unprobed-able, so the silence is the honest answer.
+  if (!controlInjected) return false;
+
+  const outcome = await sendPreviewControl("get-tree");
+  if (!outcome.ok) {
+    if (outcome.status === "timeout") {
+      addIssue(
+        "blank-page",
+        "The page did not answer the render check within 6s even though this build carries the control bootstrap — the page is likely wedged. Reload the preview to re-run the check."
+      );
+      return true;
+    }
+    // No frame (the panel was closed during the wait) or a refusal: nothing to
+    // say that the user cannot already see.
+    return false;
+  }
+  const snapshot = snapshotFrom(outcome);
+  if (!snapshot) return false;
+  if (snapshot.nodes.length === 0) {
+    addIssue(
+      "blank-page",
+      "The dev server is up but the page rendered nothing the snapshot can see — no text, headings, links, buttons, images, or inputs. A script during mount likely threw: read the console issues below."
+    );
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -794,6 +1277,16 @@ const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
     hint: "It refuses the workspace's Node.js version. That version belongs to the browser runtime, not to this project, so this dev script cannot run here at all — which is a limit of the preview, not a bug in the code.",
   },
   {
+    // Next 16 made Turbopack the default for `next dev`, and Turbopack's own
+    // engine cannot run on WASM bindings (vercel/next.js#75665,
+    // stackblitz/webcontainer-core#2065). The SWC-WASM download that precedes
+    // it succeeds — the failure is the engine, not the transform binding, so
+    // this hint exists so the reader is sent to Next's documented opt-out
+    // instead of debugging a bundler that was never going to start.
+    pattern: /turbo\.createProject|not supported by the (?:current )?WebAssembly/i,
+    hint: "It starts Next.js's Turbopack engine, whose bindings cannot run in a WebAssembly runtime — this dev script cannot work here no matter what is installed. The project's fix is Next's own opt-out: run the dev server with webpack (`next dev --webpack`).",
+  },
+  {
     // Two shapes of the same problem, and they need the same answer. A native
     // addon (`*.node`) cannot be loaded here at all; a WASM build of one can be
     // loaded and still fail, because the runtime's environment is not the one the
@@ -802,12 +1295,25 @@ const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
     // read as an ordinary crash, and neither is the project's fault, so the hint
     // is stated once for both rather than leaving the second to look like a bug.
     pattern:
-      /Cannot load native addon|invalid ELF header|not a valid (ELF|Win32)|not a shared object|\.node: cannot open|__napiBindingTarget|ERR_NAPI_BINDING_TARGET_CONFLICT|Cannot find native binding/i,
+      /Cannot load native addon|Cannot (find|load) native binding|invalid ELF header|not a valid (ELF|Win32)|not a shared object|\.node: cannot open|__napiBindingTarget|ERR_NAPI_BINDING_TARGET_CONFLICT|Cannot find native binding|Failed to load SWC binary|could not be found, and is needed by Next\.js/i,
     hint: "It loads a compiled binding — a native addon, or the WebAssembly build of one. The workspace runs in WebAssembly and cannot load native addons, however cleanly the install finished, so this dev script cannot run here at all. The code is not at fault: run this project in another tier, or start it with a tool that has no compiled binding.",
   },
   {
     pattern: /EADDRINUSE|address already in use/i,
     hint: "Something is already listening on its port. Stop the preview and start it again.",
+  },
+  {
+    // The module that is missing decides who is at fault, and the two read
+    // nothing alike. A package import (`@scope/pkg`, `react-server-dom`) is
+    // node_modules — an install problem. A RELATIVE or absolute path that is
+    // not in node_modules is a file of the project itself; the usual next.js
+    // shape is Next's own transpile of a TypeScript config: `next.config.ts`
+    // imports `./lib/x`, Next compiles the config to `next.config.compiled.js`,
+    // and the rewritten import then fails to resolve — a project-shaped file
+    // the install never touched, so blaming the install sends the reader to
+    // fix a thing that is not broken.
+    pattern: /Cannot find module ['"](?:\.\.?\/|[A-Za-z]:\\|\/home\/)/,
+    hint: "The config (or another project file) imports a file Node could not resolve — the missing module is a path into the project itself, not a package, so this is a project import to fix rather than an install to re-run. Next.js projects hit this through their TypeScript config: `next.config.ts` imports a relative file, and Next's own transpile of that config (`next.config.compiled.js`) fails to resolve it.",
   },
   {
     pattern: /command not found|: not found|npm error code 127|Cannot find module|ERR_MODULE_NOT_FOUND/i,
@@ -816,7 +1322,7 @@ const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
 ];
 
 /** Every script this revision declares, other than the one that was started */
-function declaredScripts(plan: MountPlan): string[] {
+function declaredScripts(plan: MountPlan | null): string[] {
   const scripts = scriptsOf(packageJsonOf(plan));
   if (!scripts) return [];
   return Object.keys(scripts).filter((name) => !(DEV_SCRIPTS as readonly string[]).includes(name));
@@ -1029,10 +1535,14 @@ export function previewEvidenceNote(): string {
   // user was looking at B when the evidence was gathered.
   const state = livePreviewState();
   if (state.status === "failed") {
-    return `# Preview\nThe app's dev server did not start: ${state.notes.slice(-2).join(" ")}. Do not describe the change as working in the browser.`;
+    const died = state.notes.join(" ").includes("died after it started serving");
+    const head = died
+      ? `The app's dev server started and then died: ${state.notes.slice(-2).join(" ")}`
+      : `The app's dev server did not start: ${state.notes.slice(-2).join(" ")}`;
+    return `# Preview\n${head}. Do not describe the change as working in the browser.`;
   }
   if (state.issues.length === 0) return "";
-  const errors = state.issues.filter((issue) => issue.kind !== "console-error").length;
+  const errors = state.issues.filter((issue) => issue.kind !== "console-error" && issue.kind !== "blank-page").length;
   const head = `# Preview\nThe app is running in the browser workspace and it reported ${state.issues.length} problem(s) at runtime${errors > 0 ? `, including ${errors} exception(s)` : ""} — this is the running app, not the build:`;
   const lines = state.issues
     .slice(-5)

@@ -52,6 +52,8 @@ import {
   type EnvironmentSignals,
   type SignalSkillSelection,
 } from "../lib/skill-signals";
+import { renderToolSignalBlock, selectToolSignals } from "../lib/tool-signals";
+import { getSessionState } from "../session/turn-engine";
 import { verificationEvidence } from "../lib/verification-ledger";
 import { registerScopedResource } from "../identity/scoped-resources";
 import { recordSkillActivity } from "../lib/skill-activity";
@@ -85,6 +87,11 @@ import { pickEscalationTarget } from "../lib/escalation";
 import { AGENT_TEMPERATURE, DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "../constants";
 import { loadStrategies } from "../braid/strategy-store";
 import { strategyBlockFor } from "../braid/inject";
+import {
+  probeFindingsFromTranscript,
+  rebuildBraidState,
+  renderBraidState,
+} from "../braid/state-file";
 import { ensureCompaction } from "./compaction";
 import { visibleMessages } from "../types";
 import type {
@@ -466,6 +473,35 @@ export async function prepareTurn(
   const environmentSignals = tools
     ? environmentSignalsFor(conversationId, live)
     : { failingChecks: [], changedPaths: [], previewErrors: [] };
+
+  // ── Braid P3: the fixed-size working state ──
+  // Derived deterministically every round from sources the harness already
+  // holds — plan, verification evidence, this turn's probe notes — and
+  // rendered as a capped block that CANNOT GROW, the anti-context-rot
+  // counterpart to the rolling summary. Rides in the turn note, after the
+  // cached prefix, because every input moves with the revision. An off
+  // switch exists for users who want the note lean (default on).
+  const braidStateBlock =
+    tools && settings.braidStateFile !== false
+      ? renderBraidState(
+          rebuildBraidState({
+            taskText: lastUser?.content ?? "",
+            plan: live.plan,
+            evidence: workspace
+              ? verificationEvidence(conversationId, { workspaceUpdatedAt: workspace.updatedAt })
+              : [],
+            probeFindings: probeFindingsFromTranscript(
+              visibleMessages(live.messages).map((m) => ({
+                role: m.role,
+                content: m.content,
+                ...(m.toolResult !== undefined ? { toolResult: m.toolResult } : {}),
+              }))
+            ),
+            turnSettled: false,
+            workspaceUpdatedAt: workspace?.updatedAt ?? null,
+          })
+        )
+      : "";
   const environmentText = renderEnvironmentSignals(environmentSignals);
   // Gated on `tools` because the bodies are delivered in the turn note, and a
   // turn with no tool surface has no note: selecting here would log skills as
@@ -490,6 +526,53 @@ export async function prepareTurn(
       ...skillSelection.loaded.map((s) => s.name),
     ]);
   }
+  // ── Tool signals: the moment, with the tools that read it ──
+  // The same decision point the skill selection above uses, aimed at tools:
+  // rules in lib/tool-signals.ts match this round's facts (failing checks,
+  // changed data files, preview errors, the request's own shape) to short
+  // notes naming the tools that act on them. Capped, deduped across rounds
+  // of the turn, and filtered to the surface this turn actually offers —
+  // a note that names a withheld tool is the advertised-but-withheld bug
+  // in one line.
+  //
+  // The failed-call facts come from the turn engine's ledger (the same
+  // source the difficulty assessment reads): a tool failing repeatedly is
+  // tool-shaped friction, and the note is the ladder's KNOWLEDGE rung —
+  // hand the contract back before any effort bump or model swap.
+  const priorToolNotes = toolSignalStateByConversation.get(conversationId) ?? [];
+  const session = getSessionState(conversationId);
+  let failedToolCalls = 0;
+  let mostFailedTool = "";
+  let mostFailedExecutions = 0;
+  for (const [signature, entry] of session.callLedger ?? []) {
+    if (entry.ok) continue;
+    failedToolCalls += 1;
+    if (entry.count > mostFailedExecutions) {
+      mostFailedExecutions = entry.count;
+      mostFailedTool = signature.split("\u0000")[0] ?? "";
+    }
+  }
+  const toolSignals =
+    tools && surfaceNames.length > 0
+      ? selectToolSignals({
+          failingChecks: environmentSignals.failingChecks,
+          changedPaths: environmentSignals.changedPaths,
+          previewErrors: environmentSignals.previewErrors,
+          userText: lastUser?.content ?? "",
+          surface: surfaceNames,
+          priorNotes: priorToolNotes,
+          failedToolCalls,
+          mostFailedTool,
+          failedToolExecutions: mostFailedExecutions,
+        })
+      : [];
+  if (tools) {
+    toolSignalStateByConversation.set(conversationId, [
+      ...priorToolNotes,
+      ...toolSignals.map((s) => s.id),
+    ]);
+  }
+
   if (skillSelection.loaded.length > 0 || skillSelection.deferred.length > 0) {
     logTurnEvent({
       turnId: null,
@@ -498,6 +581,14 @@ export async function prepareTurn(
       detail:
         `skill triggers matched — auto-loaded: ${skillSelection.loaded.map((s) => s.name).join(", ") || "none"}; ` +
         `deferred: ${skillSelection.deferred.map((s) => s.name).join(", ") || "none"}`,
+    });
+  }
+  if (toolSignals.length > 0) {
+    logTurnEvent({
+      turnId: null,
+      conversationId,
+      phase: "turn-start",
+      detail: `tool signals matched — ${toolSignals.map((s) => s.id).join(", ")}`,
     });
   }
   if (tools) {
@@ -570,6 +661,7 @@ export async function prepareTurn(
     ? composeTurnNote({
         skillSelection,
         environmentSignals,
+        braidState: braidStateBlock,
         threads,
         availability: declaredAvailability({
           repo: repoActive ? repoContext ?? null : null,
@@ -585,6 +677,7 @@ export async function prepareTurn(
         // compilation — a suite that passes over a page that throws is exactly
         // what this line exists to prevent being reported as working.
         runtime: previewEvidenceNote(),
+        toolSignals: renderToolSignalBlock(toolSignals),
         now: new Date(),
       })
     : "";
@@ -711,6 +804,18 @@ export function composeTurnNote(input: {
    * matching machinery.
    */
   environmentSignals?: EnvironmentSignals;
+  /**
+   * The fixed-size working state (Braid P3, braid/state-file.ts) — goal,
+   * decisions, facts, open threads, next action, rebuilt from plan and
+   * evidence every round. "" when disabled or nothing is derivable.
+   */
+  braidState?: string;
+  /**
+   * The tool-signal block ("" when nothing fired): the moment this turn is
+   * living through, with the tools that read it directly. Sits with the
+   * other per-round blocks — after the cached prefix, before the skills.
+   */
+  toolSignals?: string;
   availability: TurnAvailability;
   /** The verification plan block ("" when there is nothing to say) */
   verification?: string;
@@ -734,6 +839,13 @@ export function composeTurnNote(input: {
   lines.push(describeAvailability(input.availability));
   lines.push(`Today's date: ${input.now.toISOString().slice(0, 10)}.`);
 
+  // The fixed-size working state right after the frame, before the plans:
+  // it is the distilled "where is this turn" that the longer blocks below
+  // elaborate on, and the first thing a model recovering from context rot
+  // needs. Capped by construction (state-file.ts), so it cannot grow the
+  // note the way a prose ledger would.
+  if (input.braidState?.trim()) lines.push("", input.braidState.trim());
+
   // The tier decision, immediately after the environment facts it depends on:
   // the workspace line above says what is live, and this says what to DO about
   // it. Kept out of the cached prefix on purpose — the plan changes with the
@@ -751,6 +863,12 @@ export function composeTurnNote(input: {
   // mid-rewrite on is the other fact that can change what this turn should do
   // next (and the only one that can change it mid-turn).
   if (input.threads?.trim()) lines.push("", input.threads.trim());
+
+  // The moment-based tool notes, right before the skills: both are
+  // "what the harness noticed for you", and the notes point at tools the
+  // surface already offered (lib/tool-signals filters them), so they can
+  // never advertise a call this turn withheld.
+  if (input.toolSignals?.trim()) lines.push("", input.toolSignals.trim());
 
   // Loaded, not offered: the harness matched these itself — from the request
   // or from the turn's own state — so they read as instructions already in
@@ -827,6 +945,28 @@ const envSkillStateByConversation = new Map<string, string[]>();
 export function clearEnvSkillState(conversationId: string): void {
   envSkillStateByConversation.delete(conversationId);
 }
+
+/**
+ * Tool-signal ids suggested on earlier ROUNDS of the current turn, by
+ * conversation — the dedupe memory, exactly parallel to the skill state
+ * above. Cleared when the turn ends (clearToolSignalState, called by the
+ * engine next to clearEnvSkillState) and released with the thread.
+ */
+const toolSignalStateByConversation = new Map<string, string[]>();
+
+/** Test seam / engine hook: forget a turn's tool-signal record */
+export function clearToolSignalState(conversationId: string): void {
+  toolSignalStateByConversation.delete(conversationId);
+}
+
+registerScopedResource({
+  name: "turn-prep.tool-signal-state",
+  scope: "thread",
+  release: ({ transition }) => {
+    if (transition.type !== "thread.deleted") return;
+    toolSignalStateByConversation.delete(transition.threadId);
+  },
+});
 
 /**
  * The environment signals THIS round should match skills against, from

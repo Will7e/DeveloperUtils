@@ -54,6 +54,40 @@ export const BRAID_STATE_MAX_THREADS = 8;
 export const BRAID_STATE_FIELD_MAX_CHARS = 200;
 export const BRAID_STATE_GOAL_MAX_CHARS = 400;
 
+/** Probe findings pulled from the transcript, newest note first */
+export const PROBE_FINDINGS_MAX = 6;
+
+/** The minimal message shape the extractor reads — no store, no worker */
+export interface ProbeSourceMessage {
+  role: string;
+  content: string;
+  toolResult?: unknown;
+}
+
+/**
+ * Pulls fresh probe findings out of the transcript.
+ *
+ * The engine's mid-turn probe (braid/probe.ts) reports through harness notes —
+ * assistant rows whose content starts with "[harness probe]" — so the round
+ * boundary that prepares the next request can recover what those probes found
+ * without threading engine state into turn-prep. Only rows AFTER the newest
+ * user message are read: they are THIS turn's probes, not the previous
+ * turn's. Newest note first (a later note supersedes an earlier one), capped.
+ */
+export function probeFindingsFromTranscript(messages: ProbeSourceMessage[]): string[] {
+  const findings: string[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === "user" && m.toolResult === undefined) break;
+    if (m.role !== "assistant" || !m.content.startsWith("[harness probe]")) continue;
+    for (const line of m.content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("- ")) findings.push(trimmed.slice(2));
+    }
+  }
+  return findings.slice(0, PROBE_FINDINGS_MAX);
+}
+
 /** Input sources — all already in memory at any round boundary */
 export interface BraidStateInput {
   taskText: string;

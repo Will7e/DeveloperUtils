@@ -21,7 +21,7 @@
   animation: loader-pulse 2s ease-in-out infinite;
 }
 .loader-text {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   font-weight: 700;
   letter-spacing: 0.4px;
   color: var(--ds-gray-1000);

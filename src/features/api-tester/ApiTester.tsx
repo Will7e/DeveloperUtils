@@ -412,10 +412,9 @@ export function ApiTester() {
                 right: envDropdownPos.right,
                 background: "var(--bg-1)",
                 border: "1px solid var(--border-1)",
-                borderRadius: "8px",
+                borderRadius: "var(--radius-md)",
                 padding: "6px",
-                boxShadow:
-                  "0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)",
+                boxShadow: "var(--ds-shadow-menu)",
                 zIndex: 1000,
                 minWidth: "180px",
               }}

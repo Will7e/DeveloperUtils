@@ -264,9 +264,8 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                 <div className="flex items-center gap-2.5">
                   <Globe
                     className={`h-5 w-5 shrink-0 ${
-                      activeEnvironmentId === null ? "api-settings-env-icon-active" : ""
+                      activeEnvironmentId === null ? "api-settings-env-icon-active" : "text-text-3"
                     }`}
-                    style={{ color: activeEnvironmentId === null ? "#22c55e" : "var(--text-3)" }}
                   />
                   <div>
                     <h2 className="api-settings-title">Global Variables</h2>
@@ -279,9 +278,8 @@ export function SettingsModal({ isOpen, onClose, initialEnvId }: SettingsModalPr
                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
                   <Database
                     className={`h-5 w-5 shrink-0 ${
-                      activeEnvironmentId === effectiveEnvId ? "api-settings-env-icon-active" : ""
+                      activeEnvironmentId === effectiveEnvId ? "api-settings-env-icon-active" : "text-text-3"
                     }`}
-                    style={{ color: activeEnvironmentId === effectiveEnvId ? "#22c55e" : "var(--text-3)" }}
                   />
                   <div className="flex-1 min-w-0">
                     <input

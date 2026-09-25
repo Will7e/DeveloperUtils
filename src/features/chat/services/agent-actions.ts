@@ -58,13 +58,18 @@ import {
 } from "../lib/verify-contract";
 import { bindingIdOf } from "../identity/bindings";
 import { describeBinding } from "../identity/identity";
-import { assessPushPolicy, policyWarnings } from "../lib/push-policy";
+import { assessPushPolicy, findSecret, policyWarnings } from "../lib/push-policy";
 import { assessCommandPolicy, summarizeCommandPolicy } from "../lib/command-policy";
 import {
   processTail,
   startProcess,
   stopProcess,
 } from "../container/process-registry";
+import {
+  repoEnvKeys,
+  setRepoEnvFromText,
+  setRepoEnvVar,
+} from "../container/runtime-env";
 import { formatOutline } from "../container/preview-control";
 import {
   sendPreviewControl,
@@ -80,6 +85,7 @@ import {
 import { requestAutoVerify } from "./auto-verify";
 import { workspaceSupport } from "../lib/availability";
 import { describeMount } from "../container/mount-plan";
+import { repoKeyOf } from "../container/preview-bridge";
 import { runInContainer } from "../container/container-executor";
 import { mountPlanForWorkspace, workspaceOwnerFor } from "./container-workspace";
 import { planVerification } from "../lib/verification-plan";
@@ -1026,6 +1032,9 @@ async function tryBrowserWorkspace(input: {
     // The page's workspace holds one thread's tree at a time; naming this thread
     // is what lets the executor empty it first when another thread had it.
     owner: workspaceOwnerFor(input.conversationId),
+    // The repo's runtime env rides spawn env — a key the user stored once, a
+    // value the doctor inferred — so the command sees what the laptop sees.
+    repoKey: repoKeyOf(input.ws.owner, input.ws.repo),
     ...(typeof input.args.timeoutMs === "number" ? { timeoutMs: input.args.timeoutMs } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
@@ -1582,6 +1591,9 @@ export async function runStartProcess(
     plan: mount.result.plan,
     revision: ws.updatedAt,
     owner: workspaceOwnerFor(conversationId),
+    // Same env the executor and the preview merge: background processes are
+    // the third spawn site, and the repo's stored vars reach all three.
+    repoKey: repoKeyOf(ws.owner, ws.repo),
   });
   if (!outcome.ok) return fail(outcome.error, outcome.status);
 
@@ -2314,7 +2326,194 @@ export async function runDelegate(
   }
 }
 
-// ── remember (durable project memory) ────────────────────────
+// ── memory_search (read back what remember wrote) ──────────
+
+/**
+ * Searches the project memory the harness already recorded. The read
+ * half of `remember`: a fact that is on file is a fact the agent does
+ * not have to re-derive. Reads the WORKSPACE's copy (including facts
+ * recorded this session that have not been pushed yet).
+ */
+export async function runMemorySearch(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const fail = (error: string): ToolCallResult => ({
+    callId: "",
+    name: "memory_search",
+    ok: false,
+    data: { error },
+    durationMs: Date.now() - started,
+    summary: "project memory",
+  });
+
+  const store = useChatStore.getState();
+  const ws = await latestWorkspace(conversationId);
+  if (!ws) return fail("No workspace available — attach a repository first.");
+  const token = store.settings.github.token;
+
+  let current = ws;
+  if (!current.files[MEMORY_PATH] && current.tree.some((e) => e.path === MEMORY_PATH)) {
+    const loaded = await readFile(current, token, MEMORY_PATH);
+    if (!loaded.error) current = loaded.ws;
+  }
+
+  const existing = current.files[MEMORY_PATH]?.content ?? null;
+  const facts = parseMemoryFacts(existing);
+  const query = typeof args.query === "string" ? args.query.trim() : "";
+
+  if (!existing) {
+    return {
+      callId: "",
+      name: "memory_search",
+      ok: true,
+      data: {
+        facts: [],
+        total: 0,
+        note: `No project memory has been recorded yet (${MEMORY_PATH}). When you learn something durable about this repository, record it with remember.`,
+      },
+      durationMs: Date.now() - started,
+      summary: "no memory yet",
+    };
+  }
+
+  // Keywords: every term must appear (case-insensitive) — narrowing, not ranking.
+  const terms = query
+    ? query.toLowerCase().split(/[^a-z0-9_-]+/).filter(Boolean)
+    : [];
+  const matched = terms.length
+    ? facts.filter((fact) => {
+        const hay = fact.toLowerCase();
+        return terms.every((t) => hay.includes(t));
+      })
+    : facts;
+
+  return {
+    callId: "",
+    name: "memory_search",
+    ok: true,
+    data: {
+      query: query || null,
+      facts: matched,
+      total: facts.length,
+      ...(terms.length && matched.length === 0
+        ? {
+            note: `No recorded fact matches all of: ${terms.join(", ")}. Call with no query to list every fact, or record what you learned with remember.`,
+          }
+        : {}),
+      ...(terms.length && matched.length > 0 ? { note: "Matched every keyword — facts appear in file (oldest-first) order." } : {}),
+    },
+    durationMs: Date.now() - started,
+    summary: query ? `"${query.slice(0, 40)}"` : "all facts",
+  };
+}
+
+// ── secrets_scan (the gate's policy engine, agent-facing) ──
+
+/**
+ * Scans text — or the pending change set — for credential-shaped values.
+ * Deliberately the SAME engine the push gate blocks on
+ * (lib/push-policy.ts findSecret), so what this reports is exactly what
+ * the gate will enforce: an early-warning, not a different opinion.
+ * Findings are redacted by the engine itself (shape, never value).
+ */
+export async function runSecretsScan(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const fail = (error: string): ToolCallResult => ({
+    callId: "",
+    name: "secrets_scan",
+    ok: false,
+    data: { error },
+    durationMs: Date.now() - started,
+    summary: "scan failed",
+  });
+
+  const text = typeof args.text === "string" ? args.text : "";
+  if (!text.trim()) {
+    // Whole-change-set mode.
+    const ws = await latestWorkspace(conversationId);
+    if (!ws) return fail("No workspace available — attach a repository first, or pass `text` to scan.");
+    const changes = collectChanges(ws);
+    if (changes.length === 0) {
+      return {
+        callId: "",
+        name: "secrets_scan",
+        ok: true,
+        data: {
+          scanned: "change set",
+          files: 0,
+          findings: [],
+          note: "The change set is empty — nothing to scan.",
+        },
+        durationMs: Date.now() - started,
+        summary: "empty change set",
+      };
+    }
+    const findings = changes
+      .map((f) => {
+        if (f.content === null) return null; // deletion — removing a secret is a fix
+        const secret = findSecret(f.content);
+        return secret ? { path: f.path, label: secret.label, snippet: secret.snippet } : null;
+      })
+      .filter((f): f is { path: string; label: string; snippet: string } => f !== null);
+    return {
+      callId: "",
+      name: "secrets_scan",
+      ok: true,
+      data: {
+        scanned: "change set",
+        files: changes.length,
+        findings,
+        ...(findings.length > 0
+          ? {
+              note:
+                "The push gate runs this same scan and will BLOCK the push while these are present. Remove the value, read it from an environment variable (set_env stores it without writing files), and rotate the exposed credential.",
+            }
+          : {
+              note: "No credential-shaped values found. This is the same scan the push gate runs — the push should clear it.",
+            }),
+      },
+      durationMs: Date.now() - started,
+      summary: findings.length ? `${findings.length} finding(s)` : "clean",
+    };
+  }
+
+  // Text mode: one redacted finding per pattern hit.
+  const findings: Array<{ label: string; snippet: string }> = [];
+  let remaining = text;
+  for (;;) {
+    const secret = findSecret(remaining);
+    if (!secret) break;
+    findings.push({ label: secret.label, snippet: secret.snippet });
+    // Cut past this hit so one value repeated does not flood the result.
+    const cut = remaining.indexOf(secret.snippet.slice(0, 6));
+    remaining = cut >= 0 ? remaining.slice(cut + secret.snippet.length) : "";
+    if (findings.length >= 20 || !remaining) break;
+  }
+  return {
+    callId: "",
+    name: "secrets_scan",
+    ok: true,
+    data: {
+      scanned: "text",
+      findings,
+      ...(findings.length > 0
+        ? {
+            note:
+              "Values are REDACTED (shape, not content). Fix the source file — the shape is enough to find it — and rotate any real credential this caught.",
+          }
+        : { note: "No credential-shaped values found in the text." }),
+    },
+    durationMs: Date.now() - started,
+    summary: findings.length ? `${findings.length} finding(s)` : "clean",
+  };
+}
+
+// ── remember (durable project memory) ────────────────────
 
 /**
  * Records one durable fact about the repository into .intab/memory.md.
@@ -2394,6 +2593,77 @@ export async function runRemember(
     },
     durationMs: Date.now() - started,
     summary: fact.slice(0, 50),
+  };
+}
+
+// ── set_env (the workspace's configuration) ─────────────────
+
+/**
+ * Stores env variables for this repository's browser workspace.
+ *
+ * This is the conversational half of the runtime-env layer: when the doctor's
+ * verdict says keys exist nowhere in the repository, the agent asks ONCE, the
+ * user pastes, and the pairs land here — per repo, in this browser. The paste
+ * itself is discarded after parsing; values never enter a file, a mount, the
+ * transcript, or a push. Every later spawn (commands, the dev server,
+ * background processes) merges them in, which is what makes a Supabase-class
+ * app run here the way it runs on the laptop it was written on.
+ */
+export async function runSetEnv(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
+  const started = Date.now();
+  const fail = (error: string): ToolCallResult => ({
+    callId: "",
+    name: "set_env",
+    ok: false,
+    data: { error },
+    durationMs: Date.now() - started,
+    summary: "env variables",
+  });
+
+  const ws = await latestWorkspace(conversationId);
+  if (!ws) return fail("No workspace available — attach a repository first.");
+
+  const content = typeof args.content === "string" ? args.content : null;
+  const key = typeof args.key === "string" ? args.key.trim() : "";
+  const hasValue = typeof args.value === "string";
+  const value = hasValue ? (args.value as string) : null;
+
+  if (content && (key || hasValue)) {
+    return fail("Give either `content` (a pasted env file) or `key`/`value` (one variable) — not both.");
+  }
+  if (!content && !key) {
+    return fail('Nothing to store: pass `content` (env text to parse) or `key` (with optional `value`).');
+  }
+
+  const outcome = content
+    ? await setRepoEnvFromText(ws.owner, ws.repo, content)
+    : await setRepoEnvVar(ws.owner, ws.repo, key, value);
+  if (!outcome.ok) return fail(outcome.error);
+
+  // Narrowed by the branch that produced the outcome: only the text-parsed
+  // result carries the parsed key list.
+  const keys = "keys" in outcome ? outcome.keys : [key];
+  const repoKey = outcome.repoKey;
+  const allKeys = await repoEnvKeys(ws.owner, ws.repo);
+  const removed = !content && !hasValue;
+  return {
+    callId: "",
+    name: "set_env",
+    ok: true,
+    data: {
+      repo: repoKey,
+      action: content ? "stored-from-text" : removed ? "removed" : "set",
+      keys,
+      storedKeys: allKeys,
+      note: removed
+        ? `Removed \`${key}\` from this repo's workspace env. Variables now stored: ${allKeys.length === 0 ? "none" : allKeys.map((k) => `\`${k}\``).join(", ")}.`
+        : `Stored for this repo's workspace env. The next dev-server start and every command receive it. Say the variable NAMES only — never repeat the values. Variables now stored: ${allKeys.map((k) => `\`${k}\``).join(", ")}.`,
+    },
+    durationMs: Date.now() - started,
+    summary: content ? `${keys.length} env var(s)` : `${removed ? "removed" : "set"} ${key}`,
   };
 }
 

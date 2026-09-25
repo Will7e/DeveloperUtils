@@ -133,10 +133,34 @@ export type PendingApproval =
 /** The decision an approval of either kind carries */
 export type ApprovalDecision = PushDecision | HttpApprovalDecision;
 
+/**
+ * A repository PINNED to the chat sidebar.
+ *
+ * The sidebar files chats under their repository, but a repo row that existed
+ * only while it had chats disappears the moment the last chat is deleted —
+ * which read as the app silently detaching the user's repository. A pinned
+ * row is the repo's place in the sidebar, independent of chats: deleting a
+ * chat never removes it, and only the row's own Detach button does.
+ */
+export interface PinnedRepo {
+  owner: string;
+  repo: string;
+  /** The branch its chats were on — the default for a new chat started here */
+  branch: string;
+  /** When the repo was pinned, for ordering the rows */
+  pinnedAt: number;
+}
+
 export interface ChatStoreState {
   conversations: ChatConversation[];
   activeConversationId: string | null;
   settings: ChatSettings;
+  /**
+   * Repository rows the sidebar keeps showing even when they have no chats.
+   * Persisted: a repo you pinned stays pinned across reloads — it is a place
+   * in the sidebar, not a property of a session.
+   */
+  pinnedRepos: PinnedRepo[];
 
   // ── Transient (not persisted) ──
   /**
@@ -265,6 +289,23 @@ export interface ChatStoreState {
   deleteConversation: (id: string) => void;
   duplicateConversation: (id: string) => string | null;
   togglePinConversation: (id: string) => void;
+  /**
+   * Keeps a repository's row in the sidebar even with no chats on it.
+   *
+   * Called by the sidebar for every repo it renders, so a row that exists is
+   * a row that stays: deleting its chats leaves the row, and only the row's
+   * own Detach (unpin) removes it.
+   */
+  pinRepoToSidebar: (repo: { owner: string; repo: string; branch: string }) => void;
+  /**
+   * Removes a repository's sidebar row — the Detach button on the row.
+   *
+   * This, not deleting a chat, is the action that makes a repository leave
+   * the sidebar. Chats are not touched: a chat already detached from this
+   * repo is unaffected, and an attached one keeps its binding (the row is a
+   * sidebar bookmark, not the thread's own attachment).
+   */
+  unpinRepoFromSidebar: (owner: string, repo: string) => void;
   setConversationModel: (id: string, model: string | undefined) => void;
   /** Sets this conversation's reasoning-effort rung */
   setConversationEffort: (id: string, effort: ReasoningEffort | undefined) => void;
@@ -474,6 +515,58 @@ function mapConversation(
   return conversations.map((c) => (c.id === id ? fn(c) : c));
 }
 
+/** The sidebar's key for a repo — case-insensitive, like GitHub's names */
+function pinnedRepoKey(owner: string, repo: string): string {
+  return `${owner}/${repo}`.toLowerCase();
+}
+
+/**
+ * Structural guard for pins arriving from OUTSIDE the store — hydration and
+ * the cloud-sync apply door both carry arbitrary JSON that older or corrupt
+ * storage may have mangled. A pin without a usable owner/repo would render
+ * as an `undefined/undefined` row and its detach button could never match;
+ * anything without every string field is dropped rather than repaired.
+ */
+export function isPinnedRepo(value: unknown): value is PinnedRepo {
+  if (typeof value !== "object" || value === null) return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.owner === "string" &&
+    p.owner.trim().length > 0 &&
+    typeof p.repo === "string" &&
+    p.repo.trim().length > 0 &&
+    typeof p.branch === "string" &&
+    typeof p.pinnedAt === "number" &&
+    Number.isFinite(p.pinnedAt)
+  );
+}
+
+/**
+ * The pinned list with this repo in it — inserted or updated in place.
+ *
+ * Idempotent: pinning a repo that is already pinned keeps ONE row and only
+ * refreshes the branch when the caller has a concrete one (an empty branch
+ * must not overwrite a real one). Newest pin sorts first.
+ */
+function upsertPinnedRepo(
+  pinned: PinnedRepo[],
+  repo: { owner: string; repo: string; branch: string },
+  at: number = Date.now()
+): PinnedRepo[] {
+  const key = pinnedRepoKey(repo.owner, repo.repo);
+  const existing = pinned.find(
+    (p) => pinnedRepoKey(p.owner, p.repo) === key
+  );
+  if (existing) {
+    return pinned.map((p) =>
+      p === existing
+        ? { ...p, branch: repo.branch || p.branch }
+        : p
+    );
+  }
+  return [{ owner: repo.owner, repo: repo.repo, branch: repo.branch, pinnedAt: at }, ...pinned];
+}
+
 const CHAT_STORAGE_NAME = "intab_chat_state";
 
 /** Pristine builtin skill set (fresh objects each call) */
@@ -487,6 +580,7 @@ export const useChatStore = create<ChatStoreState>()(
       conversations: [],
       activeConversationId: null,
       settings: DEFAULT_CHAT_SETTINGS,
+      pinnedRepos: [],
 
       streams: {},
       abortedStreams: {},
@@ -723,6 +817,11 @@ export const useChatStore = create<ChatStoreState>()(
         set((s) => ({
           conversations: [conv, ...s.conversations],
           activeConversationId: id,
+          // A chat seeded onto a repository gives that repo its sidebar row —
+          // the same "attached repos have a row" invariant the attach path
+          // enforces (see setConversationRepo). Inheritance included: a new
+          // chat inheriting the active chat's repo is still a chat on it.
+          ...(repo ? { pinnedRepos: upsertPinnedRepo(s.pinnedRepos, repo) } : {}),
         }));
         return id;
       },
@@ -770,8 +869,8 @@ export const useChatStore = create<ChatStoreState>()(
         })),
 
       deleteConversation: (id) => {
-        // Read before the set: the replacement chat below is seeded from the
-        // thread being deleted, and `set` has already dropped it by then.
+        // Read before the set: the repository below is pinned from the thread
+        // being deleted, and `set` has already dropped it by then.
         const leaving = get().conversations.find((c) => c.id === id);
         set((s) => {
           const remaining = s.conversations.filter((c) => c.id !== id);
@@ -789,27 +888,21 @@ export const useChatStore = create<ChatStoreState>()(
           // leaving it behind is memory held for a chat that is gone.
           const composerDrafts = { ...s.composerDrafts };
           delete composerDrafts[id];
+          // The deleted chat's repository KEEPS its sidebar row: deleting a
+          // chat is not detaching a repository, and the row is where a new
+          // chat on that repo starts. (The pin is idempotent, so repos that
+          // still have chats re-pin to the same row.)
+          const pinnedRepos = leaving?.repoContext
+            ? upsertPinnedRepo(s.pinnedRepos, leaving.repoContext)
+            : s.pinnedRepos;
           return {
             conversations: remaining,
             activeConversationId: active,
             workspaces,
             composerDrafts,
+            pinnedRepos,
           };
         });
-        // Deleting the LAST chat leaves the store empty, and the empty state
-        // is a working chat (the composer must always be usable — the page
-        // counts on a fresh thread existing). That replacement is created
-        // HERE, seeded with the deleted chat's repository and mode, rather
-        // than by the page with no seed: an unseeded create inherits the
-        // active chat's repo, and the active chat is now null, so the fresh
-        // chat used to come up detached — the user's repo silently vanished
-        // because they tidied up their chat list.
-        if (leaving && get().conversations.length === 0) {
-          get().createConversation(undefined, {
-            ...(leaving.repoContext ? { repo: leaving.repoContext } : { repo: null }),
-            ...(leaving.mode ? { mode: leaving.mode } : {}),
-          });
-        }
         // The deleted thread's binding is announced so every cache scoped to it
         // releases its share: file reads, published URLs, recorded evidence.
         // Before, each of those was forgotten (or not) separately, and the ones
@@ -876,6 +969,25 @@ export const useChatStore = create<ChatStoreState>()(
           })),
         })),
 
+      // A repo the sidebar is rendering is a repo the sidebar keeps rendering:
+      // the pin is what makes the row survive its chats, so the sidebar calls
+      // this for every repo group it draws rather than only on an explicit
+      // user gesture. Idempotent, and the branch refresh keeps the row's
+      // "new chat here" default on the branch the user's threads moved to.
+      pinRepoToSidebar: (repo) =>
+        set((s) => ({ pinnedRepos: upsertPinnedRepo(s.pinnedRepos, repo) })),
+
+      // The one action that removes a repo row from the sidebar — the row's
+      // own Detach button. Chats are untouched: the pin is a bookmark on the
+      // sidebar, not the thread binding (setConversationRepo owns that), so
+      // unpinning must not reach into any conversation.
+      unpinRepoFromSidebar: (owner, repo) =>
+        set((s) => {
+          const key = pinnedRepoKey(owner, repo);
+          const next = s.pinnedRepos.filter((p) => pinnedRepoKey(p.owner, p.repo) !== key);
+          return next.length === s.pinnedRepos.length ? s : { pinnedRepos: next };
+        }),
+
       setConversationModel: (id, model) =>
         set((s) => ({
           conversations: mapConversation(s.conversations, id, (c) =>
@@ -938,8 +1050,19 @@ export const useChatStore = create<ChatStoreState>()(
         // to a component effect is a hop that can be missed, and missing it is
         // exactly how a thread came to be on repository B while its workspace
         // and its recorded evidence still belonged to A.
-        if (repo) void setAttachment(id, repo);
-        else void clearAttachment(id);
+        if (repo) {
+          // Attaching a repository gives it its sidebar row (the pin). Doing
+          // it here — at the one choke point every attach flows through — is
+          // what makes "a repo the user is working on has a row" true without
+          // the sidebar having to race its own renders to keep it so.
+          set((s) => ({ pinnedRepos: upsertPinnedRepo(s.pinnedRepos, repo) }));
+          void setAttachment(id, repo);
+        } else {
+          // Detaching a CHAT does not unpin the ROW: the row is the repo's
+          // place in the sidebar, and it keeps standing with a "no chats" note
+          // until the row's own Detach button is used (unpinRepoFromSidebar).
+          void clearAttachment(id);
+        }
       },
 
       setConversationPlan: (id, plan) =>
@@ -1398,6 +1521,7 @@ export const useChatStore = create<ChatStoreState>()(
         conversations: state.conversations,
         activeConversationId: state.activeConversationId,
         settings: state.settings,
+        pinnedRepos: state.pinnedRepos,
       }),
       // NOTE: pendingTurn rides inside conversations, so it persists
       // automatically — that's what makes reload-resume detectable.
@@ -1433,6 +1557,27 @@ export const useChatStore = create<ChatStoreState>()(
           // "intab/intab-llm*" id would otherwise 404 on the next send.
           conversations: (p.conversations ?? current.conversations).map((c) =>
             isLegacyIntabModelId(c.model) ? { ...c, model: DEFAULT_CHAT_MODEL } : c
+          ),
+          // The sidebar's repo rows, persisted. Hydrated from storage, then
+          // RE-SEEDED from every attached chat below: the pin is what keeps a
+          // row alive after its chats are deleted, so the invariant is "every
+          // attached repo has a row", and hydration enforces it rather than
+          // trusting older storage that predates the field.
+          pinnedRepos: [
+            // Persisted pins are validated before they touch the store; the
+            // re-seed below enforces the invariant against the chats.
+            ...(p.pinnedRepos ?? []).filter(isPinnedRepo),
+            ...(p.conversations ?? [])
+              .filter((c) => c.repoContext)
+              .map((c) => ({
+                owner: c.repoContext!.owner,
+                repo: c.repoContext!.repo,
+                branch: c.repoContext!.branch ?? "",
+                pinnedAt: c.repoContext!.attachedAt ?? Date.now(),
+              })),
+          ].reduce<PinnedRepo[]>(
+            (acc, repo) => upsertPinnedRepo(acc, repo, repo.pinnedAt),
+            []
           ),
           streams: {},
           abortedStreams: {},

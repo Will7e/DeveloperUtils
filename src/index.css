@@ -276,12 +276,6 @@
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", monospace;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-
   /* shadcn compat tokens */
   --background: var(--bg-0);
   --foreground: var(--text-1);
@@ -494,7 +488,6 @@ html.light {
   /* ---- InTab Modern Logo Tokens (Light Mode) ---- */
   --logo-tab-fill: #ffffff;
   --logo-tab-stroke: #000000;
-  --logo-tab-highlight: rgba(0, 112, 243, 0.4);
   --logo-text-color: #000000;
   --logo-dot-color: #0070f3;
   --logo-dot-glow: none;
@@ -569,6 +562,15 @@ input[type="checkbox"]:indeterminate,
   background-repeat: no-repeat;
 }
 
+/* Light mode swaps the indeterminate dash to a light-scale gray (the dark
+   #8f8f8f would sit on a white box at the same value — invisible). The
+   dash can't read a CSS var from inside the SVG data URI, so the light
+   value is a literal by necessity. */
+html.light input[type="checkbox"]:indeterminate,
+html.light .api-checkbox:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cline x1='5' y1='10' x2='15' y2='10' stroke='%23a8a8a8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
 /* Disabled states */
 input[type="checkbox"]:disabled,
 .api-checkbox:disabled {
@@ -604,13 +606,6 @@ html.light .activity-brand-text {
   color: #000000;
   background: none;
   -webkit-text-fill-color: initial;
-}
-
-html.light .brand-text {
-  background: linear-gradient(135deg, #000000, #4d4d4d);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 /* ---- Light: Activity Bar Logo ---- */
@@ -711,11 +706,6 @@ html.light .resize-handle:active .resize-handle-indicator {
 }
 
 /* ---- Light: Dropdowns & Modals ---- */
-html.light .new-file-dropdown {
-  background: var(--bg-1);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
 html.light .palette-container {
   background: var(--ds-background-100);
   border-color: var(--ds-gray-alpha-400);
@@ -729,11 +719,6 @@ html.light .palette-item-icon {
 
 html.light .palette-item-active {
   background: var(--ds-gray-200);
-}
-
-html.light .palette-overlay {
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(4px);
 }
 
 /* ---- Light: Palette Item Shortcut ---- */
@@ -944,74 +929,6 @@ html.light .dash-api-url-input {
   color: var(--text-1);
 }
 
-/* ---- Light: Workflow Canvas ---- */
-html.light .wf-canvas-wrapper {
-  background-color: var(--bg-0);
-  background-image:
-    radial-gradient(circle at top right, rgba(0, 112, 243, 0.04), transparent 50%),
-    radial-gradient(circle at bottom left, rgba(142, 78, 198, 0.04), transparent 50%),
-    linear-gradient(to bottom right, #ffffff, #fafafa);
-  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.02);
-}
-
-html.light .wf-minimap {
-  background: rgba(255, 255, 255, 0.90) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
-}
-
-/* ---- Light: Workflow Nodes ---- */
-html.light .wf-node-process,
-html.light .wf-node-data,
-html.light .wf-node-integration {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-html.light .wf-node-process:hover,
-html.light .wf-node-data:hover,
-html.light .wf-node-integration:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
-}
-
-html.light .wf-node-start .wf-node-terminal-inner,
-html.light .wf-node-end .wf-node-terminal-inner {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-html.light .wf-node-decision-diamond {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-html.light .wf-handle {
-  border-color: var(--bg-1) !important;
-}
-
-/* ---- Light: Workflow Palette Items ---- */
-html.light .wf-palette-item {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.05);
-}
-
-html.light .wf-palette-item:hover {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.10);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-}
-
-html.light .wf-palette-icon-wrapper {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-/* ---- Light: Workflow Toggle Group ---- */
-html.light .wf-prop-toggle-group {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-html.light .wf-prop-toggle-item:hover {
-  background: rgba(0, 0, 0, 0.04);
-}
-
 /* ---- Light: Results Tab Active ---- */
 html.light .results-tab.active {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -1122,39 +1039,11 @@ html.light .lib-sidebar-footer {
   background: rgba(0, 0, 0, 0.01);
 }
 
-/* ---- Light: Diff Stats ---- */
-html.light .diff-stat-add {
-  background: var(--green-dim);
-  color: var(--green);
-}
-
-html.light .diff-stat-del {
-  background: var(--red-dim);
-  color: var(--red);
-}
-
-html.light .diff-stat-eq {
-  background: rgba(0, 0, 0, 0.03);
-}
-
 /* ---- Light: Lib Search Highlight ---- */
 html.light .lib-search-highlight,
 html.light .lib-text-highlight {
   background: rgba(0, 112, 243, 0.12);
   color: #0070f3;
-}
-
-/* ---- Light: Cancel Pulse overrides removed ---- */
-
-/* ---- Light: Brand Icon Glow ---- */
-html.light .brand-icon-svg {
-  color: var(--accent);
-  fill: rgba(0, 112, 243, 0.12);
-}
-
-/* ---- Light: Comparator options ---- */
-html.light .comparator-option-label input {
-  accent-color: var(--accent);
 }
 
 /* ---- Light: Lib TOC Item Match ---- */

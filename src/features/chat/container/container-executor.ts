@@ -46,6 +46,7 @@ import {
   type WorkspaceOwner,
 } from "./container-host";
 import { flattenTree, type MountPlan } from "./mount-plan";
+import { spawnEnvFor } from "./runtime-env";
 import {
   CONTAINER_DEFAULT_TIMEOUT_MS,
   CONTAINER_MAX_OUTPUT_CHARS,
@@ -171,6 +172,14 @@ interface ExecOutcome {
   unreadable: string | null;
 }
 
+/** The env one command runs with — the non-interactive base unless the caller merged the repo's vars */
+interface ExecOptions {
+  timeoutMs: number;
+  maxChars: number;
+  signal?: AbortSignal;
+  env?: Record<string, string>;
+}
+
 /**
  * Runs one command line and collects its output, capped as it arrives.
  *
@@ -181,12 +190,12 @@ interface ExecOutcome {
 async function execOnce(
   instance: ContainerRuntime,
   command: string,
-  options: { timeoutMs: number; maxChars: number; signal?: AbortSignal }
+  options: ExecOptions
 ): Promise<{ ok: true; outcome: ExecOutcome } | { ok: false; error: string }> {
   const started = Date.now();
   let process: Awaited<ReturnType<ContainerRuntime["spawn"]>>;
   try {
-    process = await instance.spawn(CONTAINER_SHELL, ["-c", command], { env: { ...CONTAINER_ENV } });
+    process = await instance.spawn(CONTAINER_SHELL, ["-c", command], { env: options.env ?? { ...CONTAINER_ENV } });
   } catch (error) {
     return {
       ok: false,
@@ -396,7 +405,9 @@ async function exitCodeOf(process: Awaited<ReturnType<ContainerRuntime["spawn"]>
 export async function ensureDependencies(
   plan: MountPlan,
   revision: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** The merged env for this repo — absent means the plain non-interactive base (tests) */
+  env?: Record<string, string>
 ): Promise<{ ok: true; installed: string | null; notes: string[] } | { ok: false; error: string }> {
   if (installedRevision === revision) return { ok: true, installed: null, notes: [] };
   const instance = await ensureContainer();
@@ -463,6 +474,7 @@ export async function ensureDependencies(
       // report a timeout as if the code were at fault.
       timeoutMs: CONTAINER_MAX_TIMEOUT_MS,
       maxChars: CONTAINER_MAX_OUTPUT_CHARS,
+      ...(env ? { env } : {}),
       ...(signal ? { signal } : {}),
     });
 
@@ -793,6 +805,16 @@ export async function runInContainer(request: {
    * evidence.
    */
   owner?: WorkspaceOwner;
+  /**
+   * The repository the mounted tree belongs to (`owner/repo`), for the runtime
+   * env.
+   *
+   * The workspace's stored env vars — a key the user pasted once, a value the
+   * doctor inferred — reach the process ONLY through here: they ride spawn env,
+   * never files, so nothing mounted or pushed ever carries them. Optional for
+   * the same reason `owner` is; absent means the plain non-interactive base.
+   */
+  repoKey?: string | null;
 }): Promise<ContainerExecResult> {
   if (request.signal?.aborted) return { ok: false, error: STOPPED_BY_USER };
 
@@ -804,6 +826,12 @@ export async function runInContainer(request: {
       return { ok: false, error: containerStatus().reason ?? "no browser workspace is available on this page" };
     }
 
+    // One merge per run: the base env, the commit's own env files (so a
+    // non-`VITE_` variable reaches `process.env` the way it reaches it on a
+    // laptop) and the repo's stored vars are combined HERE, so a command and
+    // the preview's dev server can never disagree about precedence.
+    const spawnEnv = await spawnEnvFor(CONTAINER_ENV, request.repoKey ?? null, request.plan.tree);
+
     const prepared = await prepareWorkspace(request.plan, request.revision, request.owner);
     if (!prepared.ok) return { ok: false, error: prepared.error };
     const notes: string[] = [...prepared.notes];
@@ -812,7 +840,7 @@ export async function runInContainer(request: {
     }
 
     if (request.install !== false) {
-      const installed = await ensureDependencies(request.plan, request.revision, request.signal);
+      const installed = await ensureDependencies(request.plan, request.revision, request.signal, spawnEnv);
       if (!installed.ok) return { ok: false, error: installed.error };
       notes.push(...installed.notes);
     }
@@ -822,6 +850,7 @@ export async function runInContainer(request: {
     const result = await execOnce(instance, request.command, {
       timeoutMs,
       maxChars,
+      env: spawnEnv,
       ...(request.signal ? { signal: request.signal } : {}),
     });
     if (!result.ok) return { ok: false, error: result.error };

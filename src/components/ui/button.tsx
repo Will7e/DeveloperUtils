@@ -24,7 +24,7 @@ const buttonVariants = cva(
         destructive:
           "bg-[var(--ds-red-800)] text-white border border-transparent hover:bg-[var(--ds-red-900)]",
         warning:
-          "bg-[var(--ds-amber-800)] text-[#0a0a0a] border border-transparent hover:bg-[var(--ds-amber-900)]",
+          "bg-[var(--ds-amber-800)] text-[var(--ds-background-100)] border border-transparent hover:bg-[var(--ds-amber-900)]",
         ghost:
           "bg-transparent text-[var(--ds-gray-900)] border border-transparent hover:bg-[var(--ds-gray-alpha-200)] hover:text-[var(--ds-gray-1000)]",
         link: "text-[var(--ds-blue-700)] underline-offset-4 hover:underline bg-transparent border-none p-0 h-auto",

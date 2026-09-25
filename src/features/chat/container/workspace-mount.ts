@@ -21,9 +21,12 @@
 // ============================================================
 
 import type { WorkspaceState } from "../types";
+import { isCommittedEnvFilePath } from "../lib/sensitivity";
 import { collectChanges } from "../workspace/workspace";
-import { planMount, type MountPlan } from "./mount-plan";
+import { planMount, flattenTree, type MountPlan } from "./mount-plan";
 import { hydrateTree } from "./tree-source";
+import { diagnoseEnv } from "./env-doctor";
+import { inferRepoEnvFromPublicLiterals } from "./runtime-env";
 
 export interface MountPlanResult {
   plan: MountPlan;
@@ -69,9 +72,9 @@ export async function planWorkspaceMount(input: {
 
   // The hydrator's own exclusions, summarized by reason rather than enumerated:
   // a project's `node_modules` is thousands of entries and listing them would
-  // bury the three lines that matter. Secret-shaped paths are the exception —
-  // they are named, because "something was left out" is not enough when the
-  // something is what a dev server would need to start.
+  // bury the three lines that matter. Key material is the exception — it is
+  // named, because "something was left out" is not enough when the something is
+  // what a deploy script would need.
   if (hydrated.skipped.length > 0) {
     const counts = new Map<string, number>();
     for (const skip of hydrated.skipped) counts.set(skip.reason, (counts.get(skip.reason) ?? 0) + 1);
@@ -79,14 +82,14 @@ export async function planWorkspaceMount(input: {
       .slice(0, 4)
       .map(([reason, count]) => `${count} ${reason}`)
       .join("; ");
-    const secrets = hydrated.skipped.filter((skip) => skip.reason.startsWith("secret-shaped"));
+    const keyMaterial = hydrated.skipped.filter((skip) => skip.reason.startsWith("key material"));
     notes.push(
       `${hydrated.skipped.length} file(s) in this revision were not fetched into the browser workspace: ${summary}.` +
-        (secrets.length > 0
-          ? ` Secret-shaped paths never enter a workspace (${secrets
+        (keyMaterial.length > 0
+          ? ` Key material never enters a workspace (${keyMaterial
               .slice(0, 3)
               .map((skip) => skip.path)
-              .join(", ")}${secrets.length > 3 ? ", …" : ""}): report anything that needs one rather than asking for it.`
+              .join(", ")}${keyMaterial.length > 3 ? ", …" : ""}): report anything that needs one rather than asking for it.`
           : "")
     );
   }
@@ -98,6 +101,51 @@ export async function planWorkspaceMount(input: {
         .map((skip) => `${skip.path} (${skip.code})`)
         .join(", ")}${plan.skipped.length > 4 ? ", …" : ""}. A failure that names one of them is not a failure of the change.`
     );
+  }
+
+  // The counterpart of the omissions above: when the revision's own env files
+  // made it into the tree, the agent is TOLD — its standing instruction says env
+  // files never reach the workspace, and acting on the stale rule would have it
+  // report a missing configuration that is in fact mounted and working.
+  const committedEnv = plan.files.filter((file) => isCommittedEnvFilePath(file.path)).map((file) => file.path);
+  if (committedEnv.length > 0) {
+    notes.push(
+      `This revision's committed env file(s) — ${committedEnv
+        .slice(0, 3)
+        .map((path) => `\`${path}\``)
+        .join(", ")}${committedEnv.length > 3 ? ", …" : ""} — are mounted: they are part of the commit, so the workspace runs with the configuration the repository itself publishes. Values a user keeps only in their local (uncommitted) env file are a different matter: ask for those in conversation, never as a file.`
+    );
+  }
+
+  // The doctor's verdict rides the mount notes, so a preview that fails for an
+  // env reason is diagnosed BEFORE the failure instead of after it — and the
+  // values the doctor inferred from public literals are persisted (once per
+  // repo), so the next dev server starts with them without anyone asking.
+  const treeFiles = flattenTree(plan.tree);
+  const report = diagnoseEnv({
+    files: treeFiles,
+    packageJson: treeFiles.find((file) => file.path === "package.json")?.content as string | null ?? null,
+  });
+  if (report.inferred.length > 0) {
+    const inferred = await inferRepoEnvFromPublicLiterals(input.ws.owner, input.ws.repo, report.inferred);
+    if (inferred.keys.length > 0) {
+      notes.push(
+        `${inferred.keys.length} env value(s) were inferred from public literals in this repository (${inferred.keys
+          .map((key) => `\`${key}\``)
+          .join(", ")}) and stored for this repo's workspace — public-by-design endpoints only, never a secret.`
+      );
+    }
+  }
+  if (report.missingKeys.length > 0) {
+    notes.push(
+      `The code references env key(s) that exist nowhere in this repository or the stored env: ${report.missingKeys
+        .map((key) => `\`${key}\``)
+        .join(", ")}. Ask the user for exactly these in conversation (a paste is parsed and remembered per repo via set_env); never invent values.`
+    );
+  }
+  if (report.findings.some((finding) => finding.kind === "blocked")) {
+    const blocked = report.findings.find((finding) => finding.kind === "blocked")!;
+    notes.push(blocked.message);
   }
   return { ok: true, result: { plan, notes } };
 }

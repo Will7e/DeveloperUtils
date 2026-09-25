@@ -157,8 +157,15 @@ export async function mountPlanForWorkspace(
 export async function startPreviewForConversation(
   conversationId: string
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
-  const live = selectWorkspace(useChatStore.getState(), conversationId);
-  const ws = live ?? (await useChatStore.getState().ensureWorkspace(conversationId));
+  // Re-read the ACTIVE conversation before waiting on anything: the caller may
+  // be an effect that fired before the chat store finished hydrating, and an
+  // id captured at call time was null then. `ensureWorkspace(null)` would
+  // create a stray conversation in a hydrated store — the one thing the store
+  // explicitly avoids — so the restart waits for a real thread instead.
+  const active = conversationId || useChatStore.getState().activeConversationId;
+  if (!active) return { ok: false, error: "No conversation is active yet, so there is nothing to start a preview for." };
+  const live = selectWorkspace(useChatStore.getState(), active);
+  const ws = live ?? (await useChatStore.getState().ensureWorkspace(active));
   if (!ws) return { ok: false, error: "No workspace available — attach a repository first." };
 
   const mount = await mountPlanForWorkspace(ws);
@@ -167,7 +174,7 @@ export async function startPreviewForConversation(
     plan: mount.result.plan,
     revision: ws.updatedAt,
     mountNotes: mount.result.notes,
-    owner: workspaceOwnerFor(conversationId),
+    owner: workspaceOwnerFor(active),
     // The session is filed under its REPO, so its record (status, console
     // errors, notes) follows the repo through sidebar switches instead of
     // being shown to whichever thread is active.

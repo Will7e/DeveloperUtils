@@ -4,7 +4,7 @@
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--ds-overlay-strong);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: flex-start;
@@ -149,6 +149,49 @@
 .palette-item-active .palette-item-shortcut {
   background: var(--ds-gray-300);
   color: var(--ds-gray-1000);
+}
+
+/* Footer: keyboard hints + result count, mirroring the Geist menu footer */
+.palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-1);
+  background: var(--ds-background-100);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  user-select: none;
+}
+.palette-footer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.palette-footer-hint kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  background: var(--ds-gray-200);
+  border: 1px solid var(--ds-gray-alpha-400);
+  border-radius: 4px;
+}
+.palette-footer-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+html.light .palette-footer {
+  background: var(--ds-background-200);
 }
 
 /* ============================================================

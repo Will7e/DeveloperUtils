@@ -55,12 +55,33 @@ describe("planMount — the tree", () => {
 });
 
 describe("planMount — the exclusions, each with its reason", () => {
-  it("keeps a secret-shaped file out, and says why in terms of who can read the tree", () => {
-    const plan = planMount({ base: [base(".env", "TOKEN=1"), base("src/.env.local", "A=2")], changes: [] });
+  it("keeps KEY MATERIAL out, and says why in terms of who can read the tree", () => {
+    // `.npmrc` rides with the keys on purpose: its contents are registry auth
+    // tokens, not app configuration, and committing one is how tokens leak.
+    const plan = planMount({ base: [base("id_rsa", "-----BEGIN"), base(".npmrc", "//npm.pkg:authToken=x"), base("secrets.json", "{}")], changes: [] });
     expect(plan.files).toEqual([]);
-    expect(plan.skipped.map((s) => s.code)).toEqual(["secret", "secret"]);
+    expect(plan.skipped.map((s) => s.code)).toEqual(["secret", "secret", "secret"]);
     expect(plan.skipped[0]?.message).toContain("not mounted");
     expect(plan.skipped[0]?.message).toContain("dev server");
+  });
+
+  it("mounts the env file the COMMIT itself carries", () => {
+    // The policy follows the commit: an `.env` in the repository is already
+    // public to everyone who can see that commit, so refusing to run the
+    // project with it is stricter than the user's laptop, where the same
+    // install scripts read the very same file.
+    const plan = planMount({ base: [base(".env", "VITE_SUPABASE_URL=https://x.supabase.co"), base(".env.local", "VITE_KEY=y")], changes: [] });
+    expect(plan.files.map((f) => f.path)).toEqual([".env", ".env.local"]);
+    expect(plan.skipped).toEqual([]);
+  });
+
+  it("lets an agent's edit to a committed env file through, but never key material", () => {
+    const plan = planMount({
+      base: [base(".env", "KEY=1")],
+      changes: [{ path: ".env", content: "KEY=2", status: "modified" }, { path: "id_rsa", content: "x", status: "added" }],
+    });
+    expect(plan.files.map((f) => f.path)).toEqual([".env"]);
+    expect(plan.skipped.map((s) => s.path)).toEqual(["id_rsa"]);
   });
 
   it("keeps an env TEMPLATE, which looks secret and holds no values", () => {
@@ -115,12 +136,12 @@ describe("describeMount — a claim that carries its own omissions", () => {
 
   it("says how many were skipped, because a silent omission is the failure mode", () => {
     const plan = planMount({
-      base: [base("a.ts"), base(".env", "T=1"), base("b/.env.production", "T=2")],
+      base: [base("a.ts"), base(".npmrc", "token"), base("id_rsa", "x"), base("b/.pem", "x")],
       changes: [],
     });
     const line = describeMount(plan);
     expect(line).toContain("1 file");
-    expect(line).toContain("2 skipped");
-    expect(line).toContain(".env");
+    expect(line).toContain("3 skipped");
+    expect(line).toContain(".npmrc");
   });
 });

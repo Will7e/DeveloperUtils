@@ -13,6 +13,7 @@ import {
   APP_PROMPT_TOOLS,
   REPO_CHANGE_GROUP,
   REPO_COLLAB_GROUP,
+  REPO_GUARDRAIL_GROUP,
   REPO_MCP_GROUP,
   REPO_PROMPT_TOOLS,
   REPO_READ_GROUP,
@@ -81,6 +82,7 @@ describe("prompt generation", () => {
       REPO_CHANGE_GROUP,
       REPO_VERIFY_GROUP,
       REPO_COLLAB_GROUP,
+      REPO_GUARDRAIL_GROUP,
       REPO_MCP_GROUP,
     ];
     const seen = new Set<string>();

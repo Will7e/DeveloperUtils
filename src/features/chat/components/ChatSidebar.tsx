@@ -44,6 +44,7 @@ import {
   Plus,
   Search,
   Settings,
+  CircleMinus,
   Trash2,
   TriangleAlert,
   X,
@@ -55,6 +56,7 @@ import { DeleteConfirmPopover } from "@/components/ui/DeleteConfirmPopover";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useNarrowLayout } from "./useNarrowLayout";
 import type { ChatConversation } from "../types";
+import { useChatStore } from "@/stores/chat.store";
 import {
   conversationMatchesQuery,
   conversationRowMeta,
@@ -104,6 +106,15 @@ interface ChatSidebarProps {
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
+  /**
+   * Detach a REPOSITORY from the sidebar — the button on the repo row.
+   *
+   * This, and only this, is what makes a repository leave the sidebar:
+   * deleting a chat never does. Empty rows (repos whose chats are all
+   * deleted) carry the button too, because a row with no chats is exactly
+   * the one the user is looking at when they decide the repo is done.
+   */
+  onDetachRepo?: (owner: string, repo: string) => void;
   onOpenSettings?: () => void;
   /** What each thread is doing, keyed by conversation id (lib/conversation-status) */
   statuses: Record<string, ConversationStatus>;
@@ -150,6 +161,7 @@ export function ChatSidebar({
   onDelete,
   onDuplicate,
   onTogglePin,
+  onDetachRepo,
   onOpenSettings,
   statuses,
 }: ChatSidebarProps) {
@@ -184,6 +196,35 @@ export function ChatSidebar({
   const searchToggleRef = React.useRef<HTMLButtonElement | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const drawer = useNarrowLayout();
+
+  // ── Pinned repositories ──
+  // The sidebar's repo rows are PINS, not projections of the chat list: a row
+  // survives its chats, and only the row's Detach button removes it. Every
+  // repo rendered here (from the store's persisted `pinnedRepos`) is written
+  // back through pinRepoToSidebar — an idempotent upsert — so "a row that
+  // exists is a row that stays" holds from either side: attach a repo in a
+  // chat and the row appears; delete the chat and the row remains.
+  const pinnedRepos = useChatStore((s) => s.pinnedRepos);
+  const pinRepoToSidebar = useChatStore((s) => s.pinRepoToSidebar);
+  React.useEffect(() => {
+    for (const conv of conversations) {
+      if (conv.repoContext) {
+        pinRepoToSidebar({
+          owner: conv.repoContext.owner,
+          repo: conv.repoContext.repo,
+          branch: conv.repoContext.branch ?? "",
+        });
+      }
+    }
+    // The sync runs when the conversation list changes shape or any repo
+    // binding changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    conversations,
+    conversations.map((c) => c.repoContext?.owner).join(),
+    conversations.map((c) => c.repoContext?.repo).join(),
+    conversations.map((c) => c.repoContext?.branch).join(),
+  ]);
 
   /**
    * The band's one button, both ways.
@@ -927,6 +968,100 @@ export function ChatSidebar({
                 </section>
               );
             })}
+
+            {/* ── Repositories with no chats left ──────────────
+                A pinned repo whose threads are all deleted keeps its row: this
+                is the whole point of the pin. The row says so in words, offers
+                the same "new chat here" the occupied rows do, and carries the
+                one button that can actually remove it — Detach. Hidden while a
+                search runs, where "no chats match" already says the state. */}
+            {!searching &&
+              pinnedRepos
+                .filter(
+                  (pinned) =>
+                    !groups.some(
+                      (g) =>
+                        g.repo &&
+                        g.repo.owner.toLowerCase() === pinned.owner.toLowerCase() &&
+                        g.repo.repo.toLowerCase() === pinned.repo.toLowerCase()
+                    )
+                )
+                .map((pinned) => {
+                  const key = `${pinned.owner}/${pinned.repo}`.toLowerCase();
+                  const collapsed = collapsedKeys.includes(key);
+                  return (
+                    <section
+                      key={key}
+                      className="chat-repo-group chat-repo-group-empty"
+                      aria-label={`${pinned.owner}/${pinned.repo} — no chats`}
+                    >
+                      <div className="chat-repo-group-header">
+                        <button
+                          type="button"
+                          className="chat-repo-group-toggle"
+                          onClick={() => toggleGroup(key)}
+                          aria-expanded={!collapsed}
+                        >
+                          <ChevronRight
+                            className={cn(
+                              "h-3 w-3 chat-repo-group-chevron",
+                              !collapsed && "chat-repo-group-chevron-open"
+                            )}
+                            aria-hidden="true"
+                          />
+                          <span className="chat-repo-group-name" title={`${pinned.owner}/${pinned.repo}`}>
+                            {pinned.owner}/{pinned.repo}
+                          </span>
+                          <span
+                            className="chat-repo-group-count"
+                            title={`No chats on ${pinned.owner}/${pinned.repo} — deleted chats leave the repository pinned here`}
+                          >
+                            no chats
+                          </span>
+                        </button>
+                        {onNewInRepo && pinned.branch && (
+                          <SimpleTooltip content={`New chat in ${pinned.owner}/${pinned.repo}`} side="left">
+                            <button
+                              type="button"
+                              className="chat-repo-group-new"
+                              onClick={() =>
+                                onNewInRepo({
+                                  owner: pinned.owner,
+                                  repo: pinned.repo,
+                                  branch: pinned.branch,
+                                })
+                              }
+                              aria-label={`New chat in ${pinned.owner}/${pinned.repo}`}
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          </SimpleTooltip>
+                        )}
+                        {onDetachRepo && (
+                          <SimpleTooltip
+                            content={`Detach ${pinned.owner}/${pinned.repo} — removes it from this sidebar`}
+                            side="left"
+                          >
+                            <button
+                              type="button"
+                              className="chat-repo-group-detach"
+                              onClick={() => onDetachRepo(pinned.owner, pinned.repo)}
+                              aria-label={`Detach ${pinned.owner}/${pinned.repo}`}
+                            >
+                              <CircleMinus className="h-3 w-3" />
+                            </button>
+                          </SimpleTooltip>
+                        )}
+                      </div>
+                      {!collapsed && (
+                        <div className="chat-repo-group-body chat-repo-group-empty-body">
+                          No chats on this repository. New chats here start from
+                          {pinned.branch ? ` ${pinned.branch}` : " its default branch"}.
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
           </div>
         </div>
 

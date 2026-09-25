@@ -241,6 +241,7 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   braidStrategies: true,
   braidProbes: true,
   braidStrandRollouts: true,
+  braidStateFile: true,
 
   github: {
     token: "",

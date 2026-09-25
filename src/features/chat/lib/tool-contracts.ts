@@ -344,6 +344,37 @@ export const TOOL_CONTRACTS: Readonly<Record<ToolName, ToolContract>> = {
     autonomy: "undoable",
     sensitivity: "project",
   },
+  memory_search: {
+    when: "you are about to rediscover something about how this repository builds, tests or behaves — the fact may already be recorded",
+    how: 'memory_search({ query: "tests vitest" }) — keyword match over recorded facts; no arguments lists them all.',
+    insteadOf: {
+      tool: "remember",
+      discriminator: "choose this one to READ what is already recorded; remember is what writes a new fact",
+    },
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  create_pull_request: {
+    when: "the change is pushed to the working branch and ready for review, and no pull request covers the branch yet",
+    how: 'create_pull_request({ title: "The change, reviewer-searchable", body: "what changed, why, what was verified" }) — the user approves the text first.',
+    insteadOf: {
+      tool: "push_changes",
+      discriminator: "choose this one only AFTER the commit is on the branch; push_changes is what puts it there (and normally opens the PR itself)",
+    },
+    misuse:
+      "a PR that already exists for the branch is reported back rather than duplicated — update it with update_pull_request instead",
+    effects: "external",
+    autonomy: "ask",
+    sensitivity: "project",
+  },
+  set_env: {
+    when: "the workspace needs the repo's configuration to run — the user pasted their .env in chat, or the project wants a hosted URL that only they can supply",
+    how: 'set_env({ content: "KEY=value\\n..." }) for a pasted env file, or set_env({ key: "NAME", value: "..." }) for one variable (omit value to remove). Values stay in this browser per repo; report NAMES, never values.',
+    effects: "app-data",
+    autonomy: "act",
+    sensitivity: "secret",
+  },
   delegate: {
     when: "a research question would flood your context with file bodies you do not need to keep — 'map every usage of X', 'how does Y work'",
     how: 'delegate({ task: "State the DELIVERABLE: which files, which symbols, which line ranges." }) — free to choose the approach; it returns a report, not edits.',
@@ -525,6 +556,32 @@ export const TOOL_CONTRACTS: Readonly<Record<ToolName, ToolContract>> = {
     autonomy: "ask",
     sensitivity: "project",
   },
+  secrets_scan: {
+    when: "you just wrote a file that holds configuration, tokens or connection strings, or you are about to push and want the gate's blocking scan to be a formality",
+    how: "secrets_scan({}) scans the pending change set; secrets_scan({ text: … }) scans one piece of text. Findings are redacted — fix the FILE, not the finding.",
+    insteadOf: {
+      tool: "license_check",
+      discriminator: "choose this one for CREDENTIALS in your diff; license_check is for the legal terms of dependencies",
+    },
+    proves:
+      "a clean scan is the same check the push gate runs — but the gate re-runs it at push time, so only the CURRENT change set is covered.",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "secret",
+  },
+  license_check: {
+    when: "you are about to add a dependency, or the user asks whether the project's dependencies can be shipped",
+    how: "license_check({}) — reads the manifests in the workspace and reports each direct dependency's declared license, flagging GPL-family and unknown ones.",
+    insteadOf: {
+      tool: "secrets_scan",
+      discriminator: "choose this one for DEPENDENCY licensing; secrets_scan is for credentials in the change set",
+    },
+    misuse:
+      "it reads manifests only — it does not query registries, detect transitive licenses, or audit advisories",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
   // ── Shipping ──────────────────────────────────────────────
   create_working_branch: {
     when: "you want the working branch named deliberately before a push (optional — push_changes creates one when needed)",
@@ -582,6 +639,90 @@ export const TOOL_CONTRACTS: Readonly<Record<ToolName, ToolContract>> = {
     effects: "none",
     autonomy: "act",
     sensitivity: "public",
+  },
+  // ── Utility tools: pure conversions and checks ────────────
+  generate_csv: {
+    when: "the user asks for an export, a spreadsheet or a report of structured data",
+    how: 'generate_csv({ data: [{ id: 1, name: "a" }] }) — returns CSV text; save it as a file in the workspace so it is reviewable with the change set.',
+    insteadOf: {
+      tool: "run_code",
+      discriminator: "choose this one for the serialization itself; run_code is for logic a serializer does not cover",
+    },
+    misuse:
+      "rows must be flat — nested objects are refused rather than stringified; flatten first (JSON.stringify the nested value into a column)",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  convert_data: {
+    when: "data in one shape needs to be another — an API JSON export to CSV, a pasted spreadsheet to JSON, rows to XML",
+    how: 'convert_data({ data, from: "csv", to: "json" }) — RFC 4180-aware delimited parsing; a single JSON object converts as one row.',
+    insteadOf: {
+      tool: "compare_data",
+      discriminator: "choose this one to TRANSFORM a dataset; compare_data answers what DIFFERS between two",
+    },
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  encode_decode: {
+    when: "a payload is encoded and you need what it says — base64, URL-encoding, hex, or a JWT's claims",
+    how: 'encode_decode({ operation: "base64-decode", text }) — jwt-decode surfaces exp/iat as dates and never verifies a signature.',
+    insteadOf: {
+      tool: "hash_text",
+      discriminator: "choose this one to REVERSE an encoding; hashing is one-way and answers identity, not content",
+    },
+    misuse:
+      "a decoded JWT is NOT an authenticated one — decoding reads the claims; only signature verification (never done here) proves origin",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  hash_text: {
+    when: "you need to prove two payloads are identical, fingerprint an artifact, or confirm which version a digest refers to",
+    how: 'hash_text({ text, algorithm: "SHA-256" }) — returns hex and base64 of the digest.',
+    insteadOf: {
+      tool: "encode_decode",
+      discriminator: "choose this one for a ONE-WAY digest; encode_decode is reversible and answers content",
+    },
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  regex_test: {
+    when: "a pattern is about to go into code and you want proof of what it matches — including the over-matching that reasoning misses",
+    how: 'regex_test({ pattern: "^\\\\d{4}-", flags: "g", text: sample }) — reports every match with index and capture groups.',
+    insteadOf: {
+      tool: "run_code",
+      discriminator: "choose this one for the dry-run itself; run_code is when the regex is one step of larger logic",
+    },
+    misuse:
+      "only g/i/m/s/u flags are honored, and a non-global pattern reports its first match — pass g for every match",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  timestamp_convert: {
+    when: "an epoch value needs a date, an ISO string needs an epoch, or you need TODAY'S DATE and cannot see a clock",
+    how: 'timestamp_convert({ timestamp: "1770000000", timeZone: "Europe/Berlin" }) — no timestamp reports NOW; the result states whether it read the number as seconds or milliseconds.',
+    insteadOf: {
+      tool: "run_code",
+      discriminator: "choose this one for the conversion itself; run_code is for date LOGIC beyond conversion",
+    },
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
+  },
+  uuid_generate: {
+    when: "fixture rows, seed data or examples need identifiers that will not collide",
+    how: 'uuid_generate({ format: "v4", count: 5 }) — v4 (crypto-random), ulid (sortable) or short (display keys).',
+    insteadOf: {
+      tool: "run_code",
+      discriminator: "choose this one for the ids themselves; run_code is for generating ids inside larger logic",
+    },
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "personal",
   },
   compare_data: {
     when: "the question is what DIFFERS between two lists, two JSON documents or two config files — including reordered and missing items",

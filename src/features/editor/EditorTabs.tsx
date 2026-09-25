@@ -206,7 +206,7 @@ export function EditorTabs() {
                   disabled={!activeFile}
                 >
                   {isCopied ? (
-                    <Check className="h-3.5 w-3.5 text-green-400" />
+                    <Check className="h-3.5 w-3.5 text-[var(--green)]" />
                   ) : (
                     <Copy className="h-3.5 w-3.5" />
                   )}

@@ -75,25 +75,25 @@ const TYPE_BADGE: Record<string, { icon: React.ReactNode; color: string; bg: str
   "Server-side": {
     icon: <Server size={11} />,
     color: "var(--accent)",
-    bg: "rgba(56, 189, 248, 0.1)",
+    bg: "var(--blue-dim)",
     label: "Server-side",
   },
   "Client-side": {
     icon: <Monitor size={11} />,
     color: "var(--green)",
-    bg: "rgba(16, 185, 129, 0.1)",
+    bg: "var(--green-dim)",
     label: "Client-side",
   },
   "Client/Server Interaction": {
     icon: <ArrowLeftRight size={11} />,
     color: "var(--yellow)",
-    bg: "rgba(245, 158, 11, 0.1)",
+    bg: "var(--yellow-dim)",
     label: "Client ↔ Server",
   },
   "Utils": {
     icon: <Wrench size={11} />,
     color: "var(--purple)",
-    bg: "rgba(168, 85, 247, 0.1)",
+    bg: "var(--purple-dim)",
     label: "Utilities & Snippets",
   },
 };
@@ -111,7 +111,7 @@ function getTypeBadge(type: string) {
   return TYPE_BADGE[norm] || {
     icon: <FileCode2 size={11} />,
     color: "var(--text-3)",
-    bg: "rgba(255,255,255,0.05)",
+    bg: "var(--bg-hover)",
     label: norm,
   };
 }
@@ -640,8 +640,8 @@ function MethodCard({
         <div className="lib-method-body">
           {/* Deprecation Warning Banner */}
           {method.deprecated && method.deprecationNotice && (
-            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs mb-3">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-[var(--yellow-dim)] border border-[var(--ds-amber-500)] text-[var(--ds-amber-900)] text-xs mb-3">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--yellow)]" />
               <div>
                 <span className="font-semibold block">Deprecation Notice</span>
                 <span>{method.deprecationNotice}</span>
@@ -939,7 +939,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             onClick={() => onSelectApi("GlideRecord")}
           >
             <div className="lib-cat-card-top">
-              <div className="lib-cat-card-icon" style={{ background: "rgba(56, 189, 248, 0.12)", color: "var(--accent)" }}>
+              <div className="lib-cat-card-icon" style={{ background: "var(--blue-dim)", color: "var(--accent)" }}>
                 <Server className="w-4 h-4" />
               </div>
               <span className="lib-cat-card-count">75 APIs</span>
@@ -959,7 +959,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             onClick={() => onSelectApi("g_form")}
           >
             <div className="lib-cat-card-top">
-              <div className="lib-cat-card-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "var(--green)" }}>
+              <div className="lib-cat-card-icon" style={{ background: "var(--green-dim)", color: "var(--green)" }}>
                 <Monitor className="w-4 h-4" />
               </div>
               <span className="lib-cat-card-count">17 APIs</span>
@@ -979,7 +979,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             onClick={() => onSelectApi("GlideAjax")}
           >
             <div className="lib-cat-card-top">
-              <div className="lib-cat-card-icon" style={{ background: "rgba(245, 158, 11, 0.12)", color: "var(--yellow)" }}>
+              <div className="lib-cat-card-icon" style={{ background: "var(--yellow-dim)", color: "var(--yellow)" }}>
                 <ArrowLeftRight className="w-4 h-4" />
               </div>
               <span className="lib-cat-card-count">3 APIs</span>
@@ -999,7 +999,7 @@ function onChange(control, oldValue, newValue, isLoading) {
             onClick={() => onSelectApi("JSON")}
           >
             <div className="lib-cat-card-top">
-              <div className="lib-cat-card-icon" style={{ background: "rgba(168, 85, 247, 0.12)", color: "var(--purple)" }}>
+              <div className="lib-cat-card-icon" style={{ background: "var(--purple-dim)", color: "var(--purple)" }}>
                 <Wrench className="w-4 h-4" />
               </div>
               <span className="lib-cat-card-count">30 APIs</span>
@@ -1101,7 +1101,7 @@ function onChange(control, oldValue, newValue, isLoading) {
                     >
                       {copiedRecipe === recipe.title ? (
                         <>
-                          <Check size={10} className="text-emerald-400" />
+                          <Check size={10} className="text-[var(--green)]" />
                           <span>Copied</span>
                         </>
                       ) : (

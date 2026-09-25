@@ -18,9 +18,9 @@ const badgeVariants = cva(
         blue:
           "bg-[var(--ds-blue-200)] text-[var(--ds-blue-900)] border border-[var(--ds-blue-400)]",
         success:
-          "bg-[#002b11] text-[#50e3c2] border border-[#0f5b30]",
+          "bg-[var(--ds-green-100)] text-[var(--ds-green-900)] border border-[var(--ds-green-300)]",
         green:
-          "bg-[#002b11] text-[#50e3c2] border border-[#0f5b30]",
+          "bg-[var(--ds-green-100)] text-[var(--ds-green-900)] border border-[var(--ds-green-300)]",
         warning:
           "bg-[var(--ds-amber-200)] text-[var(--ds-amber-900)] border border-[var(--ds-amber-400)]",
         amber:

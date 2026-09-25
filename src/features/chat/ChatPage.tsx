@@ -46,7 +46,12 @@ import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
 import { HttpApprovalModal } from "./components/HttpApprovalModal";
 import { useSkillActivity } from "./lib/skill-activity";
-import { repoKeyOf, setPreviewView } from "./container/preview-bridge";
+import {
+  claimReloadEndedPreview,
+  previewRecordsRestored,
+  repoKeyOf,
+  setPreviewView,
+} from "./container/preview-bridge";
 import { resolveMentionContext } from "./services/mention-context";
 import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
@@ -59,10 +64,12 @@ import { ChangesPane } from "./components/ChangesPane";
 
 import { collectChangeSet } from "./lib/change-set";
 import { modelSupportsImages } from "./services/chat-runner";
+import { startPreviewForConversation } from "./services/container-workspace";
 import { sessionHost } from "./session/session-client";
 import { logTurnEvent } from "./session/turn-log";
 import { installDebugForward } from "./session/debug-forward";
 import { isTurnUnrecoverable } from "./session/turn-engine";
+import { workspaceSupport } from "./lib/availability";
 import { availableEfforts, modelSupportsTools } from "./lib/model-state";
 import { resolveToolSurface } from "./lib/tool-profiles";
 import { DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "./constants";
@@ -216,6 +223,55 @@ export function ChatPage() {
   );
   useEffect(() => {
     setPreviewView(activeRepoKey);
+  }, [activeRepoKey]);
+
+  // ── Auto-restart the preview a reload ended ──
+  // The dev server cannot survive a reload (it lives in this page's browser
+  // workspace), but its RECORD does — see preview-bridge's persistence. When
+  // that record says the page went down with a live server, this page finishes
+  // the job: the same thread's repository gets a fresh server AND the panel is
+  // put back on the preview tab, so the preview the user was watching comes
+  // back on its own — not as a dead record they must click open.
+  //
+  // Gated three ways, each one a real answer to "should this run here?":
+  //   • the restored records have landed (otherwise the pending set is empty
+  //     no matter what happened before the reload);
+  //   • this page can host a workspace at all (the boot verdict, not a probe);
+  //   • the ACTIVE conversation's repo is the one whose session ended — the
+  //     restart serves the thread the user is looking at, never a background
+  //     one. Switching chats consumes the pending restart, because a preview
+  //     the user navigated away from during the reload window is not one they
+  //     asked to come back.
+  useEffect(() => {
+    if (!activeRepoKey) return;
+    let cancelled = false;
+    void previewRecordsRestored().then(() => {
+      // Identity is read at RESOLUTION time, not captured at effect time: the
+      // chat store hydrates asynchronously, so `activeConversationId` here is
+      // often still null when this effect first ran. Capturing it was the bug
+      // that made every auto-restart a silent no-op — the claim was burned on
+      // an empty conversation id and the user had to press the button after
+      // all. The claim is only spent when there is a real thread to start.
+      if (cancelled) return;
+      const conversationId = useChatStore.getState().activeConversationId;
+      if (!conversationId) return;
+      if (workspaceSupport().state === "down") return;
+      if (!claimReloadEndedPreview(activeRepoKey)) return;
+      // The record was live → the panel WAS showing the preview when the page
+      // went down. Reopen that tab; the strip shows progress from the shared
+      // preview state ("starting" → "running"), so no local state is needed.
+      setPanelTab("preview");
+      setClosedForAttachment(null);
+      void startPreviewForConversation(conversationId).catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately keyed on the repo key, NOT on the conversation object:
+    // the restart belongs to whichever conversation is on screen when the
+    // restored records land, and re-running it on unrelated conversation
+    // updates would re-claim (and re-fail) forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRepoKey]);
   const panelVisible = Boolean(repoAttached) && closedForAttachment !== attachedAt;
   // Fail closed: the change set in this panel must be the change set of the
@@ -706,14 +762,39 @@ export function ChatPage() {
     state.setConversationRepo(state.activeConversationId, undefined);
   };
 
-  // deleteConversation in the store already guarantees a usable chat when the
-  // last one is deleted (and seeds it with the deleted chat's repository, so
-  // "closed every chat" no longer detaches the repo) — the page adds nothing
-  // here. An unseeded createConversation would be actively wrong: with the
-  // store empty, inheritance has nothing to inherit and the fresh chat came up
-  // detached, which is how deleting the last chat silently dropped the repo.
+  // Deleting the last conversation spawns NO replacement any more: the
+  // repository's pinned sidebar row is what survives (deleteConversation
+  // re-pins it), and a working chat is created lazily — by the row's "new
+  // chat here" button, the send path (resolveTargetConversation), or the
+  // hydration effect. An automatic replacement used to come up detached
+  // whenever the store was empty, because inheritance had nothing to
+  // inherit; the pin covers the repo, so the spawn is simply gone.
   const handleDeleteConversation = (id: string) => {
     useChatStore.getState().deleteConversation(id);
+  };
+
+  /**
+   * Detach a REPOSITORY from the sidebar — the button on the repo row.
+   *
+   * This is the ONLY gesture that removes a repo row; deleting chats never
+   * does. It unpins the row and, when a chat is currently attached to that
+   * repo, detaches the chat too — that is what the button says, and leaving
+   * the chat attached would put the row straight back on the next sync. Chats
+   * themselves are kept: their transcripts outlive the repo's place in the
+   * sidebar (the same rule the header's Detach follows for one chat).
+   */
+  const handleDetachRepo = (owner: string, repo: string) => {
+    const state = useChatStore.getState();
+    state.unpinRepoFromSidebar(owner, repo);
+    const key = `${owner}/${repo}`.toLowerCase();
+    for (const conv of state.conversations) {
+      if (
+        conv.repoContext &&
+        `${conv.repoContext.owner}/${conv.repoContext.repo}`.toLowerCase() === key
+      ) {
+        state.setConversationRepo(conv.id, undefined);
+      }
+    }
   };
 
   const handleClearAllConversations = () => {
@@ -783,6 +864,7 @@ export function ChatPage() {
         onDelete={handleDeleteConversation}
         onDuplicate={(id) => useChatStore.getState().duplicateConversation(id)}
         onTogglePin={(id) => useChatStore.getState().togglePinConversation(id)}
+        onDetachRepo={handleDetachRepo}
         onOpenSettings={() => useChatStore.getState().setSettingsOpen(true)}
       />
 

@@ -96,6 +96,7 @@ export type ToolName =
   | "edit_file"
   | "delete_file"
   | "get_workspace_diff"
+  | "set_env"
   | "create_working_branch"
   | "push_changes"
   | "run_tool_program"
@@ -142,6 +143,25 @@ export type ToolName =
   | "http_write"
   | "create_diagram"
   | "open_in_tool"
+  // ── Utility tools: pure, local, no-deps conversions and checks the
+  //    agent otherwise burns a `run_code` round on. Same family rules as
+  //    the other app tools — plan-safe, repo-free, act-autonomy.
+  | "generate_csv"
+  | "convert_data"
+  | "encode_decode"
+  | "hash_text"
+  | "regex_test"
+  | "timestamp_convert"
+  | "uuid_generate"
+  // ── GitHub collaboration: the two asymmetric gaps. Agents could review
+  //    and edit PRs but never OPEN one; `remember` wrote project memory
+  //    that nothing could search back.
+  | "create_pull_request"
+  | "memory_search"
+  // ── Guardrail tools: read-only scans the agent runs on its own work —
+  //    or that run for it at the push gate (secrets_scan is wired there).
+  | "secrets_scan"
+  | "license_check"
   // ── App-surface tools: the agent as a USER of this app. `read_app` and
   //    `act_app` are the two hands (one read per feature family, one
   //    dispatcher for every declared action) and `describe_tools` loads the
@@ -851,6 +871,14 @@ export interface ChatSettings {
   braidStrategies?: boolean;
   braidProbes?: boolean;
   braidStrandRollouts?: boolean;
+  /**
+   * The fixed-size working state (Braid P3, braid/state-file.ts): a capped
+   * GOAL/DECISIONS/FACTS/OPEN THREADS/NEXT ACTION block, rebuilt from plan,
+   * evidence and probe findings every round and carried in the turn note.
+   * Costs no model calls; it exists to keep the round-to-round picture of
+   * the work from growing the way a prose ledger does. Default on.
+   */
+  braidStateFile?: boolean;
   /**
    * "Run tools without asking": resolve every agent approval gate as
    * approved, without showing a dialog.

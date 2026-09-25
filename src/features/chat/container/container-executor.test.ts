@@ -22,6 +22,7 @@ import {
   type ContainerRuntime,
 } from "./container-host";
 import { planMount } from "./mount-plan";
+import { resetRuntimeEnvForTest, setRepoEnvVar } from "./runtime-env";
 
 const PKG = JSON.stringify({ name: "demo", scripts: { test: "vitest run" } });
 
@@ -114,12 +115,76 @@ function npmCannotUseLockfile(): string {
 beforeEach(() => {
   resetContainerQueue();
   resetContainerHost();
+  resetRuntimeEnvForTest();
 });
 
 afterEach(() => {
   adoptRuntimeForTest(null);
   resetContainerHost();
   resetContainerQueue();
+  resetRuntimeEnvForTest();
+});
+
+describe("runInContainer — the repo's runtime env reaches the command", () => {
+  it("merges the repo's stored vars into the spawn env, over the non-interactive base", async () => {
+    // The whole point of the runtime-env layer: a key the user pasted once has
+    // to reach `npm run dev` and `npm test` exactly as it reaches the project
+    // on a laptop — through the environment, never through a mounted file.
+    await setRepoEnvVar("acme", "widgets", "VITE_SUPABASE_URL", "https://x.supabase.co");
+    const spawn = vi.fn(async (command: string, args: string[], _options?: { env?: Record<string, string> }) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      return fakeProcess(line.includes("npm ci") ? "added 12 packages" : "2 passed", 0);
+    });
+    adoptRuntimeForTest(runtimeWith(spawn));
+
+    const result = await runInContainer({
+      command: "npm test",
+      plan: plan(),
+      revision: 7,
+      repoKey: "acme/widgets",
+    });
+    expect(result.ok).toBe(true);
+
+    // The LAST spawn is the command itself; its options carry the merged env.
+    const calls = spawn.mock.calls;
+    const options = calls[calls.length - 1]?.[2] as { env?: Record<string, string> } | undefined;
+    expect(options?.env?.VITE_SUPABASE_URL).toBe("https://x.supabase.co");
+    // The base env survives the merge — user vars override, never replace.
+    expect(options?.env?.CI).toBe("1");
+    expect(options?.env?.NO_COLOR).toBe("1");
+  });
+
+  it("another repo's vars stay out of this repo's commands", async () => {
+    await setRepoEnvVar("acme", "other", "VITE_SECRET_OF_OTHER", "nope");
+    await setRepoEnvVar("acme", "widgets", "VITE_MINE", "yes");
+    const spawn = vi.fn(async (command: string, args: string[], _options?: { env?: Record<string, string> }) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      return fakeProcess(line.includes("npm ci") ? "added 12 packages" : "2 passed", 0);
+    });
+    adoptRuntimeForTest(runtimeWith(spawn));
+
+    await runInContainer({ command: "npm test", plan: plan(), revision: 7, repoKey: "acme/widgets" });
+    const calls = spawn.mock.calls;
+    const options = calls[calls.length - 1]?.[2] as { env?: Record<string, string> } | undefined;
+    expect(options?.env?.VITE_MINE).toBe("yes");
+    expect(options?.env?.VITE_SECRET_OF_OTHER).toBeUndefined();
+  });
+
+  it("sends the plain base env when no repo key is given (the tests' own path)", async () => {
+    const spawn = vi.fn(async (command: string, args: string[], _options?: { env?: Record<string, string> }) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      return fakeProcess(line.includes("npm ci") ? "added 12 packages" : "2 passed", 0);
+    });
+    adoptRuntimeForTest(runtimeWith(spawn));
+
+    await runInContainer({ command: "npm test", plan: plan(), revision: 7 });
+    const calls = spawn.mock.calls;
+    const options = calls[calls.length - 1]?.[2] as { env?: Record<string, string> } | undefined;
+    expect(options?.env).toEqual({ CI: "1", NO_COLOR: "1", FORCE_COLOR: "0", TERM: "dumb", npm_config_fund: "false", npm_config_audit: "false", npm_config_yes: "true" });
+  });
 });
 
 describe("runInContainer — installing before judging", () => {

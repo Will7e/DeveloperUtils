@@ -18,7 +18,7 @@
 
 import { readEncryptedValue } from "@/services/encrypted-storage.service";
 import { normalizeSkillsForSync, reconcileBuiltins } from "@/features/chat/lib/skills";
-import { selectStreamingIds, useChatStore } from "./chat.store";
+import { isPinnedRepo, selectStreamingIds, useChatStore } from "./chat.store";
 
 const CHAT_STORAGE_NAME = "intab_chat_state";
 
@@ -162,7 +162,12 @@ export async function applyChatSnapshot(snapshot: unknown): Promise<void> {
       };
     }
     if (Array.isArray(snap.pinnedRepos)) {
-      partial.pinnedRepos = snap.pinnedRepos;
+      // Remote pins are arbitrary JSON from another device's storage. A pin
+      // without usable owner/repo would render as an `undefined/undefined`
+      // sidebar row whose Detach could never match, so the field is
+      // validated element-wise — the same treatment the store's own
+      // hydration gives pins it reads from local storage.
+      partial.pinnedRepos = snap.pinnedRepos.filter(isPinnedRepo);
     }
 
     // Plain setState flows through the persist middleware, so the
