@@ -252,51 +252,86 @@
 }
 
 /* ── History — "Pick up where you left off" ───────────────
-   The recent-chats list that used to sit on the welcome screen, moved to the
-   sidebar where it is always on screen rather than only when the current chat
-   is empty. Sits between the "New chat" entry and the repository groups:
-   section headers are a Geist eyebrow (11px/500, uppercase), and the rows are
-   the same 30px, 12.5px list rows the empty state's list used, so the section
-   reads as native to this column rather than as a card dropped into it.
+   The chat history, folded behind a button the way the repository groups fold:
+   the header is a 26px ghost target with a chevron, an eyebrow label, and the
+   count of resumable threads. Open, it lists EVERY chat that has messages,
+   newest first — a recency view across repositories, not a second archive.
 
-   NOT grouped by repo and NOT searchable — the groups below are the archive,
-   filed by project; this is the recency view, filed by WHEN. Five rows: after
-   that the list below is one glance away, and a section that outgrows the
-   viewport's interest becomes noise. */
+   Collapsed by default: the grouped list below is the working surface, and a
+   permanent duplicate of its newest rows would only push the repos down. The
+   state is remembered across reloads (intab_chat_history_open). */
 .chat-history {
   margin: 2px 0 14px;
 }
 
-.chat-history-head {
+.chat-history-toggle {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
+  gap: 4px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-history-toggle:hover {
+  background: var(--ds-gray-alpha-100);
+  color: var(--text-1);
+}
+
+.chat-history-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+.chat-history-chevron {
+  flex-shrink: 0;
   color: var(--chat-meta);
+  transition: transform 0.12s ease;
+}
+
+.chat-history-chevron-open {
+  transform: rotate(90deg);
 }
 
 .chat-history-icon {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
+  color: var(--chat-meta);
 }
 
 .chat-history-title {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-3);
-  font-size: 11px;
+  color: var(--text-2);
   font-weight: 500;
+}
+
+.chat-history-count {
+  flex-shrink: 0;
+  color: var(--chat-meta);
   font-family: var(--font-sans);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-history-list {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  margin-top: 1px;
 }
 
 .chat-history-item {
@@ -1149,19 +1184,9 @@
   background: var(--ds-gray-alpha-200);
   border: 1px solid var(--ds-gray-alpha-300);
   border-radius: var(--radius-full);
-  /* NOT pointer: the chip is a readout unless it can pair a companion, and the
-     action class below is what says which. A pointer on a control that does
-     nothing is the tell that teaches people to stop pressing. */
+  /* NOT pointer: the chip is a readout, not a control. A pointer on a control
+     that does nothing is the tell that teaches people to stop pressing. */
   transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.chat-verify-chip-action {
-  cursor: pointer;
-}
-
-.chat-verify-chip-action:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
 }
 
 .chat-verify-chip-pass {
@@ -1304,16 +1329,6 @@ html body .intab-tooltip.chat-verify-card > span {
   height: 1px;
   background: var(--border-1);
   margin: 1px 0;
-}
-
-.chat-verify-card-link {
-  padding: 0;
-  font: inherit;
-  color: var(--blue);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 /* ── Model picker button ── */
@@ -4277,8 +4292,6 @@ typography rather than looking like a control of its own */
 /* ── Confirming a move off a repository with un-pushed work ──
    Anchored under the chip, mirroring the sidebar's delete-confirm popover so
    a decision that strands work looks like the other decisions that do. */
-/* The chip is a button only when it can pair a companion; otherwise it is a
-   readout, so it must not look pressable. */
 .chat-repo-confirm-backdrop {
   position: fixed;
   inset: 0;
@@ -4910,6 +4923,38 @@ typography rather than looking like a control of its own */
   font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
+}
+
+/* ── Workspace panel tabs ───────────────────────────────
+   The panel holds two surfaces — the diff and the running app — as tabs in
+   the header row, so the switch between them is one glance, not a hunt. */
+.chat-panel-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.chat-panel-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-panel-tab:hover { color: var(--text-1); }
+.chat-panel-tab:focus-visible { outline: none; box-shadow: var(--ds-focus-ring); }
+.chat-panel-tab-active {
+  color: var(--text-1);
+  background: var(--ds-background-200);
 }
 
 .chat-changes-actions {
@@ -6432,28 +6477,120 @@ typography rather than looking like a control of its own */
   background: color-mix(in srgb, var(--amber) 10%, transparent);
 }
 
-/* ── Live preview panel ──────────────────────────────────────
-   A floating panel rather than a third column: on the narrow layout there is no
-   room for one, and the preview is something a person looks at briefly and then
-   dismisses, not a surface they work in. */
+/* ── Live preview (docked) ────────────────────────────
+   A tab of the workspace panel, not a floating popup: the preview is half of
+   what the panel is FOR, and a surface the user works in — navigates, resizes,
+   switches device widths — deserves a dock, not a hover. */
 .chat-preview {
-  position: absolute;
-  right: 16px;
-  /* Above the open-changes button, which sits at 96px: the two are both
-     bottom-right, and a preview that covers the button that opens the diff
-     would hide the thing the preview is showing the running half of. */
-  bottom: 148px;
-  width: min(520px, calc(100% - 32px));
-  height: min(420px, calc(100% - 300px));
-  min-height: 240px;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Browser chrome: back / forward / reload · address bar · open-in-tab */
+.chat-preview-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.chat-preview-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* The address bar. Shows where the frame is; takes edits the way a browser's
+   omnibox does — absolute URL, bare host, or path on the preview origin. */
+.chat-preview-urlbox {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.chat-preview-url {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 10px;
   border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg);
-  background: var(--ds-background-200);
-  box-shadow: var(--ds-shadow-menu);
+  border-radius: var(--radius-full);
+  background: var(--bg-1);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  outline: none;
+}
+.chat-preview-url:focus {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-1));
+  color: var(--text-1);
+}
+.chat-preview-url::placeholder { color: var(--text-3); }
+
+/* Device-width row: which width the page believes it is. */
+.chat-preview-devices {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.chat-preview-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-preview-device:hover {
+  color: var(--text-1);
+  background: var(--bg-hover);
+}
+.chat-preview-device:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+.chat-preview-device-active {
+  color: var(--text-1);
+  border-color: var(--border-1);
+  background: var(--bg-2);
+}
+
+/* The viewport stage. A device-mode page is rendered at its true CSS width
+   and scaled to fit, so the layout it chooses is the layout a real device
+   gets; the stage centres it when the pane is wider than the device. */
+.chat-preview-viewport-outer {
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  z-index: 25;
+  background: var(--ds-background-100);
+  display: flex;
+  justify-content: center;
+}
+
+.chat-preview-viewport {
+  position: relative;
+  transform-origin: top center;
+  flex-shrink: 0;
+}
+
+.chat-preview-viewport-fill {
+  width: 100%;
+  height: 100%;
 }
 
 .chat-preview-header {

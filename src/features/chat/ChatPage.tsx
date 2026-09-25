@@ -51,11 +51,12 @@ import { resolveMentionContext } from "./services/mention-context";
 import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
 import { ActivityRail } from "./components/ActivityRail";
-import { WorkspacePreview } from "./components/WorkspacePreview";
 import { WorkspaceStrip } from "./components/WorkspaceStrip";
 import { ChangesSheet } from "./components/ChangesSheet";
 import { useNarrowLayout } from "./components/useNarrowLayout";
+import type { WorkspacePanelTab } from "./components/ChangesPane";
 import { ChangesPane } from "./components/ChangesPane";
+
 import { collectChangeSet } from "./lib/change-set";
 import { modelSupportsImages } from "./services/chat-runner";
 import { sessionHost } from "./session/session-client";
@@ -198,9 +199,12 @@ export function ChatPage() {
   // button brings it back.
   const attachedAt = activeConversation?.repoContext?.attachedAt ?? 0;
   const [closedForAttachment, setClosedForAttachment] = useState<number | null>(null);
-  // The live preview is a panel the user opens and dismisses, not a pane they
-  // work in — so it is page state, not layout state.
-  const [previewOpen, setPreviewOpen] = useState(false);
+  // The preview lives INSIDE the workspace panel (Changes | Preview tabs), so
+  // "showing the preview" means the panel is open on the preview tab — one
+  // surface, tabbed, instead of a panel and a floating popup. Owned by the
+  // page: the workspace strip below the composer moves it between tabs, and
+  // the sheet layout (≤860px) hosts the same tabs.
+  const [panelTab, setPanelTab] = useState<WorkspacePanelTab>("changes");
   // The preview's RECORD is per-repo (lib/preview-bridge sessions), so the view
   // follows the active conversation's repository: switching chats in the sidebar
   // switches the preview state the strip and panel describe. Starting a preview
@@ -819,9 +823,6 @@ export function ChatPage() {
                 }
               : undefined
           }
-          onOpenCompanionSettings={() =>
-            useChatStore.getState().setSettingsOpen(true, "companion")
-          }
           hasMessages={Boolean(activeConversation?.messages.length)}
           onExport={() => {
             if (activeConversationId) downloadConversation(activeConversationId);
@@ -869,8 +870,11 @@ export function ChatPage() {
                   <WorkspaceStrip
                     conversationId={activeConversationId}
                     repoAttached={repoAttached}
-                    previewOpen={previewOpen}
-                    onTogglePreview={setPreviewOpen}
+                    previewShown={panelVisible && panelTab === "preview"}
+                    onShowPreview={() => {
+                      setClosedForAttachment(null);
+                      setPanelTab("preview");
+                    }}
                   />
 
                   <Composer
@@ -912,6 +916,8 @@ export function ChatPage() {
                       surface says it, this one acts on it. */}
                   <ChangesPane
                     conversationId={activeConversationId}
+                    tab={panelTab}
+                    onTabChange={setPanelTab}
                     onClose={() => {
                       if (attachedAt) setClosedForAttachment(attachedAt);
                     }}
@@ -951,8 +957,11 @@ export function ChatPage() {
             <WorkspaceStrip
               conversationId={activeConversationId}
               repoAttached={repoAttached}
-              previewOpen={previewOpen}
-              onTogglePreview={setPreviewOpen}
+              previewShown={narrow && panelVisible && panelTab === "preview"}
+              onShowPreview={() => {
+                if (repoAttached) setClosedForAttachment(null);
+                setPanelTab("preview");
+              }}
             />
 
             <Composer
@@ -987,6 +996,8 @@ export function ChatPage() {
             {narrow && panelVisible && (
               <ChangesSheet
                 conversationId={activeConversationId}
+                tab={panelTab}
+                onTabChange={setPanelTab}
                 onClose={() => {
                   if (attachedAt) setClosedForAttachment(attachedAt);
                 }}
@@ -1011,15 +1022,6 @@ export function ChatPage() {
           </>
         )}
       </main>
-
-      {/* The app the agent is changing, running, beside the diff. Outside the
-          two layout branches because it belongs to the page: whether the
-          preview is open has nothing to do with how the panes are arranged. */}
-      <WorkspacePreview
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        repoKey={activeRepoKey}
-      />
 
       <PushApprovalModal />
 

@@ -31,16 +31,17 @@ interface WorkspaceStripProps {
   conversationId: string | null;
   /** A repository is attached, so there is a project this could run */
   repoAttached: boolean;
-  /** Shows/hides the preview panel in the chat surface */
-  previewOpen: boolean;
-  onTogglePreview: (open: boolean) => void;
+  /** Whether the preview surface is on screen (the panel, on the preview tab) */
+  previewShown: boolean;
+  /** Brings the preview forward in the workspace panel */
+  onShowPreview: () => void;
 }
 
 export function WorkspaceStrip({
   conversationId,
   repoAttached,
-  previewOpen,
-  onTogglePreview,
+  previewShown,
+  onShowPreview,
 }: WorkspaceStripProps) {
   const capability = useWorkspaceCapability();
   const status = useContainerStatus();
@@ -58,8 +59,8 @@ export function WorkspaceStrip({
       setError(result.error);
       return;
     }
-    onTogglePreview(true);
-  }, [conversationId, onTogglePreview]);
+    onShowPreview();
+  }, [conversationId, onShowPreview]);
 
   if (!repoAttached) return null;
 
@@ -85,7 +86,7 @@ export function WorkspaceStrip({
     );
   }
 
-  const previewLine = describePreview(preview, busy, error, start, onTogglePreview, previewOpen);
+  const previewLine = describePreview(preview, busy, error, start, onShowPreview, previewShown);
   const workspaceLine = describeWorkspace(status);
 
   if (!previewLine && !workspaceLine) return null;
@@ -151,8 +152,8 @@ function describePreview(
   busy: boolean,
   error: string | null,
   start: () => Promise<void>,
-  onTogglePreview: (open: boolean) => void,
-  previewOpen: boolean
+  onShowPreview: () => void,
+  previewShown: boolean
 ): React.ReactNode {
   const issues = preview.issues.length;
   const issueChip =
@@ -161,7 +162,7 @@ function describePreview(
         <button
           type="button"
           className="chat-workspace-chip chat-workspace-chip-warn"
-          onClick={() => onTogglePreview(true)}
+          onClick={() => onShowPreview()}
           aria-label={`Show ${issues} runtime problem${issues === 1 ? "" : "s"} reported by the preview`}
         >
           {issues} console error{issues === 1 ? "" : "s"}
@@ -188,10 +189,10 @@ function describePreview(
         <button
           type="button"
           className="chat-workspace-action"
-          onClick={() => onTogglePreview(!previewOpen)}
+          onClick={() => onShowPreview()}
         >
           <Globe className="h-3 w-3" aria-hidden="true" />
-          {previewOpen ? "Hide" : "Show"}
+          {previewShown ? "View" : "Show"}
         </button>
         <SimpleTooltip
           content="Restart the dev server — needed after a dependency or config change"

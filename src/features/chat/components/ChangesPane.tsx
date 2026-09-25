@@ -26,6 +26,7 @@ import {
   FilePen,
   FilePlus2,
   Loader2,
+  MonitorPlay,
   ShieldCheck,
   Undo2,
   X,
@@ -46,16 +47,27 @@ import {
   verificationEvent,
   type VerificationEvidence,
 } from "../lib/verification-ledger";
-import { capabilityState, subscribeCapability, capabilityVersion } from "../lib/availability";
+import { repoKeyOf } from "../container/preview-bridge";
 import { runRunChecks, undoLastWorkspaceMutation } from "../services/agent-actions";
 import { DiffView } from "./DiffView";
 import { VerificationCard } from "./VerificationChip";
 import { useVerificationReadout } from "./useVerificationReadout";
+import { WorkspacePreview } from "./WorkspacePreview";
 import type { ToolCallResult, WorkspaceChange } from "../types";
+
+/** The two surfaces the workspace panel holds, and which one is showing */
+export type WorkspacePanelTab = "changes" | "preview";
 
 interface ChangesPaneProps {
   conversationId: string | null;
   onClose: () => void;
+  /**
+   * Which surface the workspace panel is showing — the diff (default) or the
+   * live preview. Owned by the page so the workspace strip, the composer-level
+   * row, can move the panel between them.
+   */
+  tab: WorkspacePanelTab;
+  onTabChange: (tab: WorkspacePanelTab) => void;
   /**
    * True when this pane is the whole surface — the ≤860px sheet, which covers the
    * chat header. Only then does the pane state the verification word itself; in
@@ -108,15 +120,14 @@ function VerificationControls({
   showState: boolean;
   onRun: () => void;
 }) {
-  const companion = useCompanionState();
   const state = verificationState(evidence);
   const entry = representativeEvidence(evidence);
   const label = verificationLabel(evidence);
   const ran = state !== "none";
   const plan = React.useMemo(
     () =>
-      planVerification({ repoAttached, hasChanges, companion, pushed, evidence }),
-    [repoAttached, hasChanges, companion, pushed, evidence]
+      planVerification({ repoAttached, hasChanges, pushed, evidence }),
+    [repoAttached, hasChanges, pushed, evidence]
   );
 
   const Icon =
@@ -136,17 +147,7 @@ function VerificationControls({
         <SimpleTooltip
           side="bottom"
           className="chat-verify-card"
-          content={
-            <VerificationCard
-              state={state}
-              evidence={evidence}
-              plan={plan}
-              companion={companion}
-              onOpenCompanionSettings={() =>
-                useChatStore.getState().setSettingsOpen(true, "companion")
-              }
-            />
-          }
+          content={<VerificationCard state={state} evidence={evidence} plan={plan} />}
         >
           <span
             className={`chat-changes-verify-badge chat-changes-verify-${state}`}
@@ -188,18 +189,11 @@ function VerificationControls({
   );
 }
 
-/**
- * The companion's availability, subscribed so a pairing that happens while this
- * pane is open updates the plan a reader is looking at.
- */
-function useCompanionState() {
-  React.useSyncExternalStore(subscribeCapability, capabilityVersion, capabilityVersion);
-  return capabilityState("companion");
-}
-
 export const ChangesPane = React.memo(function ChangesPane({
   conversationId,
   onClose,
+  tab,
+  onTabChange,
   standalone = false,
 }: ChangesPaneProps) {
   // Fail closed: right after a repository switch the in-memory entry is the
@@ -208,6 +202,9 @@ export const ChangesPane = React.memo(function ChangesPane({
   const workspace = useChatStore((s) => selectWorkspace(s, conversationId) ?? undefined);
   const conversation = useChatStore((s) => s.conversations.find((c) => c.id === conversationId));
   const repoAttached = Boolean(conversation?.repoContext);
+  // The preview tab's header label: whose session the panel is showing. Derived
+  // from THIS conversation's repo context, the same way the page derives it.
+  const repoKey = repoKeyOf(conversation?.repoContext?.owner, conversation?.repoContext?.repo);
   // THIS thread's stream, not "the" one: a peer agent editing its own working
   // copy in another chat must not grey out this pane's Run-checks button.
   const isStreamingHere = useChatStore((s) => selectStream(s, conversationId) !== null);
@@ -314,11 +311,31 @@ export const ChangesPane = React.memo(function ChangesPane({
   return (
     <div className="chat-changes" role="region" aria-label="Agent code changes">
       <div className="chat-changes-header">
-        <span className="chat-changes-title">
-          <FileDiff className="h-3.5 w-3.5" aria-hidden="true" />
-          Changes
-        </span>
-        {changes.fileCount > 0 && (
+        {/* The panel's two surfaces as tabs: the diff, and the app running.
+            Same row as the title so the switch is one glance, not a hunt. */}
+        <div className="chat-panel-tabs" role="tablist" aria-label="Workspace panel">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "changes"}
+            className={`chat-panel-tab ${tab === "changes" ? "chat-panel-tab-active" : ""}`}
+            onClick={() => onTabChange("changes")}
+          >
+            <FileDiff className="h-3.5 w-3.5" aria-hidden="true" />
+            Changes
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "preview"}
+            className={`chat-panel-tab ${tab === "preview" ? "chat-panel-tab-active" : ""}`}
+            onClick={() => onTabChange("preview")}
+          >
+            <MonitorPlay className="h-3.5 w-3.5" aria-hidden="true" />
+            Preview
+          </button>
+        </div>
+        {tab === "changes" && changes.fileCount > 0 && (
           <span className="chat-changes-stats">
             {changes.fileCount} file{changes.fileCount === 1 ? "" : "s"} ·{" "}
             <span className="chat-changes-add">+{changes.additions}</span>{" "}
@@ -328,7 +345,7 @@ export const ChangesPane = React.memo(function ChangesPane({
         {/* Verification rides with the diff, not just in the header: the moment
             a reviewer needs it is the moment they are reading this pane. The
             state word is drawn only when nothing else on screen is saying it. */}
-        {repoAttached && (
+        {tab === "changes" && repoAttached && (
           <VerificationControls
             evidence={evidence}
             workspaceUpdatedAt={workspaceUpdatedAt}
@@ -341,8 +358,10 @@ export const ChangesPane = React.memo(function ChangesPane({
             onRun={runChecks}
           />
         )}
+        {/* The close button serves the whole panel — on the preview tab it is
+            the panel's only exit — so it stays outside the tab condition. */}
         <div className="chat-changes-actions">
-          {changes.fileCount > 0 && (
+          {tab === "changes" && changes.fileCount > 0 && (
             <>
               <button
                 type="button"
@@ -388,6 +407,9 @@ export const ChangesPane = React.memo(function ChangesPane({
         </div>
       </div>
 
+      {tab === "preview" ? (
+        <WorkspacePreview repoKey={repoKey} />
+      ) : (
       <div className="chat-changes-body">
         {changes.empty ? (
           <div className="chat-changes-empty">
@@ -412,8 +434,9 @@ export const ChangesPane = React.memo(function ChangesPane({
           </ul>
         )}
       </div>
+      )}
 
-      {!changes.empty && (
+      {tab === "changes" && !changes.empty && (
         <div className="chat-changes-footer">
           <span className="chat-changes-note">
             Diff of the workspace — nothing reaches {workspace ? `${workspace.owner}/${workspace.repo}` : "GitHub"} until

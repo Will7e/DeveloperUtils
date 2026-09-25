@@ -17,14 +17,19 @@
 
 import React from "react";
 import { useModalDialog } from "./useModalDialog";
-import { ChangesPane } from "./ChangesPane";
+import { ChangesPane, type WorkspacePanelTab } from "./ChangesPane";
 
 export function ChangesSheet({
   conversationId,
   onClose,
+  tab,
+  onTabChange,
 }: {
   conversationId: string | null;
   onClose: () => void;
+  /** Which workspace-panel surface the sheet shows — same tabs as the pane */
+  tab: WorkspacePanelTab;
+  onTabChange: (tab: WorkspacePanelTab) => void;
 }) {
   const panelRef = useModalDialog<HTMLDivElement>({ onDismiss: onClose });
 
@@ -41,7 +46,13 @@ export function ChangesSheet({
         {/* `standalone`: this sheet covers the chat header, so the pane is the only
             surface that can state the verification status. In the split layout
             it is left to the header chip instead. */}
-        <ChangesPane conversationId={conversationId} onClose={onClose} standalone />
+        <ChangesPane
+          conversationId={conversationId}
+          onClose={onClose}
+          tab={tab}
+          onTabChange={onTabChange}
+          standalone
+        />
       </div>
     </div>
   );
