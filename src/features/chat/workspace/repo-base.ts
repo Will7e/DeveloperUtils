@@ -39,6 +39,15 @@ export interface RepoIdentity {
 export interface RepoBaseFile {
   content: string;
   sha: string | null;
+  /**
+   * The file's bytes as the API sent them, when it sent bytes at all.
+   *
+   * Only binary ASSETS carry this (images, fonts): the browser workspace's
+   * preview serves them, and a text field cannot. Optional — entries cached
+   * before the field existed are still valid text, and a text-only cache is
+   * the normal state for source files.
+   */
+  base64?: string;
 }
 
 export interface RepoBase {

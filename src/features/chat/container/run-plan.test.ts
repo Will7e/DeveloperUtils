@@ -13,6 +13,7 @@ import {
   describeRunPlan,
   normalizePackageManager,
   planInstall,
+  planInstallWithoutLockfile,
   planRun,
   stepsOf,
 } from "./run-plan";
@@ -92,6 +93,62 @@ describe("planInstall — the tree the repository declares, or a note saying oth
     const { step, note } = planInstall({ lockfiles: [], hasPackageJson: false });
     expect(step).toBeNull();
     expect(note).toContain("nothing to install");
+  });
+
+  it("names the file the frozen install reads, so a caller can check it is really there", () => {
+    // The plan says which files the revision HAS; it cannot say which bytes
+    // arrived. Naming the lockfile is what lets the install verify the one file
+    // its guarantee rests on, instead of discovering the mismatch in npm's words.
+    expect(planInstall({ lockfiles: ["package-lock.json"], hasPackageJson: true }).lockfile).toBe("package-lock.json");
+    expect(
+      planInstall({ packageManager: "pnpm@9", lockfiles: ["pnpm-lock.yaml"], hasPackageJson: true }).lockfile
+    ).toBe("pnpm-lock.yaml");
+    // Nothing frozen was chosen, so nothing is load-bearing.
+    expect(planInstall({ lockfiles: [], hasPackageJson: true }).lockfile).toBeNull();
+  });
+
+  it("treats npm-shrinkwrap.json as npm's lockfile of record", () => {
+    // `npm ci` reads it exactly as it reads package-lock.json, so keying on the
+    // commoner name alone downgraded a repository that ships one to a floating
+    // install — and the note then said the versions were whatever resolves now.
+    const shrinkwrap = planInstall({ lockfiles: ["npm-shrinkwrap.json"], hasPackageJson: true });
+    expect(shrinkwrap.step?.command).toBe("npm ci --no-audit --no-fund");
+    expect(shrinkwrap.lockfile).toBe("npm-shrinkwrap.json");
+    // When both are present the claim is about the one npm prefers.
+    expect(
+      planInstall({ lockfiles: ["npm-shrinkwrap.json", "package-lock.json"], hasPackageJson: true }).lockfile
+    ).toBe("package-lock.json");
+  });
+});
+
+describe("planInstallWithoutLockfile — the install that gives the guarantee up on purpose", () => {
+  it("keeps the repository's own manager and drops only the frozen flag", () => {
+    expect(planInstallWithoutLockfile({ hasPackageJson: true }).step?.command).toBe("npm install --no-audit --no-fund");
+    expect(planInstallWithoutLockfile({ packageManager: "pnpm@9", hasPackageJson: true }).step?.command).toBe(
+      "pnpm install --no-frozen-lockfile"
+    );
+    expect(planInstallWithoutLockfile({ packageManager: "yarn@4", hasPackageJson: true }).step?.command).toBe(
+      "yarn install --no-immutable"
+    );
+    expect(planInstallWithoutLockfile({ packageManager: "bun@1", hasPackageJson: true }).step?.command).toBe(
+      "bun install"
+    );
+  });
+
+  it("never claims the lockfile's versions, because it never read them", () => {
+    const steps = [
+      planInstallWithoutLockfile({ hasPackageJson: true }).step,
+      planInstallWithoutLockfile({ packageManager: "pnpm@9", hasPackageJson: true }).step,
+      planInstallWithoutLockfile({ packageManager: "yarn@4", hasPackageJson: true }).step,
+    ];
+    for (const step of steps) {
+      expect(step?.proves).toContain("resolve today");
+      expect(step?.proves).not.toContain("exact");
+    }
+  });
+
+  it("still refuses to invent an install with no manifest to install against", () => {
+    expect(planInstallWithoutLockfile({ hasPackageJson: false }).step).toBeNull();
   });
 });
 

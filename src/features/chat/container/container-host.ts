@@ -72,10 +72,23 @@ export interface ContainerRuntime {
    * which is a `run_command` that cannot run anything after its first call.
    */
   fs?: {
-    writeFile(path: string, data: string): Promise<void>;
+    /** `data` takes bytes too — the SDK writes a `Uint8Array` as a binary file */
+    writeFile(path: string, data: string | Uint8Array): Promise<void>;
     mkdir(path: string, options: { recursive: true }): Promise<unknown>;
     /** Optional so "this runtime cannot delete" stays an expressible, tested state */
     rm?(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+    /**
+     * Optional, and the only way to ask what a file in the workspace CONTAINS.
+     *
+     * Every other question about the tree is answered from the plan, and the plan
+     * is a statement of intent: it says which files the revision has, not which
+     * bytes arrived. The two can disagree — a mount that skipped a path, a copy
+     * that is empty where the plan has 275 KiB — and the only evidence about the
+     * workspace itself is the workspace. The install checks the lockfile it is
+     * about to depend on through here, because `npm ci` failing to find a
+     * lockfile says "you have no lockfile", not "your mount lost it".
+     */
+    readFile?(path: string, encoding: "utf-8"): Promise<string>;
   };
   spawn(command: string, args?: string[], options?: { env?: Record<string, string> }): Promise<ContainerProcess>;
   on(event: "server-ready", listener: (port: number, url: string) => void): () => void;
@@ -535,7 +548,7 @@ export async function mountWorkspace(tree: FileSystemTree, revision: number): Pr
  * the work in progress rather than a snapshot taken once.
  */
 export async function writeWorkspaceFiles(
-  files: readonly { path: string; content: string }[]
+  files: readonly { path: string; content: string | Uint8Array }[]
 ): Promise<{ ok: true; written: number } | { ok: false; error: string }> {
   const instance = await ensureContainer();
   if (!instance) return { ok: false, error: status.reason ?? "no workspace runtime is available" };

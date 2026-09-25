@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import {
   CONTENT_SECURITY_POLICY,
   ISOLATION_HEADERS,
+  PREVIEW_ORIGIN,
   RUNTIME_ORIGIN,
 } from "./isolation";
 
@@ -130,6 +131,26 @@ describe("deployment headers — the isolation contract", () => {
     // Named separately so a failure says WHY rather than showing two long strings.
     const frameSrc = csp?.split("; ").find((d) => d.startsWith("frame-src")) ?? "";
     expect(frameSrc).toContain(RUNTIME_ORIGIN);
+  });
+
+  it("allows the WebContainer server origins the preview iframe actually loads", () => {
+    // The failure this pins: the workspace booted, `server-ready` fired, and the
+    // preview showed Chromium's "This content is blocked" — a frame-src refusal,
+    // because the dev server's URL lives on a host family no policy copy named.
+    // BOTH families are required: they are different registrable domains, so one
+    // wildcard cannot cover the other — serving the classic *.webcontainer.io
+    // while the runtime hands out *.local-corp.webcontainer-api.io is precisely
+    // the bug that got past a policy naming only one. Both directives: child-src
+    // is the fallback some engines reach frame-src through.
+    for (const directive of ["frame-src", "child-src"]) {
+      const sources =
+        CONTENT_SECURITY_POLICY.split("; ")
+          .find((d) => d.startsWith(`${directive} `))
+          ?.split(" ") ?? [];
+      for (const origin of PREVIEW_ORIGIN.split(" ")) {
+        expect(sources, `${directive} → ${origin}`).toContain(origin);
+      }
+    }
   });
 
   it("serves the same headers from the build output for hosts that read _headers", () => {

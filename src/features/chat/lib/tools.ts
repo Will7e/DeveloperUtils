@@ -28,6 +28,7 @@ import type { RepoContext, ToolCallRequest, ToolCallResult } from "../types";
 import { runToolProgram } from "./tool-program";
 import { readViewFor } from "./tool-cache";
 import { findSkill, matchSkills } from "./skills";
+import { recordSkillLoaded } from "./skill-activity";
 import { isUntrustedTool, wrapUntrusted } from "./untrusted";
 import { AGENT_TOOLS, summarizeToolCall } from "./tool-registry";
 import type { ChatSkill } from "../types";
@@ -173,6 +174,20 @@ function readmeExcerpt(text: string, maxChars = 1_800): string {
 }
 
 // ── Executor ─────────────────────────────────────────────────
+
+/**
+ * A `read_skill` call whose body actually ships — the single source of truth
+ * for "the agent pulled this mid-turn". Fires at the two returns that hand
+ * over a body (single-match query, named read), guarded against churn:
+ * unknown names, catalogue listings, and match lists never count.
+ */
+function recordLoadedSkill(ctx: ToolExecutionContext, skill: { name: string }): void {
+  try {
+    recordSkillLoaded(ctx.conversationId ?? "", skill.name);
+  } catch {
+    /* the header card must never be able to fail a tool call */
+  }
+}
 
 export interface ToolExecutionContext {
   token: string;
@@ -638,6 +653,7 @@ export async function executeToolCall(
           // A single match is the answer — return its body, not just its name.
           if (matches.length === 1) {
             const only = matches[0]!;
+            recordLoadedSkill(ctx, only);
             return {
               callId: call.id,
               name: call.name,
@@ -673,6 +689,7 @@ export async function executeToolCall(
             summary: `unknown skill: ${requested}`,
           };
         }
+        recordLoadedSkill(ctx, skill);
         return {
           callId: call.id,
           name: call.name,

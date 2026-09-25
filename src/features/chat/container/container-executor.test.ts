@@ -63,7 +63,10 @@ function fakeProcess(output: string, exitCode: number) {
   };
 }
 
-function runtimeWith(spawn: ContainerRuntime["spawn"]): ContainerRuntime {
+function runtimeWith(
+  spawn: ContainerRuntime["spawn"],
+  fs: Partial<NonNullable<ContainerRuntime["fs"]>> = {}
+): ContainerRuntime {
   return {
     mount: vi.fn(async () => {}),
     // The filesystem is under `fs`, mirroring the SDK. It was declared on the
@@ -74,11 +77,38 @@ function runtimeWith(spawn: ContainerRuntime["spawn"]): ContainerRuntime {
       writeFile: vi.fn(async () => {}),
       mkdir: vi.fn(async () => {}),
       rm: vi.fn(async () => {}),
+      ...fs,
     },
     spawn,
     on: vi.fn(() => () => {}),
     teardown: vi.fn(async () => {}),
   };
+}
+
+/** The install commands the fake runtime was asked to run */
+function commandsOf(spawn: ReturnType<typeof vi.fn>): string[] {
+  return spawn.mock.calls.map((call) => `${call[0]} ${(call[1] as string[]).join(" ")}`);
+}
+
+/**
+ * npm's answer when it cannot use the lockfile it was pointed at.
+ *
+ * Verbatim from the runtime (npm 10.8.2): a file that is missing, empty or not a
+ * whole JSON document all produce this text, which is what makes it useless to a
+ * reader and unambiguous as a trigger.
+ */
+function npmCannotUseLockfile(): string {
+  return [
+    "npm error code EUSAGE",
+    "npm error",
+    "npm error The `npm ci` command can only install with an existing package-lock.json or",
+    "npm error npm-shrinkwrap.json with lockfileVersion >= 1. Run an install with npm@5 or",
+    "npm error later to generate a package-lock.json file, then try again.",
+    "npm error",
+    "npm error Usage:",
+    "npm error npm ci",
+    "npm error aliases: clean-install, ic, install-clean, isntall-clean",
+  ].join("\n");
 }
 
 beforeEach(() => {
@@ -130,6 +160,46 @@ describe("runInContainer — installing before judging", () => {
     // so reporting it as a failing suite would be a lie about the change.
     expect(result.error).toMatch(/dependencies could not be installed/);
     expect(result.error).toMatch(/proves nothing either way/);
+  });
+
+  it("keeps the diagnostic lines of a failed install, not npm's usage footer", async () => {
+    // The real failure that exposed this: `npm ci` with a lockfile npm rejects at
+    // run time exits EUSAGE with a footer of usage boilerplate, and the old tail
+    // was that boilerplate alone — the actual cause scrolled past it. The lockfile
+    // here is VALID json (the pre-run verdict passes) so this is the plain
+    // failure path, not the lockfile-substitution retry.
+    const npmOutput = [
+      "npm error code EUSAGE",
+      "npm error",
+      "npm error `npm ci` can only install with an existing package-lock.json",
+      "npm error Complete documentation: https://docs.npmjs.com/cli/v10/commands/npm-ci",
+      "npm error [-wsl--workspaces] [--include-workspace-root] [--install-links]",
+      "npm error aliases: clean-install, ic, install-clean, isntall-clean",
+      "npm error Run \"npm help ci\" for more info",
+      "npm error A complete log of this run can be found in: /home/.npm/_logs/x-debug-0.log",
+    ].join("\n");
+    const noLockfilePlan = planMount({
+      base: [{ path: "package.json", content: PKG }],
+      changes: [],
+    });
+    const spawn = vi.fn(async (command: string, args: string[]) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      if (line.includes("npm install")) return fakeProcess(npmOutput, 1);
+      throw new Error(`unexpected command: ${line}`);
+    });
+    adoptRuntimeForTest(runtimeWith(spawn));
+
+    const result = await runInContainer({ command: "npm test", plan: noLockfilePlan, revision: 7 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The lines that name the cause survive…
+    expect(result.error).toContain("npm error code EUSAGE");
+    expect(result.error).toContain("can only install with an existing package-lock.json");
+    // …and the footer that names nothing does not.
+    expect(result.error).not.toContain("aliases: clean-install");
+    expect(result.error).not.toContain("npm help ci");
+    expect(result.error).not.toContain("_logs/x-debug-0.log");
   });
 
   it("treats a non-zero exit as a result, not as a failure to run", async () => {
@@ -292,6 +362,230 @@ describe("runInContainer — installing before judging", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.installed).toBeNull();
+  });
+});
+
+describe("the lockfile a frozen install rests on — checked, repaired, or given up honestly", () => {
+  /** A plan whose lockfile really is the one the revision declares */
+  const withLockfile = () =>
+    planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: '{"lockfileVersion":3}' },
+      ],
+      changes: [],
+    });
+
+  /** A plan whose lockfile is EMPTY, which is a defect in the revision's read */
+  const withEmptyLockfile = () =>
+    planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: "" },
+      ],
+      changes: [],
+    });
+
+  const installingSpawn = (answer: (line: string) => ReturnType<typeof fakeProcess> | null) =>
+    vi.fn(async (command: string, args: string[]) => {
+      const line = `${command} ${args.join(" ")}`;
+      if (line.includes("node --version")) return fakeProcess("v22.0.0\n", 0);
+      return answer(line) ?? fakeProcess("added 300 packages", 0);
+    });
+
+  it("writes the revision's lockfile back when the workspace's copy is empty", async () => {
+    // The failure this exists for: the plan has the lockfile (so the frozen
+    // command is chosen) and the workspace's copy is empty, which npm reports as
+    // "you have no package-lock.json" — a sentence about the repository, for a
+    // defect in the mount. The repair keeps the frozen guarantee instead of
+    // trading it away for every later command in the thread.
+    const spawn = installingSpawn((line) => (line.includes("npm ci") ? fakeProcess("added 300 packages", 0) : null));
+    const writeFile = vi.fn(async () => {});
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => ""), writeFile }));
+
+    const result = await ensureDependencies(withLockfile(), 11);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(writeFile).toHaveBeenCalledWith("package-lock.json", '{"lockfileVersion":3}');
+    expect(commandsOf(spawn).some((line) => line.includes("npm ci --no-audit --no-fund"))).toBe(true);
+    expect(result.notes.join(" ")).toContain("written into the workspace from this revision");
+  });
+
+  it("installs without the frozen form — and says so — when the revision's copies are both unusable", async () => {
+    const spawn = installingSpawn(() => null);
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => "") }));
+
+    const result = await ensureDependencies(withEmptyLockfile(), 12);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const commands = commandsOf(spawn);
+    expect(commands.some((line) => line.includes("npm ci"))).toBe(false);
+    expect(commands.some((line) => line.includes("npm install --no-audit --no-fund"))).toBe(true);
+    // The claim has to shrink with the guarantee: a floating install is reported
+    // as one, in the same result, or a later green means the wrong thing.
+    expect(result.installed).toBe("npm install --no-audit --no-fund");
+    const notes = result.notes.join(" ");
+    expect(notes).toContain("is empty in the workspace");
+    expect(notes).toContain("whatever resolves today");
+  });
+
+  it("recognises a truncated lockfile as one it cannot use, not as bytes", async () => {
+    const truncated = planMount({
+      base: [
+        { path: "package.json", content: PKG },
+        { path: "package-lock.json", content: '{"name":"demo","lockfileVer' },
+      ],
+      changes: [],
+    });
+    const spawn = installingSpawn(() => null);
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => '{"name":"demo","lockfileVer') }));
+
+    const result = await ensureDependencies(truncated, 13);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const notes = result.notes.join(" ");
+    expect(notes).toContain("not a complete JSON document");
+    expect(result.installed).toBe("npm install --no-audit --no-fund");
+  });
+
+  it("retries with the plain install when npm itself refuses the lockfile, and says what the fallback means", async () => {
+    // The check above cannot see everything: the workspace's copy can look fine to
+    // `fs.readFile` and still be something npm will not use. The retry is keyed to
+    // npm's own words — the lockfile-unusable family — and the result names both
+    // installs, because only one of them ran.
+    const spawn = installingSpawn((line) =>
+      line.includes("npm ci") ? fakeProcess(npmCannotUseLockfile(), 1) : null
+    );
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => '{"lockfileVersion":3}') }));
+
+    const result = await ensureDependencies(withLockfile(), 14);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.installed).toBe("npm install --no-audit --no-fund");
+    expect(result.notes.join(" ")).toContain("could not use the workspace's `package-lock.json`");
+  });
+
+  it("installs the WebAssembly build the toolchain needs but npm skipped", async () => {
+    // The failure this exists for, reproduced in the runtime: Vite 8 bundles with
+    // rolldown, whose WebAssembly binding npm never installs (the package declares
+    // `cpu: wasm32`, which does not match the platform the runtime reports), so the
+    // dev server dies at binding load — `ERR_NAPI_BINDING_TARGET_CONFLICT` from
+    // rolldown's own download fallback. Installing the package its loader looks for
+    // first makes the loader take the path that stamps it correctly.
+    const spawn = installingSpawn((line) => (line.includes("npm ci") ? fakeProcess("added 300 packages", 0) : null));
+    const files: Record<string, string> = {
+      "package-lock.json": '{"lockfileVersion":3}',
+      "node_modules/rolldown/package.json": '{"name":"rolldown","version":"1.2.9"}',
+    };
+    adoptRuntimeForTest(
+      runtimeWith(spawn, {
+        readFile: vi.fn(async (path: string) => {
+          const content = files[path];
+          if (content === undefined) throw new Error(`ENOENT: ${path}`);
+          return content;
+        }),
+      })
+    );
+
+    const result = await ensureDependencies(withLockfile(), 21);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const commands = commandsOf(spawn);
+    expect(commands.some((line) => line.includes("npm install --no-save --force --no-audit --no-fund @rolldown/binding-wasm32-wasi@1.2.9"))).toBe(true);
+    expect(result.notes.join(" ")).toContain("@rolldown/binding-wasm32-wasi@1.2.9");
+    expect(result.notes.join(" ")).toContain("Nothing in the repository changed");
+  });
+
+  it("leaves a workspace that already has the binding, and one with no such toolchain, alone", async () => {
+    const spawn = installingSpawn((line) => (line.includes("npm ci") ? fakeProcess("added 300 packages", 0) : null));
+    const readFile = vi.fn(async (path: string) => {
+      const files: Record<string, string> = {
+        "node_modules/rolldown/package.json": '{"name":"rolldown","version":"1.2.9"}',
+        "node_modules/@rolldown/binding-wasm32-wasi/package.json": '{"name":"@rolldown/binding-wasm32-wasi","version":"1.2.9"}',
+      };
+      const content = files[path];
+      if (content === undefined) throw new Error(`ENOENT: ${path}`);
+      return content;
+    });
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile }));
+
+    const withBinding = await ensureDependencies(withLockfile(), 22);
+    expect(withBinding.ok).toBe(true);
+    // Already resolvable: the loader will find it itself, and a second install
+    // would be churn in a tree the user is watching.
+    expect(commandsOf(spawn).some((line) => line.includes("npm install --no-save"))).toBe(false);
+
+    // No rolldown in the tree at all: nothing to do, and nothing said.
+    spawn.mockClear();
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => { throw new Error("ENOENT"); }) }));
+    const withoutToolchain = await ensureDependencies(withEmptyLockfile(), 23);
+    expect(withoutToolchain.ok).toBe(true);
+    expect(commandsOf(spawn).some((line) => line.includes("npm install --no-save"))).toBe(false);
+  });
+
+  it("never fails the install because the binding could not be added", async () => {
+    const spawn = installingSpawn((line) => {
+      if (line.includes("npm ci")) return fakeProcess("added 300 packages", 0);
+      if (line.includes("npm install --no-save")) return fakeProcess("npm error code EACCES", 1);
+      return null;
+    });
+    adoptRuntimeForTest(
+      runtimeWith(spawn, {
+        readFile: vi.fn(async (path: string) => {
+          if (path === "node_modules/rolldown/package.json") return '{"version":"1.2.9"}';
+          throw new Error("ENOENT");
+        }),
+      })
+    );
+
+    const result = await ensureDependencies(withLockfile(), 24);
+    // A workspace without the binding is the workspace this app had before the
+    // step existed; the dev server's own failure, with its hint, is a better report.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.notes.join(" ")).toContain("could not be installed into the workspace");
+    expect(result.installed).toBe("npm ci --no-audit --no-fund");
+  });
+
+  it("falls back to the plain install when the lockfile is out of sync — announced", async () => {
+    // The policy bolt.diy taught and this workspace's nature allows: `ci`'s
+    // refusal on a package.json/lockfile disagreement is correct on a laptop
+    // (where `install` would edit the repository) and fatal here for no reason —
+    // the workspace tree is scratch, and the rewrite reaches the repository only
+    // through an explicit push. The refusal is still reported, never silently
+    // repaired: the note names the out-of-sync, the substitute command, and the
+    // weaker claim a pass makes.
+    const spawn = installingSpawn((line) =>
+      line.includes("npm ci")
+        ? fakeProcess(
+            "npm error `npm ci` can only install packages when your package.json and package-lock.json or npm-shrinkwrap.json are in sync",
+            1
+          )
+        : null
+    );
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => '{"lockfileVersion":3}') }));
+
+    const result = await ensureDependencies(withLockfile(), 15);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(commandsOf(spawn).some((line) => line.includes("npm install --no-audit --no-fund"))).toBe(true);
+    expect(result.notes.join(" ")).toContain("out of sync");
+    expect(result.notes.join(" ")).toContain("npm install");
+  });
+
+  it("does not retry a failure that has nothing to do with the lockfile", async () => {
+    // A network outage or a bad postinstall fails the same way under `install`;
+    // substituting there would hide a real failure behind a second failing
+    // install and double the wait.
+    const spawn = installingSpawn((line) =>
+      line.includes("npm ci") ? fakeProcess("npm error network request failed ECONNRESET", 1) : null
+    );
+    adoptRuntimeForTest(runtimeWith(spawn, { readFile: vi.fn(async () => '{"lockfileVersion":3}') }));
+
+    const result = await ensureDependencies(withLockfile(), 16);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(commandsOf(spawn).some((line) => line.includes("npm install"))).toBe(false);
   });
 });
 

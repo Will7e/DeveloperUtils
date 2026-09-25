@@ -25,7 +25,14 @@ export interface SkillActivity {
   auto: string[];
   /** Matched but over the cap or the char budget — the model may still pull them */
   deferred: string[];
-  /** When the turn was prepared */
+  /**
+   * Skills the agent pulled mid-turn via `read_skill` (in load order). Kept
+   * separate from `auto` because the two arrive from different moments — turn
+   * prep vs. tool execution — and a new prepared turn must clear this half
+   * while `auto` is being recomputed, not blend the two turns together.
+   */
+  loaded: string[];
+  /** When the turn was prepared (moved forward when the agent loads a skill) */
   at: number;
 }
 
@@ -33,12 +40,17 @@ const byConversation = new Map<string, SkillActivity>();
 const listeners = new Set<() => void>();
 
 /** True when two records would render identically */
-function sameActivity(a: SkillActivity, b: Pick<SkillActivity, "auto" | "deferred">): boolean {
+function sameActivity(
+  a: SkillActivity,
+  b: Pick<SkillActivity, "auto" | "deferred" | "loaded">
+): boolean {
   return (
     a.auto.length === b.auto.length &&
     a.deferred.length === b.deferred.length &&
+    a.loaded.length === b.loaded.length &&
     a.auto.every((n, i) => n === b.auto[i]) &&
-    a.deferred.every((n, i) => n === b.deferred[i])
+    a.deferred.every((n, i) => n === b.deferred[i]) &&
+    a.loaded.every((n, i) => n === b.loaded[i])
   );
 }
 
@@ -60,6 +72,12 @@ function emit(): void {
  * as if they were still active. The emit is skipped when the record would
  * render the same, so a long conversation is not re-rendering the header on
  * every send for no visible change.
+ *
+ * `loaded` starts empty here ON PURPOSE: mid-turn `read_skill` loads are
+ * attributed to the turn they happened in, and a newly prepared turn has not
+ * had any yet. Nothing about the PREVIOUS turn's loads survives into this
+ * record — the new turn has not loaded anything, and pretending otherwise
+ * would read as current what is history.
  */
 export function recordSkillActivity(
   conversationId: string,
@@ -69,10 +87,38 @@ export function recordSkillActivity(
   const next: SkillActivity = {
     auto: [...activity.auto],
     deferred: [...activity.deferred],
+    loaded: [],
     at: activity.at ?? Date.now(),
   };
   const existing = byConversation.get(conversationId);
   if (existing && sameActivity(existing, next)) return;
+  byConversation.set(conversationId, next);
+  emit();
+}
+
+/**
+ * Records one skill the agent loaded mid-turn via `read_skill`.
+ *
+ * Folded into the record of the turn the load happened in, so the card's
+ * rows describe one turn end to end. Nothing when the load lands in a turn
+ * that has not been prepared (no record yet — e.g. a resumed session reading
+ * history) or is already in the set: a name loaded twice is one name on the
+ * card, and an emit nobody can see is churn.
+ */
+export function recordSkillLoaded(conversationId: string, name: string): void {
+  if (!conversationId) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const existing = byConversation.get(conversationId);
+  if (!existing) return;
+  if (existing.loaded.includes(trimmed)) return;
+  const next: SkillActivity = {
+    ...existing,
+    loaded: [...existing.loaded, trimmed],
+    // The card describes "the last turn so far"; a mid-turn load is the
+    // newest thing that happened in it, so the record's own clock moves.
+    at: Date.now(),
+  };
   byConversation.set(conversationId, next);
   emit();
 }

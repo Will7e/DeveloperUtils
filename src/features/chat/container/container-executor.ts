@@ -52,6 +52,7 @@ import {
   CONTAINER_MAX_TIMEOUT_MS,
   capOutput,
   planInstall,
+  planInstallWithoutLockfile,
 } from "./run-plan";
 
 /** What the runtime calls this workspace's root, for a result's `cwd` field */
@@ -149,10 +150,13 @@ export function resetContainerQueue(): void {
  *
  * Reads the tree the caller already built rather than mounting and re-reading:
  * the question ("which install command does this revision imply?") is answerable
- * from the plan, and asking the runtime would mean a boot for a decision.
+ * from the plan, and asking the runtime would mean a boot for a decision. Only
+ * text is returned — every caller asks about a manifest — and an asset's bytes
+ * are `null` here the same way an absent file is.
  */
 export function fileInTree(tree: FileSystemTree, path: string): string | null {
-  return flattenTree(tree).find((file) => file.path === path)?.content ?? null;
+  const content = flattenTree(tree).find((file) => file.path === path)?.content ?? null;
+  return typeof content === "string" ? content : null;
 }
 
 interface ExecOutcome {
@@ -399,47 +403,357 @@ export async function ensureDependencies(
   if (!instance) return { ok: false, error: containerStatus().reason ?? "no browser workspace is available on this page" };
 
   const packageJson = fileInTree(plan.tree, "package.json");
+  const packageManager = packageManagerOf(packageJson);
+  const hasPackageJson = Boolean(packageJson && packageJson.trim());
   const lockfiles = plan.files
     .map((file) => file.path)
     .filter((path) => !path.includes("/") && /lock|lockb|lock\.ya?ml/.test(path));
-  const { step, note } = planInstall({
-    packageManager: packageManagerOf(packageJson),
-    lockfiles,
-    hasPackageJson: Boolean(packageJson && packageJson.trim()),
-  });
+  const declared = planInstall({ packageManager, lockfiles, hasPackageJson });
   const notes: string[] = [];
-  if (note) notes.push(note);
-  if (!step) {
+  /** Notes that must survive a failure too: they are WHY the command changed */
+  const substitutions: string[] = [];
+  if (declared.note) notes.push(declared.note);
+  if (!declared.step) {
     // Nothing to install is a finished install.
     installedRevision = revision;
     return { ok: true, installed: null, notes };
   }
 
-  const result = await execOnce(instance, step.command, {
-    // The install gets the workspace's full ceiling: a cold `npm ci` on a real
-    // project is the slowest thing this tier does, and killing it early would
-    // report a timeout as if the code were at fault.
-    timeoutMs: CONTAINER_MAX_TIMEOUT_MS,
-    maxChars: CONTAINER_MAX_OUTPUT_CHARS,
-    ...(signal ? { signal } : {}),
-  });
+  /** The install without its frozen guarantee, for when the lockfile cannot be read */
+  const loose = () => planInstallWithoutLockfile({ packageManager, hasPackageJson }).step;
+  let step = declared.step;
+
+  /**
+   * BEFORE the frozen command runs, the file it depends on is checked against the
+   * WORKSPACE.
+   *
+   * The plan already said the lockfile is in this revision — that is why `npm ci`
+   * was chosen — and the plan is a statement of intent about the tree, not about
+   * the bytes that arrived. The two can disagree, and when they do the failure
+   * lands here, in npm's own words: "`npm ci` can only install with an existing
+   * package-lock.json", which names neither the file the workspace is missing nor
+   * the mount that lost it. A user reads that as "my repository is broken".
+   */
+  if (declared.lockfile) {
+    const secured = await secureLockfile({
+      instance,
+      path: declared.lockfile,
+      fromPlan: fileInTree(plan.tree, declared.lockfile),
+      notes,
+    });
+    if (!secured.usable) {
+      const substitute = loose();
+      if (!substitute) {
+        return {
+          ok: false,
+          error: `this workspace cannot install dependencies: \`${declared.lockfile}\` ${secured.reason}, and the revision declares no package.json to install against.`,
+        };
+      }
+      const why = `\`${declared.lockfile}\` ${secured.reason}, so \`${declared.step.command}\` was not run — the versions it would have installed are not the ones the lockfile pins, and reporting its failure would prove nothing about this revision. Dependencies were installed with \`${substitute.command}\` instead, so the versions in this workspace are whatever resolves today; a pass here is a pass against a tree the repository never declared.`;
+      notes.push(why);
+      substitutions.push(why);
+      step = substitute;
+    }
+  }
+
+  const run = (command: string) =>
+    execOnce(instance, command, {
+      // The install gets the workspace's full ceiling: a cold `npm ci` on a real
+      // project is the slowest thing this tier does, and killing it early would
+      // report a timeout as if the code were at fault.
+      timeoutMs: CONTAINER_MAX_TIMEOUT_MS,
+      maxChars: CONTAINER_MAX_OUTPUT_CHARS,
+      ...(signal ? { signal } : {}),
+    });
+
+  const result = await run(step.command);
   if (!result.ok) return { ok: false, error: result.error };
   if (result.outcome.aborted) return { ok: false, error: STOPPED_BY_USER };
-  if (result.outcome.exitCode !== 0) {
-    const tail = result.outcome.text.trim().split("\n").slice(-6).join("\n");
+  let outcome = result.outcome;
+
+  /**
+   * A frozen install that fails against its own lockfile gets one more attempt
+   * without it — announced, never silent.
+   *
+   * The pre-run check catches the lockfile the workspace cannot deliver (missing,
+   * empty, truncated); this catches the rest of the family, including the one a
+   * browser workspace meets constantly and a local terminal never does: the
+   * OUT-OF-SYNC lockfile, where the revision's package.json and its lockfile
+   * disagree. On a laptop that refusal is the correct, final answer — `npm install`
+   * would rewrite the lockfile, editing the repository. Here the rewrite is
+   * ISOLATED: the workspace tree is thrown away when the thread's repository
+   * detaches or another thread takes the lease, and push is an explicit,
+   * user-approved action, so the lockfile the install would rewrite exists in a
+   * scratch copy of the revision, not in anyone's repository. Refusing forever
+   * bought purity at the price of the whole tier: an app that cannot start cannot
+   * be previewed, driven, or verified, no matter how correct the reasoning was.
+   *
+   * The policy is therefore bolt.diy's: install first with the manager's frozen
+   * form when one exists, fall back to the non-frozen form on failure, and SAY SO
+   * — the note names the substitution, the command that ran, and the weaker claim
+   * a pass makes (`planInstallWithoutLockfile`'s `proves` line), so nothing about
+   * the tree is implied that the repository declared.
+   */
+  if (outcome.exitCode !== 0 && declared.lockfile && LOCKFILE_RETRY.test(outcome.text)) {
+    const substitute = loose();
+    if (substitute) {
+      const why = LOCKFILE_UNUSABLE.test(outcome.text)
+        ? `\`${declared.step.command}\` could not use the workspace's \`${declared.lockfile}\` (npm reported it as missing, empty, or not a complete JSON document), so dependencies were installed with \`${substitute.command}\` instead — they resolve today rather than from the lockfile. The output that follows is that install's.`
+        : `\`${declared.step.command}\` refused to run: the revision's \`package.json\` and \`${declared.lockfile}\` are out of sync, so dependencies were installed with \`${substitute.command}\` instead, which resolves and writes the tree the manifest now describes. In this workspace that rewrite stays in the sandbox — it reaches the repository only through an explicit push — but a pass here is a pass against the RESOLVED tree, not the one the lockfile pinned.`;
+      notes.push(why);
+      substitutions.push(why);
+      const retry = await run(substitute.command);
+      if (!retry.ok) return { ok: false, error: retry.error };
+      if (retry.outcome.aborted) return { ok: false, error: STOPPED_BY_USER };
+      step = substitute;
+      outcome = retry.outcome;
+    }
+  }
+
+  if (outcome.exitCode !== 0) {
+    const tail = installFailureTail(outcome.text);
     return {
       ok: false,
       error:
         `dependencies could not be installed in the browser workspace (\`${step.command}\` ` +
-        `${result.outcome.timedOut ? "was killed after its timeout" : `exited ${result.outcome.exitCode}`}). ` +
-        `The command was NOT run, so it proves nothing either way.${tail ? `\n${tail}` : ""}`,
+        `${outcome.timedOut ? "was killed after its timeout" : `exited ${outcome.exitCode}`}). ` +
+        `The install did not complete, so nothing ran against this revision and it proves nothing either way.${substitutions.length > 0 ? ` ${substitutions.join(" ")}` : ""}${tail ? `\n${tail}` : ""}`,
     };
   }
   installedRevision = revision;
   notes.push(
     `\`${step.command}\` ran in the browser workspace first, so ${step.proves}.`
   );
+  // AFTER the revision's own install, because this is not part of it: nothing in
+  // the repository changed, and the one file it adds is one the runtime cannot run
+  // without.
+  await installWasmBindings({ instance, run, notes });
   return { ok: true, installed: step.command, notes };
+}
+
+/**
+ * A compiled dependency this runtime needs in its WebAssembly build.
+ *
+ * The browser workspace cannot load a native addon (`.node`), so a toolchain that
+ * ships both a native binding and a WebAssembly one has to use the WebAssembly one
+ * here — and npm will NOT install it: the package declares `cpu: wasm32`, which
+ * does not match the platform the runtime reports, so the install skips it. That
+ * skip is invisible until the toolchain runs, and then it is fatal in a way that
+ * reads like a broken project rather than a missing file: Vite 8 bundles with
+ * `rolldown`, whose binding loader falls back to downloading the package itself
+ * and then refuses the one it downloaded (`ERR_NAPI_BINDING_TARGET_CONFLICT` — its
+ * WebContainer fallback stamps the binding with the wrong target, where every
+ * other path in the same loader sets it correctly). Installing the package the
+ * loader looks for FIRST removes that fallback from the picture: the loader
+ * resolves it, stamps it correctly, and the dev server starts.
+ *
+ * Verified in the runtime, not reasoned about: without it, `npm run dev` dies at
+ * binding load with `exit status 1`; with it, Vite 8 parses this project's
+ * TypeScript, bundles `vite.config.ts` and reaches `server-ready`.
+ */
+const WASM_BINDINGS: { host: string; binding: (version: string) => string; why: string }[] = [
+  {
+    host: "rolldown",
+    binding: (version) => `@rolldown/binding-wasm32-wasi@${version}`,
+    why: "Vite 8 bundles with rolldown, and this runtime can only load its WebAssembly build",
+  },
+];
+
+/** As much of the runtime filesystem as these checks need */
+type WorkspaceFileSystem = NonNullable<ContainerRuntime["fs"]> & {
+  readFile(path: string, encoding: "utf-8"): Promise<string>;
+};
+
+/**
+ * Installs the WebAssembly build of any compiled dependency the install skipped.
+ *
+ * `--no-save` because the repository is not ours to change, and `--force` because
+ * the platform check is the very thing being overridden: the package is *meant* for
+ * a different `cpu`, and it is the right build for this environment. The install is
+ * additive — npm reports added packages here, not changed or removed ones.
+ *
+ * Never fails the run. A workspace without the binding is exactly the workspace
+ * this app had before this step existed, and the toolchain's own failure — with the
+ * hint that names it — is a better report than a refusal from here.
+ */
+async function installWasmBindings(input: {
+  instance: ContainerRuntime;
+  run: (command: string) => Promise<{ ok: true; outcome: ExecOutcome } | { ok: false; error: string }>;
+  notes: string[];
+}): Promise<void> {
+  const fs = input.instance.fs;
+  // A runtime that cannot be asked cannot be repaired, and guessing would install
+  // a package into a tree that may already hold it.
+  if (!fs?.readFile) return;
+  const files: WorkspaceFileSystem = fs as WorkspaceFileSystem;
+
+  for (const entry of WASM_BINDINGS) {
+    const version = await packageVersionIn(files, `node_modules/${entry.host}/package.json`);
+    if (!version) continue;
+    const spec = entry.binding(version);
+    const name = spec.slice(0, spec.lastIndexOf("@"));
+    if ((await packageVersionIn(files, `node_modules/${name}/package.json`)) !== null) continue;
+
+    const installed = await input.run(
+      `npm install --no-save --force --no-audit --no-fund ${spec}`
+    );
+    if (!installed.ok || installed.outcome.exitCode !== 0) {
+      input.notes.push(
+        `\`${spec}\` could not be installed into the workspace, so ${entry.why} — expect anything that loads it to fail, for that reason rather than for anything about the change.`
+      );
+      continue;
+    }
+    input.notes.push(
+      `\`${spec}\` was installed into the workspace first: ${entry.why}, and the install skips it because the package declares \`cpu: wasm32\`. Nothing in the repository changed (it is installed with \`--no-save\`), so the versions the install put in the workspace are still the declared ones — this adds the one build the runtime is able to load.`
+    );
+  }
+}
+
+/** The `version` a package.json declares, or null when that file is not there */
+async function packageVersionIn(files: WorkspaceFileSystem, path: string): Promise<string | null> {
+  try {
+    const parsed = JSON.parse(await files.readFile.call(files, path, "utf-8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : null;
+  } catch {
+    // Absent, unreadable, or not JSON: all three mean "this is not a package I can
+    // reason about", and the caller skips it rather than installing blind.
+    return null;
+  }
+}
+
+/**
+ * The lines of a failed install's output that name the CAUSE.
+ *
+ * npm ends every error block with the same footer — the usage line, the command's
+ * alias list, `Run "npm help …"`, the debug-log path — and a naive "last N lines"
+ * tail is all footer and no diagnosis (the real message sits just above it). One
+ * real failure this fixed: `npm ci` with no usable lockfile exits with `EUSAGE`,
+ * and the tail the old code kept was the footer alone, so the modal named nothing
+ * a reader could act on. The filter drops footer lines from the tail rather than
+ * taking the tail of the filtered text, so footer-free output (other managers,
+ * other failures) is returned exactly as it was.
+ */
+export function installFailureTail(text: string, maxLines = 8): string {
+  const lines = text.trim().split("\n");
+  const diagnosis = lines.filter((line) => !NPM_ERROR_FOOTER.test(line.trim()));
+  return diagnosis.slice(-maxLines).join("\n");
+}
+
+/**
+ * npm's per-error footer, matched per line. It carries no diagnosis: the usage
+ * block (`Usage:` and its flag lines, which wrap so they are matched by PREFIX,
+ * not by a whole-line shape), the alias list, the `Run "npm help …"` pointer,
+ * and the debug-log path. Bare `npm error` separator lines are dropped too. The
+ * `npm error` PREFIX lines are otherwise kept — the message that names the cause
+ * (`npm error code EUSAGE`, the explanation) wears the same prefix, and
+ * filtering it out would keep exactly the wrong half.
+ */
+const NPM_ERROR_FOOTER =
+  /^\[.*\]$|^npm error \[|^aliases:|^npm error aliases:|^Run "npm help|^npm error Run "npm help|^A complete log of this run|^npm error A complete log of this run|^npm error Usage:|^Usage:|^npm error$/;
+
+/**
+ * What npm prints when the lockfile it was told to use cannot be used at all.
+ *
+ * Kept beside the install rather than in a shared table because it is not a
+ * diagnosis for a reader — it is a trigger, and a trigger that fires too eagerly
+ * changes what a run means. Both patterns below are npm failing to READ a
+ * lockfile: the first is the message it prints for a file that is absent, empty, or
+ * unparseable (verified against npm 10.8.2 inside the runtime), and the second is
+ * the parse-error family for a lockfile that is present but not a whole document.
+ */
+const LOCKFILE_UNUSABLE =
+  /can only install with an existing package-lock|npm-shrinkwrap\.json with lockfileVersion|Invalid package-lock|EJSONPARSE|Failed to parse json|Unexpected token .* in JSON|not valid JSON/i;
+
+/**
+ * The wider family that earns the fallback install: everything above, plus the
+ * out-of-sync refusal (`ci`'s deliberate strictness) — which in a scratch
+ * workspace is a state to move past, not information to preserve. Anything npm
+ * fails at that is NEITHER of these (a network outage, a private package, a bad
+ * postinstall script) gets no retry: substituting there would hide a real
+ * failure behind a second install that fails the same way.
+ */
+const LOCKFILE_RETRY = new RegExp(
+  LOCKFILE_UNUSABLE.source +
+    "|can only install (omitted )?packages when your package.json and package-lock|are in sync|npm error code EUSAGE",
+  "i"
+);
+
+/**
+ * Whether a lockfile's TEXT is something the frozen command can read.
+ *
+ * Three ways to be unusable, and they are one failure to whoever reads the
+ * message. The JSON check is the load-bearing one: a lockfile that was fetched,
+ * cached, mounted and truncated on the way is a file that exists and that npm
+ * still refuses, and nothing before this point could tell the difference.
+ */
+function lockfileVerdict(path: string, text: string | null): { ok: true } | { ok: false; why: string } {
+  if (text === null) return { ok: false, why: "is not in the workspace" };
+  if (text.trim().length === 0) return { ok: false, why: "is empty in the workspace" };
+  if (/\.json$/i.test(path)) {
+    try {
+      JSON.parse(text);
+    } catch {
+      return { ok: false, why: "is not a complete JSON document in the workspace (it is truncated or corrupt)" };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * One file as the WORKSPACE holds it, or null when this runtime cannot be asked.
+ *
+ * Null and the empty string are deliberately different answers: the first means
+ * there is no reader and the plan's copy is the only account available, the second
+ * means the runtime looked and found nothing — which is a fact about the mount and
+ * must be reported as one.
+ */
+async function readWorkspaceFile(instance: ContainerRuntime, path: string): Promise<string | null> {
+  const fs = instance.fs;
+  if (!fs?.readFile) return null;
+  try {
+    return await fs.readFile.call(fs, path, "utf-8");
+  } catch {
+    // An unreadable path is a path that is not there, which is the same answer
+    // npm is about to get.
+    return "";
+  }
+}
+
+/**
+ * Makes the file a frozen install depends on real, or says why it cannot be.
+ *
+ * The repair matters as much as the check. A plan whose lockfile is intact and a
+ * workspace whose copy is empty is a MOUNT defect, and the honest fix is to write
+ * the revision's bytes again — not to give up the frozen install for every later
+ * command in this thread. Only when the plan's copy is unusable too is the
+ * guarantee actually unavailable, and that is reported as such.
+ */
+async function secureLockfile(input: {
+  instance: ContainerRuntime;
+  path: string;
+  fromPlan: string | null;
+  notes: string[];
+}): Promise<{ usable: true } | { usable: false; reason: string }> {
+  const present = await readWorkspaceFile(input.instance, input.path);
+  // A runtime that cannot be asked leaves the plan's copy as the only evidence.
+  const verdict = lockfileVerdict(input.path, present === null ? input.fromPlan : present);
+  if (verdict.ok) return { usable: true };
+
+  if (present !== null && input.fromPlan && lockfileVerdict(input.path, input.fromPlan).ok) {
+    try {
+      await input.instance.fs?.writeFile(input.path, input.fromPlan);
+      input.notes.push(
+        `\`${input.path}\` was written into the workspace from this revision before installing: the copy the workspace held ${verdict.why}, and a frozen install is only as good as the file it reads.`
+      );
+      return { usable: true };
+    } catch (error) {
+      return {
+        usable: false,
+        reason: `could not be written into the workspace (${error instanceof Error ? error.message : String(error)})`,
+      };
+    }
+  }
+  return { usable: false, reason: verdict.why };
 }
 
 /** The manager a package.json declares, or null when it does not say */
@@ -561,7 +875,7 @@ export async function runInContainer(request: {
   });
 }
 
-/** Exposed for the preview bridge: the tree's files, as path/content pairs */
-export function filesOf(tree: FileSystemTree): { path: string; content: string }[] {
+/** Exposed for the preview bridge: the tree's files, as path/content pairs (bytes for assets) */
+export function filesOf(tree: FileSystemTree): { path: string; content: string | Uint8Array }[] {
   return flattenTree(tree);
 }

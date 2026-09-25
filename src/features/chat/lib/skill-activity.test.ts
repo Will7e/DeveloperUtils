@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getSkillActivity,
   recordSkillActivity,
+  recordSkillLoaded,
   resetSkillActivity,
   subscribeSkillActivity,
 } from "./skill-activity";
@@ -59,6 +60,46 @@ describe("skill activity", () => {
     recordSkillActivity("conv-1", { auto, deferred: [] });
     auto.push("Sneaky");
     expect(getSkillActivity("conv-1")?.auto).toEqual(["Add Tests"]);
+  });
+
+  it("starts a new turn's record with an empty mid-turn bucket", () => {
+    // A freshly prepared turn has not run read_skill yet — the previous
+    // turn's mid-turn loads are history, not current state.
+    recordSkillActivity("conv-1", { auto: ["Add Tests"], deferred: ["Deep Review"] });
+    recordSkillLoaded("conv-1", "Deep Review");
+    recordSkillActivity("conv-1", { auto: ["Add Tests"], deferred: ["Deep Review"] });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual([]);
+  });
+
+  it("records a mid-turn read_skill load into the current turn", () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: ["Deep Review"] });
+    recordSkillLoaded("conv-1", "Deep Review");
+    const activity = getSkillActivity("conv-1");
+    expect(activity?.loaded).toEqual(["Deep Review"]);
+    expect(activity?.deferred).toEqual(["Deep Review"]);
+  });
+
+  it("does not duplicate a skill loaded twice in one turn", () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    recordSkillLoaded("conv-1", "Deep Review");
+    recordSkillLoaded("conv-1", "Deep Review");
+    expect(getSkillActivity("conv-1")?.loaded).toEqual(["Deep Review"]);
+  });
+
+  it("does not record a mid-turn load without a prepared turn", () => {
+    // No record = no turn to attribute the load to (e.g. a resumed session
+    // replaying history). Inventing one would misdate the activity.
+    recordSkillLoaded("conv-1", "Deep Review");
+    expect(getSkillActivity("conv-1")).toBeNull();
+  });
+
+  it("notifies subscribers when a mid-turn load changes the record", () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    const listener = vi.fn();
+    const unsubscribe = subscribeSkillActivity(listener);
+    recordSkillLoaded("conv-1", "Deep Review");
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 
   it("notifies subscribers when the record changes", () => {

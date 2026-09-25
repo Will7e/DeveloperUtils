@@ -82,6 +82,49 @@ export async function readRepoFileAt(
 }
 
 /**
+ * One binary asset's raw bytes at this workspace's base commit.
+ *
+ * The order mirrors `readRepoFileAt` on purpose: the working copy wins (an
+ * asset the agent replaced is served as replaced), then the base cache, then
+ * the network. GitHub hands bytes over as base64 in `GitHubFileContent.base64`
+ * — decoded here, once, at the boundary where bytes are the point.
+ */
+export async function readRepoAssetAt(
+  ws: WorkspaceState,
+  path: string,
+  token: string | null
+): Promise<Uint8Array | null> {
+  const identity = { owner: ws.owner, repo: ws.repo, branch: ws.branch };
+  const known = await getRepoBaseFile(identity, path, ws.baseCommitSha);
+  if (known?.base64) return base64ToBytes(known.base64);
+  if (!token) return null;
+
+  try {
+    const file = await readFileContent(token, ws.owner, ws.repo, path, ws.branch);
+    // `base64` is set whenever the API returned bytes, text or not; `text`
+    // alone would lose the file. Assets under the Contents API's 1 MB limit
+    // ride the first call; the Blob fallback covers the rest.
+    if (!file.base64) return null;
+    void rememberRepoBaseFile(identity, path, ws.baseCommitSha, {
+      content: file.text ?? "",
+      sha: file.sha ?? null,
+      base64: file.base64,
+    });
+    return base64ToBytes(file.base64);
+  } catch {
+    return null;
+  }
+}
+
+/** base64 → bytes (no atob unicode path — this IS the bytes path) */
+function base64ToBytes(payload: string): Uint8Array {
+  const binary = atob(payload);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+/**
  * The container tree for the revision the caller is about to run against.
  *
  * The workspace is passed in rather than re-read from the store, because the
@@ -95,7 +138,11 @@ export async function mountPlanForWorkspace(
   ws: WorkspaceState
 ): Promise<{ ok: true; result: MountPlanResult } | { ok: false; error: string }> {
   const token = useChatStore.getState().settings.github.token ?? null;
-  return planWorkspaceMount({ ws, read: (path) => readRepoFileAt(ws, path, token) });
+  return planWorkspaceMount({
+    ws,
+    read: (path) => readRepoFileAt(ws, path, token),
+    readBinary: (path) => readRepoAssetAt(ws, path, token),
+  });
 }
 
 /**

@@ -23,7 +23,16 @@
 
 export interface MaterializeBaseFile {
   path: string;
-  content: string;
+  /**
+   * Text, or raw bytes for a binary asset (image, font, audio).
+   *
+   * `Uint8Array` exists because a restaurant site without its photos is not a
+   * preview, it is a broken page: assets ARE the app. The mount pipeline passes
+   * them through untouched — never decoded to text, never inlined — and only
+   * tree-building touches the distinction (a byte array becomes a binary file
+   * node; WebContainer's `writeFile` accepts it natively).
+   */
+  content: string | Uint8Array;
 }
 
 export interface MaterializeChange {
@@ -35,7 +44,7 @@ export interface MaterializeChange {
 
 export interface MaterializePlan {
   /** Files to write, in apply order (shallowest path first) */
-  writes: { path: string; content: string }[];
+  writes: { path: string; content: string | Uint8Array }[];
   /** Paths to remove from the materialized tree */
   deletes: string[];
   /** Entries that will NOT be written, with the reason */
@@ -134,7 +143,7 @@ export function planMaterialization(input: {
 }): MaterializePlan {
   const maxBytes = input.maxBytes ?? MATERIALIZE_MAX_BYTES;
   const rejected: MaterializePlan["rejected"] = [];
-  const byPath = new Map<string, string>();
+  const byPath = new Map<string, string | Uint8Array>();
   const deleted = new Set<string>();
 
   for (const file of input.base) {
@@ -165,7 +174,8 @@ export function planMaterialization(input: {
   let bytes = 0;
   for (const path of [...byPath.keys()].sort(comparePaths)) {
     const content = byPath.get(path)!;
-    if (bytes + content.length > maxBytes) {
+    const size = typeof content === "string" ? content.length : content.byteLength;
+    if (bytes + size > maxBytes) {
       rejected.push({
         path,
         code: "too-large",
@@ -173,7 +183,7 @@ export function planMaterialization(input: {
       });
       continue;
     }
-    bytes += content.length;
+    bytes += size;
     writes.push({ path, content });
   }
 

@@ -34,10 +34,15 @@ export interface MountPlanResult {
 export async function planWorkspaceMount(input: {
   ws: WorkspaceState;
   read: (path: string) => Promise<string | null>;
+  readBinary?: (path: string) => Promise<Uint8Array | null>;
 }): Promise<{ ok: true; result: MountPlanResult } | { ok: false; error: string }> {
   let hydrated;
   try {
-    hydrated = await hydrateTree({ entries: input.ws.tree, read: input.read });
+    hydrated = await hydrateTree({
+      entries: input.ws.tree,
+      read: input.read,
+      ...(input.readBinary ? { readBinary: input.readBinary } : {}),
+    });
   } catch (error) {
     return {
       ok: false,

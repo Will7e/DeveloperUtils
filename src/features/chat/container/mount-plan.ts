@@ -99,7 +99,7 @@ export function planMount(input: {
     message: entry.message,
   }));
 
-  const files: { path: string; content: string; bytes: number }[] = [];
+  const files: { path: string; content: string | Uint8Array; bytes: number }[] = [];
   for (const write of composed.writes) {
     if (classifyPath(write.path) === "secret") {
       skipped.push({
@@ -117,7 +117,11 @@ export function planMount(input: {
       });
       continue;
     }
-    files.push({ path: write.path, content: write.content, bytes: write.content.length });
+    files.push({
+      path: write.path,
+      content: write.content,
+      bytes: typeof write.content === "string" ? write.content.length : write.content.byteLength,
+    });
   }
 
   const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
@@ -132,7 +136,7 @@ export function planMount(input: {
 
 interface PlannedFile {
   path: string;
-  content: string;
+  content: string | Uint8Array;
 }
 
 /**
@@ -164,6 +168,9 @@ function treeOf(files: readonly PlannedFile[]): FileSystemTree {
     // silent overwrite would hide it, so the directory wins and the file is
     // reported by the caller's byte/file counts.
     if (!(name in node)) {
+      // `contents` accepts a string OR a `Uint8Array` — the binary form is how
+      // committed assets (images, fonts) reach the preview without being
+      // decoded into corruption. The SDK's own `FileNode` type carries both.
       const entry: FileNode = { file: { contents: file.content } };
       node[name] = entry;
     }
@@ -183,21 +190,24 @@ function compareByDepth(a: PlannedFile, b: PlannedFile): number {
  * The inverse of `treeOf`, and it exists for the second and later mounts: writing
  * files into a mounted tree individually is what feeds the dev server's hot
  * reload, where re-mounting the whole tree would blank the preview on every
- * revision. Binary contents (a `Uint8Array`) are skipped rather than decoded —
- * this app never writes a binary into the workspace, and inventing text for one
- * would corrupt it.
+ * revision. Binary contents ride through as `Uint8Array` — the write bridge
+ * passes them to the SDK unchanged, which accepts them natively; skipping them
+ * here would silently strip every committed asset on the SECOND revision (the
+ * files are already mounted, the refresh rewrites only what it is handed).
  */
 export function flattenTree(
   tree: FileSystemTree,
   prefix = ""
-): { path: string; content: string }[] {
-  const files: { path: string; content: string }[] = [];
+): { path: string; content: string | Uint8Array }[] {
+  const files: { path: string; content: string | Uint8Array }[] = [];
   for (const [name, node] of Object.entries(tree)) {
     const path = prefix ? `${prefix}/${name}` : name;
     if ("file" in node) {
       // A `symlink` node has no contents; only a real file has bytes to write.
       const contents = "contents" in node.file ? node.file.contents : null;
-      if (typeof contents === "string") files.push({ path, content: contents });
+      if (typeof contents === "string" || contents instanceof Uint8Array) {
+        files.push({ path, content: contents });
+      }
       continue;
     }
     if ("directory" in node) {

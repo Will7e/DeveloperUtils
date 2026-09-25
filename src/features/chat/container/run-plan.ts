@@ -74,6 +74,38 @@ export interface RunPlan {
 }
 
 /**
+ * The npm lockfiles a frozen install can be built on, in preference order.
+ *
+ * `npm-shrinkwrap.json` is here because npm treats it as the lockfile of record
+ * and `ci` accepts it — a repository that ships one has exactly the frozen
+ * guarantee `package-lock.json` gives, and keying only on the more common name
+ * quietly downgraded it to a floating install.
+ */
+const NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"] as const;
+
+/**
+ * What an install depends on, beyond the package.json it is run against.
+ *
+ * `lockfile` is the file whose BYTES are load-bearing: the frozen forms below are
+ * the only ones that install the versions the repository declares, and each one is
+ * meaningless without the file it reads. Naming it here is what lets the caller
+ * check the workspace actually holds it — the plan deciding on `npm ci` while the
+ * workspace's copy is missing or empty is the difference between an install and a
+ * command that fails for a reason that reads as a broken repository.
+ */
+export interface InstallPlan {
+  step: PlannedStep | null;
+  note: string | null;
+  /** Absolute-in-workdir path of the lockfile `step` reads, or null */
+  lockfile: string | null;
+}
+
+/** The first of these the revision has, or null */
+function firstPresent(candidates: readonly string[], has: (name: string) => boolean): string | null {
+  return candidates.find((name) => has(name)) ?? null;
+}
+
+/**
  * The install command for a repository, from its declared manager and its
  * lockfile.
  *
@@ -88,37 +120,70 @@ export function planInstall(input: {
   /** Paths present in the mounted tree, e.g. ["package-lock.json"] */
   lockfiles: readonly string[];
   hasPackageJson: boolean;
-}): { step: PlannedStep | null; note: string | null } {
+}): InstallPlan {
   if (!input.hasPackageJson) {
-    return { step: null, note: "No package.json in this revision, so there is nothing to install." };
+    return { step: null, note: "No package.json in this revision, so there is nothing to install.", lockfile: null };
   }
   const has = (name: string) => input.lockfiles.includes(name);
   const manager = normalizePackageManager(input.packageManager) ?? "npm";
 
   if (manager === "pnpm" || has("pnpm-lock.yaml")) {
     return has("pnpm-lock.yaml")
-      ? { step: step("install", "Install (pnpm)", "pnpm install --frozen-lockfile", "the lockfile's exact dependency versions are installed"), note: null }
-      : { step: step("install", "Install (pnpm)", "pnpm install --no-frozen-lockfile", "dependencies resolve today, not as the lockfile declares"), note: "No pnpm lockfile in this revision — dependency versions are whatever resolves now." };
+      ? { step: step("install", "Install (pnpm)", "pnpm install --frozen-lockfile", "the lockfile's exact dependency versions are installed"), note: null, lockfile: "pnpm-lock.yaml" }
+      : { step: step("install", "Install (pnpm)", "pnpm install --no-frozen-lockfile", "dependencies resolve today, not as the lockfile declares"), note: "No pnpm lockfile in this revision — dependency versions are whatever resolves now.", lockfile: null };
   }
   if (manager === "yarn" || has("yarn.lock")) {
     return has("yarn.lock")
-      ? { step: step("install", "Install (yarn)", "yarn install --immutable", "the lockfile's exact dependency versions are installed"), note: null }
-      : { step: step("install", "Install (yarn)", "yarn install", "dependencies resolve today, not as the lockfile declares"), note: "No yarn.lock in this revision — dependency versions are whatever resolves now." };
+      ? { step: step("install", "Install (yarn)", "yarn install --immutable", "the lockfile's exact dependency versions are installed"), note: null, lockfile: "yarn.lock" }
+      : { step: step("install", "Install (yarn)", "yarn install", "dependencies resolve today, not as the lockfile declares"), note: "No yarn.lock in this revision — dependency versions are whatever resolves now.", lockfile: null };
   }
   if (manager === "bun" || has("bun.lockb")) {
     return has("bun.lockb")
-      ? { step: step("install", "Install (bun)", "bun install --frozen-lockfile", "the lockfile's exact dependency versions are installed"), note: null }
-      : { step: step("install", "Install (bun)", "bun install", "dependencies resolve today, not as the lockfile declares"), note: "No bun lockfile in this revision — dependency versions are whatever resolves now." };
+      ? { step: step("install", "Install (bun)", "bun install --frozen-lockfile", "the lockfile's exact dependency versions are installed"), note: null, lockfile: "bun.lockb" }
+      : { step: step("install", "Install (bun)", "bun install", "dependencies resolve today, not as the lockfile declares"), note: "No bun lockfile in this revision — dependency versions are whatever resolves now.", lockfile: null };
   }
-  if (has("package-lock.json")) {
+  const npmLockfile = firstPresent(NPM_LOCKFILES, has);
+  if (npmLockfile) {
     // `ci` over `install`: it refuses when the lockfile and package.json
     // disagree, which is information, where `install` silently repairs it.
-    return { step: step("install", "Install (npm ci)", "npm ci --no-audit --no-fund", "the lockfile's exact dependency versions are installed"), note: null };
+    return { step: step("install", "Install (npm ci)", "npm ci --no-audit --no-fund", "the lockfile's exact dependency versions are installed"), note: null, lockfile: npmLockfile };
   }
   return {
     step: step("install", "Install (npm)", "npm install --no-audit --no-fund", "dependencies resolve today, not as a lockfile declares"),
     note: "No package-lock.json in this revision — dependency versions are whatever resolves now.",
+    lockfile: null,
   };
+}
+
+/**
+ * The same install, WITHOUT the frozen guarantee.
+ *
+ * Exists for one situation: the frozen command cannot read the lockfile it was
+ * built on — the file is missing from the workspace, or what is there is empty or
+ * half a JSON document — and the choice is between a floating install and no
+ * install at all. `planInstall`'s rule that `ci` is honest and `install` repairs
+ * stays intact; what changes is that the replacement is DECIDED HERE, by name, so
+ * the caller can report which install actually ran and why. Nothing in this
+ * function may be silent about the guarantee it gives up: every branch returns the
+ * step whose own `proves` names the weaker claim.
+ */
+export function planInstallWithoutLockfile(input: {
+  packageManager?: string | null;
+  hasPackageJson: boolean;
+}): { step: PlannedStep | null; note: string | null } {
+  if (!input.hasPackageJson) {
+    return { step: null, note: "No package.json in this revision, so there is nothing to install." };
+  }
+  switch (normalizePackageManager(input.packageManager) ?? "npm") {
+    case "pnpm":
+      return { step: step("install", "Install (pnpm)", "pnpm install --no-frozen-lockfile", "dependencies resolve today, not as the lockfile declares"), note: null };
+    case "yarn":
+      return { step: step("install", "Install (yarn)", "yarn install --no-immutable", "dependencies resolve today, not as the lockfile declares"), note: null };
+    case "bun":
+      return { step: step("install", "Install (bun)", "bun install", "dependencies resolve today, not as the lockfile declares"), note: null };
+    default:
+      return { step: step("install", "Install (npm)", "npm install --no-audit --no-fund", "dependencies resolve today, not as the lockfile declares"), note: null };
+  }
 }
 
 /** The plan for one revision: install first, then the checks it declares */

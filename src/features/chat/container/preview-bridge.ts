@@ -50,6 +50,7 @@ import {
 } from "./container-executor";
 import type { MountPlan } from "./mount-plan";
 import { normalizePackageManager } from "./run-plan";
+import { injectPreviewControl } from "./preview-control-bridge";
 
 /**
  * The runtime's own message types, spelled as literals.
@@ -144,6 +145,18 @@ let outputUnreadable: string | null = null;
 let startToken = 0;
 
 /**
+ * Ends the readiness wait in flight, if there is one.
+ *
+ * Killing the process is not enough on its own: `waitForServerReady` settles on
+ * the process EXITING, and whether a kill resolves that promise is the runtime's
+ * business, not something a Stop can rely on. A stop that only killed could
+ * leave the caller — and the strip, still reading "starting" — waiting out the
+ * full timeout for an answer that is already known. Set while a wait is in
+ * flight, cleared by it.
+ */
+let abortStartup: ((outcome: StartupOutcome) => void) | null = null;
+
+/**
  * The thread whose dev server this is.
  *
  * A page runs ONE dev server — that is the design, not a limitation to work
@@ -154,6 +167,19 @@ let startToken = 0;
  * we know whether it was ours.
  */
 let ownerThreadId: string | null = null;
+
+/**
+ * Whose thread the running preview belongs to, or null when nothing is
+ * running or the owner was never recorded.
+ *
+ * Exposed because the preview's state is PAGE-GLOBAL while the completion
+ * gate is PER-CONVERSATION: a gate that read another thread's preview
+ * exceptions would nudge a turn for an app it never touched. Absent means
+ * "not yours" — and the gate treats absent as silent.
+ */
+export function previewOwnerThreadId(): string | null {
+  return ownerThreadId;
+}
 
 /** As much of a spawned process as this module holds on to */
 type ContainerProcessHandle = Awaited<ReturnType<ContainerRuntime["spawn"]>>;
@@ -183,11 +209,11 @@ export function resetPreview(): void {
   outputTail = "";
   outputUnreadable = null;
   startToken = 0;
+  abortStartup = null;
   ownerThreadId = null;
   state = INITIAL;
   revision += 1;
 }
-
 function setState(next: Partial<PreviewState>): void {
   state = { ...state, ...next };
   revision += 1;
@@ -244,6 +270,7 @@ function handleWorkspaceReleased(event: Extract<WorkspaceEvent, { type: "workspa
   ownerThreadId = null;
   // The release ends any startup in flight too, so it must not be reported later
   // as that attempt failing on its own.
+  endStartupWait();
   startToken += 1;
   if (running) {
     try {
@@ -392,6 +419,14 @@ export async function startPreview(input: {
     startedAt: Date.now(),
   });
 
+  // The control bootstrap rides the tree BEFORE it is mounted, so the served
+  // page carries the listener from its first byte and no restart is needed
+  // later. A project without an index.html-shaped document is left alone —
+  // there is nothing to inject into, and that is a normal outcome, not a
+  // failure (the interaction tools report the missing capability honestly).
+  const control = injectPreviewControl(input.plan);
+  if (control.note) setState({ notes: [...state.notes, control.note] });
+
   const prepared = await serializeWorkspaceWork(async () => {
     const mounted = await prepareWorkspace(input.plan, input.revision, input.owner);
     if (!mounted.ok) return { ok: false as const, error: mounted.error };
@@ -424,10 +459,39 @@ export async function startPreview(input: {
     setState({ status: "failed", notes: [...state.notes, `The dev server would not start: ${message}`] });
     return { ok: false, error: `The dev server would not start: ${message}` };
   }
+  // A Stop pressed while this was still mounting and spawning arrived before
+  // `process` existed to kill, so it bumped the token and nothing else. The
+  // process it left behind is the server the user just stopped: killed here,
+  // before anything waits on it, rather than waited out and then blamed on the
+  // project's dev script.
+  if (attempt !== startToken) {
+    try {
+      spawned.kill();
+    } catch {
+      // Already gone.
+    }
+    setState({ status: "stopped", url: null, port: null });
+    return { ok: false, error: "the preview was stopped while it was starting" };
+  }
+
   process = spawned;
   const pump = pumpOutput(spawned);
 
   const outcome = await waitForServerReady(spawned, PREVIEW_START_TIMEOUT_MS);
+
+  // A deliberate stop is not a failure to start, and saying it was reads as a bug
+  // in the project's dev script. Checked before the output is drained: there is
+  // no failure to explain, so there is nothing here worth waiting for.
+  if (attempt !== startToken) {
+    try {
+      spawned.kill();
+    } catch {
+      // Already gone.
+    }
+    process = null;
+    return { ok: false, error: "the preview was stopped while it was starting" };
+  }
+
   // Drained before the failure is described, because the tail is filled by a
   // reader running alongside this await: the last line a dying dev server prints
   // — the one naming the cause — is the most likely to still be in flight, and
@@ -441,12 +505,6 @@ export async function startPreview(input: {
       // Already gone.
     }
     process = null;
-
-    // A deliberate stop is not a failure to start, and saying it was reads as a
-    // bug in the project's dev script.
-    if (attempt !== startToken) {
-      return { ok: false, error: "the preview was stopped while it was starting" };
-    }
 
     const tail = outputTail.trim();
     const note = `\`${detected.command}\` ${outcome.error}`;
@@ -523,8 +581,16 @@ const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
     hint: "It refuses the workspace's Node.js version. That version belongs to the browser runtime, not to this project, so this dev script cannot run here at all — which is a limit of the preview, not a bug in the code.",
   },
   {
-    pattern: /Cannot load native addon|invalid ELF header|not a valid (ELF|Win32)|not a shared object|\.node: cannot open/i,
-    hint: "It loads a native module. The workspace runs in WebAssembly and cannot load native addons, however cleanly the install finished.",
+    // Two shapes of the same problem, and they need the same answer. A native
+    // addon (`*.node`) cannot be loaded here at all; a WASM build of one can be
+    // loaded and still fail, because the runtime's environment is not the one the
+    // binding's generated loader expects — `ERR_NAPI_BINDING_TARGET_CONFLICT` is
+    // what a napi-rs loader throws when the same binding is stamped twice. Both
+    // read as an ordinary crash, and neither is the project's fault, so the hint
+    // is stated once for both rather than leaving the second to look like a bug.
+    pattern:
+      /Cannot load native addon|invalid ELF header|not a valid (ELF|Win32)|not a shared object|\.node: cannot open|__napiBindingTarget|ERR_NAPI_BINDING_TARGET_CONFLICT|Cannot find native binding/i,
+    hint: "It loads a compiled binding — a native addon, or the WebAssembly build of one. The workspace runs in WebAssembly and cannot load native addons, however cleanly the install finished, so this dev script cannot run here at all. The code is not at fault: run this project in another tier, or start it with a tool that has no compiled binding.",
   },
   {
     pattern: /EADDRINUSE|address already in use/i,
@@ -565,6 +631,7 @@ function waitForServerReady(spawned: ContainerProcessHandle, timeoutMs: number):
     const finish = (result: StartupOutcome) => {
       if (settled) return;
       settled = true;
+      if (abortStartup === finish) abortStartup = null;
       clearTimeout(timer);
       unsubscribe();
       resolve(result);
@@ -578,6 +645,7 @@ function waitForServerReady(spawned: ContainerProcessHandle, timeoutMs: number):
       () => finish({ ok: false, error: `did not answer within ${Math.round(timeoutMs / 1000)}s` }),
       timeoutMs
     );
+    abortStartup = finish;
     // The status is carried out rather than turned into prose here: a cause needs
     // the code (an exit of 0 and an exit of 1 are different reports) and only the
     // caller has the process's output to read it against.
@@ -585,6 +653,11 @@ function waitForServerReady(spawned: ContainerProcessHandle, timeoutMs: number):
       .then((code) => finish({ ok: false, error: describeDevServerExit(code), exitCode: code }))
       .catch(() => undefined);
   });
+}
+
+/** Settles the readiness wait in flight, as the cancellation it actually is */
+function endStartupWait(): void {
+  abortStartup?.({ ok: false, error: "the preview was stopped while it was starting" });
 }
 
 /**
@@ -631,6 +704,7 @@ export function stopPreview(reason: string): void {
   ownerThreadId = null;
   // Closing the startup attempt in flight: a server killed while starting exits
   // like a server that crashed, and only this flag tells the two apart.
+  endStartupWait();
   startToken += 1;
   if (running) {
     try {
@@ -650,6 +724,79 @@ export function notePreviewRevision(revisionNumber: number): void {
   // the server here. This exists so the status line can say which revision the
   // preview is serving, rather than implying it is always the newest one.
   setState({ notes: [...state.notes, `The preview has been serving since revision ${revisionNumber}.`] });
+}
+
+/** Defaults and caps for `waitForPreviewSettle` */
+export const PREVIEW_SETTLE_DEFAULT_QUIET_MS = 2_000;
+export const PREVIEW_SETTLE_MAX_QUIET_MS = 10_000;
+export const PREVIEW_SETTLE_DEFAULT_TIMEOUT_MS = 15_000;
+export const PREVIEW_SETTLE_MAX_TIMEOUT_MS = 30_000;
+
+/**
+ * Resolves when the preview has SETTLED: it reached `running` (or was already
+ * there) and no new issue arrived for `quietMs`, or it reached `failed`, or
+ * `timeoutMs` elapsed first.
+ *
+ * Built for a model that just wrote files and wants to know what the running
+ * app thinks: hot reload takes a moment, and an error often trails the change
+ * by a second or two — so the quiet window is what separates "read too early"
+ * from "the app is genuinely quiet". The failed status settles EARLY, because
+ * a server that just refused to start has nothing further to say and the
+ * diagnosis is already on the state.
+ *
+ * Never throws and never inspects the server process: it reads the same state
+ * every other subscriber reads, so it cannot race `startPreview`.
+ */
+export function waitForPreviewSettle(options: {
+  quietMs?: number;
+  timeoutMs?: number;
+} = {}): Promise<void> {
+  const quietMs = Math.min(
+    Math.max(0, options.quietMs ?? PREVIEW_SETTLE_DEFAULT_QUIET_MS),
+    PREVIEW_SETTLE_MAX_QUIET_MS
+  );
+  const timeoutMs = Math.min(
+    Math.max(100, options.timeoutMs ?? PREVIEW_SETTLE_DEFAULT_TIMEOUT_MS),
+    PREVIEW_SETTLE_MAX_TIMEOUT_MS
+  );
+
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      clearTimeout(deadline);
+      unsubscribe();
+      resolve();
+    };
+
+    const armQuietWindow = () => {
+      if (timer) clearTimeout(timer);
+      if (quietMs <= 0) {
+        finish();
+        return;
+      }
+      timer = setTimeout(finish, quietMs);
+    };
+
+    const deadline = setTimeout(finish, timeoutMs);
+    const unsubscribe = subscribePreview(() => {
+      if (state.status === "failed") {
+        finish();
+        return;
+      }
+      if (state.status !== "running") return;
+      // A new issue restarts the quiet window — the app just said something.
+      armQuietWindow();
+    });
+
+    // Not running yet: the deadline (or a later transition) ends the wait —
+    // arming the quiet window here would report a settled `idle` preview.
+    if (state.status === "running") armQuietWindow();
+  });
 }
 
 /**
@@ -672,6 +819,14 @@ export function previewEvidenceNote(): string {
     .map((issue) => `- ${issue.kind}: ${issue.message.split("\n")[0]}`)
     .join("\n");
   return `${head}\n${lines}\nFix these before claiming the change works — a build that passes with a broken page is exactly what this catches.`;
+}
+
+/**
+ * Test seam: move the preview state directly, for tests of code that reads
+ * state transitions (the settle wait). Production never calls this.
+ */
+export function setStateForTest(patch: Partial<PreviewState>): void {
+  setState(patch);
 }
 
 /** Test seam: feed the bridge console messages without a runtime */

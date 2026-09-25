@@ -103,10 +103,77 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     expect([...contents.keys()]).toEqual(["package.json", "src/index.ts", "src/new.ts"]);
   });
 
+  it("counts an empty read for a non-empty blob as a FAILED read, and names it", async () => {
+    const result = await planWorkspaceMount({
+      ws: workspace(),
+      read: async (path) => (path === "package.json" ? "" : READ[path] ?? null),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The listing says 20 bytes and the reader handed back nothing. Mounting that
+    // puts an EMPTY file in a workspace whose every name-based decision still sees
+    // the file — "there is a package.json", "there is a lockfile, so install with
+    // the frozen command" — and the failure lands in the install, where it reads as
+    // a broken repository. Naming it here keeps the two apart.
+    expect(result.result.plan.files.map((file) => file.path)).toEqual(["src/index.ts"]);
+    const notes = result.result.notes.join("\n");
+    expect(notes).toContain("package.json");
+    expect(notes).toContain("20 bytes");
+  });
+
   it("names the size when it reports a partial tree, in the same breath", async () => {
     const result = await planWorkspaceMount({ ws: workspace(), read: async (p) => READ[p] ?? null });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(describeMount(result.result.plan)).toContain("file");
+  });
+
+  it("mounts binary assets as bytes when a byte reader is provided", async () => {
+    // The preview serves the repo's own photos and fonts; a site whose images
+    // are all missing is a broken page, and it reads as a broken project.
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const result = await planWorkspaceMount({
+      ws: workspace(),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async (path) => (path === "logo.png" ? bytes : null),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const written = result.result.plan.tree["logo.png"] as { file: { contents: Uint8Array } };
+    expect(written.file.contents).toBe(bytes);
+    // Assets ride the SAME budget and the same report as text: nothing about
+    // the mount is silent, including the assets that made it in.
+    expect(result.result.notes.join("\n")).not.toContain("logo.png");
+  });
+
+  it("skips assets with a stated reason when no byte reader is available", async () => {
+    const result = await planWorkspaceMount({
+      ws: workspace(),
+      read: async (path) => READ[path] ?? null,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.result.plan.files.map((f) => f.path)).not.toContain("logo.png");
+    expect(result.result.notes.join("\n")).toContain("no byte reader");
+  });
+
+  it("never fetches archives or executables even with a byte reader", async () => {
+    const result = await planWorkspaceMount({
+      ws: workspace({
+        tree: [
+          { path: "package.json", type: "blob", size: 20 },
+          { path: "dist/lib.tar.gz", type: "blob", size: 20 },
+          { path: "native/addon.node", type: "blob", size: 20 },
+        ],
+      }),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async () => new Uint8Array([1, 2, 3]),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const paths = result.result.plan.files.map((f) => f.path);
+    expect(paths).toEqual(["package.json"]);
+    const notes = result.result.notes.join("\n");
+    expect(notes).toContain("cannot run or be read in a browser workspace");
   });
 });

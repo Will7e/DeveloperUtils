@@ -121,12 +121,15 @@ export function ChatHeader({
   // Who serves the selected model. Fetched here rather than in the card so the
   // facts are already there when the card opens — see useModelEndpoints.
   const endpoints = useModelEndpoints(model);
-  // "In play" = always sent PLUS whatever the last turn loaded from triggers.
-  // The count used to be the always-on half only, which under-reported every
-  // turn where a skill activated itself.
+  // "In play" = always sent PLUS whatever the last turn loaded from triggers
+  // PLUS what the agent pulled mid-turn with read_skill. The count used to be
+  // the always-on half only, which under-reported every turn where a skill
+  // activated itself — and then under-reported again the moment the agent
+  // fetched a deferred skill it had been told about.
   const autoActive = skillActivity?.auto ?? [];
   const deferredSkills = skillActivity?.deferred ?? [];
-  const inEffect = alwaysOnSkills.length + autoActive.length;
+  const loadedSkills = skillActivity?.loaded ?? [];
+  const inEffect = alwaysOnSkills.length + autoActive.length + loadedSkills.length;
   const hasSkills = alwaysOnSkills.length + availableSkillCount > 0;
 
   return (
@@ -195,6 +198,7 @@ export function ChatHeader({
                 alwaysOn={alwaysOnSkills}
                 auto={autoActive}
                 deferred={deferredSkills}
+                loaded={loadedSkills}
                 availableSkillCount={availableSkillCount}
               />
             }
@@ -255,14 +259,16 @@ function SkillsCard({
   alwaysOn,
   auto,
   deferred,
+  loaded,
   availableSkillCount,
 }: {
   alwaysOn: string[];
   auto: string[];
   deferred: string[];
+  loaded: string[];
   availableSkillCount: number;
 }) {
-  const inEffect = alwaysOn.length + auto.length;
+  const inEffect = alwaysOn.length + auto.length + loaded.length;
   const rows: Array<{ title: string; note: string; names: string[]; tone: string }> = [
     {
       title: "Always on",
@@ -277,9 +283,15 @@ function SkillsCard({
       tone: "auto",
     },
     {
+      title: "Loaded mid-turn",
+      note: "the agent pulled these with read_skill",
+      names: loaded,
+      tone: "loaded",
+    },
+    {
       title: "Matched, not loaded",
-      note: "the agent can still load these with read_skill",
-      names: deferred,
+      note: "named for the agent; it has not fetched them yet",
+      names: deferred.filter((name) => !loaded.includes(name)),
       tone: "deferred",
     },
   ];
@@ -293,7 +305,7 @@ function SkillsCard({
         </span>
       </div>
 
-      {inEffect === 0 && deferred.length === 0 && (
+      {inEffect === 0 && deferred.length === 0 && loaded.length === 0 && (
         <div className="chat-skills-card-empty">
           Nothing is active for the latest turn. Skills load themselves when your
           request matches their triggers.

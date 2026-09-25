@@ -12,6 +12,8 @@ import {
   resetPreview,
   startPreview,
   stopPreview,
+  waitForPreviewSettle,
+  setStateForTest,
 } from "./preview-bridge";
 import { planMount } from "./mount-plan";
 import { resetContainerHost, setContainerModuleLoader, type ContainerRuntime } from "./container-host";
@@ -152,8 +154,11 @@ describe("startPreview — the harness owns the dev server, including the one al
    * itself as "exited before it served anything" — with the exit status discarded
    * and the cause still sitting unread in the output stream.
    */
-  function bootWithDevScript(devScript: { output: string; code: number | null; broken?: boolean }): void {
-    const runtime = devRuntime([], devScript);
+  function bootWithDevScript(
+    devScript: { output: string; code: number | null; broken?: boolean },
+    devProcesses: { killed: boolean }[] = []
+  ): void {
+    const runtime = devRuntime(devProcesses, devScript);
     const boot = vi.fn(async () => runtime);
     setContainerModuleLoader(
       async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
@@ -360,6 +365,9 @@ describe("startPreview — the harness owns the dev server, including the one al
   });
 
   it("does not blame the project for a stop that landed while it was starting", async () => {
+    // The stop arrives BEFORE the process exists to kill: the mount and the
+    // install are still running, `stopPreview` therefore killed nothing, and the
+    // server this attempt then spawned is one the user has already stopped.
     bootWithDevScript({ output: "", code: null });
 
     const starting = startPreview({ plan: DEV_PLAN(), revision: 1 });
@@ -372,6 +380,26 @@ describe("startPreview — the harness owns the dev server, including the one al
     });
     expect(previewState().status).toBe("stopped");
     expect(previewState().notes.join(" ")).not.toMatch(/exited before it served/);
+  });
+
+  it("does not wait out the timeout for a start that was stopped while serving", async () => {
+    // The other half of the same window, one step later: the process exists, so
+    // the stop reaches it — but a wait for a server that never answers must not
+    // run to its two-minute timeout when the answer is already known, and the
+    // caller must not be handed a failure the project did not cause.
+    const processes: { killed: boolean }[] = [];
+    bootWithDevScript({ output: "", code: null }, processes);
+
+    const starting = startPreview({ plan: DEV_PLAN(), revision: 1 });
+    await until(() => processes.length === 1);
+    stopPreview("stopped by the test");
+
+    expect(await starting).toEqual({
+      ok: false,
+      error: "the preview was stopped while it was starting",
+    });
+    expect(processes[0]?.killed).toBe(true);
+    expect(previewState().status).toBe("stopped");
   });
 
   it("reaches the running server on stop, and leaves the workspace alone", async () => {
@@ -402,6 +430,12 @@ describe("a failed preview explains itself", () => {
 
   it("names native addons, occupied ports and missing binaries", () => {
     expect(diagnoseDevServerFailure("Cannot load native addon", 1)).toMatch(/native addons/);
+    // The same limit wearing a different error, and the one a Vite 8 project hits:
+    // a napi-rs loader's WASM binding loads and then refuses. Reported with the
+    // same cause, because it is one — the process never reached the project's code.
+    expect(
+      diagnoseDevServerFailure("Error: `__napiBindingTarget` is reserved by the generated binding loader", 1)
+    ).toMatch(/compiled binding/);
     expect(diagnoseDevServerFailure("listen EADDRINUSE: address already in use", 1)).toMatch(
       /already listening/
     );
@@ -435,5 +469,41 @@ describe("the mounted tree is what the plan says it is", () => {
     const tree = plan.tree as FileSystemTree;
     const src = tree.src as { directory: FileSystemTree };
     expect(Object.keys(src.directory)).toEqual(["a.ts"]);
+  });
+});
+
+describe("waitForPreviewSettle — the read-after-edit boundary", () => {
+  beforeEach(() => resetPreview());
+
+  it("resolves immediately when running and already quiet", async () => {
+    const pending = waitForPreviewSettle({ quietMs: 30, timeoutMs: 500 });
+    await until(() => true);
+    expect(await pending).toBeUndefined();
+  });
+
+  it("settles early on a failed preview instead of waiting out the quiet window", async () => {
+    const pending = waitForPreviewSettle({ quietMs: 10_000, timeoutMs: 10_000 });
+    // A failed STATUS (not merely an issue) is what ends the wait early.
+    // The test seam moves the state directly; startPreview's failure path
+    // needs a real container, which is covered by the suites above.
+    const startedAt = Date.now();
+    setStateForTest({ status: "failed" });
+    await pending;
+    expect(Date.now() - startedAt).toBeLessThan(9_000);
+  });
+
+  it("stays pending while the preview has not started, until the timeout", async () => {
+    const pending = waitForPreviewSettle({ quietMs: 5, timeoutMs: 80 });
+    await pending;
+    // Returning at all is the assertion: an `idle` preview never arms the
+    // quiet window, so the deadline is the only way out.
+    expect(previewState().status).toBe("idle");
+  });
+
+  it("ends the wait when a running preview goes quiet", async () => {
+    const pending = waitForPreviewSettle({ quietMs: 40, timeoutMs: 2_000 });
+    setStateForTest({ status: "running", url: "http://localhost:5173" });
+    await pending;
+    expect(previewState().status).toBe("running");
   });
 });

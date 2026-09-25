@@ -81,6 +81,33 @@ export const RUNTIME_ORIGIN = "https://stackblitz.com";
 export const RUNTIME_PATH = "/headless";
 
 /**
+ * Where a WebContainer's dev server is reachable.
+ *
+ * `server-ready` does not hand back a `localhost` URL — the runtime proxies the
+ * in-container port to a per-server host, and THAT is what lands in the preview
+ * iframe's `src`. A policy that names the runtime origin but not these boots the
+ * workspace perfectly and then refuses to show it: Chromium's "This content is
+ * blocked" interstitial, a frame-src violation that reads like a broken project.
+ *
+ * TWO domain families, measured, not guessed — they are different registrable
+ * domains, so one wildcard cannot cover both, and serving one while the runtime
+ * hands out the other is exactly the bug this constant exists to end:
+ *
+ *   • `*.local-corp.webcontainer-api.io` — what the headless runtime emits today
+ *     (verified against a live boot: `server-ready` returned
+ *     `<id>-fkdo--<port>--<hash>.local-corp.webcontainer-api.io`).
+ *   • `*.webcontainer.io` — the classic form, still seen on some runtime
+ *     versions and documented in the vendor's own examples.
+ *
+ * Both are CSP subdomain wildcards (`https://*.host`) — one origin family each,
+ * no scheme slop, nothing else in the policy loosened. The value is a
+ * space-separated SOURCE LIST fragment meant to be interpolated inside a
+ * directive.
+ */
+export const PREVIEW_ORIGIN =
+  "https://*.local-corp.webcontainer-api.io https://*.webcontainer.io";
+
+/**
  * The header set that makes a page cross-origin isolated AND keeps the rest of
  * this app working: the GitHub popup, the snippet sandbox's `esm.sh` modules,
  * and images from hosts that never heard of CORP.
@@ -142,8 +169,8 @@ export const CONTENT_SECURITY_POLICY = [
   "connect-src *",
   "img-src 'self' data: blob: https:",
   "worker-src 'self' blob: https://cdn.jsdelivr.net",
-  `child-src 'self' blob: https://cdn.jsdelivr.net ${RUNTIME_ORIGIN}`,
-  `frame-src 'self' blob: https://cdn.jsdelivr.net ${RUNTIME_ORIGIN}`,
+  `child-src 'self' blob: https://cdn.jsdelivr.net ${RUNTIME_ORIGIN} ${PREVIEW_ORIGIN}`,
+  `frame-src 'self' blob: https://cdn.jsdelivr.net ${RUNTIME_ORIGIN} ${PREVIEW_ORIGIN}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

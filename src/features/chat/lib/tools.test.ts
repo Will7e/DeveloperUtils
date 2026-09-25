@@ -8,6 +8,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { executeToolCall, serializeToolResult } from "./tools";
 import { wrapUntrusted } from "./untrusted";
+import { getSkillActivity, recordSkillActivity, resetSkillActivity } from "./skill-activity";
 import { useChatStore } from "@/stores/chat.store";
 import type { ChatSkill, RepoContext } from "../types";
 
@@ -94,6 +95,65 @@ describe("read_skill", () => {
   it("marks an already-active skill as active", async () => {
     const result = await run({ name: "House Style" });
     expect((result.data as { note: string }).note).toMatch(/already active/);
+  });
+});
+
+describe("read_skill → skill activity", () => {
+  // The header card's "Loaded mid-turn" row is fed from the record this tool
+  // writes; these pin the boundary — a BODY handed over counts, everything
+  // else (listings, match lists, unknown names) does not.
+  beforeEach(() => {
+    resetSkillActivity();
+  });
+
+  function runInConversation(conversationId: string | undefined, args: Record<string, unknown>) {
+    return executeToolCall(call("read_skill", args), {
+      token: "t",
+      repo: REPO,
+      conversationId,
+    });
+  }
+
+  it("records a named load as mid-turn activity", async () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: ["Verify Before Push"] });
+    await runInConversation("conv-1", { name: "Verify Before Push" });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual(["Verify Before Push"]);
+  });
+
+  it("records a single-match query load too", async () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    await runInConversation("conv-1", { query: "I want to ship this change" });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual(["Verify Before Push"]);
+  });
+
+  it("does not record a catalogue listing as a load", async () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    await runInConversation("conv-1", {});
+    expect(getSkillActivity("conv-1")?.loaded).toEqual([]);
+  });
+
+  it("does not record a multi-match result as a load", async () => {
+    useChatStore.getState().updateSettings({
+      skills: [
+        ...SKILLS,
+        { id: "two", name: "Ship Checklist", description: "another", content: "b", enabled: false, triggers: ["ship"] },
+      ],
+    });
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    await runInConversation("conv-1", { query: "shipping" });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual([]);
+  });
+
+  it("does not record an unknown skill name as a load", async () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    await runInConversation("conv-1", { name: "Does Not Exist" });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual([]);
+  });
+
+  it("records nothing when the call carries no conversation id", async () => {
+    recordSkillActivity("conv-1", { auto: [], deferred: [] });
+    await runInConversation(undefined, { name: "Verify Before Push" });
+    expect(getSkillActivity("conv-1")?.loaded).toEqual([]);
   });
 });
 
