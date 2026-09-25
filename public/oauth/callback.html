@@ -45,6 +45,10 @@
     const stateKey = params.get("state");
 
     function fail(message) {
+      try {
+        localStorage.setItem("intab_oauth_result_" + stateKey, JSON.stringify({ ok: false, error: message }));
+        window.opener?.postMessage({ type: "intab-oauth-complete", state: stateKey, error: message }, window.location.origin);
+      } catch (e) { /* noop */ }
       document.getElementById("spinner").style.display = "none";
       document.getElementById("message").textContent = "Sign-in failed";
       document.getElementById("error").textContent = message;
@@ -76,8 +80,36 @@
         flow = JSON.parse(localStorage.getItem("intab_oauth_handoff_" + stateKey) || "null");
       } catch { /* noop */ }
 
+      // Fallback 1: Attempt to read from window.opener if same-origin
+      if (!flow && window.opener) {
+        try {
+          flow = JSON.parse(window.opener.localStorage.getItem("intab_oauth_handoff_" + stateKey) || "null");
+        } catch { /* cross-origin or restricted */ }
+      }
+
+      // Fallback 2: Scan for most recent active handoff in localStorage (within 15 min)
+      if (!flow) {
+        try {
+          let newest = 0;
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith("intab_oauth_handoff_")) {
+              const item = JSON.parse(localStorage.getItem(k) || "null");
+              if (item && item.verifier && item.clientId && item.startedAt && item.startedAt > newest) {
+                if (Date.now() - item.startedAt < 15 * 60 * 1000) {
+                  newest = item.startedAt;
+                  flow = item;
+                }
+              }
+            }
+          }
+        } catch { /* noop */ }
+      }
+
       if (!flow || !flow.verifier || !flow.clientId) {
-        fail("Sign-in session expired. Please try again.");
+        fail(
+          "Sign-in session expired. If you started sign-in on localhost, ensure the redirect landed on localhost (not in-tab.se), or vice-versa."
+        );
       } else {
         exchange(flow, code).then(succeed).catch((e) => fail(e?.message || "Token exchange failed"));
       }

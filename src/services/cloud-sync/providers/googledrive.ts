@@ -12,8 +12,7 @@ import {
   buildAuthorizeUrl,
   beginPkceFlow,
   refreshTokens,
-  openOAuthPopup,
-  waitForOAuthResult,
+  openOAuthPopupAndAwaitResult,
 } from "../pkce";
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || "";
@@ -72,10 +71,7 @@ export const googleDriveProvider: CloudProvider = {
       verifier: flow.verifier,
     });
 
-    await openOAuthPopup(authorizeUrl, "googledrive");
-
-    // The callback page wrote the result to localStorage before closing.
-    const result = await waitForOAuthResult(flow.state, 5000);
+    const result = await openOAuthPopupAndAwaitResult(authorizeUrl, "googledrive", flow.state);
 
     if (!result.ok) throw new Error(result.error);
 

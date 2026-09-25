@@ -137,21 +137,175 @@ export type OAuthPopupResult =
   | { ok: true; tokens: { accessToken: string; refreshToken: string | null; expiresIn: number; scope: string } }
   | { ok: false; error: string };
 
-/** Waits (polling localStorage) for the callback page to deliver the result. */
-export function waitForOAuthResult(state: string, timeoutMs = 8000): Promise<OAuthPopupResult> {
+/** Waits (polling localStorage, storage events, and postMessage) for the callback page to deliver the result. */
+export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<OAuthPopupResult> {
   return new Promise((resolve, reject) => {
+    let resolved = false;
     const startedAt = Date.now();
+
+    const finish = (result: OAuthPopupResult) => {
+      if (resolved) return;
+      resolved = true;
+      window.clearInterval(poll);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("message", onMessage);
+      resolve(result);
+    };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === OAUTH_RESULT_PREFIX + state && e.newValue) {
+        const result = consumeOAuthResult(state);
+        if (result) finish(result);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "intab-oauth-complete" && e.data?.state === state) {
+        if (e.data.tokens) {
+          cleanupOAuthFlow(state);
+          finish({ ok: true, tokens: e.data.tokens });
+        } else if (e.data.error) {
+          cleanupOAuthFlow(state);
+          finish({ ok: false, error: e.data.error });
+        } else {
+          const result = consumeOAuthResult(state);
+          if (result) finish(result);
+        }
+      }
+    };
+    window.addEventListener("message", onMessage);
+
     const poll = window.setInterval(() => {
       const result = consumeOAuthResult(state);
       if (result) {
-        window.clearInterval(poll);
-        resolve(result);
+        finish(result);
       } else if (Date.now() - startedAt > timeoutMs) {
+        if (resolved) return;
+        resolved = true;
         window.clearInterval(poll);
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener("message", onMessage);
         cleanupOAuthFlow(state);
-        reject(new Error("Sign-in was cancelled or did not complete."));
+        reject(new Error("Sign-in timed out or was cancelled."));
       }
     }, 300);
+  });
+}
+
+/**
+ * Opens the OAuth popup and awaits the result via localStorage / postMessage.
+ * Avoids race conditions and premature timeouts from COOP navigation severance.
+ */
+export function openOAuthPopupAndAwaitResult(
+  authorizeUrl: string,
+  providerName: string,
+  state: string,
+  timeoutMs = 300000
+): Promise<OAuthPopupResult> {
+  return new Promise((resolve, reject) => {
+    const width = 520;
+    const height = 640;
+    const y = window.top!.outerHeight / 2 + window.screenY - height / 2;
+    const x = window.top!.outerWidth / 2 + window.screenX - width / 2;
+    const popup = window.open(
+      authorizeUrl,
+      `intab-oauth-${providerName}`,
+      `width=${width},height=${height},top=${y},left=${x}`
+    );
+
+    if (!popup) {
+      cleanupOAuthFlow(state);
+      reject(new Error("Popup blocked. Please allow popups for this site and try again."));
+      return;
+    }
+
+    let settled = false;
+    let pollTimer: number | null = null;
+    let timeoutTimer: number | null = null;
+    const startedAt = Date.now();
+
+    const cleanup = () => {
+      settled = true;
+      if (pollTimer !== null) clearInterval(pollTimer);
+      if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("message", onMessage);
+    };
+
+    const finish = (result: OAuthPopupResult) => {
+      if (settled) return;
+      cleanup();
+      try {
+        if (!popup.closed) popup.close();
+      } catch {
+        /* cross-origin */
+      }
+      resolve(result);
+    };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === OAUTH_RESULT_PREFIX + state && e.newValue) {
+        const result = consumeOAuthResult(state);
+        if (result) finish(result);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "intab-oauth-complete" && e.data?.state === state) {
+        if (e.data.tokens) {
+          cleanupOAuthFlow(state);
+          finish({ ok: true, tokens: e.data.tokens });
+        } else if (e.data.error) {
+          cleanupOAuthFlow(state);
+          finish({ ok: false, error: e.data.error });
+        } else {
+          const result = consumeOAuthResult(state);
+          if (result) finish(result);
+        }
+      }
+    };
+    window.addEventListener("message", onMessage);
+
+    pollTimer = window.setInterval(() => {
+      if (settled) return;
+      const result = consumeOAuthResult(state);
+      if (result) {
+        finish(result);
+        return;
+      }
+
+      // Check popup closed, but give at least 5s grace to avoid COOP false-cancellation
+      if (Date.now() - startedAt > 5000) {
+        try {
+          if (popup.closed) {
+            const lastCheck = consumeOAuthResult(state);
+            if (lastCheck) {
+              finish(lastCheck);
+            } else {
+              cleanup();
+              cleanupOAuthFlow(state);
+              reject(new Error("Sign-in was cancelled or did not complete."));
+            }
+          }
+        } catch {
+          /* cross-origin permission error on popup.closed */
+        }
+      }
+    }, 300);
+
+    timeoutTimer = window.setTimeout(() => {
+      if (settled) return;
+      cleanup();
+      cleanupOAuthFlow(state);
+      try {
+        if (!popup.closed) popup.close();
+      } catch {
+        /* noop */
+      }
+      reject(new Error("Sign-in timed out. Please try again."));
+    }, timeoutMs);
   });
 }
 

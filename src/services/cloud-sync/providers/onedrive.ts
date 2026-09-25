@@ -12,8 +12,7 @@ import {
   buildAuthorizeUrl,
   beginPkceFlow,
   refreshTokens,
-  openOAuthPopup,
-  waitForOAuthResult,
+  openOAuthPopupAndAwaitResult,
 } from "../pkce";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -74,10 +73,7 @@ export const oneDriveProvider: CloudProvider = {
       verifier: flow.verifier,
     });
 
-    // Launch the popup; it stays open until the user finishes (or cancels).
-    // The callback page writes the result to localStorage before closing.
-    await openOAuthPopup(authorizeUrl, "onedrive");
-    const result = await waitForOAuthResult(flow.state, 5000);
+    const result = await openOAuthPopupAndAwaitResult(authorizeUrl, "onedrive", flow.state);
     if (!result.ok) throw new Error(result.error);
 
     const now = Date.now();
