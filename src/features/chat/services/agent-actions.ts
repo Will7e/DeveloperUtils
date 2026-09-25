@@ -85,7 +85,7 @@ import {
 import { requestAutoVerify } from "./auto-verify";
 import { workspaceSupport } from "../lib/availability";
 import { describeMount } from "../container/mount-plan";
-import { repoKeyOf } from "../container/preview-bridge";
+import { repoKeyOf, restartPreviewForEnvChange } from "../container/preview-bridge";
 import { runInContainer } from "../container/container-executor";
 import { mountPlanForWorkspace, workspaceOwnerFor } from "./container-workspace";
 import { planVerification } from "../lib/verification-plan";
@@ -2647,6 +2647,11 @@ export async function runSetEnv(
   // result carries the parsed key list.
   const keys = "keys" in outcome ? outcome.keys : [key];
   const repoKey = outcome.repoKey;
+  // bolt.diy's move, adopted: a dev server reads its environment once, at
+  // startup, so new variables are applied by RE-RUNNING the server — done by
+  // the harness here, not left for the user to think of. Hot reload picks up
+  // code; it never re-reads env.
+  await restartPreviewForEnvChange();
   const allKeys = await repoEnvKeys(ws.owner, ws.repo);
   const removed = !content && !hasValue;
   return {
@@ -2660,7 +2665,7 @@ export async function runSetEnv(
       storedKeys: allKeys,
       note: removed
         ? `Removed \`${key}\` from this repo's workspace env. Variables now stored: ${allKeys.length === 0 ? "none" : allKeys.map((k) => `\`${k}\``).join(", ")}.`
-        : `Stored for this repo's workspace env. The next dev-server start and every command receive it. Say the variable NAMES only — never repeat the values. Variables now stored: ${allKeys.map((k) => `\`${k}\``).join(", ")}.`,
+        : `Stored for this repo's workspace env and the running dev server was restarted with it (a dev server reads its environment once, at startup — hot reload never re-reads env). Every future command receives it too. Say the variable NAMES only — never repeat the values. Variables now stored: ${allKeys.map((k) => `\`${k}\``).join(", ")}.`,
     },
     durationMs: Date.now() - started,
     summary: content ? `${keys.length} env var(s)` : `${removed ? "removed" : "set"} ${key}`,

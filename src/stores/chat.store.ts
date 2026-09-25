@@ -655,7 +655,34 @@ export const useChatStore = create<ChatStoreState>()(
         // changed repos kept editing the old one's files, in memory, while
         // every record on disk said otherwise.
         const existing = state.workspaces[conversationId];
-        if (workspaceMatchesRepo(existing, repo)) return existing!;
+        if (workspaceMatchesRepo(existing, repo)) {
+          // A persisted workspace pins the commit it was created from — but the
+          // BRANCH does not stand still. If it advanced, the pins are the reason
+          // a pushed fix never reached the preview: the mount kept serving the
+          // old revision no matter how many times the user retried (the
+          // sulkasnickeri loop). The check costs one cheap ref read and only
+          // fires when the tree is present; a workspace with local changes is
+          // left alone (re-basing under edits would lose them).
+          const ws = existing!;
+          if (ws.tree.length > 0 && pendingChangeCount(ws) === 0) {
+            try {
+              const { getBranchHead } = await import("@/features/chat/lib/github-write");
+              const head = await getBranchHead(token, ws.owner, ws.repo, ws.branch);
+              if (head.commitSha && head.commitSha !== ws.baseCommitSha) {
+                const { createWorkspace } = await import("@/features/chat/workspace/workspace");
+                const fresh = createWorkspace(conversationId, ws.owner, ws.repo, ws.branch, head.commitSha);
+                const hydrated = await hydrateTree(fresh, token);
+                set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: hydrated } }));
+                void flushWorkspaceSave(conversationId, hydrated);
+                return hydrated;
+              }
+            } catch {
+              // Offline, rate-limited, or no write-capable base: the pinned
+              // workspace still stands, exactly as before this check existed.
+            }
+          }
+          return ws;
+        }
 
         // Rehydrate from IDB or create fresh; pin the base commit.
         //

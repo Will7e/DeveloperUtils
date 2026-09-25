@@ -50,7 +50,7 @@ import {
 import { repoKeyOf } from "../container/preview-bridge";
 import { runRunChecks, undoLastWorkspaceMutation } from "../services/agent-actions";
 import { DiffView } from "./DiffView";
-import { VerificationCard } from "./VerificationChip";
+import { VerificationCard } from "./VerificationCard";
 import { useVerificationReadout } from "./useVerificationReadout";
 import { WorkspacePreview } from "./WorkspacePreview";
 import type { ToolCallResult, WorkspaceChange } from "../types";

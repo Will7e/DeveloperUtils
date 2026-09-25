@@ -29,6 +29,7 @@ import { registerScopedResource } from "../identity/scoped-resources";
 import { readWorkspaceEnvironment, workspaceVerdict } from "./boot-probe";
 import { RUNTIME_ORIGIN, declaredCoep } from "./isolation";
 import { flattenTree } from "./mount-plan";
+import { bootstrapScriptBody } from "./preview-control";
 
 /** The SDK's module, and the instance its `boot` resolves with, for the seam below */
 type WebContainerApi = typeof import("@webcontainer/api");
@@ -342,6 +343,19 @@ export async function ensureContainer(): Promise<ContainerRuntime | null> {
       });
       const instance = await bootWithin(boot, CONTAINER_BOOT_TIMEOUT_MS);
       rememberRuntime(instance as unknown as ContainerRuntime);
+      // The control bootstrap rides the RUNTIME, bolt.diy-style: the SDK
+      // injects this script tag into every HTML response the runtime serves,
+      // which is the only mechanism that reaches pages a dev server GENERATES
+      // (Next.js, Nuxt — no index.html exists to rewrite at mount time). The
+      // mount-time injection stays as the belt to this suspenders; the
+      // bootstrap itself is idempotent, so both can be present. A failure here
+      // is degraded coverage, not a broken boot — the mount-time path still
+      // covers static pages.
+      try {
+        await instance.setPreviewScript(bootstrapScriptBody());
+      } catch {
+        // Older runtimes may not expose it; mount-time injection still applies.
+      }
       instance.on("server-ready", (port, url) => {
         setStatus({ previewUrl: url });
         emit({ type: "server-ready", port, url });

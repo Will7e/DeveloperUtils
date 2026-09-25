@@ -30,6 +30,15 @@ vi.mock("@/features/chat/lib/github-write", () => ({
   }),
 }));
 
+// The base-tree reads go through the shared repo base; a real fetch here
+// would make the base-refresh path fail (and fall back to the pinned
+// workspace) for reasons the tests below are not about.
+vi.mock("@/features/chat/workspace/repo-base", () => ({
+  getRepoBaseTree: vi.fn(async () => ({ tree: [{ path: "src/app.ts", type: "blob" }] })),
+  getRepoBaseFile: vi.fn(async () => null),
+  rememberRepoBaseFile: vi.fn(),
+}));
+
 import {
   currentWorkspace,
   selectApprovalCount,
@@ -209,6 +218,55 @@ describe("workspace summary in the chat list", () => {
     // No write-capable base for the new repo in this test, so the honest
     // answer is "none" — not the old repository's working copy.
     expect(await store().ensureWorkspace(id)).toBeNull();
+  });
+
+  it("re-pins the base when the branch moved and the working copy is clean", async () => {
+    // The sulkasnickeri loop: the workspace pins the commit it was created
+    // from, so a fix pushed to the branch never reached the preview — every
+    // retry kept mounting the OLD revision and reported the SAME error, no
+    // matter what was fixed upstream. ensureWorkspace now checks the branch
+    // head (one cheap ref read, clean workspaces only) and re-pins when the
+    // branch moved.
+    useChatStore.setState({
+      settings: { ...store().settings, github: { ...store().settings.github, token: "t" } },
+    });
+    const { getBranchHead } = await import("@/features/chat/lib/github-write");
+    const mockedHead = vi.mocked(getBranchHead);
+    // First call (inside this test) reports the NEW head; the workspace below
+    // was pinned to the old one.
+    mockedHead.mockResolvedValueOnce({ commitSha: "sha-new", object: null } as never);
+
+    const id = store().createConversation("model-a", { repo: WEB });
+    // Clean workspace (no changed files) with a tree — exactly the state a
+    // user has when they come back to a chat to look at the preview again.
+    const ws = { ...workspaceWith(0, id), tree: [{ path: "src/app.ts", type: "blob" as const }] };
+    store().setWorkspace(id, ws);
+
+    const next = await store().ensureWorkspace(id);
+    expect(next).not.toBeNull();
+    expect(next!.baseCommitSha).toBe("sha-new");
+    expect(next!.tree.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the pinned base when the working copy has changes", async () => {
+    // Re-basing under un-pushed edits would silently discard them — the guard
+    // refuses, and the pinned workspace stands.
+    useChatStore.setState({
+      settings: { ...store().settings, github: { ...store().settings.github, token: "t" } },
+    });
+    const { getBranchHead } = await import("@/features/chat/lib/github-write");
+    vi.mocked(getBranchHead).mockResolvedValueOnce({ commitSha: "sha-new", object: null } as never);
+
+    const id = store().createConversation("model-a", { repo: WEB });
+    const ws = {
+      ...workspaceWith(2, id),
+      tree: [{ path: "src/app.ts", type: "blob" as const }],
+    };
+    store().setWorkspace(id, ws);
+
+    const next = await store().ensureWorkspace(id);
+    expect(next!.baseCommitSha).toBe("sha");
+    expect(store().workspaces[id]).toBe(ws);
   });
 
   it("leaves other conversations' summaries alone", () => {

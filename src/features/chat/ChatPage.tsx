@@ -891,20 +891,6 @@ export function ChatPage() {
           onRepoDetach={handleRepoDetach}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
           isSidebarOpen={sidebarOpen}
-          verification={
-            activeConversationId && activeConversation?.repoContext
-              ? {
-                  // Only the facts the chip cannot read for itself: it looks up
-                  // its own evidence (and the revision it belongs to) through
-                  // useVerificationReadout, so no revision is threaded through
-                  // this component to be compared somewhere else.
-                  conversationId: activeConversationId,
-                  repoAttached: true,
-                  hasChanges: !changeSet.empty,
-                  pushed: Boolean(activeWorkspace?.pushedAt),
-                }
-              : undefined
-          }
           hasMessages={Boolean(activeConversation?.messages.length)}
           onExport={() => {
             if (activeConversationId) downloadConversation(activeConversationId);

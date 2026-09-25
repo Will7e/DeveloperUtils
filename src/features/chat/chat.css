@@ -1206,56 +1206,6 @@
   border-radius: var(--radius-full);
 }
 
-/* ── Verification chip — what this change has actually been proven to do ──
-   Four states, and the colours carry the distinction prose keeps blurring:
-   a passing TYPE CHECK and a passing TEST SUITE are not the same claim, and
-   a result that passed before an edit is not a result at all. */
-
-.chat-verify-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  font-family: var(--font-sans);
-  color: var(--text-2);
-  background: var(--ds-gray-alpha-200);
-  border: 1px solid var(--ds-gray-alpha-300);
-  border-radius: var(--radius-full);
-  /* NOT pointer: the chip is a readout, not a control. A pointer on a control
-     that does nothing is the tell that teaches people to stop pressing. */
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-}
-
-.chat-verify-chip-pass {
-  color: var(--green);
-  background: var(--green-dim);
-  border-color: var(--green);
-}
-
-.chat-verify-chip-fail {
-  color: var(--red);
-  background: var(--red-dim);
-  border-color: var(--red);
-}
-
-.chat-verify-chip-stale {
-  color: var(--amber);
-  background: var(--amber-dim);
-  border-color: var(--amber);
-}
-
-.chat-verify-chip-label {
-  white-space: nowrap;
-}
-
-/* The chip is a button, so focus has to be visible for keyboard use. */
-.chat-verify-chip:focus-visible {
-  box-shadow: var(--ds-focus-ring);
-  outline: none;
-}
-
 /* The card repaints the shared bubble with panel tokens, the same way the
    context meter does — selector deliberately specific so it wins in both
    themes. */
@@ -6488,8 +6438,7 @@ typography rather than looking like a control of its own */
   color: var(--text-1);
 }
 
-/* These are buttons in a strip that is otherwise read-only text, so focus has to
-   be visible for keyboard use — the same rule `.chat-verify-chip` follows. */
+/* These are buttons in a strip that is otherwise read-only text, so focus has to    be visible for keyboard use, as the verification badge's own rule does. */
 .chat-workspace-action:focus-visible,
 .chat-workspace-chip:focus-visible,
 .chat-workspace-hint:focus-visible {
@@ -6552,7 +6501,7 @@ typography rather than looking like a control of its own */
 }
 
 .chat-preview-devicebar .chat-preview-device {
-  border-radius: 0;
+  border-radius: 0px;
   padding: 3px 6px;
 }
 
@@ -6601,7 +6550,7 @@ typography rather than looking like a control of its own */
   gap: 5px;
   padding: 3px 6px;
   border: none;
-  border-radius: 0;
+  border-radius: 0px;
   background: transparent;
   color: var(--text-3);
   cursor: pointer;

@@ -47,11 +47,6 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "find_files",
   "read_file",
   "read_files",
-  // Reading back what `remember` recorded is the flat-call alternative to
-  // rediscovering a fact with a round of file reads — exactly the loop this
-  // surface exists to keep small. (remember itself stays off: writes are
-  // withheld from lean, reads are not.)
-  "memory_search",
   // A weak model is the one most likely to answer about a dependency from
   // memory, and these are reading tools with one flat argument each — the
   // same shape as read_file, so they add no loop the profile has to teach.
@@ -68,6 +63,12 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "read_skill",
   "write_file",
   "edit_file",
+  // Reading back what `remember` recorded is the flat-call alternative to
+  // rediscovering a fact with a round of file reads — exactly the loop this
+  // surface exists to keep small. (remember itself stays off: writes are
+  // withheld from lean, reads are not.) Positioned in REGISTRY order: it
+  // sits beside remember in the registry, which is after the edit tools.
+  "memory_search",
   "get_workspace_diff",
   "push_changes",
   // Asking is the cheapest good move a weak model can make, and the one it

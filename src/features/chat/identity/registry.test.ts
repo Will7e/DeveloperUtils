@@ -83,6 +83,7 @@ const REGISTERED: Record<string, string> = {
   "services/ask-user.ts:waiters": "ask-user.parked-questions",
   "services/turn-prep.ts:fingerprintCache": "turn-prep.project-fingerprint",
   "services/turn-prep.ts:envSkillStateByConversation": "turn-prep.env-skill-state",
+  "services/turn-prep.ts:toolSignalStateByConversation": "turn-prep.tool-signal-state",
   "lib/app-action-ledger.ts:entries": "app-action-ledger.entries",
   "lib/skill-activity.ts:byConversation": "skill-activity.records",
   "session/turn-engine.ts:sessions": "session.turn",
@@ -194,6 +195,7 @@ describe("scoped-resource registry", () => {
       "tool-cache.results",
       "turn-prep.env-skill-state",
       "turn-prep.project-fingerprint",
+      "turn-prep.tool-signal-state",
       "verification-ledger.events",
       "workspace.pending-saves",
     ]);

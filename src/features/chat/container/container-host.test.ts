@@ -103,4 +103,40 @@ describe("ensureContainer — booting once, with everything the tier depends on"
     expect(first).toBe(second);
     expect(boot).toHaveBeenCalledTimes(1);
   });
+
+  it("hands the control bootstrap to the runtime, bolt.diy-style", async () => {
+    // The SDK's setPreviewScript injects a script tag into EVERY HTML response
+    // the runtime serves — the only mechanism that reaches pages a dev server
+    // GENERATES (Next.js, Nuxt), where no index.html exists to rewrite at
+    // mount time. bolt.diy installs its inspector through exactly this API.
+    pretendIsolated();
+    const runtime = { ...fakeRuntime(), setPreviewScript: vi.fn(async (_script?: string) => {}) };
+    const boot = vi.fn(async () => runtime);
+    setContainerModuleLoader(
+      async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
+    );
+
+    await ensureContainer();
+    expect(runtime.setPreviewScript).toHaveBeenCalledTimes(1);
+    const body = String(runtime.setPreviewScript.mock.calls[0]?.[0]);
+    // The runtime form is the RAW script body (no <script> wrapper — the SDK
+    // adds the tag), and it still announces the protocol version and the
+    // idempotence flag, so both injection paths coexist safely.
+    expect(body).not.toMatch(/<script/);
+    expect(body).toContain("__intabPreviewControl");
+  });
+
+  it("boots anyway when the runtime has no setPreviewScript", async () => {
+    // Older runtimes and the fakes alike: a missing API degrades to the
+    // mount-time injection path, it does not take the whole tier down.
+    pretendIsolated();
+    const boot = vi.fn(async () => fakeRuntime());
+    setContainerModuleLoader(
+      async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
+    );
+
+    const runtime = await ensureContainer();
+    expect(runtime).not.toBeNull();
+    expect(containerStatus().state).toBe("ready");
+  });
 });

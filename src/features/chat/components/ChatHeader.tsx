@@ -16,7 +16,6 @@ import { EffortPicker } from "./EffortPicker";
 import { ModeToggle } from "./ModeToggle";
 import { ContextMeter } from "./ContextMeter";
 import { useModelEndpoints } from "./useModelEndpoints";
-import { VerificationChip } from "./VerificationChip";
 import { RepoPicker, type RepoSelection } from "./RepoPicker";
 import type { RepoPickIntent } from "../lib/repo-routing";
 import type {
@@ -72,20 +71,6 @@ interface ChatHeaderProps {
   /** Toggle the off-canvas sidebar drawer (narrow widths) */
   onToggleSidebar: () => void;
   isSidebarOpen: boolean;
-  /**
-   * The facts the verification chip's tier plan needs. Absent when the chat has
-   * no repository, in which case there is nothing to verify and no chip.
-   *
-   * The evidence itself is NOT passed down: the chip reads the ledger through
-   * the shared hook, so the revision comparison happens in one place instead of
-   * at every caller between here and the header.
-   */
-  verification?: {
-    conversationId: string;
-    repoAttached: boolean;
-    hasChanges: boolean;
-    pushed: boolean;
-  };
 }
 
 export function ChatHeader({
@@ -110,7 +95,6 @@ export function ChatHeader({
   onRepoDetach,
   onToggleSidebar,
   isSidebarOpen,
-  verification,
   hasMessages,
   onExport,
 }: ChatHeaderProps) {
@@ -215,7 +199,6 @@ export function ChatHeader({
             </button>
           </SimpleTooltip>
         )}
-        {verification && <VerificationChip {...verification} />}
         {/* Export was reachable only as `/export` while these props sat unused
             here: the affordance existed, the wiring did not. It lives in the
             header rather than the sidebar because it exports the chat you are

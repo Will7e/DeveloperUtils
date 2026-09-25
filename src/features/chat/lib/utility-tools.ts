@@ -382,7 +382,7 @@ export function encodeDecodeTool(args: Record<string, unknown>): ToolCallResult 
   if (guarded) return guarded;
 
   try {
-    let result: string;
+    let result = "";
     switch (op) {
       case "base64-encode":
         result = btoa(String.fromCharCode(...new TextEncoder().encode(text)));

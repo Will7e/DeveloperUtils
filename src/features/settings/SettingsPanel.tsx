@@ -3,6 +3,7 @@
 // ============================================================
 
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   X,
   Settings,
@@ -1052,10 +1053,27 @@ export function SettingsPanel() {
         </div>
 
         {/* Footer */}
-        <div className="settings-footer">
+        <div className="settings-footer flex items-center justify-between">
           <span className="settings-footer-hint">
             ⌘, or Esc to close • ⌘K for Command Palette
           </span>
+          <div className="flex items-center gap-3 text-[11px] text-text-3">
+            <Link
+              to="/privacy"
+              onClick={toggleSettings}
+              className="hover:text-text-1 hover:underline transition-colors"
+            >
+              Privacy Policy
+            </Link>
+            <span>•</span>
+            <Link
+              to="/terms"
+              onClick={toggleSettings}
+              className="hover:text-text-1 hover:underline transition-colors"
+            >
+              Terms of Service
+            </Link>
+          </div>
         </div>
       </div>
     </div>

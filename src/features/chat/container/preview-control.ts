@@ -180,20 +180,17 @@ export function formatOutline(snapshot: SerializedSnapshot): string {
 }
 
 /**
- * The bootstrap source, injected into index.html at mount time.
+ * The bootstrap's raw JavaScript, without the `<script>` wrapper.
  *
- * It listens for control requests on window messages, acts on the page, and
- * answers with a versioned result. The listener tolerates being injected
- * TWICE (a re-mount over an already-injected tree): the second copy sees the
- * first's flag and leaves the original in place, so handlers never stack.
- *
- * The code must parse as ES2015-ish JavaScript with NO imports — it runs
- * inside the previewed app's page, whatever its bundler is. Everything it
- * needs is in this one IIFE.
+ * This is the form the RUNTIME needs: `WebContainer.setPreviewScript` injects
+ * a script tag into every HTML response the runtime serves — the mechanism
+ * bolt.diy uses for its inspector, and the only one that reaches pages a dev
+ * server GENERATES (Next.js, Nuxt), where no index.html exists to rewrite at
+ * mount time. `bootstrapSource` wraps it for the mount-time injection, which
+ * remains as the belt to this suspenders.
  */
-export function bootstrapSource(): string {
-  return `<script data-intab-preview-control="${PREVIEW_CONTROL_PROTOCOL_VERSION}">
-(function () {
+export function bootstrapScriptBody(): string {
+  return `(function () {
   if (window.__intabPreviewControl) return;
   window.__intabPreviewControl = ${PREVIEW_CONTROL_PROTOCOL_VERSION};
   var REQUEST = ${JSON.stringify(PREVIEW_CONTROL_REQUEST)};
@@ -345,8 +342,20 @@ export function bootstrapSource(): string {
   } catch (err) {
     // Sandboxed or absent parent — the host discovers readiness by polling.
   }
-})();
-</script>`;
+})();`;
+}
+
+/**
+ * The bootstrap source, injected into index.html at mount time.
+ *
+ * It listens for control requests on window messages, acts on the page, and
+ * answers with a versioned result. The listener tolerates being injected
+ * TWICE (a re-mount over an already-injected tree, or the runtime script plus
+ * this one): the second copy sees the first's flag and leaves the original in
+ * place, so handlers never stack.
+ */
+export function bootstrapSource(): string {
+  return `<script data-intab-preview-control="${PREVIEW_CONTROL_PROTOCOL_VERSION}">\n${bootstrapScriptBody()}\n</script>`;
 }
 
 /**

@@ -11,6 +11,7 @@ import { FaqSection } from "@/features/dashboard/sections/FaqSection";
 import { HeroSection } from "@/features/dashboard/sections/HeroSection";
 import { PrivacySection } from "@/features/dashboard/sections/PrivacySection";
 import { ShortcutsSection } from "@/features/dashboard/sections/ShortcutsSection";
+import { DashFooter } from "@/features/dashboard/sections/DashFooter";
 
 export function DashboardPage() {
   return (
@@ -21,6 +22,7 @@ export function DashboardPage() {
         <PrivacySection />
         <ShortcutsSection />
         <FaqSection />
+        <DashFooter />
       </div>
     </div>
   );

@@ -1532,4 +1532,5 @@ html.light .intab-logo-glow {
 @import "./styles/cloud-sync.css";
 @import "./styles/file-drop.css";
 @import "./features/chat/chat.css";
+@import "./styles/legal.css";
 @import "./styles/responsive.css";

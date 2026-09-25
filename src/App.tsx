@@ -25,6 +25,8 @@ const LibraryPage = lazy(() => import("@/pages/LibraryPage").then(m => ({ defaul
 const DrawFlowPage = lazy(() => import("@/pages/DrawFlowPage").then(m => ({ default: m.DrawFlowPage })));
 const ApiTesterPage = lazy(() => import("@/pages/ApiTesterPage").then(m => ({ default: m.ApiTesterPage })));
 const ChatBotPage = lazy(() => import("@/pages/ChatBotPage").then(m => ({ default: m.ChatBotPage })));
+const PrivacyPage = lazy(() => import("@/pages/PrivacyPage").then(m => ({ default: m.PrivacyPage })));
+const TermsPage = lazy(() => import("@/pages/TermsPage").then(m => ({ default: m.TermsPage })));
 
 import { bootstrapApp } from "@/services/bootstrap.service";
 
@@ -136,6 +138,8 @@ function AppContent() {
             <Route path="/api-tester" element={<ApiTesterPage />} />
             <Route path="/chat" element={<ChatBotPage />} />
             <Route path="/chatbot" element={<Navigate to="/chat" replace />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

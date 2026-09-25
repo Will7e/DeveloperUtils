@@ -1448,6 +1448,38 @@ export function notePreviewRevision(revisionNumber: number): void {
   setState({ notes: [...state.notes, `The preview has been serving since revision ${revisionNumber}.`] });
 }
 
+/**
+ * Restarts the dev server when the workspace's ENVIRONMENT changed under it.
+ *
+ * A dev server reads its environment exactly once, at startup — on a laptop
+ * and in this container alike — so an env var stored after the server started
+ * (a key the user pasted, a value the doctor inferred) silently does not
+ * apply. Hot reload picks up CODE changes; it never re-reads env. bolt.diy
+ * solves the same physics by simply re-running its `start` action; our
+ * equivalent is to restart the one server the harness owns, once, and say so.
+ *
+ * Called by the store when `set_env` lands for the repo the live preview
+ * serves. Safe on every path: no live session, or a start already in flight,
+ * and this is a no-op — the next start merges the env anyway.
+ */
+export async function restartPreviewForEnvChange(): Promise<void> {
+  if (liveKey === null) return;
+  const repoKey = liveKey;
+  if (state.status === "starting") return;
+  // The revision the server was serving: env changes do not move the revision,
+  // so the restart re-mounts the SAME tree (a no-op by prepare's design) while
+  // the new spawn re-reads the env — which is the entire point.
+  const revision = containerStatus().mountedRevision ?? 0;
+  // Stop with an env-specific reason (the record keeps it), then start again —
+  // `startPreview` merges `spawnEnvFor` from scratch, which is how the new
+  // variables reach the process. This is bolt.diy's re-run of its `start`
+  // action, done by the harness so the user never has to think about it.
+  stopPreview("The environment changed, so the dev server was restarted to pick up the new env vars — a dev server reads its environment once, at startup.");
+  if (lastPlan) {
+    await startPreview({ plan: lastPlan, revision, repoKey }).catch(() => undefined);
+  }
+}
+
 /** Defaults and caps for `waitForPreviewSettle` */
 export const PREVIEW_SETTLE_DEFAULT_QUIET_MS = 2_000;
 export const PREVIEW_SETTLE_MAX_QUIET_MS = 10_000;
