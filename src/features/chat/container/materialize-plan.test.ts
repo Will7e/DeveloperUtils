@@ -2,7 +2,7 @@
 // Materialize Plan — Containment Is The Point
 // ============================================================
 // The change set comes from edits a model produced, and it is about to be
-// written to a real directory on someone's machine. So the tests that matter
+// written into the runtime that will execute it. So the tests that matter
 // are the paths that must NOT be written, and the report that says why —
 // a silently skipped file becomes a confusing failure two layers later.
 // ============================================================

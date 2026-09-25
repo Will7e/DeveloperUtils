@@ -82,6 +82,7 @@ const REGISTERED: Record<string, string> = {
   "lib/verification-ledger.ts:ledger": "verification-ledger.events",
   "services/ask-user.ts:waiters": "ask-user.parked-questions",
   "services/turn-prep.ts:fingerprintCache": "turn-prep.project-fingerprint",
+  "services/turn-prep.ts:envSkillStateByConversation": "turn-prep.env-skill-state",
   "lib/app-action-ledger.ts:entries": "app-action-ledger.entries",
   "lib/skill-activity.ts:byConversation": "skill-activity.records",
   "session/turn-engine.ts:sessions": "session.turn",
@@ -110,9 +111,9 @@ const EXEMPT: Record<string, string> = {
   "services/turn-prep.ts:warnedToolsIssues":
     "once-per-session warning dedupe over tool names, not over repository state",
   "lib/availability.ts:observed":
-    "capability states (companion running, web search configured) with a one-minute TTL — facts about this machine, not copies of any repository's state",
+    "capability states (workspace booted, web search configured) with a one-minute TTL — facts about this machine, not copies of any repository's state",
   "session/session-host.worker.ts:ports":
-    "worker port bookkeeping inside the companion worker",
+    "worker port bookkeeping inside the session worker",
   "session/turn-log.ts:subscribers":
     "pub/sub subscriber list, not a cache",
   "lib/availability.ts:capabilityListeners":
@@ -189,6 +190,7 @@ describe("scoped-resource registry", () => {
       "session.turn",
       "skill-activity.records",
       "tool-cache.results",
+      "turn-prep.env-skill-state",
       "turn-prep.project-fingerprint",
       "verification-ledger.events",
       "workspace.pending-saves",

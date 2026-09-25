@@ -13,9 +13,6 @@
 //              machine in a way that is worth stating rather than hiding (it is
 //              the tab's Linux-ish runtime, so no native toolchains, no
 //              services), and stronger than a type check by a long way.
-//   command    runs the project's real commands in a real tree on the user's
-//              machine, through the companion. The tier for anything JS/TS and
-//              the only fast one.
 //   ci         dispatches the repository's own workflow on the pushed branch.
 //              Authoritative for the pull request, the only tier that can
 //              verify Python/Rust/Docker/service-backed projects, and the
@@ -23,11 +20,11 @@
 //
 // The gap this module closes is not a missing capability, it is a missing
 // DECISION. Every tier was a tool the model had to pick from prose, and the
-// prose was wrong in one direction: a model without a companion would describe
-// running the tests, or call `run_checks` (which proves nothing by itself) and
-// report the result as if it were a pass. Two failure modes came out of that,
-// and both are expensive: a confident "verified" over an unverified change, and
-// a turn spent discovering by failure what was knowable in advance.
+// prose was wrong in one direction: a model would describe running the tests,
+// or call `run_checks` (which proves nothing by itself) and report the result
+// as if it were a pass. Two failure modes came out of that, and both are
+// expensive: a confident "verified" over an unverified change, and a turn
+// spent discovering by failure what was knowable in advance.
 //
 // So the facts are collected ONCE, per turn, and turned into an ordered list of
 // what could run, what it would prove, and what is stopping it. Pure and
@@ -51,12 +48,12 @@ export interface VerificationStep {
   tool: VerificationTool;
   /** What this tier proves, in one line, in the words the model should use */
   proves: string;
-  /** True when it can run right now, with the companion/push state as given */
+  /** True when it can run right now, with the push state as given */
   available: boolean;
   /** Why it cannot run, when it cannot — stated so the model can say it */
   blockedBy?: string;
-  /** True when a run is the only thing missing (a push, a companion, a page) */
-  needs?: "companion" | "push" | "repository" | "workspace";
+  /** True when a run is the only thing missing (a push, a page) */
+  needs?: "push" | "repository" | "workspace";
 }
 
 export interface VerificationPlanInput {
@@ -64,8 +61,6 @@ export interface VerificationPlanInput {
   repoAttached: boolean;
   /** A change set exists in the workspace */
   hasChanges: boolean;
-  /** Whether the companion is known to be up, down, or not yet observed */
-  companion: CapabilityState;
   /**
    * Whether this page can host a browser workspace, and whether one is up.
    *
@@ -107,7 +102,6 @@ export interface VerificationPlan {
 
 const TIER_PROVES: Record<VerificationTier, string> = {
   ci: "the repository's own workflow on the pushed branch — the authoritative definition of green for the pull request",
-  command: "the project's real commands in a working tree on the user's machine (install, build, test, lint, typecheck)",
   workspace:
     "the project's real commands in a browser workspace in this tab (install, build, test) — the actual dependency graph runs, but not your own environment: no native toolchains and no services",
   typecheck: "that the workspace's own sources type-check — nothing about whether the change behaves correctly",
@@ -117,29 +111,19 @@ const TIER_PROVES: Record<VerificationTier, string> = {
  * `run_command` serves two tiers, deliberately.
  *
  * Which workspace a command runs in is a routing decision the harness makes
- * from facts the model cannot see (is this page cross-origin isolated? is a
- * companion paired?), and asking a model to choose between two spellings of
+ * Which workspace a command runs in is a routing decision the harness makes
+ * from facts the model cannot see (is this page cross-origin isolated? has a
+ * runtime booted?), and asking a model to choose between two spellings of
  * "run npm test" is how it picks the one that cannot run.
  */
 const TIER_TOOL: Record<VerificationTier, VerificationTool> = {
   ci: "verify_with_ci",
-  command: "run_command",
   workspace: "run_command",
   typecheck: "run_checks",
 };
 
-/** Strongest first: CI beats a machine beats a tab beats a static check. */
-const TIER_ORDER: readonly VerificationTier[] = ["ci", "command", "workspace", "typecheck"];
-
-function companionBlocked(companion: CapabilityState, reason?: string): string {
-  if (companion === "down") {
-    return (
-      reason ??
-      "the local companion is not paired, so no command can run — the change is UNVERIFIED"
-    );
-  }
-  return "the local companion has not been observed — a command may not run; if it does not, say the change is UNVERIFIED";
-}
+/** Strongest first: CI beats a tab beats a static check. */
+const TIER_ORDER: readonly VerificationTier[] = ["ci", "workspace", "typecheck"];
 
 /**
  * Builds the turn's verification plan.
@@ -200,26 +184,6 @@ export function planVerification(input: VerificationPlanInput): VerificationPlan
           available: false,
           needs: "workspace",
           blockedBy: "whether this page can host a browser workspace has not been checked yet",
-        };
-      }
-      return { ...base, available: true };
-    }
-
-    if (tier === "command") {
-      if (!input.repoAttached) {
-        return {
-          ...base,
-          available: false,
-          needs: "repository",
-          blockedBy: "no repository is attached, so there is no project to run",
-        };
-      }
-      if (input.companion !== "up") {
-        return {
-          ...base,
-          available: false,
-          needs: "companion",
-          blockedBy: companionBlocked(input.companion),
         };
       }
       return {
@@ -429,15 +393,14 @@ export const VERIFICATION_STATE_LABEL: Record<VerificationState, string> = {
 export const VERIFICATION_TIER_SHORT: Record<VerificationTier, string> = {
   typecheck: "types",
   workspace: "browser",
-  command: "command",
   ci: "CI",
 };
 
 /**
  * The strongest passing tier, or undefined when nothing passed.
  *
- * "Strongest" is the tier order above (ci > command > typecheck), not the order
- * results arrived: a command run after a green CI dispatch is weaker evidence,
+ * "Strongest" is the tier order above (ci > browser > typecheck), not the order
+ * results arrived: a browser run after a green CI dispatch is weaker evidence,
  * and labelling the chip with it would understate what is known.
  */
 export function strongestPass(

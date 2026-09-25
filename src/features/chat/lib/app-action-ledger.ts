@@ -41,6 +41,8 @@ export interface AppActionRecord {
   at: number;
   /** True once the reversal has been applied */
   undone: boolean;
+  /** The conversation whose agent made the change (absent on records from before this field) */
+  threadId?: string;
 }
 
 interface LedgerEntry {
@@ -56,8 +58,18 @@ const entries = new Map<string, LedgerEntry>();
 registerScopedResource({
   name: "app-action-ledger.entries",
   scope: "thread",
-  release: () => {
-    entries.clear();
+  release: ({ transition }) => {
+    // The first version cleared the WHOLE ledger on every transition — deleting
+    // one chat erased every other chat's undo history too. Entries are stamped
+    // with the thread whose agent made them, so only that thread's actions go
+    // with it; a peer thread's work stays undoable. A record without a threadId
+    // (pre-stamp, or a caller that could not know) has no owner to outlive, so
+    // it is dropped — an undo offered after its actor is gone is worse than an
+    // undo that is gone.
+    for (const [id, entry] of entries) {
+      if (entry.record.threadId !== transition.threadId) continue;
+      entries.delete(id);
+    }
   },
 });
 
@@ -76,6 +88,8 @@ export function recordAppAction(params: {
   action: string;
   summary: string;
   undo: () => void;
+  /** The conversation whose agent made the change — what a transition is scoped by */
+  threadId?: string;
 }): AppActionRecord {
   counter += 1;
   const record: AppActionRecord = {
@@ -86,6 +100,7 @@ export function recordAppAction(params: {
     summary: params.summary,
     at: Date.now(),
     undone: false,
+    threadId: params.threadId,
   };
   entries.set(record.id, { record, undo: params.undo });
   if (entries.size > LEDGER_LIMIT) {

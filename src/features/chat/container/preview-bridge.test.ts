@@ -382,6 +382,35 @@ describe("startPreview — the harness owns the dev server, including the one al
     expect(processes[0]?.killed).toBe(false);
   });
 
+  it("does not blame the project when no package.json reached the workspace", async () => {
+    // An over-budget mount can leave the manifest unfetched. That is this
+    // workspace's omission, and the old note read it as the project's
+    // declaration — "declares no dev/start/serve/preview script" — sending the
+    // user to fix scripts that exist and were never mounted.
+    bootWith([]);
+    const plan = planMount({
+      base: [{ path: "src/index.ts", content: "export const a = 1;" }],
+      changes: [],
+    });
+    const started = await startPreview({ plan, revision: 1 });
+    expect(started.ok).toBe(false);
+    if (started.ok) throw new Error("expected the start to fail");
+    expect(started.error).toMatch(/No package\.json reached the workspace/);
+    expect(previewState().notes.join(" ")).toContain("the mount dropped it");
+  });
+
+  it("keeps the project's own answer when the manifest is mounted but lists no dev script", async () => {
+    bootWith([]);
+    const plan = planMount({
+      base: [{ path: "package.json", content: JSON.stringify({ scripts: { build: "next build" } }) }],
+      changes: [],
+    });
+    const started = await startPreview({ plan, revision: 1 });
+    expect(started.ok).toBe(false);
+    if (started.ok) throw new Error("expected the start to fail");
+    expect(started.error).toContain("declares no dev/start/serve/preview script");
+  });
+
   it("kills the running server before starting another one", async () => {
     // A second dev server on the same port is the failure this module exists to
     // prevent, and `Restart` is the most ordinary way to cause it: the first

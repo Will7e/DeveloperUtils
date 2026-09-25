@@ -609,8 +609,15 @@ export async function startPreview(input: {
   const packageJson = packageJsonOf(input.plan);
   const detected = detectDevServer({ packageJson });
   if (!detected) {
-    const note =
-      "This revision declares no dev/start/serve/preview script, so there is nothing for the app to start. The workspace itself still runs commands.";
+    // Two different facts wear the same shape here: a manifest that honestly
+    // lists no server script, and a manifest the budget never mounted (an
+    // image-heavy repo spends its bytes on photographs). The first is the
+    // project's declaration; the second is this workspace's omission, and
+    // reporting it as the project's is how a Next.js repo read as "no dev
+    // script" while its `package.json` sat unfetched.
+    const note = packageJson
+      ? "This revision declares no dev/start/serve/preview script, so there is nothing for the app to start. The workspace itself still runs commands."
+      : "No package.json reached the workspace, so there is no dev script to find — the mount dropped it. Retry the preview, and if it persists the revision is too large to mount in full; the mount notes above name what was left out. The workspace itself still runs commands.";
     setState({ status: "failed", notes: [...(input.mountNotes ?? []), note], url: null, port: null });
     return { ok: false, error: note };
   }

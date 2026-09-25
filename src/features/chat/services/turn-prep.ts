@@ -44,7 +44,16 @@ import {
   getConversationContext,
   needsCompaction,
 } from "../context/engine";
-import { buildEffectiveSystemPrompt, renderSkillBody, selectAutoSkills } from "../lib/skills";
+import { buildEffectiveSystemPrompt } from "../lib/skills";
+import {
+  renderEnvironmentSignals,
+  renderSignalSkillBlock,
+  selectAutoSkillsFromSignals,
+  type EnvironmentSignals,
+  type SignalSkillSelection,
+} from "../lib/skill-signals";
+import { verificationEvidence } from "../lib/verification-ledger";
+import { registerScopedResource } from "../identity/scoped-resources";
 import { recordSkillActivity } from "../lib/skill-activity";
 import { logTurnEvent } from "../session/turn-log";
 import { UNTRUSTED_RULE } from "../lib/untrusted";
@@ -58,17 +67,14 @@ import { buildFingerprint, describeFingerprint } from "../lib/project-fingerprin
 import {
   declaredAvailability,
   describeAvailability,
-  refreshCompanionAvailability,
   type TurnAvailability,
 } from "../lib/availability";
 import { SECRET_HANDLING_RULE } from "../lib/sensitivity";
-import { capabilityState, workspaceSupport } from "../lib/availability";
+import { workspaceSupport } from "../lib/availability";
 import { primeContainer } from "../container/container-host";
-import { previewEvidenceNote } from "../container/preview-bridge";
+import { previewEvidenceNote, livePreviewState, previewOwnerThreadId } from "../container/preview-bridge";
 import { planVerification } from "../lib/verification-plan";
-import { verificationEvidence } from "../lib/verification-ledger";
 import { ensureRepoInstructions } from "../lib/repo-instructions";
-import { registerScopedResource } from "../identity/scoped-resources";
 import { modelSupportsTools, modelSupportsVision, resolveEffortState } from "../lib/model-state";
 import {
   resolveModelInfo,
@@ -77,12 +83,13 @@ import {
 } from "../lib/model-catalog";
 import { pickEscalationTarget } from "../lib/escalation";
 import { AGENT_TEMPERATURE, DEFAULT_CHAT_MODE, DEFAULT_REASONING_EFFORT } from "../constants";
+import { loadStrategies } from "../braid/strategy-store";
+import { strategyBlockFor } from "../braid/inject";
 import { ensureCompaction } from "./compaction";
 import { visibleMessages } from "../types";
 import type {
   ChatConversation,
   ChatMode,
-  ChatSkill,
   ModelInfo,
   ReasoningEffort,
   RepoContext,
@@ -113,7 +120,11 @@ export interface PreparedTurn {
 export type TurnPreparation = PreparedTurn | null;
 
 /** Resolves the conversation's model state (override → settings → default) */
-export function resolveModelState(conversation: ChatConversation | undefined): {
+export function resolveModelState(
+  conversation: ChatConversation | undefined,
+  /** Turn-scoped effort bump (lib/effort-escalation.ts); wins for this turn only */
+  effortOverride?: ReasoningEffort
+): {
   model: string;
   effort: ReasoningEffort;
   mode: ChatMode;
@@ -121,7 +132,15 @@ export function resolveModelState(conversation: ChatConversation | undefined): {
   const settings = useChatStore.getState().settings;
   return {
     model: conversation?.model ?? settings.defaultModel,
-    effort: conversation?.reasoningEffort ?? settings.defaultReasoningEffort ?? DEFAULT_REASONING_EFFORT,
+    // Order is load-bearing: the turn's bump (if any) → what the user set on
+    // the conversation → the settings default. An override the user never
+    // sees would be a hidden control; one announced in the transcript (the
+    // bump always is) is the harness adapting the request.
+    effort:
+      effortOverride ??
+      conversation?.reasoningEffort ??
+      settings.defaultReasoningEffort ??
+      DEFAULT_REASONING_EFFORT,
     mode: conversation?.mode ?? settings.defaultMode ?? DEFAULT_CHAT_MODE,
   };
 }
@@ -191,6 +210,12 @@ export interface PrepareTurnOptions {
    * is never rewritten by it.
    */
   modelOverride?: string;
+  /**
+   * Reasoning rung this turn continues at, instead of the conversation's
+   * own. Set by the engine after an effort bump (lib/effort-escalation.ts);
+   * like the model override, it dies with the turn.
+   */
+  effortOverride?: ReasoningEffort;
 }
 
 export async function prepareTurn(
@@ -225,7 +250,7 @@ export async function prepareTurn(
     return null;
   }
 
-  const modelState = resolveModelState(conversation);
+  const modelState = resolveModelState(conversation, opts.effortOverride);
   const { effort, mode } = modelState;
   // An escalated turn continues on another model; the conversation keeps
   // the model the user picked, so the override dies with the turn.
@@ -365,9 +390,44 @@ export async function prepareTurn(
     .filter(Boolean)
     .join("\n\n");
 
+  // ── Braid P0: strategy injection ──
+  // Distilled strategies for THIS repository, selected against the user's
+  // latest message and rendered as a capped background block. Load-bearing
+  // properties: the block is empty (and costs nothing) when nothing
+  // matches; membership is generation-quantized (see inject.ts) so the
+  // cached prefix stays byte-stable within a day; the text is background,
+  // never commands — the same precedence rule the rolling summary carries.
+  // Async is fine here: prepareTurn is already the async boundary, and a
+  // failed/empty load contributes an empty string, never an error.
+  let strategyBlock = "";
+  if (settings.braidStrategies !== false && repoActive && repoContext) {
+    try {
+      const strategies = await loadStrategies(repoContext);
+      const taskText =
+        [...visibleMessages(live.messages)].reverse().find((m) => m.role === "user")?.content ?? "";
+      const failureWords = live.summary?.text
+        ? live.summary.text.split(/[^a-zA-Z]+/).filter((w) => w.length > 2)
+        : [];
+      const { block, usedIds } = strategyBlockFor(strategies, {
+        taskText,
+        failureWords: failureWords.slice(0, 24),
+      });
+      strategyBlock = block;
+      // Usage marking is fire-and-forget: it must never delay the request.
+      if (usedIds.length > 0) {
+        void import("../braid/strategy-store").then(({ markStrategiesUsed }) =>
+          markStrategiesUsed(repoContext, usedIds)
+        );
+      }
+    } catch {
+      // An injection that cannot load is an injection that does not happen.
+    }
+  }
+
   const planBlock = mode === "plan" ? composePlanPrompt() : "";
   const effectiveSystemPrompt = [
     baseSystemPrompt,
+    strategyBlock,
     profile?.note,
     tools ? composeAppToolsPrompt(surfaceNames) : "",
     // What the <untrusted-content> delimiter MEANS.
@@ -390,24 +450,46 @@ export async function prepareTurn(
     .filter(Boolean)
     .join("\n\n");
 
-  // Per-turn teaching, at the decision point rather than in the cached prefix.
+  // Per-round teaching, at the decision point rather than in the cached prefix.
   //
-  // WHICH skills this request needs is decided here, not by the model: the
-  // triggers already answer it, and a body the model must fetch with
-  // `read_skill` before it can follow is a body it frequently never fetches.
-  // So the matched bodies ride the turn note itself (see composeTurnNote) and
-  // only the ones the budget deferred are named for the model to pull. Nothing
-  // here touches the cached prefix — the selection depends on the user's
-  // message, and a system prompt that moved per turn would miss the provider
-  // cache on every turn of a long conversation.
+  // WHICH skills this round needs is decided here, not by the model — and not
+  // only from the user's message any more: turn prep runs once per ROUND, so
+  // the environment this round is living through (failing checks, changed
+  // paths, preview errors) is fresh, matchable signal. A debugging skill whose
+  // triggers name "npm test" loads the round after that test failed, without
+  // the model having to think of `read_skill` on its own.
+  //
+  // Nothing here touches the cached prefix — the selection depends on this
+  // round's state, and a system prompt that moved per turn would miss the
+  // provider cache every turn of a long conversation.
   const lastUser = [...visibleMessages(live.messages)].reverse().find((m) => m.role === "user");
+  const environmentSignals = tools
+    ? environmentSignalsFor(conversationId, live)
+    : { failingChecks: [], changedPaths: [], previewErrors: [] };
+  const environmentText = renderEnvironmentSignals(environmentSignals);
   // Gated on `tools` because the bodies are delivered in the turn note, and a
   // turn with no tool surface has no note: selecting here would log skills as
   // "auto-loaded" on a turn that never carried them.
-  const skillSelection =
-    tools && lastUser?.content && settings.skills?.length
-      ? selectAutoSkills(lastUser.content, settings.skills)
-      : { loaded: [], deferred: [] };
+  const skillSelection: SignalSkillSelection =
+    tools && settings.skills?.length
+      ? selectAutoSkillsFromSignals(
+          lastUser?.content ?? "",
+          environmentText,
+          settings.skills,
+          envSkillStateByConversation.get(conversationId) ?? [],
+          { environmentPaths: environmentSignals.changedPaths }
+        )
+      : { loaded: [], deferred: [], alreadyActive: [] };
+  // Remember what THIS round injected, so the next round of the same turn
+  // names those bodies instead of re-paying them. Cleared when the turn ends
+  // (see clearEnvSkillState, called by the engine alongside its other
+  // per-turn resets).
+  if (tools) {
+    envSkillStateByConversation.set(conversationId, [
+      ...(envSkillStateByConversation.get(conversationId) ?? []),
+      ...skillSelection.loaded.map((s) => s.name),
+    ]);
+  }
   if (skillSelection.loaded.length > 0 || skillSelection.deferred.length > 0) {
     logTurnEvent({
       turnId: null,
@@ -429,15 +511,6 @@ export async function prepareTurn(
     });
   }
 
-  // Probe the companion BEFORE composing the turn note, so the verification
-  // plan and availability line report the truth rather than "unknown". The
-  // probe is self-throttling (once a minute, one in-flight) and its own
-  // timeout is 2 s, so this adds at most one RTT to the first turn — and
-  // without it the first turn always says the companion has not been observed.
-  if (tools) {
-    await refreshCompanionAvailability(settings.companion);
-  }
-
   // Start the browser workspace NOW, behind the user's message.
   //
   // The runtime costs several seconds to boot, and that cost is the same whether
@@ -457,11 +530,9 @@ export async function prepareTurn(
   const verificationPlan = planVerification({
     repoAttached: repoActive,
     hasChanges: Boolean(workspace && pendingChangeCount(workspace) > 0),
-    companion: capabilityState("companion"),
-    // The tier that needs no pairing. Read from the PAGE (isolation headers) and
-    // from what a boot has already proven, never assumed: a plan that offers the
-    // tab on a page that cannot host it is how a model comes to describe running
-    // the tests.
+    // Read from the PAGE (isolation headers) and from what a boot has already
+    // proven, never assumed: a plan that offers the tab on a page that cannot
+    // host it is how a model comes to describe running the tests.
     workspace: workspaceSupport().state,
     pushed: Boolean(workspace?.pushedAt),
     evidence: workspace
@@ -497,8 +568,8 @@ export async function prepareTurn(
 
   const turnNote = tools
     ? composeTurnNote({
-        autoSkills: skillSelection.loaded,
-        deferredSkills: skillSelection.deferred,
+        skillSelection,
+        environmentSignals,
         threads,
         availability: declaredAvailability({
           repo: repoActive ? repoContext ?? null : null,
@@ -517,9 +588,6 @@ export async function prepareTurn(
         now: new Date(),
       })
     : "";
-
-  // The companion probe already ran above (awaited before the verification
-  // plan), so it is not repeated here.
 
   const prepared = prepareRequest({
     conversation: live,
@@ -635,10 +703,14 @@ function appendTurnNote(messages: unknown[], note: string): unknown[] {
  * transcript.
  */
 export function composeTurnNote(input: {
-  /** Bodies the harness already loaded for this request */
-  autoSkills: ChatSkill[];
-  /** Matched but not loaded (cap/budget) — named so `read_skill` can pull them */
-  deferredSkills: ChatSkill[];
+  /** Skill selection for this round (user-message + environment matches) */
+  skillSelection?: SignalSkillSelection;
+  /**
+   * The environment facts this round matched skills against, so the note
+   * can name WHY a procedure loaded ("1 check failing") rather than the
+   * matching machinery.
+   */
+  environmentSignals?: EnvironmentSignals;
   availability: TurnAvailability;
   /** The verification plan block ("" when there is nothing to say) */
   verification?: string;
@@ -663,7 +735,7 @@ export function composeTurnNote(input: {
   lines.push(`Today's date: ${input.now.toISOString().slice(0, 10)}.`);
 
   // The tier decision, immediately after the environment facts it depends on:
-  // the companion line above says what is live, and this says what to DO about
+  // the workspace line above says what is live, and this says what to DO about
   // it. Kept out of the cached prefix on purpose — the plan changes with the
   // revision and the push state, and a prefix that moves per turn misses the
   // provider cache on every turn of a long conversation.
@@ -680,27 +752,49 @@ export function composeTurnNote(input: {
   // next (and the only one that can change it mid-turn).
   if (input.threads?.trim()) lines.push("", input.threads.trim());
 
-  // Loaded, not offered: the harness matched the triggers itself, so these read
-  // as instructions already in force. Phrased as a fact rather than a question
-  // so the model does not spend a round deciding whether to agree.
-  if (input.autoSkills.length > 0) {
-    lines.push(
-      "",
-      "The skill instructions below matched this request and are ALREADY ACTIVE — follow them as part of the task.",
-      ...input.autoSkills.map(renderSkillBody)
-    );
+  // Loaded, not offered: the harness matched these itself — from the request
+  // or from the turn's own state — so they read as instructions already in
+  // force. Phrased as a fact rather than a question so the model does not
+  // spend a round deciding whether to agree.
+  if (
+    input.skillSelection &&
+    (input.skillSelection.loaded.length > 0 || input.skillSelection.alreadyActive.length > 0)
+  ) {
+    lines.push("", renderSignalSkillBlock(input.skillSelection));
   }
 
-  if (input.deferredSkills.length > 0) {
-    const named = input.deferredSkills.slice(0, 3);
+  // The environment facts that ACTIVATED a skill, so the model knows what
+  // situation the loaded procedure is for. One line, only when environment
+  // matching actually fired — the verification/runtime blocks above already
+  // carry the details when they exist.
+  if (
+    input.environmentSignals &&
+    input.skillSelection &&
+    input.skillSelection.loaded.length > 0
+  ) {
+    const facts: string[] = [];
+    if (input.environmentSignals.failingChecks.length > 0) {
+      facts.push(`${input.environmentSignals.failingChecks.length} check(s) failing`);
+    }
+    if (input.environmentSignals.changedPaths.length > 0) {
+      facts.push(`${input.environmentSignals.changedPaths.length} file(s) changed`);
+    }
+    if (input.environmentSignals.previewErrors.length > 0) {
+      facts.push(`${input.environmentSignals.previewErrors.length} runtime error(s) live`);
+    }
+    if (facts.length > 0) lines.push(`Matched against the turn's state: ${facts.join(", ")}.`);
+  }
+
+  if (input.skillSelection && input.skillSelection.deferred.length > 0) {
+    const named = input.skillSelection.deferred.slice(0, 3);
     const list = named
       .map((s) => `"${s.name}"${s.description ? ` (${s.description})` : ""}`)
       .join(", ");
     // "also" only when something WAS loaded: a single skill over the budget
     // defers on its own, and "also matches" would read as if it had company.
-    const verb = input.autoSkills.length > 0 ? "also matches" : "matches";
+    const verb = input.skillSelection.loaded.length > 0 ? "also matches" : "matches";
     lines.push(
-      `This request ${verb} the skill${named.length === 1 ? "" : "s"} ${list}, too much to load here. ` +
+      `This request or the turn's state ${verb} the skill${named.length === 1 ? "" : "s"} ${list}, too much to load here. ` +
         `If the task is what that skill describes, call read_skill({ name: "${named[0]!.name}" }) before you start — ` +
         "its instructions are not loaded yet, and loading them is cheaper than working it out."
     );
@@ -708,6 +802,80 @@ export function composeTurnNote(input: {
 
   return lines.join("\n");
 }
+
+// ── Environment-signal skills (per-turn, cross-round) ──────
+
+/**
+ * Skill bodies injected on earlier ROUNDS of the current turn, by
+ * conversation.
+ *
+ * Turn prep runs once per round, and without this record round three would
+ * re-pay the bodies round one already injected (a per-round cost, not a
+ * per-turn one). Keyed by conversation and cleared by the engine when the
+ * turn ends — the same lifecycle the tool ledger and the model override
+ * follow, for the same reason: these describe the turn, and two turns do
+ * not share one.
+ *
+ * Registered as a thread-scoped resource rather than left unregistered: a
+ * conversation that is deleted takes its in-turn state with it, and the
+ * structural registry test requires every module-level cache to declare
+ * itself (identity/registry.test.ts).
+ */
+const envSkillStateByConversation = new Map<string, string[]>();
+
+/** Test seam / engine hook: forget a turn's injected-skill record */
+export function clearEnvSkillState(conversationId: string): void {
+  envSkillStateByConversation.delete(conversationId);
+}
+
+/**
+ * The environment signals THIS round should match skills against, from
+ * sources the turn already holds. All best-effort: a conversation with no
+ * repository, no workspace or no preview simply contributes fewer signals.
+ */
+function environmentSignalsFor(
+  conversationId: string,
+  conversation: ChatConversation
+): EnvironmentSignals {
+  void conversation;
+  const state = useChatStore.getState();
+  const workspace = selectWorkspace(state, conversationId);
+  const revision = workspace?.updatedAt ?? -1;
+
+  // Fresh-failing checks: the same freshness rule the completion gate
+  // applies — evidence about a revision the agent has since replaced is
+  // not friction this round is living through.
+  const failingChecks = verificationEvidence(conversationId, { workspaceUpdatedAt: revision })
+    .filter((e) => e.status === "fresh-fail")
+    .map((e) => [e.summary, ...(e.details ?? []).slice(0, 2)].join(" — "));
+
+  // The change set as it stands now: what skill `globs` were written for.
+  const changedPaths = workspace
+    ? collectChanges(workspace).map((c) => c.path)
+    : [];
+
+  // Fresh preview errors, scoped to the thread that OWNS the preview —
+  // the page-global dev server must not inject a debugging skill into an
+  // unrelated thread's turn.
+  const previewErrors =
+    previewOwnerThreadId() === conversationId && livePreviewState().status === "running"
+      ? livePreviewState()
+          .issues.filter((i) => i.at >= revision && (i.kind === "uncaught" || i.kind === "unhandled-rejection"))
+          .slice(0, 4)
+          .map((i) => i.message.split("\n")[0] ?? i.message)
+      : [];
+
+  return { failingChecks, changedPaths, previewErrors };
+}
+
+registerScopedResource({
+  name: "turn-prep.env-skill-state",
+  scope: "thread",
+  release: ({ transition }) => {
+    if (transition.type !== "thread.deleted") return;
+    envSkillStateByConversation.delete(transition.threadId);
+  },
+});
 
 // ── Project fingerprint (per-repository, byte-stable) ───────
 

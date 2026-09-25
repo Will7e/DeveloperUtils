@@ -52,7 +52,7 @@ function input(over: Partial<CompletionInput> = {}): CompletionInput {
 // is the kind of nudge that teaches everyone to ignore the gate.
 
 describe("untested-change — source changed while the suite went green", () => {
-  const testRun = [evidence("command", "fresh-pass", { summary: "`npm test` exited 0 in 2100ms" })];
+  const testRun = [evidence("workspace", "fresh-pass", { summary: "`npm test` exited 0 in 2100ms" })];
   const changed = (paths: Array<[string, string]>) =>
     paths.map(([path, status]) => ({ path, status }));
 
@@ -102,7 +102,7 @@ describe("untested-change — source changed while the suite went green", () => 
   it("stays silent when the test run FAILED (that is the check-failing rule)", () => {
     const verdict = evaluateCompletion(
       input({
-        evidence: [evidence("command", "fresh-fail", { ok: false, summary: "`npm test` exited 1 in 2100ms" })],
+        evidence: [evidence("workspace", "fresh-fail", { ok: false, summary: "`npm test` exited 1 in 2100ms" })],
         changeSet: changed([["src/api.ts", "modified"]]),
         projectHasTests: true,
       })
@@ -158,7 +158,7 @@ describe("untested-change — source changed while the suite went green", () => 
     // path is not evidence that tests ran.
     const verdict = evaluateCompletion(
       input({
-        evidence: [evidence("command", "fresh-pass", { summary: "`npm run build` exited 0 in 2100ms" })],
+        evidence: [evidence("workspace", "fresh-pass", { summary: "`npm run build` exited 0 in 2100ms" })],
         changeSet: changed([["src/api.ts", "modified"]]),
         projectHasTests: true,
       })
@@ -181,7 +181,7 @@ describe("evaluateCompletion — what counts as finished", () => {
       input({
         aborted: true,
         plan: plan([["wire the route", "active"]]),
-        evidence: [evidence("command", "fresh-fail", { ok: false })],
+        evidence: [evidence("workspace", "fresh-fail", { ok: false })],
       })
     );
     expect(verdict.complete).toBe(true);
@@ -194,7 +194,7 @@ describe("evaluateCompletion — what counts as finished", () => {
       input({
         agentTools: false,
         plan: plan([["write the plan", "active"]]),
-        evidence: [evidence("command", "fresh-fail", { ok: false })],
+        evidence: [evidence("workspace", "fresh-fail", { ok: false })],
       })
     );
     expect(verdict.complete).toBe(true);
@@ -255,8 +255,8 @@ describe("evaluateCompletion — recorded evidence", () => {
     const verdict = evaluateCompletion(
       input({
         evidence: [
-          evidence("command", "fresh-pass"),
-          evidence("command", "fresh-fail", {
+          evidence("workspace", "fresh-pass"),
+          evidence("workspace", "fresh-fail", {
             ok: false,
             summary: "`npm test` exited 1 in 900ms",
             details: ["FAIL src/a.test.ts > adds", "1 failing"],
@@ -276,7 +276,7 @@ describe("evaluateCompletion — recorded evidence", () => {
 
   it("is complete with a stale failure — it describes older code", () => {
     const verdict = evaluateCompletion(
-      input({ evidence: [evidence("command", "stale", { ok: false })] })
+      input({ evidence: [evidence("workspace", "stale", { ok: false })] })
     );
     expect(verdict.complete).toBe(true);
   });

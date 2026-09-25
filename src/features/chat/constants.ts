@@ -235,24 +235,19 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   skills: [],
   syncImageAttachments: true,
 
+  // Braid (features/chat/braid/) — the learning loop. Strategies and
+  // probes cost nothing but a background call and a worker run;
+  // strand rollouts are the consent-gated one (see ChatSettings).
+  braidStrategies: true,
+  braidProbes: true,
+  braidStrandRollouts: true,
+
   github: {
     token: "",
     mode: null,
     login: null,
     avatarUrl: null,
     connectedAt: null,
-  },
-
-  // Unpaired by default. An empty origin is the honest value for "no companion
-  // is configured": the probe then reports it as absent and the agent says its
-  // change is unverified, instead of the app inventing a loopback URL that may
-  // or may not answer.
-  companion: {
-    origin: "",
-    token: "",
-    protocolVersion: null,
-    connectedAt: null,
-    localOnly: true,
   },
 };
 
@@ -309,7 +304,7 @@ export const BUILTIN_SKILLS: ChatSkill[] = [
       "",
       "Choose the tier by what has to be proven:",
       "- `run_checks` inspects the repo's manifests and AGENTS.md and reports WHICH checks exist. It proves nothing by itself; use it to decide what to run.",
-      "- `run_command` runs a real command in a real working tree on the user's machine (install, build, test, lint, typecheck, a script). The tier for a JS/TS project, and the only one that answers in seconds. Needs the local companion running.",
+      "- `run_command` runs a real command in the browser workspace in this tab (install, build, test, lint, typecheck, a script). The tier for a JS/TS project, and the only one that answers in seconds.",
       "- `verify_with_ci` dispatches the repository's own GitHub Actions workflow on the pushed branch: the only tier that can verify Python, Rust, Docker, databases and service-backed projects, and the authoritative definition of green for the pull request. Slower, and it needs the branch pushed.",
       "",
       "Read the result for what it says, not for what you hoped:",
@@ -329,7 +324,7 @@ export const BUILTIN_SKILLS: ChatSkill[] = [
     name: "Finish The Job",
     description: "Keep working until the work is actually done",
     // ON by default, and deliberately short: it is paid for on every turn,
-    // so it states the contract rather than a procedure. The companion half
+    // so it states the contract rather than a procedure. The verification half
     // is enforced in code by lib/completion-gate.ts — the plan and the
     // verification ledger are read back before a stopped turn is accepted.
     enabled: true,
@@ -424,7 +419,7 @@ export const BUILTIN_SKILLS: ChatSkill[] = [
     builtin: true,
     triggers: ["add tests", "write tests", "unit test", "coverage", "regression test", "spec"],
     content:
-      "When adding tests for an existing change:\n1. Read the file you changed and the tests that already cover it — match the existing framework, file location, and naming conventions. Do not introduce a second test style.\n2. Write the test that would have FAILED before your change. That is the only test that proves the change did something.\n3. Add one boundary case (empty, null, zero, maximum) and one error-path case.\n4. Keep tests deterministic: no real network, no real clock, no ordering dependence. Inject or freeze what varies.\n5. RUN IT and report the real result: `run_command` with the project's test command. A suite you did not execute is not evidence — if no companion is running, say the tests were not run instead of implying they passed.",
+      "When adding tests for an existing change:\n1. Read the file you changed and the tests that already cover it — match the existing framework, file location, and naming conventions. Do not introduce a second test style.\n2. Write the test that would have FAILED before your change. That is the only test that proves the change did something.\n3. Add one boundary case (empty, null, zero, maximum) and one error-path case.\n4. Keep tests deterministic: no real network, no real clock, no ordering dependence. Inject or freeze what varies.\n5. RUN IT and report the real result: `run_command` with the project's test command. A suite you did not execute is not evidence — if the browser workspace cannot run it, say the tests were not run instead of implying they passed.",
   },
   {
     id: "builtin-review-this-diff",

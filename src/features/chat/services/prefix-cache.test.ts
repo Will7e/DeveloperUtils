@@ -149,9 +149,7 @@ describe("cached prefix — separation from per-turn facts", () => {
    */
   const availability: TurnAvailability = {
     repo: REPO,
-    companion: "up",
-    companionReason: null,
-    // The other execution tier, and a required field because every turn has an
+    // The one execution tier, and a required field because every turn has an
     // answer for it: the page either can host a browser workspace or it cannot.
     workspace: "up",
     workspaceReason: null,
@@ -176,9 +174,14 @@ describe("cached prefix — separation from per-turn facts", () => {
     enabled: true,
   };
 
+  const skillSelection = {
+    loaded: [skill],
+    deferred: [],
+    alreadyActive: [],
+  };
+
   const note = composeTurnNote({
-    autoSkills: [skill],
-    deferredSkills: [],
+    skillSelection,
     availability,
     verification: VOLATILE.verification,
     threads: VOLATILE.threads,
@@ -216,8 +219,8 @@ describe("cached prefix — separation from per-turn facts", () => {
         for (const [what, value] of Object.entries(VOLATILE)) {
           // The availability line is the one that has repeatedly been proposed
           // for the system prompt ("the model should know what it has before it
-          // decides") — it depends on whether the companion is running, so it
-          // changes between turns and would move the prefix with it.
+          // decides") — it depends on what the workspace has done, so it changes
+          // between turns and would move the prefix with it.
           expect(text.includes(value), `${what} leaked into ${mode}/${repoAttached}`).toBe(false);
         }
         expect(text).not.toContain("2026-09-24");
@@ -230,9 +233,8 @@ describe("cached prefix — separation from per-turn facts", () => {
     // prefix. This is what a cache hit is made of.
     const turnOne = prefix(surface("build", FULL_MODEL, true));
     composeTurnNote({
-      autoSkills: [],
-      deferredSkills: [skill],
-      availability: { ...availability, companion: "down", companionReason: "unpaired" },
+      skillSelection: { loaded: [], deferred: [skill], alreadyActive: [] },
+      availability: { ...availability, workspace: "down", workspaceReason: "not cross-origin isolated" },
       now: new Date("2026-09-25T08:30:00Z"),
     });
     const turnTwo = prefix(surface("build", FULL_MODEL, true));
@@ -240,9 +242,8 @@ describe("cached prefix — separation from per-turn facts", () => {
 
     // ...and the note really did move, so the prefix is the only stable half.
     const changed = composeTurnNote({
-      autoSkills: [],
-      deferredSkills: [skill],
-      availability: { ...availability, companion: "down", companionReason: "unpaired" },
+      skillSelection: { loaded: [], deferred: [skill], alreadyActive: [] },
+      availability: { ...availability, workspace: "down", workspaceReason: "not cross-origin isolated" },
       now: new Date("2026-09-25T08:30:00Z"),
     });
     expect(changed).not.toBe(note);

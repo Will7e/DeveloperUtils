@@ -2,15 +2,15 @@
 // Availability — What Is Actually Live This Turn
 // ============================================================
 // Every capability this agent has can be absent: no repository is attached, no
-// local companion is running, no web-search provider is configured, no MCP
-// server answered, the selected model cannot call tools at all. Today the agent
-// discovers each one the expensive way — it calls the tool, the tool explains
-// itself, and the round is spent. Worse, a model that does not know a tool is
-// unavailable plans around it and then apologizes.
+// web-search provider is configured, no MCP server answered, the selected model
+// cannot call tools at all. Today the agent discovers each one the expensive
+// way — it calls the tool, the tool explains itself, and the round is spent.
+// Worse, a model that does not know a tool is unavailable plans around it and
+// then apologizes.
 //
 // So the facts are collected BEFORE the turn and stated once, in the turn note,
 // and the model is told the consequence rather than only the fact ("the
-// companion is not running" is trivia; "a command cannot prove anything this
+// workspace cannot boot" is trivia; "a command cannot prove anything this
 // turn, say so instead of retrying" is an instruction).
 //
 // Two sources, deliberately different in kind:
@@ -18,10 +18,10 @@
 //   • DECLARED state, known synchronously (a repository is attached, N MCP
 //     servers are configured, the model's catalog entry supports tools); and
 //   • OBSERVED state, which starts "unknown" and is corrected by reality — a
-//     companion probe, or a tool reporting that it could not run.
+//     boot probe, or a tool reporting that it could not run.
 //
 // Observed state starts unknown rather than assumed-up on purpose. Telling a
-// model the companion is available when nobody has checked is how you get a
+// model the workspace is available when nobody has checked is how you get a
 // confident "I verified that" about a command that never ran.
 //
 // Pure state + formatting; the probe is the caller's (turn-prep), and it never
@@ -29,18 +29,12 @@
 
 import type { ModelInfo, RepoContext } from "../types";
 import { modelSupportsTools, modelSupportsVision } from "./model-state";
-import {
-  COMPANION_UNPAIRED_HELP,
-  companionCredentials,
-  probeCompanion,
-  type SavedCompanion,
-} from "../companion/companion-client";
 import { readWorkspaceEnvironment, workspaceVerdict } from "../container/boot-probe";
 
 export type CapabilityState = "up" | "down" | "unknown";
 
 /** Capabilities whose availability is learned by trying them */
-export type ObservedCapability = "companion" | "webSearch" | "workspace";
+export type ObservedCapability = "webSearch" | "workspace";
 
 interface CapabilityNote {
   state: CapabilityState;
@@ -50,23 +44,12 @@ interface CapabilityNote {
 const observed = new Map<ObservedCapability, CapabilityNote>();
 
 /**
- * Why the companion was last down, in the words the model should repeat.
- *
- * Kept beside the state rather than derived from it, because "down" has three
- * different causes with three different fixes — unpaired, unreachable, wrong
- * protocol — and a model told only "down" invents a reason. The one that used
- * to be invented most was "the companion is not running" for a companion that
- * was running perfectly and simply had no token.
- */
-let companionIssue: string | null = null;
-
-/**
  * Why the browser workspace is not usable, when it is not.
  *
- * Same reasoning as the companion's: "down" has two unrelated causes with two
- * unrelated fixes — this page is not cross-origin isolated (a deployment
- * property nobody can fix from the app), or a runtime that was supported failed
- * to boot. A model told only "down" invents one of them.
+ * "Down" has two unrelated causes with two unrelated fixes — this page is not
+ * cross-origin isolated (a deployment property nobody can fix from the app),
+ * or a runtime that was supported failed to boot. A model told only "down"
+ * invents one of them, so the reason is kept beside the state.
  */
 let workspaceIssue: string | null = null;
 
@@ -79,8 +62,8 @@ const OBSERVED_TTL_MS = 60_000;
  * The header chip reads these facts, and they change as a side effect of tools
  * running — so without a notification the chip would show whatever was true at
  * the last unrelated re-render. Polling would work and is the wrong shape: the
- * interesting transitions (paired, then a command actually ran) happen exactly
- * when the user is watching.
+ * interesting transitions (a workspace booting, then a command actually ran)
+ * happen exactly when the user is watching.
  */
 const capabilityListeners = new Set<() => void>();
 let capabilityRevision = 0;
@@ -110,7 +93,8 @@ function notifyCapability(): void {
 
 /**
  * Records what a capability just did. Called by the tools themselves: a run
- * that reports "no companion is running" is the most reliable probe there is.
+ * that reports "the workspace could not boot" is the most reliable probe
+ * there is.
  */
 export function noteCapability(name: ObservedCapability, state: CapabilityState): void {
   if (state === "unknown") return;
@@ -129,71 +113,8 @@ export function capabilityState(name: ObservedCapability): CapabilityState {
 /** Test seam: forget everything observed */
 export function resetAvailability(): void {
   observed.clear();
-  companionIssue = null;
   workspaceIssue = null;
-  lastProbeAt = 0;
   notifyCapability();
-}
-
-let lastProbeAt = 0;
-let probeInFlight: Promise<void> | null = null;
-
-/**
- * Best-effort companion probe, at most once a minute.
- *
- * Never awaits longer than the probe's own timeout and never throws: a turn
- * must not fail because a local runner is not there. Concurrent callers share
- * one probe, so a burst of rounds does not open a socket each.
- *
- * `saved` is the pairing from settings. It is a PARAMETER rather than a store
- * read so this module stays testable without a browser, and so the one place
- * that knows the settings (turn prep) is the one place that passes them.
- */
-export async function refreshCompanionAvailability(
-  saved: SavedCompanion | null | undefined = null
-): Promise<void> {
-  if (Date.now() - lastProbeAt < OBSERVED_TTL_MS) return;
-  if (probeInFlight) return probeInFlight;
-  lastProbeAt = Date.now();
-  probeInFlight = (async () => {
-    try {
-      const credentials = await companionCredentials(undefined, saved);
-      if (!credentials.origin) {
-        companionIssue = credentials.error ?? COMPANION_UNPAIRED_HELP;
-        noteCapability("companion", "down");
-        return;
-      }
-      if (!credentials.token) {
-        // Reachable but unpaired is a DIFFERENT outcome from absent, and the
-        // only one of the two the user can fix in two clicks.
-        companionIssue = credentials.error;
-        noteCapability("companion", "down");
-        return;
-      }
-      const probe = await probeCompanion(credentials.origin);
-      companionIssue = probe.available ? null : (probe.error ?? "the companion did not answer");
-      noteCapability("companion", probe.available ? "up" : "down");
-    } catch {
-      // A probe that throws tells us nothing; leave the state as it was.
-    } finally {
-      probeInFlight = null;
-    }
-  })();
-  return probeInFlight;
-}
-
-/** The last companion failure reason, or null when it is up / never probed */
-export function companionDownReason(): string | null {
-  return capabilityState("companion") === "down" ? companionIssue : null;
-}
-
-/**
- * Records an outcome learned by trying (set by the tools themselves, which is
- * the most reliable probe there is) — including its reason.
- */
-export function noteCompanionOutcome(state: CapabilityState, reason?: string | null): void {
-  if (reason !== undefined) companionIssue = state === "up" ? null : (reason ?? null);
-  noteCapability("companion", state);
 }
 
 /**
@@ -201,9 +122,8 @@ export function noteCompanionOutcome(state: CapabilityState, reason?: string | n
  *
  * Declared, not observed, and therefore known before anything boots: it is the
  * document's own `crossOriginIsolated`, plus whether shared memory is exposed.
- * That is what separates this tier from the companion — no pairing, no probe,
- * no user step — so the answer is available at the start of the very first turn
- * rather than after a tool call has already failed.
+ * No pairing, no probe, no user step — so the answer is available at the start
+ * of the very first turn rather than after a tool call has already failed.
  */
 export function workspaceSupport(): { state: CapabilityState; reason: string | null } {
   const verdict = workspaceVerdict(readWorkspaceEnvironment());
@@ -231,13 +151,6 @@ export function noteWorkspaceOutcome(state: CapabilityState, reason?: string | n
 export interface TurnAvailability {
   /** Repository attached to this conversation, when there is one */
   repo: RepoContext | null;
-  companion: CapabilityState;
-  /**
-   * Why the companion is unavailable, when it is. Present so the consequence
-   * line can name the actual cause — unpaired, unreachable, or a protocol
-   * mismatch are three fixes, and only one of them is "start the companion".
-   */
-  companionReason?: string | null;
   /**
    * Whether commands can run in THIS TAB, and whether that has been proven yet.
    * `unknown` here means "this page could host a workspace, nothing has booted
@@ -263,8 +176,6 @@ export function declaredAvailability(params: {
   const workspace = workspaceSupport();
   return {
     repo: params.repo,
-    companion: capabilityState("companion"),
-    companionReason: companionDownReason(),
     workspace: workspace.state,
     workspaceReason: workspace.reason,
     webSearch: capabilityState("webSearch"),
@@ -286,38 +197,29 @@ export function describeAvailability(a: TurnAvailability): string {
 
   facts.push(a.repo ? `repository attached (${a.repo.owner}/${a.repo.repo}@${a.repo.branch})` : "no repository attached");
 
-  // The two execution tiers are described TOGETHER, because they are two answers
-  // to one question ("can a command run this turn?") and the model's next move
-  // depends on the pair, not on either fact alone. The line that used to be here
-  // said `run_command` cannot run anything whenever the companion was down —
-  // which stopped being true the moment this app could run a command in its own
-  // tab, and would have made the model report a green run as UNVERIFIED.
+  // The one execution tier. Commands run in this tab or nowhere, so the
+  // workspace's state IS the answer to "can a command run this turn?".
   const workspaceReady = a.workspace !== "down";
-  if (a.companion === "up") {
-    facts.push("local companion running");
-  } else if (a.companion === "down") {
-    // The reason is stated, not implied. "NOT running" was wrong for the most
-    // common case (a companion that is up but unpaired), and a model handed the
-    // wrong cause writes the wrong fix into its reply and into the user's head.
-    facts.push(a.companionReason ? `local companion unavailable — ${a.companionReason}` : "local companion NOT running");
-  }
-
   if (a.workspace === "up") {
     facts.push("browser workspace running in this tab");
   } else if (a.workspace === "down") {
+    // The reason is stated, not implied. "Unavailable" alone has two unrelated
+    // causes with two unrelated fixes (a non-Chromium browser versus a failed
+    // boot), and a model handed the wrong cause writes the wrong fix into its
+    // reply and into the user's head.
     facts.push(a.workspaceReason ? `browser workspace unavailable — ${a.workspaceReason}` : "browser workspace unavailable");
   } else if (workspaceReady) {
     facts.push("browser workspace available on this page (not started yet)");
   }
 
-  if (a.companion === "down" && !workspaceReady) {
+  if (a.workspace === "down") {
     consequences.push(
       "`run_command` cannot run anything this turn — a change you cannot execute is UNVERIFIED, so say that plainly instead of retrying the command"
     );
     consequences.push(
-      "If the user asks how to make it work, tell them to open the app in a current desktop Chromium browser (commands then run in the browser tab itself), or pair a companion under Chat settings → Companion with `npm run companion`"
+      "If the user asks how to make it work, tell them to open the app in a current desktop Chromium browser (commands then run in the browser tab itself)"
     );
-  } else if (a.companion !== "up") {
+  } else {
     // Commands CAN run — in the tab. Say where, because it is a different
     // environment from the user's machine and a run's authority depends on it.
     consequences.push(

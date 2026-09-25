@@ -96,7 +96,7 @@ describe("auditClaims — verification claims", () => {
       claim: "The build passes now.",
       changedPaths: CHANGED,
       toolsUsed: ["edit_file", "run_command"],
-      command: { status: "fresh-pass", summary: "`npm run build` exited 0 in 3.1s" },
+      workspace: { status: "fresh-pass", summary: "`npm run build` exited 0 in 3.1s" },
     });
     expect(findings).toHaveLength(0);
   });
@@ -131,7 +131,7 @@ describe("claims weighed against real verification", () => {
       claim: "Added the increment button in src/App.tsx and the counter works now.",
       changedPaths: CHANGED,
       toolsUsed: ["edit_file", "run_command"],
-      command: failedCommand,
+      workspace: failedCommand,
     });
     const contradicted = findings.filter((f) => f.code === "contradicted-claim");
     expect(contradicted).toHaveLength(1);
@@ -144,7 +144,7 @@ describe("claims weighed against real verification", () => {
       claim: "Updated src/App.tsx to use the new hook.",
       changedPaths: CHANGED,
       toolsUsed: ["edit_file", "run_command"],
-      command: failedCommand,
+      workspace: failedCommand,
     });
     expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
   });
@@ -165,7 +165,7 @@ describe("claims weighed against real verification", () => {
       claim: "The login flow works now — src/App.tsx handles the redirect.",
       changedPaths: CHANGED,
       toolsUsed: ["edit_file", "run_command"],
-      command: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
+      workspace: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
     });
     expect(findings.map((f) => f.code)).toContain("unverified-claim");
     expect(findings.some((f) => /describes older code/.test(f.message))).toBe(true);
@@ -176,7 +176,7 @@ describe("claims weighed against real verification", () => {
       claim: "The counter works now — src/App.tsx increments on click.",
       changedPaths: CHANGED,
       toolsUsed: ["edit_file", "run_command"],
-      command: { status: "fresh-pass", summary: "`npm test` exited 0 in 812ms" },
+      workspace: { status: "fresh-pass", summary: "`npm test` exited 0 in 812ms" },
     });
     expect(findings.filter((f) => f.code === "contradicted-claim")).toHaveLength(0);
   });
@@ -199,7 +199,7 @@ describe("auditClaims — real execution changes what is provable", () => {
       claim: "All tests pass. Fixed src/App.tsx.",
       changedPaths: CHANGED,
       toolsUsed: ["run_command"],
-      command: COMMAND_PASS,
+      workspace: COMMAND_PASS,
     });
     expect(findings.filter((f) => f.code === "unverified-claim")).toHaveLength(0);
   });
@@ -225,10 +225,10 @@ describe("auditClaims — real execution changes what is provable", () => {
       claim: "Fixed the parser and all tests pass.",
       changedPaths: CHANGED,
       toolsUsed: ["run_command"],
-      command: COMMAND_FAIL,
+      workspace: COMMAND_FAIL,
     }).find((f) => f.code === "contradicted-claim");
     expect(contradicted).toBeTruthy();
-    expect(contradicted!.message).toContain("A command run in the working tree");
+    expect(contradicted!.message).toContain("A command run in the browser workspace");
     expect(contradicted!.evidence[0]).toContain("FAIL");
   });
 
@@ -247,7 +247,7 @@ describe("auditClaims — real execution changes what is provable", () => {
       claim: "All tests pass.",
       changedPaths: CHANGED,
       toolsUsed: ["run_command", "verify_with_ci"],
-      command: COMMAND_FAIL,
+      workspace: COMMAND_FAIL,
       ci: { status: "fresh-fail", summary: "Verify — failed" },
     }).find((f) => f.code === "contradicted-claim");
     expect(contradicted!.message).toContain("1 other result(s) also failed");
@@ -258,7 +258,7 @@ describe("auditClaims — real execution changes what is provable", () => {
       claim: "All tests pass.",
       changedPaths: CHANGED,
       toolsUsed: ["run_command"],
-      command: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
+      workspace: { status: "stale", summary: "`npm test` exited 0 in 812ms" },
     }).find((f) => f.code === "unverified-claim");
     expect(finding).toBeTruthy();
     expect(finding!.message).toContain("before the last edit");

@@ -793,47 +793,6 @@ export type GitHubConnectionState =
   | { status: "connected"; login: string; avatarUrl: string | null; mode: GitHubAuthMode }
   | { status: "error"; message: string };
 
-/**
- * Local companion pairing — the connection to the process that can actually
- * run this project's own commands.
- *
- * It lives in the settings because it is a CREDENTIAL, and it lives in the
- * ENCRYPTED settings doc for the same reason the GitHub token does. Before
- * this, the origin and pairing token came only from
- * `VITE_COMPANION_ORIGIN`/`VITE_COMPANION_TOKEN`, which meant the app could
- * not reach a companion at all unless somebody edited `.env` and restarted
- * the dev server — so the one tier that can actually PROVE a change (a real
- * `npm test` in a real tree) was invisible to every user who had not read the
- * source. An unpaired companion is not a missing feature; it is the most
- * common configuration of this product, and it has to be a two-click setup.
- *
- * The env vars still win when set: they are the dev-server override, and a
- * developer who has them pointing somewhere should not have to clear a saved
- * pairing to use them.
- */
-export interface CompanionSettings {
-  /**
-   * Where the companion listens, e.g. `http://127.0.0.1:5280`.
-   * Empty means "use the environment, or the loopback default in dev".
-   */
-  origin: string;
-  /** Pairing token printed by the companion at startup (encrypted at rest) */
-  token: string;
-  /** Protocol version observed at pairing time (null until a probe succeeds) */
-  protocolVersion: number | null;
-  /** When pairing was established (null when never paired) */
-  connectedAt: number | null;
-  /**
-   * Local-only, as a saved FACT rather than a re-derived guess.
-   *
-   * A loopback origin is the companion on this machine. Anything else is a
-   * companion someone else runs, which is a legitimate setup and a different
-   * trust statement — the UI says so plainly instead of leaving the user to
-   * work out where their commands would execute.
-   */
-  localOnly: boolean;
-}
-
 export interface ChatSettings {
   defaultModel: string;
   /** Model state applied to new chats (each chat remembers its own) */
@@ -860,12 +819,6 @@ export interface ChatSettings {
   /** GitHub OAuth/PAT credentials for agent mode (encrypted at rest) */
   github: GitHubSettings;
   /**
-   * Local companion pairing (encrypted at rest). There is no "unset" state
-   * to distinguish from "unpaired": an empty origin means this build has not
-   * been paired, which is what the probe reports and what the agent is told.
-   */
-  companion: CompanionSettings;
-  /**
    * When a turn stalls — the model repeats the same FAILING tool call, or
    * the provider refuses the request — continue it on a capably stronger
    * model instead of giving up. Default on; every switch is announced in
@@ -879,6 +832,25 @@ export interface ChatSettings {
    * choice they were equipped to make.
    */
   autoEscalate?: boolean;
+  /**
+   * Adaptive reasoning effort: the harness picks the turn's initial rung
+   * from what the request looks like (lib/task-complexity.ts) and may
+   * raise it mid-turn when the turn is struggling (lib/effort-escalation.ts),
+   * before any model switch. Default on. Never overrides an effort the
+   * user set on the conversation, never changes the saved setting, and
+   * every change is announced in the transcript with its basis.
+   */
+  adaptiveEffort?: boolean;
+  /**
+   * Braid — the learning loop (features/chat/braid/). Three switches,
+   * one per capability; all default on. `braidStrandRollouts` is the
+   * only one that can spend tokens beyond the turn itself, and it is
+   * hard-capped regardless of this flag (max 2 strands, 8 rounds each,
+   * risk-signal-gated, once per turn) — the flag is consent to fork.
+   */
+  braidStrategies?: boolean;
+  braidProbes?: boolean;
+  braidStrandRollouts?: boolean;
   /**
    * "Run tools without asking": resolve every agent approval gate as
    * approved, without showing a dialog.

@@ -154,7 +154,7 @@ describe("what the ledger reads from it", () => {
     // The repair loop the gate depends on: run, fail, read, fix.
     const ws = fresh();
     recordVerification(CONV, {
-      kind: "command",
+      kind: "workspace",
       at: 1_000,
       workspaceUpdatedAt: ws.updatedAt,
       ok: false,
@@ -174,7 +174,7 @@ describe("what the ledger reads from it", () => {
   it("retires it once the code it describes is edited", () => {
     const ws = fresh();
     recordVerification(CONV, {
-      kind: "command",
+      kind: "workspace",
       at: 1_000,
       workspaceUpdatedAt: ws.updatedAt,
       ok: true,

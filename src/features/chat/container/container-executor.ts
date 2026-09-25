@@ -31,7 +31,7 @@
 
 import type { FileSystemTree } from "@webcontainer/api";
 import { noteWorkspaceOutcome } from "../lib/availability";
-import { STOPPED_BY_USER } from "../companion/companion-client";
+import { STOPPED_BY_USER } from "../lib/user-stop";
 import {
   claimWorkspace,
   containerStatus,
@@ -787,7 +787,7 @@ export async function runInContainer(request: {
   /**
    * The thread this command is being run for.
    *
-   * Optional only because the local/companion tiers and the tests do not mount
+   * Optional because the tests do not mount a real runtime
    * anything; every caller that mounts a tree on this page passes it, because the
    * claim it drives is what keeps one thread's files out of another thread's
    * evidence.

@@ -28,7 +28,6 @@ import {
   Plus,
   RotateCcw,
   ShieldCheck,
-  Terminal,
   Trash2,
   Upload,
   X,
@@ -45,14 +44,6 @@ import {
   skillFromParsed,
 } from "../lib/skills";
 import { activeServers, parseMcpServersJson, serializeMcpServers } from "../lib/mcp";
-import {
-  COMPANION_DEFAULT_ORIGIN,
-  COMPANION_UNPAIRED_HELP,
-  isLoopbackOrigin,
-  normalizeCompanionOrigin,
-  probeCompanion,
-} from "../companion/companion-client";
-import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
 import { ModelPicker } from "./ModelPicker";
 import { EffortPicker } from "./EffortPicker";
 import { availableEfforts } from "../lib/model-state";
@@ -66,7 +57,7 @@ interface ChatSettingsModalProps {
   /** Model catalog for the default-model picker */
   models: ModelInfo[];
   /** Tab to focus on open (from store deep-links) */
-  initialTab?: "connection" | "chat" | "skills" | "github" | "companion" | null;
+  initialTab?: "connection" | "chat" | "skills" | "github" | null;
   onClose: () => void;
   onUpdate: (patch: Partial<ChatSettings>) => void;
   onClearAllConversations: () => void;
@@ -82,7 +73,7 @@ type KeyState =
   | { status: "valid"; result: KeyCheckResult }
   | { status: "invalid"; result: KeyCheckResult };
 
-type SettingsTab = "connection" | "chat" | "skills" | "github" | "companion";
+type SettingsTab = "connection" | "chat" | "skills" | "github";
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -283,14 +274,6 @@ function SettingsModalInner({
           >
             <GitBranch className="h-3.5 w-3.5" />
             <span>GitHub</span>
-          </button>
-          <button
-            type="button"
-            className={`settings-tab-item ${activeTab === "companion" ? "active" : ""}`}
-            onClick={() => setActiveTab("companion")}
-          >
-            <Terminal className="h-3.5 w-3.5" />
-            <span>Companion</span>
           </button>
         </div>
 
@@ -554,6 +537,97 @@ function SettingsModalInner({
 
                 <div className="settings-row">
                   <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-adaptive-effort">
+                      Adapt reasoning effort to the work
+                    </label>
+                    <span className="settings-sublabel">
+                      The harness picks each turn&apos;s starting depth from what the
+                      request looks like — deeper for debugging and multi-file work,
+                      shallower for a one-line rename — and may raise it mid-turn when
+                      the turn is struggling, before considering a stronger model.
+                      Never overrides an effort you set on a conversation, never changes
+                      your saved setting, and every change is announced in the
+                      transcript with the reason.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-adaptive-effort"
+                      size="sm"
+                      checked={settings.adaptiveEffort !== false}
+                      onCheckedChange={(checked) => onUpdate({ adaptiveEffort: checked })}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-braid-strategies">
+                      Strategy memory (Braid)
+                    </label>
+                    <span className="settings-sublabel">
+                      After each turn, a background call distills what worked — and
+                      what failed — into reusable strategies for this repository,
+                      injected as capped background context on future tasks. Costs
+                      no latency: distillation never blocks the next send.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-braid-strategies"
+                      size="sm"
+                      checked={settings.braidStrategies !== false}
+                      onCheckedChange={(checked) => onUpdate({ braidStrategies: checked })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-braid-probes">
+                      Mid-turn typecheck probe (Braid)
+                    </label>
+                    <span className="settings-sublabel">
+                      Between tool calls, the in-browser type checker runs without
+                      being asked and reports diagnostics that were not there when
+                      the turn started — before the model writes more on top of a
+                      broken file. Never blocks a round.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-braid-probes"
+                      size="sm"
+                      checked={settings.braidProbes !== false}
+                      onCheckedChange={(checked) => onUpdate({ braidProbes: checked })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <label className="settings-label" htmlFor="chat-braid-strands">
+                      Strand rollouts on stuck turns (Braid)
+                    </label>
+                    <span className="settings-sublabel">
+                      When a turn is demonstrably losing — repeated failing calls,
+                      repeated probe findings — up to two bounded parallel attempts
+                      run on isolated forks while the main turn keeps working. At
+                      the stop, whichever verifies better is kept; a main path that
+                      already verified discards them. Hard-capped: 2 strands, 8
+                      rounds each, once per turn.
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Toggle
+                      id="chat-braid-strands"
+                      size="sm"
+                      checked={settings.braidStrandRollouts !== false}
+                      onCheckedChange={(checked) => onUpdate({ braidStrandRollouts: checked })}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row">
+                  <div className="settings-row-info">
                     <label className="settings-label" htmlFor="chat-auto-approve-tools">
                       Run tools without asking
                     </label>
@@ -692,10 +766,6 @@ function SettingsModalInner({
             />
           )}
 
-          {/* ── Companion ── */}
-          {activeTab === "companion" && (
-            <CompanionTabContent settings={settings} onUpdate={onUpdate} />
-          )}
         </div>
 
         {/* Footer — same as SettingsPanel */}
@@ -808,7 +878,7 @@ function GitHubTabContent({
             <div className="settings-info-card-title">Coding agent over your repositories</div>
             <div className="settings-info-card-desc">
               Connect GitHub to attach a repository to any chat. The agent can read the code, edit a
-              local workspace, run your project's own checks through the companion, and — only after
+              local workspace, run your project's own checks in the browser workspace, and — only after
               you approve the diff — push a commit to a new agent/* branch and open a pull request.
               It can also read the issues, pull requests, reviews and CI logs of that repository, and
               — only after you approve the exact text — comment, review, file an issue or edit a pull
@@ -956,338 +1026,6 @@ function GitHubTabContent({
             </div>
           </div>
         </>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
-// Companion Tab — The Optional Local Runner
-// ============================================================
-// `run_command` turns "this should work" into "this passed" without pushing a
-// branch first, and it does that in a browser workspace in the tab by default —
-// no pairing, no install. What this tab configures is the FALLBACK for the
-// projects a tab cannot run (native dependencies, non-stdlib Python, a service,
-// a tree too large to mount), and for running them on the user's own machine
-// where the environment is theirs.
-//
-// Until now this was the only tier, and its address and pairing token came from
-// the environment alone, so it existed for whoever had read the source and for
-// nobody else: a shipped build reported every change unverified, and the agent —
-// correctly — said so on every task. The browser workspace removed that, and
-// this tab is now a choice rather than a prerequisite — which is exactly why its
-// copy has to say so.
-//
-// This is the two-click version. It is deliberately explicit about two facts a
-// green dot cannot convey: WHERE commands would run (this machine, or someone
-// else's), and what the runner refuses outright. A pairing UI that hides either
-// is asking for trust it has not earned, and the refusal list is the reason a
-// user can safely leave it paired.
-
-type CompanionTest =
-  | { status: "idle" }
-  | { status: "testing" }
-  | { status: "ok"; version: number | null; exec: boolean; platform: string | null }
-  | { status: "error"; message: string };
-
-function CompanionTabContent({
-  settings,
-  onUpdate,
-}: {
-  settings: ChatSettings;
-  onUpdate: (patch: Partial<ChatSettings>) => void;
-}) {
-  const saved = settings.companion;
-  const [originDraft, setOriginDraft] = React.useState(saved?.origin ?? "");
-  const [tokenDraft, setTokenDraft] = React.useState(saved?.token ?? "");
-  const [showToken, setShowToken] = React.useState(false);
-  const [test, setTest] = React.useState<CompanionTest>({ status: "idle" });
-
-  const paired = Boolean(saved?.origin && saved?.token);
-  const parsedOrigin = normalizeCompanionOrigin(originDraft);
-  // A draft that does not parse is a typo, not a pairing: named as its own error
-  // rather than silently saving nothing, because a missing colon in an origin
-  // otherwise surfaces later as "the companion is down".
-  const originInvalid = originDraft.trim().length > 0 && parsedOrigin === null;
-  const dirty =
-    (parsedOrigin ?? "") !== (saved?.origin ?? "") || tokenDraft.trim() !== (saved?.token ?? "");
-  const remote = !isLoopbackOrigin(parsedOrigin ?? saved?.origin);
-  const versionDrift =
-    test.status === "ok" && test.version !== null && test.version !== COMPANION_PROTOCOL_VERSION;
-
-  const handleTest = async () => {
-    if (!parsedOrigin) {
-      setTest({
-        status: "error",
-        message: originDraft.trim()
-          ? "That is not an http(s) address. Use the origin the companion printed, e.g. http://127.0.0.1:5280."
-          : "Enter the origin the companion printed before testing it.",
-      });
-      return;
-    }
-    setTest({ status: "testing" });
-    const probe = await probeCompanion(parsedOrigin);
-    if (!probe.available) {
-      setTest({ status: "error", message: probe.error ?? "The companion did not answer." });
-      return;
-    }
-    setTest({
-      status: "ok",
-      version: probe.protocolVersion,
-      exec: probe.capabilities?.exec ?? false,
-      platform: probe.capabilities?.platform ?? null,
-    });
-  };
-
-  const handleSave = () => {
-    if (!parsedOrigin) return;
-    onUpdate({
-      companion: {
-        origin: parsedOrigin,
-        token: tokenDraft.trim(),
-        // Only recorded from an OBSERVED probe: a version written down from a
-        // guess is worse than an unknown one, because it reads as verified.
-        protocolVersion: test.status === "ok" ? test.version : null,
-        connectedAt: Date.now(),
-        localOnly: isLoopbackOrigin(parsedOrigin),
-      },
-    });
-  };
-
-  const handleDisconnect = () => {
-    onUpdate({
-      companion: {
-        origin: "",
-        token: "",
-        protocolVersion: null,
-        connectedAt: null,
-        localOnly: true,
-      },
-    });
-    setOriginDraft("");
-    setTokenDraft("");
-    setTest({ status: "idle" });
-  };
-
-  return (
-    <div className="settings-tab-content">
-      <div className="settings-info-card">
-        <div className="settings-info-badge-group">
-          <div className="settings-info-card-icon-wrap">
-            <Terminal className="h-[18px] w-[18px]" />
-          </div>
-          <div>
-            <div className="settings-info-card-title">Run your project's own commands</div>
-            <div className="settings-info-card-desc">
-              The companion is OPTIONAL. By default the agent runs your project's real commands
-              (install, build, test, lint, typecheck) in a browser workspace inside the tab, with no
-              setup at all. The companion is the fallback for the projects a tab cannot run:
-              dependencies that need native code, Python beyond the standard library, a database or
-              another service, a very large tree. Pair one and it takes over automatically on the
-              machine you paired it from. Commands never run in your own checkout.
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="settings-section">
-        <div className="settings-section-title">Pair a companion</div>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-sublabel">
-              Start it in a terminal with <code>npm run companion</code>. It prints an origin and a
-              pairing token; both are stored encrypted at rest, like your API key, and the token is
-              sent only to that address.
-            </span>
-          </div>
-          <div className="settings-control">
-            {paired && (
-              <span className="chat-skill-badge chat-skill-badge-on">
-                {remote ? "Paired (remote)" : "Paired"}
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="settings-row chat-key-row">
-          <div className="settings-row-info">
-            <label className="settings-label" htmlFor="chat-companion-origin">
-              Origin
-            </label>
-            <span className="settings-sublabel">
-              Where it listens. Default is {COMPANION_DEFAULT_ORIGIN}.
-            </span>
-          </div>
-          <div className="chat-key-controls">
-            <div className="chat-key-input-wrap">
-              <input
-                id="chat-companion-origin"
-                type="text"
-                value={originDraft}
-                onChange={(e) => setOriginDraft(e.target.value)}
-                placeholder={COMPANION_DEFAULT_ORIGIN}
-                className="settings-input chat-key-input"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="settings-row chat-key-row">
-          <div className="settings-row-info">
-            <label className="settings-label" htmlFor="chat-companion-token">
-              Pairing token
-            </label>
-            <span className="settings-sublabel">The line the companion prints after “token:”.</span>
-          </div>
-          <div className="chat-key-controls">
-            <div className="chat-key-input-wrap">
-              <input
-                id="chat-companion-token"
-                type={showToken ? "text" : "password"}
-                value={tokenDraft}
-                onChange={(e) => setTokenDraft(e.target.value)}
-                placeholder="paste the token the companion printed"
-                className="settings-input chat-key-input"
-                autoComplete="off"
-                spellCheck={false}
-                data-1p-ignore="true"
-              />
-              <div className="chat-key-actions">
-                <SimpleTooltip content={showToken ? "Hide token" : "Show token"} side="top">
-                  <button
-                    type="button"
-                    className="chat-key-action-btn"
-                    onClick={() => setShowToken((v) => !v)}
-                    aria-label={showToken ? "Hide token" : "Show token"}
-                  >
-                    {showToken ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </SimpleTooltip>
-              </div>
-            </div>
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={handleTest}
-              disabled={test.status === "testing"}
-            >
-              {test.status === "testing" ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span>Testing…</span>
-                </>
-              ) : (
-                "Test"
-              )}
-            </button>
-            <button
-              type="button"
-              className="settings-action-btn"
-              onClick={handleSave}
-              disabled={!parsedOrigin || !dirty}
-            >
-              Save
-            </button>
-          </div>
-        </div>
-
-        {originInvalid && (
-          <div className="chat-key-status chat-key-status-invalid">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>That is not an http(s) address, so it cannot be saved.</span>
-          </div>
-        )}
-
-        {test.status === "error" && (
-          <div className="chat-key-status chat-key-status-invalid">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>{test.message}</span>
-          </div>
-        )}
-
-        {test.status === "ok" && !versionDrift && (
-          <div className="chat-key-status chat-key-status-valid">
-            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Companion answered
-              {test.version !== null ? ` (protocol v${test.version})` : ""}
-              {test.platform ? ` on ${test.platform}` : ""}.
-              {test.exec
-                ? " It will run commands, so `run_command` can verify changes."
-                : " It reports that it will NOT execute commands, so nothing can be verified."}
-            </span>
-          </div>
-        )}
-
-        {versionDrift && (
-          <div className="chat-key-status chat-key-status-invalid">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              It speaks protocol v{test.status === "ok" ? test.version : "?"} and this app expects
-              v{COMPANION_PROTOCOL_VERSION}. Restart the companion so the two agree — a mismatch would
-              otherwise answer requests it does not understand.
-            </span>
-          </div>
-        )}
-
-        {remote && (
-          <div className="chat-key-status chat-key-status-invalid">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              That address is not this machine. Your commands — and the change sets they run — would
-              go to whatever host answers there, so only point it at a companion you run and trust.
-            </span>
-          </div>
-        )}
-      </div>
-
-      <div className="settings-divider" />
-
-      <div className="settings-section">
-        <div className="settings-section-title">What it refuses, whatever you ask</div>
-        <div className="settings-row">
-          <div className="settings-row-info">
-            <span className="settings-sublabel">
-              Privilege escalation, anything that reads credentials, paths outside the working tree,
-              Docker with host access, and anything that publishes — <code>git push</code> included.
-              Shipping happens through the diff review, never a shell. If a command is refused, the
-              refusal is the answer: the agent is told to hand it to you instead of working around it.
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {paired && (
-        <>
-          <div className="settings-divider" />
-          <div className="settings-section">
-            <div className="settings-row">
-              <div className="settings-row-info">
-                <span className="settings-sublabel">
-                  Unpairing leaves the companion running; it just stops answering this app. Every
-                  change it had verified then reports as UNVERIFIED on the next turn.
-                </span>
-              </div>
-              <div className="settings-control">
-                <button type="button" className="settings-action-btn" onClick={handleDisconnect}>
-                  Unpair
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {!paired && (
-        <div className="chat-key-status">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>
-            Without a companion the agent can still edit, but it cannot run anything — so it will
-            report every change as unverified until you approve a push and CI runs. {COMPANION_UNPAIRED_HELP}
-          </span>
-        </div>
       )}
     </div>
   );

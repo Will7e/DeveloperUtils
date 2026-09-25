@@ -95,8 +95,8 @@ export interface EvidenceAuditInput {
   toolsUsed?: string[];
   /** The in-browser type check, when it ran against this revision */
   typecheck?: VerificationFact | null;
-  /** A command run through the local companion, when one ran */
-  command?: VerificationFact | null;
+  /** A command run in the browser workspace, when one ran */
+  workspace?: VerificationFact | null;
   /** The repository's own CI, when a run was watched to a conclusion */
   ci?: VerificationFact | null;
 }
@@ -211,16 +211,16 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
 
   // ── 2. A check the summary says ran, with nothing that ran it ──
   const executed = EXECUTED_CHECK_CLAIM.exec(claim);
-  const command = input.command ?? null;
+  const workspace = input.workspace ?? null;
   const ci = input.ci ?? null;
-  const executionEvidence = [command, ci].filter((fact): fact is VerificationFact => fact !== null);
+  const executionEvidence = [workspace, ci].filter((fact): fact is VerificationFact => fact !== null);
   if (executed && executionEvidence.length === 0) {
     findings.push({
       code: "unverified-claim",
       message:
         `The summary claims a command-line check ran ("${executed[0]}") and nothing in this turn shows for it. ` +
         "A test suite, type check or linter is not something this workspace can conclude on its own: run it with " +
-        "`run_command` (in a real working tree, on the user's machine), or verify the pushed branch with " +
+        "`run_command` (in the browser workspace in this tab), or verify the pushed branch with " +
         "`verify_with_ci`. Until one of those runs, treat that part of the summary as unverified.",
       evidence: [executed[0]],
     });
@@ -250,8 +250,8 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
   }
   // A real command or CI run failing is the strongest contradiction there
   // is: it is the project's own definition of green, and it said no.
-  if (command?.status === "fresh-fail") {
-    failing.push({ source: "A command run in the working tree", fact: command });
+  if (workspace?.status === "fresh-fail") {
+    failing.push({ source: "A command run in the browser workspace", fact: workspace });
   }
   if (ci?.status === "fresh-fail") {
     failing.push({ source: "The repository's CI", fact: ci });
@@ -282,7 +282,7 @@ export function auditClaims(input: EvidenceAuditInput): EvidenceFinding[] {
   }
   // The commonest version of this: the tests DID pass, and then three more
   // edits happened. "Tests pass" is then true and worthless.
-  if (command?.status === "stale") stale.push({ source: "a command run", summary: command.summary });
+  if (workspace?.status === "stale") stale.push({ source: "a command run", summary: workspace.summary });
   if (ci?.status === "stale") stale.push({ source: "the repository's CI", summary: ci.summary });
   if (stale.length > 0 && OUTCOME_ASSERTION.test(claim)) {
     const worst = stale[0]!;

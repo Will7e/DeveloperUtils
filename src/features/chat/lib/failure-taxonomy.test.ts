@@ -160,7 +160,7 @@ describe("the wrong sibling chosen", () => {
 
   it("stays silent when the failure has no sibling relationship", () => {
     const c = call("run_command", { command: "npm test" }, "c1");
-    const found = kinds(user("run the tests"), round(c), result(c, false, "no companion is running"));
+    const found = kinds(user("run the tests"), round(c), result(c, false, "the workspace could not start it"));
     expect(found).not.toContain("wrong-sibling");
   });
 });

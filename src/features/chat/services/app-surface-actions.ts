@@ -1471,7 +1471,9 @@ export function executorActions(familyId: string): string[] {
 export async function runAppAction(
   familyId: string,
   action: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  /** The conversation whose agent acts — stamps the undo ledger, so a scoped release (thread deleted) drops only its records */
+  threadId?: string
 ): Promise<AppActOutcome> {
   const family = appFamily(familyId);
   if (!family) {
@@ -1508,6 +1510,7 @@ export async function runAppAction(
         action,
         summary: effect.summary,
         undo: effect.undo,
+        threadId,
       });
     }
     return { ok: true, data: effect.data, summary: effect.summary };

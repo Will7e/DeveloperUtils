@@ -169,7 +169,7 @@ export interface ChatStoreState {
   reconnecting: Record<string, true>;
   settingsOpen: boolean;
   /** Tab to focus when the settings modal opens (transient) */
-  settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
+  settingsTab: "connection" | "chat" | "skills" | "github" | null;
   /**
    * A user-initiated verification run, while it is in flight.
    *
@@ -381,12 +381,12 @@ export interface ChatStoreState {
   updateSettings: (patch: Partial<ChatSettings>) => void;
   setSettingsOpen: (
     open: boolean,
-    tab?: "connection" | "chat" | "skills" | "github" | "companion"
+    tab?: "connection" | "chat" | "skills" | "github"
   ) => void;
-  setSettingsTab: (tab: "connection" | "chat" | "skills" | "github" | "companion") => void;
+  setSettingsTab: (tab: "connection" | "chat" | "skills" | "github") => void;
   setSettingsModalState: (state: {
     settingsOpen: boolean;
-    settingsTab: "connection" | "chat" | "skills" | "github" | "companion" | null;
+    settingsTab: "connection" | "chat" | "skills" | "github" | null;
   }) => void;  /** Hydration-time cleanup of stale pending-turn markers */
   cleanupStalePendingTurns: () => void;
   /** Toggles one conversation's reconnecting banner (resume retries) */
@@ -1423,14 +1423,10 @@ export const useChatStore = create<ChatStoreState>()(
               ...DEFAULT_CHAT_SETTINGS.github,
               ...settings?.github,
             },
-            // Same treatment as GitHub: a stored pairing missing a field
-            // added later must fill from the default rather than arrive as
-            // undefined, or the probe reads `origin: undefined` and reports
-            // "no companion configured" for a user who paired one.
-            companion: {
-              ...DEFAULT_CHAT_SETTINGS.companion,
-              ...settings?.companion,
-            },
+            // Legacy pairings for the retired local companion are dropped
+            // outright: nothing reads them, and carrying a stale credential
+            // forward would be worse than forgetting it.
+            companion: undefined,
             skills: reconciled ?? skills,
           },
           // Same migration for per-conversation overrides: a stored

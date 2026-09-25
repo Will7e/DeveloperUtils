@@ -44,7 +44,7 @@ import {
   runCodeTool,
   searchLibraryTool,
 } from "../lib/app-tools";
-import { STOPPED_BY_USER } from "../companion/companion-client";
+import { STOPPED_BY_USER } from "../lib/user-stop";
 import { isSecretHeader, maskValue, SECRET_HANDLING_RULE } from "../lib/sensitivity";
 import { APP_SURFACE } from "../lib/app-surface";
 import { describeToolFamilies, readAppFamily, runAppAction } from "./app-surface-actions";
@@ -927,7 +927,10 @@ function runReadAppTool(args: Record<string, unknown>): ToolCallResult {
  * sends a JSON STRING here is describing the shape it thinks the action has,
  * and telling it so is cheaper than guessing what it meant.
  */
-async function runActAppTool(args: Record<string, unknown>): Promise<ToolCallResult> {
+async function runActAppTool(
+  conversationId: string,
+  args: Record<string, unknown>
+): Promise<ToolCallResult> {
   const started = Date.now();
   const family = asString(args.family).trim();
   const action = asString(args.action).trim();
@@ -951,7 +954,7 @@ async function runActAppTool(args: Record<string, unknown>): Promise<ToolCallRes
       started
     );
   }
-  const outcome = await runAppAction(family, action, (rawArgs as Record<string, unknown>) ?? {});
+  const outcome = await runAppAction(family, action, (rawArgs as Record<string, unknown>) ?? {}, conversationId);
   return outcome.ok
     ? ok("act_app", outcome.data, outcome.summary, started)
     : fail("act_app", outcome.error, outcome.summary, started);
@@ -1024,7 +1027,7 @@ export async function runAppTool(
     case "read_app":
       return runReadAppTool(args);
     case "act_app":
-      return runActAppTool(args);
+      return runActAppTool(conversationId, args);
     case "describe_tools":
       return runDescribeToolsTool(args);
     default:

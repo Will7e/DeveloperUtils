@@ -22,6 +22,7 @@
 import {
   ArrowDownToLine,
   Bot,
+  Brain,
   CircleStop,
   Eraser,
   Hammer,
@@ -210,6 +211,43 @@ export const CHAT_COMMANDS: readonly ChatCommand[] = [
     group: "Context",
     keywords: ["summarize", "shrink", "fold"],
     run: ({ conversationId }) => void runCompactCommand(conversationId),
+  },
+  {
+    // Braid's user-facing window: what the agent has LEARNED here, as a
+    // count with provenance, plus the one destructive verb. The strategies
+    // themselves are repo-scoped (they survive deleting this chat), so the
+    // command explains the scope instead of pretending it is per-chat.
+    id: "strategies",
+    description: "Show what the agent has learned on this repository (Braid)",
+    icon: Brain,
+    group: "Context",
+    keywords: ["braid", "memory", "learned"],
+    argsHint: "· clear",
+    run: async ({ conversationId, arg }) => {
+      const conv = activeConversation(conversationId);
+      const repo = conv?.repoContext;
+      if (!repo) {
+        toast("Strategies are per-repository — attach a repo first.", "info");
+        return;
+      }
+      const { loadStrategies, clearStrategies } = await import("../braid/strategy-store");
+      if (arg.trim().toLowerCase() === "clear") {
+        await clearStrategies(repo);
+        toast(`Strategy memory cleared for ${repo.owner}/${repo.repo}.`, "success");
+        return;
+      }
+      const strategies = await loadStrategies(repo);
+      if (strategies.length === 0) {
+        toast("No strategies learned for this repository yet — they accumulate as turns finish.", "info");
+        return;
+      }
+      const verified = strategies.filter((s) => s.outcome === "verified").length;
+      toast(
+        `${strategies.length} strateg${strategies.length === 1 ? "y" : "ies"} for ${repo.owner}/${repo.repo} ` +
+          `(${verified} from verified turns) — /strategies clear wipes them.`,
+        "info"
+      );
+    },
   },
   {
     id: "clear",

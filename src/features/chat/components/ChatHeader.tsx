@@ -86,8 +86,6 @@ interface ChatHeaderProps {
     hasChanges: boolean;
     pushed: boolean;
   };
-  /** Deep-link into Chat settings → Companion */
-  onOpenCompanionSettings: () => void;
 }
 
 export function ChatHeader({
@@ -113,7 +111,6 @@ export function ChatHeader({
   onToggleSidebar,
   isSidebarOpen,
   verification,
-  onOpenCompanionSettings,
   hasMessages,
   onExport,
 }: ChatHeaderProps) {
@@ -218,7 +215,7 @@ export function ChatHeader({
             </button>
           </SimpleTooltip>
         )}
-        {verification && <VerificationChip {...verification} onOpenCompanionSettings={onOpenCompanionSettings} />}
+        {verification && <VerificationChip {...verification} />}
         {/* Export was reachable only as `/export` while these props sat unused
             here: the affordance existed, the wiring did not. It lives in the
             header rather than the sidebar because it exports the chat you are

@@ -72,6 +72,20 @@ import {
 } from "../lib/escalation";
 import { evaluateCompletion, type CompletionVerdict } from "../lib/completion-gate";
 import {
+  assessDifficulty,
+  countAlternationCycles,
+  describeDifficulty,
+  type DifficultyAssessment,
+} from "../lib/difficulty";
+import {
+  effortBumpLogDetail,
+  effortEscalationNote,
+  pickEffortBump,
+  type EffortBumpChoice,
+} from "../lib/effort-escalation";
+import { classifyRequest, effortForComplexity } from "../lib/task-complexity";
+import { resolveModelInfo } from "../lib/model-catalog";
+import {
   argumentRepairNote,
   withContractHint,
   withheldRefusal,
@@ -134,11 +148,22 @@ import { runAppTool } from "../services/app-actions";
 import { registerScopedResource } from "../identity/scoped-resources";
 // The Stop note a dismissed approval carries, so a gate closed by "stop" reads
 // to the model as the user stopping the work rather than rejecting a change.
-import { STOPPED_BY_USER } from "../companion/companion-client";
+import { STOPPED_BY_USER } from "../lib/user-stop";
 import { runAskUser, runSuggestNext, settlePendingQuestion } from "../services/ask-user";
+import {
+  captureProbeBaseline,
+  diffProbe,
+  probeFiles,
+  probeNotice,
+  type ProbeBaseline,
+} from "../braid/probe";
+import { maybeLaunchStrands, type StrandLaunchHandle } from "../braid/strand-launch";
+import { distillTurn, estimateDistillTokens } from "../braid/distill";
+import type { StrategyEntry } from "../braid/strategy-store";
 import { sessionHost } from "./session-client";
 import { HostTurnSource, LocalTurnSource, type StartOutcome, type TurnSource } from "./turn-source";
-import { logTurnEvent } from "./turn-log";
+import { getTurnLog, logTurnEvent } from "./turn-log";
+import { clearEnvSkillState } from "../services/turn-prep";
 import type {
   HostEndReason,
   HostEvent,
@@ -146,7 +171,9 @@ import type {
   HostStartTurnPayload,
   HostUsage,
 } from "./protocol";
+import { visibleMessages } from "../types";
 import type {
+  ChatConversation,
   ChatMode,
   ReasoningEffort,
   RepoContext,
@@ -196,6 +223,25 @@ export interface TurnSessionState {
   /** True once this turn spent its single escalation */
   escalated: boolean;
   /**
+   * Effort rung the rest of this turn continues at, set after an effort
+   * bump (lib/effort-escalation.ts). Null while the turn runs at the
+   * conversation's own rung. Dies with the turn, exactly like the model
+   * override: the conversation's effort setting is the user's.
+   */
+  effortOverride: ReasoningEffort | null;
+  /** True once this turn spent its single effort bump */
+  effortBumped: boolean;
+  /** The latest difficulty assessment for this turn (turn log, tests) */
+  difficulty: DifficultyAssessment | null;
+  /** Probe baseline captured at turn start (Braid P1); null until the first run */
+  probeBaseline: ProbeBaseline | null;
+  /** Probe runs that reported new diagnostics this turn (risk signal) */
+  probeFailures: number;
+  /** Workspace revision the last probe read (cost gate: skip identical re-reads) */
+  lastProbeRevision: number;
+  /** Strand fork event for this turn, when one fired (Braid P2) */
+  strandHandle: StrandLaunchHandle | null;
+  /**
    * Names of the tools the CURRENT round was sent.
    *
    * The surface is what the model was OFFERED, which is not the same as what is
@@ -244,7 +290,14 @@ function idleSession(conversationId: string | null): TurnSessionState {
     mode: DEFAULT_CHAT_MODE,
     modelOverride: null,
     escalated: false,
+    effortOverride: null,
+    effortBumped: false,
+    difficulty: null,
     stuckRefusals: 0,
+    probeBaseline: null,
+    probeFailures: 0,
+    lastProbeRevision: -1,
+    strandHandle: null,
     sentToolNames: null,
   };
 }
@@ -346,7 +399,11 @@ export interface EngineDeps {
   /** Request preparation (context engine, routing, compaction) */
   prepare: (
     conversationId: string,
-    opts?: { modelOverride?: string }
+    opts?: {
+      modelOverride?: string;
+      /** The thinking rung (lib/effort-escalation.ts); dies with the turn */
+      effortOverride?: ReasoningEffort;
+    }
   ) => Promise<TurnPreparation>;
   /** Transport used when the survivable one refuses or dies */
   createFallbackSource: () => TurnSource;
@@ -1244,6 +1301,137 @@ async function executeToolPhase(
 }
 
 /**
+ * Assesses how hard this turn is working, from state the executor and the
+ * ledger already maintain. Pure aggregation — every input is a count this
+ * module produced, so the assessment is an honest read of the turn rather
+ * than a new heuristic.
+ *
+ * The one deliberate shortcut: per-signature counts come from the call
+ * ledger, and the alternation shape is re-derived from those counts (each
+ * signature repeated by its count, bounded) rather than by keeping a new
+ * per-call execution record. The ledger is already the turn's whole memory
+ * of what ran; a second ledger would be a second thing to forget to clear.
+ */
+function assessDifficultyFor(conversationId: string): DifficultyAssessment {
+  const session = sessionOf(conversationId);
+  const state = useChatStore.getState();
+  const workspace = selectWorkspace(state, conversationId);
+  const revision = workspace?.updatedAt ?? -1;
+
+  let mostRepeated = 0;
+  let failed = 0;
+  const orderProxy: string[] = [];
+  for (const [signature, entry] of session.callLedger) {
+    orderProxy.push(...Array(Math.min(entry.count, 6)).fill(signature));
+    if (entry.count > mostRepeated) mostRepeated = entry.count;
+    if (!entry.ok) failed += 1;
+  }
+
+  return assessDifficulty({
+    failedCalls: failed,
+    mostRepeatedCall: mostRepeated,
+    alternatingPairs: countAlternationCycles(orderProxy),
+    stuckRefusals: session.stuckRefusals,
+    argumentRepairs: countArgumentRepairs(conversationId),
+    continuations: continuationCount(conversationId),
+    completionNudges: completionNudgeCount(conversationId),
+    freshFailingChecks: verificationEvidence(conversationId, {
+      workspaceUpdatedAt: revision,
+    }).filter((e) => e.status === "fresh-fail").length,
+    freshPreviewErrors:
+      previewOwnerThreadId() === conversationId && livePreviewState().status === "running"
+        ? livePreviewState().issues.filter(
+            (i) => i.at >= revision && (i.kind === "uncaught" || i.kind === "unhandled-rejection")
+          ).length
+        : 0,
+  });
+}
+
+/**
+ * Round-outcome counters. The engine already logs every one of these as
+ * turn-log events with stable phrasings, so the counters re-derive them
+ * from the log rather than adding a second bookkeeping path — one source
+ * of truth for "what happened this turn".
+ */
+function countArgumentRepairs(conversationId: string): number {
+  return getTurnLog().filter(
+    (e) =>
+      e.conversationId === conversationId &&
+      e.phase === "tool-phase" &&
+      typeof e.detail === "string" &&
+      e.detail.includes("arguments repaired")
+  ).length;
+}
+
+function completionNudgeCount(conversationId: string): number {
+  return getTurnLog().filter(
+    (e) =>
+      e.conversationId === conversationId &&
+      e.phase === "completion-gate" &&
+      typeof e.detail === "string" &&
+      e.detail.startsWith("unfinished — ")
+  ).length;
+}
+
+function continuationCount(conversationId: string): number {
+  return getTurnLog().filter(
+    (e) =>
+      e.conversationId === conversationId &&
+      e.phase === "resume" &&
+      typeof e.detail === "string" &&
+      e.detail.startsWith("tool-use checkpoint hit")
+  ).length;
+}
+
+/**
+ * The ladder's thinking rung: raises the reasoning effort on the SAME
+ * model when the turn is struggling, before any model swap.
+ *
+ * Same consent model as `maybeEscalate` — the change is announced in the
+ * transcript with its named basis, it affects only the rest of this turn,
+ * and it dies with the turn. Skipped entirely when adaptive effort is off
+ * in settings (default on) or the turn already spent its bump.
+ */
+function maybeBumpEffort(
+  conversationId: string,
+  conversation: ChatConversation | undefined,
+  deps: EngineDeps
+): EffortBumpChoice | null {
+  void deps;
+  const session = sessionOf(conversationId);
+  const store = useChatStore.getState();
+  const difficulty = session.difficulty;
+  if (!difficulty) return null;
+
+  const current = resolveModelState(conversation).effort;
+  const fromModel = session.modelOverride ?? conversation?.model ?? store.settings.defaultModel;
+  const choice = pickEffortBump(current, difficulty, {
+    enabled: store.settings.adaptiveEffort !== false,
+    alreadyBumped: session.effortBumped,
+    alreadyEscalated: session.escalated,
+    modelInfo: resolveModelInfo(fromModel),
+  });
+  if (!choice) return null;
+
+  session.effortBumped = true;
+  session.effortOverride = choice.effort;
+  logTurnEvent({
+    turnId: session.turnId,
+    conversationId,
+    phase: "failover",
+    detail: effortBumpLogDetail(choice),
+  });
+  // Visible, and in the transcript the next round is built from — the same
+  // channel a model swap uses, because for the model reading it this is the
+  // same kind of fact: the harness changed a parameter of the request.
+  store.addMessage(conversationId, {
+    role: "assistant",
+    content: effortEscalationNote(choice),
+  });
+  return choice;
+}
+
+/**
  * Spends this turn's single escalation: pick a stronger model, announce
  * the switch, and point the rest of the turn at it.
  *
@@ -1325,6 +1513,9 @@ async function runRound(
   const session = sessionOf(conversationId);
   const prepared = await deps.prepare(conversationId, {
     modelOverride: session.modelOverride ?? undefined,
+    // The thinking rung: an effort bump dies with the turn, like the
+    // model override beside it.
+    effortOverride: session.effortOverride ?? undefined,
   });
   if (prepared === null) return { kind: "done", committed: false };
 
@@ -1714,18 +1905,185 @@ async function runBatch(
       session.inToolPhase = false;
     }
 
-    // ── Escalation ──
-    // The model has been told, in words, that the call it keeps making
-    // fails, and it made it again. Continuing on the same model just
-    // repeats the argument: hand the rest of the turn to something with
-    // more capability, announce it, and let the loop continue.
-    if (session.stuckRefusals > 0 && !session.escalated) {
-      const conversation = useChatStore.getState().conversations.find((c) => c.id === conversationId);
-      maybeEscalate(
+    // ── Braid P1: mid-turn probe (never gates — results land at boundaries) ──
+    // Runs the in-browser typecheck against the CURRENT workspace and diffs
+    // against the turn-start baseline. Fire-and-forget: the next round is
+    // never waited on. New diagnostics are announced as a harness note and
+    // feed the strand fork policy's risk signals.
+    if (
+      useChatStore.getState().settings.braidProbes !== false &&
+      !session.abort?.signal.aborted
+    ) {
+      // Cost gate: the typecheck worker only sees files when they are loaded,
+      // so "did anything change since the last probe" is answered by
+      // workspace revision — the cheapest correct signal. A probe that
+      // would re-read identical bytes is skipped.
+      const wsNow = selectWorkspace(useChatStore.getState(), conversationId);
+      const revNow = wsNow?.updatedAt ?? -1;
+      if (session.lastProbeRevision === revNow) {
+        // Nothing changed since the last probe — skip this round's probe.
+      } else {
+      void (async () => {
+        try {
+          const state = useChatStore.getState();
+          const ws = selectWorkspace(state, conversationId);
+          if (!ws) return;
+          const { runTypecheck } = await import("../lib/typecheck-client");
+          const result = await runTypecheck({
+            files: probeFiles(ws),
+            tsconfigRaw:
+              ws.files["tsconfig.json"]?.content ??
+              ws.files["jsconfig.json"]?.content ??
+              null,
+            treePaths: ws.tree.map((e) => e.path),
+            changedPaths: Object.entries(ws.files)
+              .filter(([, f]) => f.status !== "unchanged")
+              .map(([p]) => p),
+          });
+          if (session.abort?.signal.aborted) return;
+          const baseline = session.probeBaseline;
+          if (!baseline) {
+            session.probeBaseline = captureProbeBaseline(ws, result);
+            return;
+          }
+          const outcome = diffProbe(baseline, result);
+          session.probeBaseline = outcome.baseline ?? baseline;
+          if (outcome.ran && outcome.ok && outcome.newDiagnostics.length > 0) {
+            session.probeFailures += 1;
+            const notice = probeNotice(outcome);
+            if (notice) {
+              useChatStore.getState().addMessage(conversationId, {
+                role: "assistant",
+                content: notice,
+              });
+            }
+            logTurnEvent({
+              turnId: session.turnId,
+              conversationId,
+              phase: "braid-probe",
+              detail: `probe: ${outcome.newDiagnostics.length} new diagnostic(s), delta ${outcome.deltaErrors}`,
+            });
+          }
+          // Remember what this probe read, so the next round skips the
+          // worker entirely when nothing has changed since.
+          session.lastProbeRevision = revNow;
+        } catch {
+          // A probe that cannot run is silent — absent is not failure.
+        }
+      })();
+      }
+    }
+
+    // ── Braid P2: risk-signaled strand rollouts (shadow, joined at the stop) ──
+    // Fired once per turn, only when the fork policy's risk signals say the
+    // turn is losing: stuck refusals or repeated probe findings. Strands run
+    // page-side on forks while the main loop CONTINUES — nothing pauses.
+    if (
+      !session.strandHandle &&
+      useChatStore.getState().settings.braidStrandRollouts !== false &&
+      (session.stuckRefusals > 0 || session.probeFailures >= 2)
+    ) {
+      const state = useChatStore.getState();
+      const conversation = state.conversations.find((c) => c.id === conversationId);
+      const ws = selectWorkspace(state, conversationId);
+      const repo = conversation?.repoContext;
+      if (conversation && ws && repo && session.abort) {
+        const task =
+          [...visibleMessages(conversation.messages)].reverse().find((m) => m.role === "user")
+            ?.content ?? "";
+        const handle = maybeLaunchStrands(
+          {
+            conversationId,
+            conversationModel:
+              session.modelOverride ?? conversation.model ?? state.settings.defaultModel,
+            // The pick function fills shortfalls with the conversation's own
+            // model; a catalog-driven cheaper list can replace this later.
+            cheaperModels: [],
+            apiKey: state.settings.apiKey.trim(),
+            token: state.settings.github.token,
+            repoLabel: `${repo.owner}/${repo.repo}@${repo.branch}`,
+            task,
+            signals: {
+              stuckRefusals: session.stuckRefusals,
+              probeFailures: session.probeFailures,
+              checkFailing: false,
+              plan: {
+                total: conversation.plan?.steps.length ?? 0,
+                done: conversation.plan?.steps.filter((s) => s.status === "done").length ?? 0,
+              },
+              roundsSpent: 0,
+            },
+            signal: session.abort.signal,
+          },
+          ws,
+          (note) => {
+            useChatStore.getState().addMessage(conversationId, {
+              role: "assistant",
+              content: note,
+            });
+          }
+        );
+        if (handle) {
+          session.strandHandle = handle;
+          logTurnEvent({
+            turnId: session.turnId,
+            conversationId,
+            phase: "braid-strands",
+            detail: `strands launched (${handle.label}): ${handle.reason}`,
+          });
+        }
+      }
+    }
+
+    // ── Response ladder ──
+    // One assessment of how hard this turn is working, from facts the
+    // executor already counted. The ladder consumes it in cost order —
+    // the effort bump (same model, more thinking) before the model
+    // escalation (a different model, more capability) — and a refusal
+    // count above zero is still the trigger for the ladder as a whole:
+    // that is the evidence the harness has told the model, in words,
+    // that its approach fails.
+    //
+    // The rungs interleave so the old behaviour is preserved exactly
+    // when the new rung cannot fire:
+    //
+    //   elevated + bump available   → bump; the model rung waits one round
+    //                                 to see whether thinking broke the loop
+    //   elevated + bump unavailable → swap immediately (what always happened
+    //                                 before the thinking rung existed — a
+    //                                 model that cannot express effort has
+    //                                 no intermediate rung to try)
+    //   high (provably stuck)       → swap directly; a turn this stuck does
+    //                                 not spend a round on an intermediate rung
+    if (session.stuckRefusals > 0) {
+      const assessment = assessDifficultyFor(conversationId);
+      session.difficulty = assessment;
+      logTurnEvent({
+        turnId: null,
         conversationId,
-        conversation?.model ?? useChatStore.getState().settings.defaultModel,
-        deps
-      );
+        phase: "tool-phase",
+        detail: describeDifficulty(assessment),
+      });
+
+      const conversation = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      let bumped = false;
+      if (
+        assessment.level === "elevated" &&
+        !session.effortBumped &&
+        !session.escalated
+      ) {
+        bumped = maybeBumpEffort(conversationId, conversation, deps) !== null;
+      }
+
+      // The model rung fires whenever the thinking rung did not just fire:
+      // a bump is one round of grace, and `high` never earns one.
+      if (!bumped && !session.escalated) {
+        maybeEscalate(
+          conversationId,
+          conversation?.model ?? useChatStore.getState().settings.defaultModel,
+          deps
+        );
+      }
     }
   }
 
@@ -1778,6 +2136,96 @@ async function runRounds(conversationId: string, deps: EngineDeps): Promise<void
   });
 }
 
+// ── Braid: the join at the stop + distillation ─────────────
+
+/**
+ * Joins any strand rollouts this turn forked, at the stop.
+ *
+ * The main path's verification is read HERE, at the stop, from the same
+ * evidence the completion gate reads: a fresh pass at the CURRENT revision
+ * is a verified main path. An aborted turn skips the join entirely — the
+ * user stopped everything, and a "strands were joined" note after a stop
+ * would be noise about work they just ended.
+ */
+async function joinBraidAtStop(conversationId: string, session: TurnSessionState): Promise<void> {
+  const handle = session.strandHandle;
+  if (!handle || session.abort?.signal.aborted) return;
+  const state = useChatStore.getState();
+  const ws = selectWorkspace(state, conversationId);
+  if (!ws) return;
+  const fresh = verificationEvidence(conversationId, { workspaceUpdatedAt: ws.updatedAt });
+  const mainVerified = fresh.some((e) => e.status === "fresh-pass");
+  // Bounded: a strand's model call honors the turn's abort signal, but a
+  // wedged network call must not hold the transcript hostage past this.
+  await Promise.race([
+    handle.join(ws, mainVerified),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 120_000)),
+  ]);
+}
+
+/**
+ * Distills this turn's outcome into strategy entries (Braid P0).
+ * Fire-and-forget from the caller's perspective: the next send never
+ * waits on it, and a failure here is silent by design — compaction's
+ * summarizer already set that policy for background side calls. Runs
+ * AFTER the strand join, so it describes the work that survived.
+ */
+async function distillTurnOutcome(conversationId: string, session: TurnSessionState): Promise<void> {
+  if (useChatStore.getState().settings.braidStrategies === false) return;
+  const state = useChatStore.getState();
+  const conversation = state.conversations.find((c) => c.id === conversationId);
+  const repo = conversation?.repoContext;
+  if (!conversation || !repo) return;
+  const apiKey = state.settings.apiKey.trim();
+  if (!apiKey) return;
+
+  const task =
+    [...visibleMessages(conversation.messages)].reverse().find((m) => m.role === "user")
+      ?.content ?? "";
+  const ws = selectWorkspace(state, conversationId);
+  const evidence = ws
+    ? verificationEvidence(conversationId, { workspaceUpdatedAt: ws.updatedAt })
+    : [];
+  const notes = [
+    ...evidence.map((e) => `${e.summary} (${e.kind}, ${e.status})`),
+    ...[...session.callLedger.values()].filter((l) => !l.ok).map((l) => `failing call: ${l.digest}`),
+  ].filter(Boolean);
+
+  const lastMessage = conversation.messages[conversation.messages.length - 1];
+  const outcome: StrategyEntry["outcome"] = session.abort?.signal.aborted
+    ? "stopped"
+    : evidence.some((e) => e.status === "fresh-pass")
+      ? "verified"
+      : lastMessage?.error
+        ? "failed"
+        : "stopped";
+
+  const modelId = conversation.model ?? state.settings.defaultModel;
+  const input = { task, outcomeNotes: notes, outcome };
+  // Budget guard: a distill must never outspend the turn it learned from.
+  if (estimateDistillTokens(input, modelId) > 6_000) return;
+
+  try {
+    const result = await distillTurn({
+      ...input,
+      conversationId,
+      repo,
+      apiKey,
+      modelId,
+    });
+    if (result.ok) {
+      logTurnEvent({
+        turnId: session.turnId,
+        conversationId,
+        phase: "braid-distill",
+        detail: `distilled ${result.stored} strateg${result.stored === 1 ? "y" : "ies"}${result.deduped > 0 ? ` (${result.deduped} deduped)` : ""}`,
+      });
+    }
+  } catch {
+    // Silent by design — see the header.
+  }
+}
+
 // ── Public entry points ─────────────────────────────────────
 
 /**
@@ -1803,6 +2251,7 @@ export async function runTurn(
   // Held locally because the finally clears the session field: whether the
   // turn was STOPPED is still the question the tail of this function asks.
   const abort = session.abort;
+
   session.toolCalls = [];
   session.inToolPhase = false;
   session.callLedger = new Map();
@@ -1810,11 +2259,82 @@ export async function runTurn(
   session.recoveredNote = null;
   session.modelOverride = null;
   session.escalated = false;
+  session.effortOverride = null;
+  session.effortBumped = false;
+  session.difficulty = null;
   session.stuckRefusals = 0;
+  session.probeBaseline = null;
+  session.probeFailures = 0;
+  session.lastProbeRevision = -1;
+  session.strandHandle = null;
   session.sentToolNames = null;
+  clearEnvSkillState(conversationId);
+
+  // ── Adaptive initial effort ──
+  // AFTER the reset block above: this writes `session.effortOverride`, and
+  // a classifier run before the resets would be silently wiped (a bug this
+  // ordering exists to prevent).
+  //
+  // The conversation's own rung is an explicit choice and is never touched.
+  // When it is unset (following the settings default) the harness may pick
+  // the STARTING rung from what this request looks like — one rung up for
+  // deep work, one down for trivial work (the cost lever). Skipped entirely
+  // when adaptive effort is off. The turn-prep resolution order already
+  // prefers a turn-scoped override, so this reaches the wire unchanged.
+  if (useChatStore.getState().settings.adaptiveEffort !== false) {
+    const conv = useChatStore
+      .getState()
+      .conversations.find((c) => c.id === conversationId);
+    if (conv && conv.reasoningEffort === undefined) {
+      const lastUser = [...visibleMessages(conv.messages)]
+        .reverse()
+        .find((m) => m.role === "user");
+      const { complexity, reasons } = classifyRequest({
+        text: lastUser?.content ?? "",
+        openPlanSteps: conv.plan
+          ? conv.plan.steps.filter((s) => s.status !== "done").length
+          : 0,
+      });
+      const base = useChatStore.getState().settings.defaultReasoningEffort;
+      const effort = effortForComplexity(complexity, base);
+      if (effort !== base) {
+        session.effortOverride = effort;
+        logTurnEvent({
+          turnId: null,
+          conversationId,
+          phase: "turn-start",
+          detail: `adaptive effort: ${complexity} (${reasons.join("; ")}) — starting at ${effort}`,
+        });
+      }
+    }
+  }
 
   try {
     await runRounds(conversationId, resolved);
+    // Braid: strands are joined at the stop (their work is materialized
+    // only when it verified better than the main path), and the settled
+    // turn is distilled into strategies afterwards. Both are no-ops on a
+    // turn that forked nothing.
+    //
+    // LATENCY RULE: when the user already queued the next instruction, the
+    // tail must not make them wait on a strand join (bounded at 120 s) or a
+    // distill call. The queued turn starts immediately and the join runs
+    // beside it — its last-instant staleness re-check refuses to adopt over
+    // anything the new turn has already edited.
+    const hasQueued =
+      (
+        useChatStore
+          .getState()
+          .conversations.find((c) => c.id === conversationId)?.queued?.length ?? 0
+      ) > 0;
+    if (hasQueued) {
+      void joinBraidAtStop(conversationId, session).then(() =>
+        distillTurnOutcome(conversationId, session)
+      );
+    } else {
+      await joinBraidAtStop(conversationId, session);
+      await distillTurnOutcome(conversationId, session);
+    }
   } catch (err) {
     const detail = err instanceof Error ? err.message : "turn failed";
     logTurnEvent({
@@ -1934,6 +2454,9 @@ export async function adoptTurn(
   session.modelOverride = null;
   session.escalated = false;
   session.stuckRefusals = 0;
+  session.probeBaseline = null;
+  session.probeFailures = 0;
+  session.strandHandle = null;
   // The adopted turn's surface died with the page that prepared it, so it is
   // unknown rather than empty — unknown does not refuse a call.
   session.sentToolNames = null;
@@ -2065,6 +2588,11 @@ registerScopedResource({
   scope: "binding",
   release: ({ transition }) => {
     if (transition.type === "thread.created") return;
+    // stopTurn already filters `liveSessions()` to the named thread, so this is
+    // naturally scoped — but the named thread may simply have no live turn, and
+    // asking an idle engine to stop is a no-op worth not paying a transition
+    // dispatch for. Read the same live set rather than a parallel record of it.
+    if (!liveSessions().some((s) => s.conversationId === transition.threadId)) return;
     stopTurn(transition.threadId);
   },
 });

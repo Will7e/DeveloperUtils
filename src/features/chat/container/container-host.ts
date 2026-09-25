@@ -455,7 +455,7 @@ async function emptyMountedTree(): Promise<{ ok: true } | { ok: false; error: st
   if (!instance || !fs || !fs.rm) {
     return {
       ok: false,
-      error: `the browser workspace still holds a different thread's files and this runtime exposes no way to remove them, so this thread's revision cannot be mounted without running commands against a mixture of two trees. Run this on the companion, or use a verification tier that does not depend on this page's workspace.`,
+      error: `the browser workspace still holds a different thread's files and this runtime exposes no way to remove them, so this thread's revision cannot be mounted without running commands against a mixture of two trees. Use a verification tier that does not depend on this page's workspace, or open this thread in its own tab.`,
     };
   }
   const failed: string[] = [];
@@ -469,7 +469,7 @@ async function emptyMountedTree(): Promise<{ ok: true } | { ok: false; error: st
   if (failed.length > 0) {
     return {
       ok: false,
-      error: `the browser workspace could not be emptied (${failed.length} of ${mountedPaths.length} path(s) would not remove, e.g. \`${failed[0]}\`), so this thread's revision was not mounted — a command here would have run against two threads' files at once. Run this on the companion, or use a verification tier that does not depend on this page's workspace.`,
+      error: `the browser workspace could not be emptied (${failed.length} of ${mountedPaths.length} path(s) would not remove, e.g. \`${failed[0]}\`), so this thread's revision was not mounted — a command here would have run against two threads' files at once. Use a verification tier that does not depend on this page's workspace, or reload the tab to reset the workspace.`,
     };
   }
   mountedPaths = [];
@@ -670,18 +670,30 @@ export function adoptRuntimeForTest(fake: ContainerRuntime | null): void {
 }
 
 /**
- * A mounted tree describes ONE repository at ONE commit.
+ * A mounted tree describes ONE repository at ONE commit, held by ONE thread.
  *
  * Every reason below is the same reason: a workspace left mounted after the code
  * underneath changed produces evidence about the wrong revision, and the ledger
  * would record it as fresh for a change it never saw. That is worse than losing an
  * install, which is why this releases rather than repairs.
+ *
+ * The release is scoped to the transition's thread — the same rule the turn
+ * engine and the pending-saves cache follow. The first version released on every
+ * transition from any thread, which meant deleting a chat on repo B tore down the
+ * runtime that repo A's chat was running commands (and its dev server) in: one
+ * page has one runtime, but a transition by one thread is not every thread's
+ * business ending.
  */
 registerScopedResource({
   name: "container.runtime",
   scope: "binding",
   release: ({ transition }) => {
     if (transition.type === "thread.created") return;
+    // Is the thread that moved the one holding the workspace? When it is not —
+    // a peer chat deleted, another thread switched repositories — the workspace
+    // keeps describing ITS thread's revision and must not be touched.
+    if (workspaceHolder()?.threadId !== transition.threadId) return;
+
     return stopContainer(
       transition.type === "base.moved"
         ? "the base revision moved, so the workspace was released rather than left describing the previous commit"

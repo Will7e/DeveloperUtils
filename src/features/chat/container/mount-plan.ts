@@ -3,8 +3,8 @@
 // ============================================================
 // A container has an empty filesystem; the workspace is an OVERLAY of files held
 // in IndexedDB plus the agent's change set. Before anything can run, the overlay
-// has to become files — and the decision of WHICH files is the same decision the
-// local runner makes, with one difference that matters: nothing we mount stays
+// has to become files — and the decision of WHICH files is the materializer's
+// decision, with one difference that matters: nothing we mount stays
 // private.
 //
 // Every file written here is readable by every process that runs afterwards — an
@@ -17,8 +17,8 @@
 // loudly instead of quietly succeeding against a tree we edited behind it.
 //
 // Path containment and the `.git` rule are not re-implemented here. They live in
-// companion/materialize-plan.ts, they are tested there, and a second copy is how
-// two rule sets drift into disagreeing about `../../`.
+// materialize-plan.ts beside this file, they are tested there, and a second copy
+// is how two rule sets drift into disagreeing about `../../`.
 //
 // Pure: contents in, a tree out. No DOM, no container, no network.
 // ============================================================
@@ -29,17 +29,16 @@ import {
   planMaterialization,
   type MaterializeBaseFile,
   type MaterializeChange,
-} from "../companion/materialize-plan";
+} from "./materialize-plan";
 
 /**
- * The ceiling for one mounted tree — deliberately far below the local runner's
- * 64 MiB.
+ * The ceiling for one mounted tree.
  *
- * The local runner writes to a disk that has room. This writes into a WASM
- * filesystem inside a browser tab, on the user's machine, competing with their
- * other tabs for the same few gigabytes — and the number that matters is not
- * "can it hold the tree" but "can it hold the tree, `node_modules`, and the dev
- * server at once". A partial tree here is reported, never silent.
+ * This writes into a WASM filesystem inside a browser tab, on the user's
+ * machine, competing with their other tabs for the same few gigabytes — and the
+ * number that matters is not "can it hold the tree" but "can it hold the tree,
+ * `node_modules`, and the dev server at once". A partial tree here is reported,
+ * never silent.
  */
 export const MOUNT_MAX_BYTES = 16 * 1024 * 1024;
 

@@ -77,9 +77,7 @@ describe("resolveCandidates", () => {
     });
     expect(resolved.candidates[1]!.contextLength).toBe(200_000);
   });
-});
-
-describe("composeTurnNote — skills that activate themselves", () => {
+});describe("composeTurnNote — skills that activate themselves", () => {
   const auto = skill({
     id: "auto",
     name: "Add Tests",
@@ -88,17 +86,26 @@ describe("composeTurnNote — skills that activate themselves", () => {
   });
   const deferred = skill({ id: "deferred", name: "Deep Review", content: "Review hard." });
 
+  const selection = (over: {
+    loaded?: ChatSkill[];
+    deferred?: ChatSkill[];
+    alreadyActive?: string[];
+  }) => ({
+    loaded: over.loaded ?? [],
+    deferred: over.deferred ?? [],
+    alreadyActive: over.alreadyActive ?? [],
+  });
+
   const note = (over: Partial<Parameters<typeof composeTurnNote>[0]> = {}) =>
     composeTurnNote({
-      autoSkills: [],
-      deferredSkills: [],
+      skillSelection: selection({}),
       availability: AVAILABILITY,
       now: new Date("2026-09-24T00:00:00Z"),
       ...over,
     });
 
   it("injects a matched skill's body as instructions already in force", () => {
-    const text = note({ autoSkills: [auto] });
+    const text = note({ skillSelection: selection({ loaded: [auto] }) });
     expect(text).toContain("### Skill: Add Tests");
     expect(text).toContain("_cover the change_");
     expect(text).toContain("Write a failing test first.");
@@ -109,7 +116,7 @@ describe("composeTurnNote — skills that activate themselves", () => {
   });
 
   it("names only the deferred skills for read_skill", () => {
-    const text = note({ autoSkills: [auto], deferredSkills: [deferred] });
+    const text = note({ skillSelection: selection({ loaded: [auto], deferred: [deferred] }) });
     expect(text).toContain('"Deep Review"');
     expect(text).toContain('read_skill({ name: "Deep Review" })');
   });
@@ -117,8 +124,8 @@ describe("composeTurnNote — skills that activate themselves", () => {
   it("does not say a deferred skill 'also' matches when nothing was loaded", () => {
     // One oversized skill defers on its own; "also matches" would read as if
     // something had been loaded before it.
-    const text = note({ deferredSkills: [deferred] });
-    expect(text).toContain("This request matches the skill");
+    const text = note({ skillSelection: selection({ deferred: [deferred] }) });
+    expect(text).toContain("matches the skill");
     expect(text).not.toContain("also matches");
   });
 
@@ -127,13 +134,41 @@ describe("composeTurnNote — skills that activate themselves", () => {
     expect(text).not.toContain("### Skill:");
     expect(text).not.toContain("read_skill");
   });
+
+  it("names prior-round bodies without re-rendering them", () => {
+    const text = note({ skillSelection: selection({ alreadyActive: ["Add Tests"] }) });
+    expect(text).toContain("Add Tests");
+    expect(text).toContain("do not re-load");
+    expect(text).not.toContain("### Skill:");
+  });
+
+  it("says which environment facts activated a skill, when any did", () => {
+    const text = note({
+      skillSelection: selection({ loaded: [auto] }),
+      environmentSignals: {
+        failingChecks: ["`npm test` exited 1"],
+        changedPaths: ["src/a.ts", "src/b.ts"],
+        previewErrors: [],
+      },
+    });
+    expect(text).toContain("Matched against the turn's state");
+    expect(text).toContain("1 check(s) failing");
+    expect(text).toContain("2 file(s) changed");
+  });
+
+  it("names no environment facts when none fired", () => {
+    const text = note({
+      skillSelection: selection({ loaded: [auto] }),
+      environmentSignals: { failingChecks: [], changedPaths: [], previewErrors: [] },
+    });
+    expect(text).not.toContain("Matched against the turn's state");
+  });
 });
 
 describe("composeTurnNote — other agent threads", () => {
   const note = (over: Partial<Parameters<typeof composeTurnNote>[0]> = {}) =>
     composeTurnNote({
-      autoSkills: [],
-      deferredSkills: [],
+      skillSelection: { loaded: [], deferred: [], alreadyActive: [] },
       availability: AVAILABILITY,
       now: new Date("2026-09-24T00:00:00Z"),
       ...over,
@@ -151,7 +186,7 @@ describe("composeTurnNote — other agent threads", () => {
     // prefix. Order matters for reading, not for caching: the tier says what to
     // run, and a peer holding a path can say not to bother yet.
     const text = note({
-      verification: "Next move: run `npm test` through the companion.",
+      verification: "Next move: run `npm test` in the browser workspace.",
       threads: 'Other agent threads in this browser:\n- "Auth rework" · editing · on acme/app · touching src/auth.ts',
     });
     expect(text).toContain("Other agent threads in this browser");

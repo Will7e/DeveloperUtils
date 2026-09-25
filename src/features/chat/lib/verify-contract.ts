@@ -291,8 +291,7 @@ export function unrunChecksStatement(checks: DeclaredCheck[]): string {
   return [
     `This repository declares ${checks.length} check(s). Declaring a check is not running it — none of these has been executed yet:`,
     ...checks.map((c) => `- ${c.label} → \`${c.command}\``),
-    "Run them with `run_command` (it runs in the browser workspace in this tab, with no setup; it falls back to the user's " +
-      "machine through the local companion when the tab cannot run the project) or delegate to " +
+    "Run them with `run_command` (it runs in the browser workspace in this tab, with no setup) or delegate to " +
       "the repository's own CI with `verify_with_ci` (the tier that covers Python, Rust, Docker and service-backed projects, " +
       "once the branch is pushed).",
     "Until one of those returns a passing result, say explicitly which of these you did NOT run, and hand the user the commands above.",

@@ -78,20 +78,12 @@ import {
   type PreviewIssue,
 } from "../container/preview-bridge";
 import { requestAutoVerify } from "./auto-verify";
-import { COMPANION_PROTOCOL_VERSION } from "../companion/protocol";
-import { capabilityState, noteCompanionOutcome, workspaceSupport } from "../lib/availability";
+import { workspaceSupport } from "../lib/availability";
 import { describeMount } from "../container/mount-plan";
 import { runInContainer } from "../container/container-executor";
 import { mountPlanForWorkspace, workspaceOwnerFor } from "./container-workspace";
 import { planVerification } from "../lib/verification-plan";
-import {
-  COMPANION_UNPAIRED_HELP,
-  companionCredentials,
-  probeCompanion,
-  runOnCompanion,
-  STOPPED_BY_USER,
-} from "../companion/companion-client";
-import { describeRejections, planMaterialization } from "../companion/materialize-plan";
+import { STOPPED_BY_USER } from "../lib/user-stop";
 import {
   announcePresence,
   claimThreadPaths,
@@ -970,13 +962,11 @@ export async function runCallMcpTool(
   };
 }
 
-// ── run_command's first tier: the project's commands in this tab ──
+// ── run_command: the project's commands in this tab ──
 //
-// Two workspaces can run a command, and the model does not choose between them:
-// the browser workspace in this tab needs no install and no pairing, so it is
-// tried FIRST, and the local companion is the fallback for the repos a tab
-// cannot run (native dependencies, non-stdlib Python, a Postgres service, a tree
-// too large to mount). Which one produced a result is a fact about its authority
+// One workspace runs a command: the browser workspace in this tab. It needs no
+// install and no setup, so a JS/TS project verifies without asking the user to
+// configure anything. Where a result was produced is a fact about its authority
 // — the tab's runtime is not the user's machine — so every result and every
 // ledger entry names the tier it ran in.
 
@@ -1008,11 +998,9 @@ function stoppedResult(started: number, command: string, why: string): { ran: tr
 /**
  * Runs the command in the browser workspace.
  *
- * `ran: false` is the only case that falls through to the companion, and it is
- * deliberately narrow: the command could not START here (no isolation, no boot,
- * no installable tree). A non-zero exit never falls through — that failing exit
- * code is the answer the model asked for, and re-running it somewhere else would
- * turn one result into two.
+ * `ran: false` means the command could not START here (no isolation, no boot,
+ * no installable tree) and nothing ran at all. A non-zero exit is never
+ * `ran: false` — that failing exit code is the answer the model asked for.
  */
 async function tryBrowserWorkspace(input: {
   conversationId: string;
@@ -1043,10 +1031,9 @@ async function tryBrowserWorkspace(input: {
   });
 
   if (!run.ok) {
-    // A Stop is NOT a reason to try somewhere else. The abort reached the tab's
-    // process and the user asked for it to stop; falling through would run the
-    // same command on their own machine — after they cancelled it — and would
-    // report a companion that is working fine as down on the way.
+    // A Stop is final. The abort reached the tab's process and the user asked
+    // for it to stop; reporting anything but "stopped" would misread their act
+    // as a failure of the code.
     if (input.signal?.aborted) return stoppedResult(started, input.command, input.why);
     return { ran: false, reason: run.error };
   }
@@ -1136,7 +1123,7 @@ function failureLines(outcome: { stdout: string; stderr: string }): string[] {
  * lie:
  *
  *   • a blocked command is REFUSED rather than attempted quietly;
- *   • no companion means the command was NOT RUN — reported as unverified,
+ *   • a command the workspace cannot start is reported as NOT RUN — unverified,
  *     never as success, because a green result the agent cannot support is
  *     worse than no result at all;
  *   • a non-zero exit is `ok: false`. A failing test run is a successful
@@ -1183,12 +1170,11 @@ export async function runShellCommand(
   const ws = await latestWorkspace(conversationId);
   if (!ws) return fail("No workspace available — attach a repository first.", "no workspace");
 
-  // The browser workspace first, the user's machine second. This order is the
-  // whole point of the tier: it needs no pairing, no install and no permission,
-  // so the common case (a JS/TS project, in a tab) verifies without asking the
-  // user to set anything up. A command that cannot start here falls through
-  // rather than failing, and the reason rides along so the refusal below can name
-  // both places it was tried.
+  // The browser workspace is the only runner. This is the whole point of the
+  // tier: it needs no install and no permission, so the common case (a JS/TS
+  // project, in a tab) verifies without asking the user to set anything up. A
+  // command that cannot start here is reported with the reason — never as a
+  // pass, because nothing ran.
   const browser = await tryBrowserWorkspace({
     conversationId,
     command,
@@ -1198,179 +1184,16 @@ export async function runShellCommand(
     ...(signal ? { signal } : {}),
   });
   if (browser.ran) return browser.result;
-  const browserFallback = browser.reason
-    ? ` The browser workspace in this tab could not run it either: ${browser.reason}`
-    : "";
 
-  const store = useChatStore.getState();
-  // Where the companion is, and the token to talk to it with: the pair saved in
-  // Chat settings → Companion, or the environment when that names one.
-  //
-  // The copy here used to say the dev server starts the companion and publishes
-  // both values, which stopped being true when the preview host (and its Vite
-  // plugin) were removed — so the single most consequential tool in the harness
-  // failed with an instruction that did not work, the agent reported UNVERIFIED,
-  // and the user had nothing to follow. Every message below now names a step
-  // that exists.
-  const credentials = await companionCredentials(undefined, store.settings.companion);
-  if (!credentials.origin) {
-    const reason = credentials.error ?? COMPANION_UNPAIRED_HELP;
-    noteCompanionOutcome("down", reason);
-    return fail(
-      `${command} was NOT RUN — no companion is paired with this app, so nothing ran and this change is ` +
-        `UNVERIFIED. ${COMPANION_UNPAIRED_HELP} Report this change as UNVERIFIED until it has run.${browserFallback}`,
-      "not run — unverified"
-    );
-  }
-  const probe = await probeCompanion(credentials.origin);
-  if (!probe.available) {
-    const reason = probe.error ?? `the companion at ${credentials.origin} did not answer`;
-    noteCompanionOutcome("down", reason);
-    return fail(
-      `${command} was NOT RUN — ${reason} Running real commands needs the local companion. ` +
-        "Start it with `npm run companion`, then paste the token it prints into Chat settings → Companion. " +
-        `Report this change as UNVERIFIED until it has run.${browserFallback}`,
-      "not run — unverified"
-    );
-  }
-  if (probe.protocolVersion !== null && probe.protocolVersion !== COMPANION_PROTOCOL_VERSION) {
-    const reason = `the companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}`;
-    noteCompanionOutcome("down", reason);
-    return fail(
-      `The companion speaks protocol v${probe.protocolVersion} and this app expects v${COMPANION_PROTOCOL_VERSION}. ` +
-        `It was NOT run: restart the companion so the two agree rather than letting it answer a request it does not understand.${browserFallback}`,
-      "not run — version mismatch"
-    );
-  }
-
-  const companionToken = credentials.token;
-  if (!companionToken) {
-    const reason = credentials.error ?? "the pairing token is missing";
-    noteCompanionOutcome("down", reason);
-    return fail(
-      `${command} was NOT RUN — a companion answered at ${credentials.origin} but no pairing token is set, ` +
-        "so it would refuse the command anyway. Paste the token the companion printed at startup into " +
-        `Chat settings → Companion. This change is UNVERIFIED.${browserFallback}`,
-      "not run — unpaired"
-    );
-  }
-  noteCompanionOutcome("up");
-
-  // Only the workspace's own changes are written: with a repository ref the
-  // companion checks out the base commit first, so the tree is the whole
-  // project and the change set is the agent's delta on top of it.
-  const plan = planMaterialization({
-    base: [],
-    changes: collectChanges(ws).map((change) => ({
-      path: change.path,
-      content: change.content,
-      status: change.status,
-    })),
-  });
-  const rejectedLine = describeRejections(plan);
-
-  const ghToken = store.settings.github.token;
-  const repo =
-    ws.owner && ws.repo && ws.baseCommitSha
-      ? {
-          url: ghToken
-            ? `https://x-access-token:${ghToken}@github.com/${ws.owner}/${ws.repo}.git`
-            : `https://github.com/${ws.owner}/${ws.repo}.git`,
-          ref: ws.baseCommitSha,
-        }
-      : undefined;
-
-  const result = await runOnCompanion({
-    origin: probe.origin,
-    token: companionToken,
-    conversationId,
-    command,
-    // The companion transport is JSON: binary writes cannot ride it. Filtering
-    // here (rather than in planMount) keeps the BROWSER workspace — the one
-    // with the preview — serving assets while the daemon tier runs text-only;
-    // a skipped asset is counted in the plan's own skipped list either way.
-    writes: plan.writes.filter(
-      (write): write is { path: string; content: string } => typeof write.content === "string"
-    ),
-    deletes: plan.deletes,
-    ...(repo ? { repo } : {}),
-    ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
-  }, signal ? { signal } : {});
-
-  if (!result.ok) {
-    // A transport failure learned by trying is the most reliable probe there
-    // is; the reason rides along so the next turn's note can name the cause
-    // instead of reporting a generic "companion down".
-    noteCompanionOutcome("down", result.error);
-    return fail(`The command was not run: ${result.error}${browserFallback}`, "not run — unverified");
-  }
-  if (signal?.aborted) return fail(STOPPED_BY_USER, "stopped by the user");
-  // It answered and it ran something: the next turn's note can say so, and a
-  // model that knows commands work is a model that verifies its change.
-  noteCompanionOutcome("up");
-
-  const outcome = result.outcome;
-  const passed = outcome.exitCode === 0;
-
-  // Into the ledger, not just into the tool result. A result is read once and
-  // forgotten; the push gate needs to know what was proven, about WHICH
-  // revision, and how long ago — and a passing run of code that has since
-  // changed is exactly the claim this ledger exists to stop.
-  recordVerification(conversationId, {
-    kind: "command",
-    at: Date.now(),
-    workspaceUpdatedAt: ws.updatedAt,
-    ok: passed,
-    summary: `\`${command}\` ${
-      passed
-        ? "exited 0"
-        : outcome.timedOut
-          ? "was killed after its timeout"
-          : `exited ${outcome.exitCode}`
-    } in ${outcome.durationMs}ms`,
-    details: passed ? [] : failureLines(outcome),
-    source: "run_command",
-  });
-
-  return {
-    callId: "",
-    name: "run_command",
-    ok: passed,
-    data: {
-      command: outcome.command,
-      ...(why ? { why } : {}),
-      exitCode: outcome.exitCode,
-      signal: outcome.signal,
-      stdout: outcome.stdout,
-      stderr: outcome.stderr,
-      timedOut: outcome.timedOut,
-      outputTruncated: outcome.truncated,
-      cwd: outcome.cwd,
-      durationMs: outcome.durationMs,
-      notes: outcome.notes,
-      // Warnings the user approved, so a later reader can see what was risky
-      // about a run that looked ordinary.
-      warnings: policy.findings.map((finding) => finding.code),
-      materialized: {
-        files: plan.writes.length,
-        deleted: plan.deletes.length,
-        ...(rejectedLine ? { rejected: rejectedLine } : {}),
-      },
-      /**
-       * The verdict, stated in the result rather than left to inference. A
-       * model that has to derive "did this pass" from an exit code will,
-       * under pressure, derive it wrongly.
-       */
-      verification: passed
-        ? { status: "passed", evidence: `\`${command}\` exited 0 in ${outcome.cwd}.` }
-        : {
-            status: outcome.timedOut ? "timed-out" : "failed",
-            evidence: `\`${command}\` ${outcome.timedOut ? "was killed after its timeout" : `exited ${outcome.exitCode}`}.`,
-          },
-    },
-    durationMs: Date.now() - started,
-    summary: `${passed ? "exit 0" : outcome.timedOut ? "timed out" : `exit ${outcome.exitCode}`} — ${command.slice(0, 48)}`,
-  };
+  // Nothing ran, so there is nothing to record and nothing to call a pass: the
+  // reason the workspace could not start the command is the whole result. The
+  // honest outcome is UNVERIFIED — not a retry elsewhere, not a guess.
+  const reason = browser.reason ?? "the browser workspace could not start it";
+  return fail(
+    `${command} was NOT RUN — the browser workspace in this tab could not run it: ${reason}. ` +
+      "No command ran, so this change is UNVERIFIED. Report that plainly; do not describe the checks as having run.",
+    "not run — unverified"
+  );
 }
 
 // ── verify_with_ci (the repository's own definition of green) ─
@@ -2173,8 +1996,8 @@ async function runLocalTypecheck(
  * commands" — which is checkable. When a runner IS configured
  * (`VITE_CHECKS_ENDPOINT`, chosen by whoever builds the app) the declared
  * commands are executed there and real results come back; otherwise the
- * local typecheck still runs, and the tiers that need a machine — the
- * companion, CI — are the ones the agent is told to use.
+ * local typecheck still runs, and the tier that needs more than a tab —
+ * CI — is the one the agent is told to use.
  */
 /**
  * The tier plan for a change set, in the shape the model reads.
@@ -2195,7 +2018,6 @@ function verificationTiersFor(
   const plan = planVerification({
     repoAttached: true,
     hasChanges: collectChanges(ws).length > 0,
-    companion: capabilityState("companion"),
     pushed: Boolean(ws.pushedAt),
     evidence: verificationEvidence(conversationId, { workspaceUpdatedAt: ws.updatedAt }),
   });
@@ -2236,8 +2058,8 @@ export async function runRunChecks(
   // Configured by whoever BUILDING the app, not by the person using it: an
   // external checks runner is deployment plumbing, and a text field in Chat
   // settings asked a user to describe their own CI infrastructure. The two
-  // tiers everyone actually has are `run_command` (the local companion,
-  // on their machine) and `verify_with_ci` (the repository's own workflow).
+  // tiers everyone actually has are `run_command` (the browser workspace,
+  // in this tab) and `verify_with_ci` (the repository's own workflow).
   const endpoint = (import.meta.env?.VITE_CHECKS_ENDPOINT as string | undefined)?.trim() || "";
 
   // ── No runner configured: run what CAN run here, report the rest ──
@@ -2762,8 +2584,9 @@ export async function runPushChanges(
     toolsUsed,
     typecheck: verification.find((v) => v.kind === "typecheck") ?? null,
     // The strongest evidence there is, and the two kinds a reviewer most
-    // wants to see in the gate: a real command, and the repository's CI.
-    command: verification.find((v) => v.kind === "command") ?? null,
+    // wants to see in the gate: a real command in the workspace's runtime,
+    // and the repository's CI.
+    workspace: verification.find((v) => v.kind === "workspace") ?? null,
     ci: verification.find((v) => v.kind === "ci") ?? null,
   });
   warnings.push(...evidenceWarnings(evidence));

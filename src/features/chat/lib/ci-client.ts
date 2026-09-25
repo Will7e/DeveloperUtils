@@ -42,7 +42,7 @@ export interface CiClientDeps {
   /**
    * The turn's abort signal. A CI wait pools up to fifteen minutes of
    * polling, and a Stop that only took effect after the verdict would be a
-   * Stop that did nothing (see companion-client's CompanionDeps).
+   * Stop that did nothing — the same contract lib/user-stop.ts exists for.
    */
   signal?: AbortSignal;
 }

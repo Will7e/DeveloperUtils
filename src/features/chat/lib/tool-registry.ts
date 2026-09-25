@@ -936,7 +936,7 @@ export const TOOL_REGISTRY: readonly AgentToolMeta[] = [
     name: "run_command",
     planSafe: false,
     description:
-      "Run a shell command in a real working tree on the user's machine, via the local companion, and get its output and exit code. This is the only way to actually VERIFY a change (install, build, test, lint, typecheck). Requires the companion to be running; without it the command is not run at all and you must say the change is unverified. Commands that escalate privileges, reach credentials, write outside the workspace, or publish (including git push) are refused. A non-zero exit is reported as failure — never describe a run as passing unless the exit code says so.",
+      "Run a shell command in the browser workspace in this tab, and get its output and exit code. This is the only way to actually VERIFY a change (install, build, test, lint, typecheck). When the workspace cannot run the command, nothing runs and you must say the change is unverified. Commands that escalate privileges, reach credentials, write outside the workspace, or publish (including git push) are refused. A non-zero exit is reported as failure — never describe a run as passing unless the exit code says so.",
     parameters: {
       type: "object",
       properties: {

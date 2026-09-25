@@ -1,6 +1,6 @@
 # Runtime Model — Teaching The Agent To Verify, Not Just Assert
 
-Companion to `docs/intab-threads.md` (T1–T9, threads over a repository) and
+Companion document to `docs/intab-threads.md` (T1–T9, threads over a repository) and
 `docs/intab-workspace-model.md` (the four layers: repo base, workspace,
 thread, run). This file covers a different axis: **where code actually runs**,
 and what the agent is allowed to claim as verified.
@@ -13,7 +13,7 @@ should work" into "this passed", so a change shipped on a promise.
 
 | Tier | Runs | Cost | Status |
 |---|---|---|---|
-| **T2** local companion | the project's real commands on the user's machine | $0 | **built here** |
+| **T2** browser workspace | the project's real commands, in a WebContainer in this tab | $0 | **built here** |
 | **T3** repository CI | the repository's own workflow, on the pushed branch | $0 to us | **built here** |
 | **T4** cloud microVM | same contract as T2, remote adapter | per session-second | not built; opt-in, deliberately last |
 
@@ -25,25 +25,25 @@ the app and is not. What remains is the direction this file is about — run
 the project's own toolchain, in a place that can actually run it.
 
 The ordering is the recommendation, not a roadmap artefact. With a
-near-zero compute budget, T2 and T3 between them cover **every repo class in
-scope** — JS/TS, Node services with databases, polyglot, native toolchains
-and Docker — at zero marginal cost, because both run on compute that already
-exists and is already paid for. Cloud buys exactly one thing: *no install
-required*.
+near-zero compute budget, T2 and T3 between them cover **every JS/TS repo
+class in scope** at zero marginal cost, because both run on compute that
+already exists and is already paid for. Native toolchains, Docker and
+service-backed projects are T3's — the repository declares them and CI runs
+them. Cloud buys exactly one thing: *no install required*.
 
-## T2 — The local companion
+## T2 — The browser workspace
 
-The only tier that can run a project's real commands without spending
-anything, because the toolchain is already on the user's machine.
+The only tier that can run a project's real commands without a push, because
+the runtime boots in this tab: a WebContainer with the repository tree and the
+agent's change set mounted into it.
 
 | Piece | File | Pinned by |
 |---|---|---|
 | Command risk classification | `lib/command-policy.ts` | 29 tests |
-| Path containment + protected paths | `companion/materialize-plan.ts` | 22 tests |
-| Versioned protocol, output shaping | `companion/protocol.ts` | in the above + client tests |
-| Real writes, real spawn, timeout kill | `companion/companion-node.ts` | 21 tests (real processes) |
-| Pairing, routing, clone-or-overlay trees | `companion/companion-server.ts` | 14 tests (real sockets) |
-| Browser client, capability probe | `companion/companion-client.ts` | — |
+| Path containment + protected paths | `container/materialize-plan.ts` | 22 tests |
+| Overlay → mountable tree | `container/mount-plan.ts` | mount-plan tests |
+| Boot probe, isolation verdict | `container/boot-probe.ts` | boot-probe tests |
+| Real mount, real spawn, timeout kill | `container/container-executor.ts` | executor tests (real SDK) |
 | `run_command` tool | `services/agent-actions.ts` | registry-consistency guard |
 
 Design decisions worth keeping:
@@ -58,20 +58,21 @@ Design decisions worth keeping:
   only the shell leaves them running. Output is capped *before* it is held.
 - **A failing command is `ok: false` with a result**, never a transport
   error. The exit code is the thing the agent asked for.
-- **No companion means not run.** The result says UNVERIFIED rather than
+- **Nothing booted means not run.** The result says UNVERIFIED rather than
   reporting a pass the tool cannot support.
 - **`rm -rf node_modules` is allowed with a warning.** A policy that refuses
   ordinary work gets switched off, and a switched-off check protects
   nothing. The refusals are escalation, credentials, paths outside the tree,
   host-escaping Docker, and anything that publishes — including `git push`,
   which would route around the diff review gate.
-- **A partial tree says so.** Given a repository ref the companion checks out
-  the base commit and overlays the change set; given only files it writes
-  exactly those and every result carries a note that a full test run may
+- **A partial tree says so.** The mount composes the repository base tree
+  with the change set overlay; entries dropped for size, count or secrecy are
+  reported, and every result carries a note that a full test run may
   fail for a missing file rather than a real fault.
 
-Run it: `node src/features/chat/companion/companion-server.ts`, then set
-`VITE_COMPANION_ORIGIN` and `VITE_COMPANION_TOKEN` from the printed banner.
+Nothing to install and nothing to start: the workspace needs cross-origin
+isolation (the deployment's own headers) and a current desktop Chromium
+browser, and `lib/availability.ts` states which of the two is missing.
 
 ## T3 — The repository's own CI
 
@@ -101,7 +102,7 @@ read. Items 3 and 7 are still open, and 8 is new.)*
 
 1. ~~**There is no capability-aware router.**~~ **Fixed.**
    `lib/verification-plan.ts` is the decision layer: a pure router over
-   `{repoAttached, hasChanges, companion, pushed, evidence}` that returns the
+   `{repoAttached, hasChanges, workspace, pushed, evidence}` that returns the
    tiers which can prove this change, which already have, and the one next
    move — with the reason when the answer is "none". It is computed once per
    turn and rides the turn note beside the environment facts, because the
@@ -112,36 +113,29 @@ read. Items 3 and 7 are still open, and 8 is new.)*
    the same plan: which tier verified what, what is stale, and what remains
    unrun — so the pane says *who* proved the change rather than listing
    commands that might have run.
-3. **The companion cannot answer prompts.** stdin is `ignore`, so a command
-   that asks a question hangs until its timeout. A PTY is a real piece of
-   work, not a flag.
-4. ~~**The pairing token comes from `VITE_COMPANION_TOKEN`**~~ **Fixed.** The
-   pairing lives in the encrypted settings store with its own settings tab, and
-   resolves settings → env → absent, so an install from before this change
-   keeps working while a new one needs no env edit. The companion also answers
-   the Private Network Access preflight it was missing — without that header a
-   public-origin page is blocked from reaching a loopback companion in current
-   Chrome, which would have made every command fail for a reason that looks
-   nothing like the cause.
-5. ~~**No dependency cache.**~~ **Fixed.** `companion/dependency-cache.ts`
-   content-addresses an installed tree by its lockfile hash, so the second
-   candidate on a repository reuses the first's `node_modules`. 18 tests.
+3. ~~**The runner cannot answer prompts.**~~ **Moot with the local runner's
+   removal.** In the browser workspace a command that reads stdin finds it
+   closed rather than hanging, and a non-interactive invocation is the
+   expected shape for an agent-run command.
+4. ~~**The pairing token comes from `VITE_COMPANION_TOKEN`**~~ **Moot.** The
+   local runner, its pairing and its env plumbing were removed with the move
+   to the browser workspace — there is no token because there is no second
+   process to pair with.
+5. ~~**No dependency cache.**~~ **Moot.** The workspace installs into its own
+   runtime; the daemon-side lockfile cache it existed for is gone with the
+   daemon.
 6. ~~**CI failures are a URL, not a reason.**~~ **Fixed.** A failing run's job
    is read for its log, the failing step and step list are extracted, and the
    tail of the log comes back with the verdict — the URL is still there as the
    citation, but the agent can now act on what CI actually said.
-7. **The agent cannot see the running app at all.** With the preview gone,
-   runtime behaviour is observable only through what the project's own
-   commands report. A loopback URL the user opens themselves is the manual
-   version of what the removed pane did.
-8. **The companion server is not started by `npm run dev`.** Four separate
-   pieces of copy told the model that it was, including a `run_command`
-   failure message. It is a separate process
-   (`node src/features/chat/companion/companion-server.ts`), and the messages
-   now say so. Worth recording *why* it drifted: the Vite plugin that used to
-   start it was deleted with the preview host, and the prose outlived the
-   plugin by several months — which is the same failure mode as this file's own
-   stale claims, and the reason both were audited together.
+7. **The agent cannot see the running app at all.** Runtime behaviour is
+   observable through what the project's own commands report and through the
+   workspace preview's console, but a running dev server's rendered output is
+   the user's to open, not the agent's to screenshot.
+8. ~~**The companion server is not started by `npm run dev`.**~~ **Moot.** The
+   separate process it described was removed with the local runner. The
+   lesson stands: copy that names a mechanism outlives the mechanism, and
+   every claim here is re-audited against the code that exists now.
 
 ## Hardening the agent to use them
 
@@ -149,8 +143,8 @@ New tiers the agent does not reach for, or reaches for wrongly, are worse
 than none: they add surface and change nothing. Three things were fixed.
 
 **The ledger now records the strongest evidence there is.**
-`VerificationKind` gained `command` and `verify_with_ci`'s `ci`, so a real
-`npm test` or a real CI run is stored with the revision it describes and
+`VerificationKind` gained `workspace` (a real `npm test` in this tab) and
+`verify_with_ci`'s `ci`, so a real run is stored with the revision it describes and
 ages out the same way the in-browser kinds do. Two consequences that are the
 whole point of the ledger: a passing run followed by another edit is reported
 as *stale* rather than as proof, and the PR's proof section is now **derived

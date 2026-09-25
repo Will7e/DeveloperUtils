@@ -7,7 +7,7 @@
 //
 // The command tiers (`run_command`, `verify_with_ci`) can now run a real
 // `tsc`, and they are authoritative when available. This module still earns
-// its place: it needs no companion, no install and no push, and it works on
+// its place: it needs no install and no push, and it works on
 // the workspace revision in front of the user the moment a file changes —
 // which is the version of "does this even compile" that can run on every
 // turn rather than on request.

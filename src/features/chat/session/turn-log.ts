@@ -20,6 +20,11 @@ export type TurnLogPhase =
   | "orphan-abort"
   | "reroute"
   | "abort"
+  // Braid (features/chat/braid/): mid-turn probe results, the strand
+  // fork event, and post-turn strategy distillation.
+  | "braid-probe"
+  | "braid-strands"
+  | "braid-distill"
   | "error";
 
 export interface TurnLogEntry {

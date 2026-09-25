@@ -74,11 +74,6 @@ export interface RepoSelectionSeed extends RepoIdentity {
   branch: string;
 }
 
-/** How many past chats the History section holds — the same cap the welcome
-    screen used, so the section reads the same way. Older threads are one
-    search (⌘⇧F) away, not gone. */
-const HISTORY_LIMIT = 5;
-
 interface ChatSidebarProps {
   conversations: ChatConversation[];
   activeId: string | null;
@@ -254,19 +249,25 @@ export function ChatSidebar({
    * live on the welcome screen, where it was only reachable when the thread
    * you opened was empty.
    *
-   * Same three-cap and has-content rule the empty state used: a fresh chat
-   * with no messages is not history, and five rows is a reminder, not the
-   * archive (the grouped list below already is that). The ACTIVE thread is not
-   * excluded — on it the row reads as "this one", which is true rather than
-   * wrong, and omitting it would shift the other rows as soon as you replied.
+   * NOT capped and NOT a second archive of the same rows: the grouped list
+   * below files by project, this files by WHEN, and a chat with no messages is
+   * not history. The ACTIVE thread is included — on it the row reads as "this
+   * one", which is true rather than wrong, and omitting it would shift the
+   * other rows as soon as you replied.
    */
   const history = React.useMemo(
     () =>
       [...conversations]
         .filter((c) => c.messages.length > 0)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, HISTORY_LIMIT),
+        .sort((a, b) => b.updatedAt - a.updatedAt),
     [conversations]
+  );
+  /** Whether the History fold is open. A STATE, not a ref-count: the section
+      is one toggle the user owns, remembered across reloads like the repo
+      folds, and it does not silently reopen because a count moved. */
+  const [historyOpen, setHistoryOpen] = useLocalStorageState<boolean>(
+    "intab_chat_history_open",
+    false
   );
 
   /**
@@ -735,41 +736,56 @@ export function ChatSidebar({
 
           {/* ── History — "Pick up where you left off" ──────────
               Moved here from the welcome screen, where it only appeared when
-              the current chat was empty. Here it is always one glance away:
-              the last threads you actually said something in, newest first,
-              regardless of which repository each belongs to (the groups above
-              file them by project; this section files them by WHEN).
+              the current chat was empty. The header is a BUTTON that folds the
+              list open and closed (state remembered across reloads, like the
+              repository folds below); open, it shows EVERY chat with a
+              conversation to resume, newest first — not a capped sample.
 
               Hidden while a search is running: results for the query sit
               directly below, and an unrelated "pick up where you left off"
               above them reads as a bug. */}
           {history.length > 0 && !searching && (
-            <section className="chat-history" aria-label="Recent chats">
-              <div className="chat-history-head">
+            <section className="chat-history" aria-label="Chat history">
+              <button
+                type="button"
+                className="chat-history-toggle"
+                onClick={() => setHistoryOpen((v) => !v)}
+                aria-expanded={historyOpen}
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 chat-history-chevron",
+                    historyOpen && "chat-history-chevron-open"
+                  )}
+                  aria-hidden="true"
+                />
                 <History className="chat-history-icon" aria-hidden="true" />
                 <span className="chat-history-title">Pick up where you left off</span>
-              </div>
-              <div className="chat-history-list" role="list">
-                {history.map((conv) => (
-                  <button
-                    key={conv.id}
-                    type="button"
-                    role="listitem"
-                    className={cn(
-                      "chat-history-item",
-                      conv.id === activeId && "chat-history-item-active"
-                    )}
-                    onClick={() => onSelect(conv.id)}
-                    title={conv.title}
-                    aria-current={conv.id === activeId ? "true" : undefined}
-                  >
-                    <span className="chat-history-item-title">{conv.title}</span>
-                    <span className="chat-history-item-time">
-                      {formatRelativeTime(conv.updatedAt)}
-                    </span>
-                  </button>
-                ))}
-              </div>
+                <span className="chat-history-count">{history.length}</span>
+              </button>
+              {historyOpen && (
+                <div className="chat-history-list" role="list">
+                  {history.map((conv) => (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      role="listitem"
+                      className={cn(
+                        "chat-history-item",
+                        conv.id === activeId && "chat-history-item-active"
+                      )}
+                      onClick={() => onSelect(conv.id)}
+                      title={conv.title}
+                      aria-current={conv.id === activeId ? "true" : undefined}
+                    >
+                      <span className="chat-history-item-title">{conv.title}</span>
+                      <span className="chat-history-item-time">
+                        {formatRelativeTime(conv.updatedAt)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
           )}
 

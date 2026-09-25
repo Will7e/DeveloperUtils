@@ -71,6 +71,19 @@ const EXCLUDED_PREFIXES: { pattern: RegExp; reason: string }[] = [
 const BINARY_ASSET =
   /\.(png|jpe?g|gif|webp|avif|ico|bmp|svgz|woff2?|ttf|otf|eot|mp3|wav|ogg|flac)$/i;
 
+/**
+ * Files hydrated ahead of every cap, because the workspace's own decisions read
+ * them. Which script starts this project, which package manager installs it,
+ * and whether the lockfile can pin the install are all answered from these
+ * names — losing `package.json` to a byte budget spent on photographs is how an
+ * image-heavy Next.js repo surfaced as "declares no dev/start/serve/preview
+ * script": the manifest was never absent, it was unfetched. They still count
+ * toward the file budget and their bytes still count against the budget for
+ * everything else; they are only exempt from being DROPPED by it, and the text
+ * per-file ceiling bounds them regardless.
+ */
+const CRITICAL_MANIFESTS = ["package.json", "package-lock.json"] as const;
+
 /** Extensions never fetched, in any form, with the reason a reader gets */
 const BINARY_EXCLUDED: { pattern: RegExp; reason: string }[] = [
   { pattern: /\.(mp4|webm|mov|avi|mkv)$/i, reason: "video is beyond this workspace's byte budget" },
@@ -170,10 +183,17 @@ export async function hydrateTree(input: {
 
   // Path order, so a cap that bites always bites in the same place.
   candidates.sort((a, b) => a.localeCompare(b));
-  const selected = candidates.slice(0, maxFiles);
+  // The manifests take the first seats; the remaining file budget is theirs to
+  // spend last. Selection — not a tail slice — decides what is skipped: a tail
+  // slice of the sorted list can land on a manifest itself in a repo with few
+  // files that sort after `package.json`.
+  const critical = candidates.filter((path) => (CRITICAL_MANIFESTS as readonly string[]).includes(path));
+  const ordinary = candidates.filter((path) => !(CRITICAL_MANIFESTS as readonly string[]).includes(path));
+  const selected = [...critical, ...ordinary.slice(0, Math.max(0, maxFiles - critical.length))];
   const overFileCap = candidates.length - selected.length;
-  for (const path of candidates.slice(maxFiles)) {
-    skipped.push({ path, reason: `beyond the ${maxFiles}-file budget` });
+  const selectedSet = new Set(selected);
+  for (const path of candidates) {
+    if (!selectedSet.has(path)) skipped.push({ path, reason: `beyond the ${maxFiles}-file budget` });
   }
 
   // What the listing says each candidate WEIGHS, for the emptiness check below.
@@ -186,6 +206,10 @@ export async function hydrateTree(input: {
   const base: { path: string; content: string | Uint8Array }[] = [];
   let bytes = 0;
   let overByteCap = 0;
+  // Counted apart from the text overage: the note names "candidate files" and
+  // assets were never candidates, so folding them into one number produced a
+  // note that could claim more files were dropped than the listing held.
+  let assetOverByteCap = 0;
 
   // Assets hydrate first: a byte budget spent on text before photos means the
   // preview's images are the things dropped, and the images are what the user
@@ -198,7 +222,7 @@ export async function hydrateTree(input: {
       return;
     }
     if (bytes + bytes8.byteLength > maxBytes) {
-      overByteCap += 1;
+      assetOverByteCap += 1;
       skipped.push({ path, reason: `beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget` });
       return;
     }
@@ -232,7 +256,10 @@ export async function hydrateTree(input: {
       });
       return;
     }
-    if (bytes + content.length > maxBytes) {
+    // The manifests are dropped by nothing here: an over-budget repo keeps a
+    // `package.json` that names its dev script, so the preview answers the
+    // question the repo actually declared instead of one the budget forced.
+    if (bytes + content.length > maxBytes && !(CRITICAL_MANIFESTS as readonly string[]).includes(path)) {
       overByteCap += 1;
       skipped.push({ path, reason: `beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget` });
       return;
@@ -242,12 +269,26 @@ export async function hydrateTree(input: {
   });
 
   base.sort((a, b) => a.path.localeCompare(b.path));
-  const complete = overFileCap === 0 && overByteCap === 0;
+  const complete = overFileCap === 0 && overByteCap === 0 && assetOverByteCap === 0;
   const notes: string[] = [];
   if (!complete) {
-    notes.push(
-      `The workspace holds ${base.length} of ${candidates.length} candidate files: this revision is too large to mount in full (${overFileCap} beyond the file budget, ${overByteCap} beyond the byte budget). A command that needs a file which is not here will fail for that reason, not because of the change — say so rather than reporting that failure as real.`
-    );
+    // Every number in this note is about the CANDIDATES — the text files the
+    // caps select between, so the frame counts text against candidates rather
+    // than all files (assets can push `base.length` past the candidate count,
+    // which read as "101 of 115"). Assets were never candidates, so their
+    // overage is its own sentence: one number mixing both was how this note
+    // once reported "170 beyond the byte budget" for a listing of 115 files.
+    const textMounted = base.filter((file) => typeof file.content === "string").length;
+    const overParts: string[] = [];
+    if (overFileCap > 0) overParts.push(`${overFileCap} beyond the ${maxFiles}-file budget`);
+    if (overByteCap > 0) overParts.push(`${overByteCap} beyond the ${Math.round(maxBytes / (1024 * 1024))} MiB byte budget`);
+    const overClause = overParts.length > 0 ? ` (${overParts.join(", ")})` : "";
+    let note =
+      `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files; it is too large to mount in full${overClause}. A command that needs a file which is not here will fail for that reason, not because of the change — say so rather than reporting that failure as real.`;
+    if (assetOverByteCap > 0) {
+      note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace.`;
+    }
+    notes.push(note);
   }
   if (unread.length > 0) {
     // NAMED, not counted. A count is enough to say the tree is partial, but the

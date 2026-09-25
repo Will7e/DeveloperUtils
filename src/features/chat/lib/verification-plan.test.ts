@@ -32,7 +32,6 @@ import type {
 const BASE: VerificationPlanInput = {
   repoAttached: true,
   hasChanges: true,
-  companion: "up",
   pushed: false,
 };
 
@@ -62,29 +61,9 @@ describe("planVerification — the tier matrix", () => {
     expect(plan.summary).toBe("");
   });
 
-  it("falls back to the type check when no companion is paired, and says why", () => {
-    const plan = planVerification({ ...BASE, companion: "down" });
-    expect(plan.recommended?.tier).toBe("typecheck");
-    const command = plan.steps.find((s) => s.tier === "command");
-    expect(command?.available).toBe(false);
-    expect(command?.needs).toBe("companion");
-    // The consequence, not just the fact — this is what the model repeats.
-    expect(plan.summary).toMatch(/UNVERIFIED/);
-  });
-
-  it("treats an OBSERVED-unknown companion as a may-run, not a can-run", () => {
-    // Observed state starts "unknown" on purpose. Telling a model the companion
-    // is available before anyone checked is how a confident "I verified that"
-    // gets written about a command that never ran.
-    const plan = planVerification({ ...BASE, companion: "unknown" });
-    expect(plan.recommended?.tier).toBe("typecheck");
-    expect(plan.steps.find((s) => s.tier === "command")?.available).toBe(false);
-    expect(plan.summary).toMatch(/has not been observed/);
-  });
-
-  it("recommends the real command over the type check when the companion is up", () => {
-    const plan = planVerification(BASE);
-    expect(plan.recommended?.tier).toBe("command");
+  it("recommends the real command over the type check when the workspace is up", () => {
+    const plan = planVerification({ ...BASE, workspace: "up" });
+    expect(plan.recommended?.tier).toBe("workspace");
     expect(plan.recommended?.tool).toBe("run_command");
     // The weakest tier is still OFFERED — it is real, it is just not the pick.
     expect(plan.steps.find((s) => s.tier === "typecheck")?.available).toBe(true);
@@ -103,25 +82,17 @@ describe("planVerification — the tier matrix", () => {
     expect(plan.recommended?.tier).toBe("ci");
     expect(plan.recommended?.tool).toBe("verify_with_ci");
   });
-
-  it("keeps CI reachable when no companion is paired, since CI runs remotely", () => {
-    // The whole reason the CI tier exists for a shipped build: it is the one
-    // tier that survives having no local runner at all.
-    const plan = planVerification({ ...BASE, companion: "down", pushed: true });
-    expect(plan.recommended?.tier).toBe("ci");
-    expect(plan.summary).toMatch(/Not available this turn/);
-    expect(plan.summary).toMatch(/run_command/);
-  });
 });
 
 describe("planVerification — evidence against the current revision", () => {
   it("stops recommending a tier that already passed this revision", () => {
     const plan = planVerification({
       ...BASE,
-      evidence: [evidence("command", "fresh-pass")],
+      workspace: "up",
+      evidence: [evidence("workspace", "fresh-pass")],
     });
     expect(plan.recommended?.tier).toBe("typecheck");
-    expect(plan.alreadyProven).toContain("command");
+    expect(plan.alreadyProven).toContain("workspace");
     expect(plan.summary).toMatch(/Do not re-run/);
   });
 
@@ -132,7 +103,8 @@ describe("planVerification — evidence against the current revision", () => {
     // behaviour that makes "fix, then re-run" the honest loop.
     const plan = planVerification({
       ...BASE,
-      evidence: [evidence("command", "fresh-fail", { ok: false, details: ["2 tests failed"] })],
+      workspace: "up",
+      evidence: [evidence("workspace", "fresh-fail", { ok: false, details: ["2 tests failed"] })],
     });
     expect(plan.recommended?.tier).toBe("typecheck");
     expect(plan.summary).toMatch(/FAILED/);
@@ -158,8 +130,11 @@ describe("planVerification — evidence against the current revision", () => {
     // lie that sends the model hunting for a tier it already used.
     const plan = planVerification({
       ...BASE,
-      companion: "down",
-      evidence: [evidence("typecheck", "fresh-pass")],
+      workspace: "up",
+      evidence: [
+        evidence("typecheck", "fresh-pass"),
+        evidence("workspace", "fresh-pass"),
+      ],
     });
     expect(plan.recommended).toBeNull();
     expect(plan.summary).toMatch(/already run against this exact revision/);
@@ -169,16 +144,17 @@ describe("planVerification — evidence against the current revision", () => {
   it("ignores STALE evidence: it describes code that is no longer here", () => {
     const plan = planVerification({
       ...BASE,
-      evidence: [evidence("command", "stale")],
+      workspace: "up",
+      evidence: [evidence("workspace", "stale")],
     });
-    expect(plan.recommended?.tier).toBe("command");
+    expect(plan.recommended?.tier).toBe("workspace");
     expect(plan.alreadyProven).toEqual([]);
   });
 });
 
 describe("planVerification — wording follows what the project declares", () => {
   it("asks for a named command when the project declares no checks", () => {
-    const plan = planVerification({ ...BASE, declaresChecks: false });
+    const plan = planVerification({ ...BASE, workspace: "up", declaresChecks: false });
     expect(plan.recommended?.proves).toMatch(/name the command/);
   });
 });
@@ -189,7 +165,7 @@ describe("verificationState — the four states, shared by the chip and the pane
   });
 
   it("reports stale when something ran and the code has since moved on", () => {
-    expect(verificationState([evidence("command", "stale")])).toBe("stale");
+    expect(verificationState([evidence("workspace", "stale")])).toBe("stale");
   });
 
   it("lets a failure outrank a pass, whichever order they arrived in", () => {
@@ -197,15 +173,15 @@ describe("verificationState — the four states, shared by the chip and the pane
     // and a fresh failure describe the same bytes, and the safe reading is the
     // failure. A green tick here is how a user stops reading.
     expect(
-      verificationState([evidence("command", "fresh-fail", { ok: false }), evidence("typecheck", "fresh-pass")])
+      verificationState([evidence("workspace", "fresh-fail", { ok: false }), evidence("typecheck", "fresh-pass")])
     ).toBe("fail");
     expect(
-      verificationState([evidence("typecheck", "fresh-pass"), evidence("command", "fresh-fail", { ok: false })])
+      verificationState([evidence("typecheck", "fresh-pass"), evidence("workspace", "fresh-fail", { ok: false })])
     ).toBe("fail");
   });
 
   it("lets a pass outrank staleness: a stale failure is about older bytes", () => {
-    expect(verificationState([evidence("command", "stale"), evidence("ci", "fresh-pass")])).toBe("pass");
+    expect(verificationState([evidence("workspace", "stale"), evidence("ci", "fresh-pass")])).toBe("pass");
   });
 });
 
@@ -216,7 +192,7 @@ describe("verificationLabel — naming the tier, not just the state", () => {
     const label = verificationLabel([
       evidence("typecheck", "fresh-pass"),
       evidence("ci", "fresh-pass"),
-      evidence("command", "fresh-pass"),
+      evidence("workspace", "fresh-pass"),
     ]);
     expect(label).toBe("Verified · CI");
   });
@@ -252,7 +228,7 @@ describe("representativeEvidence — the age a badge shows belongs to its claim"
 
   it("dates the NEWEST run when everything is stale — that is the one to repeat", () => {
     const older = { ...evidence("typecheck", "stale"), at: 10 };
-    const newer = { ...evidence("command", "stale"), at: 99 };
+    const newer = { ...evidence("workspace", "stale"), at: 99 };
     expect(representativeEvidence([older, newer])).toBe(newer);
   });
 
@@ -262,30 +238,22 @@ describe("representativeEvidence — the age a badge shows belongs to its claim"
 });
 
 describe("planVerification — the browser workspace tier", () => {
-  // The tier that needs no pairing, and the one the matrix used to be blind to:
-  // with no companion the plan offered a type check as the strongest thing
-  // reachable, while the app could in fact run the project's own suite in the
-  // tab. Under-offering is the safe direction to be wrong in, and it is still
+  // The one tier that can run the project's own commands without a push, and
+  // the one the matrix used to be blind to: it once offered only a type check
+  // while the app could in fact run the project's own suite in the tab.
+  // Under-offering is the safe direction to be wrong in, and it is still
   // wrong — it turns a runnable verification into UNVERIFIED.
 
-  it("is reachable with no companion at all", () => {
-    const plan = planVerification({ ...BASE, companion: "down", workspace: "up" });
+  it("is the recommended tier when the workspace is up and nothing is pushed", () => {
+    const plan = planVerification({ ...BASE, workspace: "up" });
     const step = plan.steps.find((s) => s.tier === "workspace");
     expect(step?.available).toBe(true);
     expect(step?.tool).toBe("run_command");
     expect(plan.recommended?.tier).toBe("workspace");
   });
 
-  it("yields to the user's own machine when a companion is paired", () => {
-    const plan = planVerification({ ...BASE, companion: "up", workspace: "up" });
-    const order = plan.steps.map((s) => s.tier);
-    expect(order.indexOf("command")).toBeLessThan(order.indexOf("workspace"));
-    expect(order.indexOf("workspace")).toBeLessThan(order.indexOf("typecheck"));
-    expect(plan.recommended?.tier).toBe("command");
-  });
-
   it("says WHY when the page cannot host one, rather than staying silent", () => {
-    const plan = planVerification({ ...BASE, companion: "down", workspace: "down" });
+    const plan = planVerification({ ...BASE, workspace: "down" });
     const step = plan.steps.find((s) => s.tier === "workspace");
     expect(step?.available).toBe(false);
     expect(step?.blockedBy).toMatch(/not cross-origin isolated/);
@@ -294,7 +262,7 @@ describe("planVerification — the browser workspace tier", () => {
   it("never offers a tier whose support has not been checked", () => {
     // `unknown` is not `up`: a tier promised on a guess is how a model reports a
     // command it never ran.
-    const plan = planVerification({ ...BASE, companion: "down", workspace: "unknown" });
+    const plan = planVerification({ ...BASE, workspace: "unknown" });
     const step = plan.steps.find((s) => s.tier === "workspace");
     expect(step?.available).toBe(false);
     expect(step?.blockedBy).toMatch(/has not been checked/);
@@ -302,7 +270,7 @@ describe("planVerification — the browser workspace tier", () => {
   });
 
   it("names the workspace tier in the plan block so the model can say where it ran", () => {
-    const plan = planVerification({ ...BASE, companion: "down", workspace: "up" });
+    const plan = planVerification({ ...BASE, workspace: "up" });
     expect(plan.summary).toContain("browser workspace");
   });
 });

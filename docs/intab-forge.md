@@ -48,10 +48,10 @@ bundler, its module resolution, its CSS pipeline, its dev server). The rule that
 follows is the design constraint for everything below:
 
 > **One interpreter of "it works" per tier.** The app may *own* a verifier — the
-> companion (T2) runs the project's real commands, `verify_with_ci` (T3) runs the
-> repository's own workflow — but it must never ship a second implementation that
-> guesses how the project would build. Anything that needs the project's
-> toolchain gets delegated to the project's toolchain.
+> browser workspace (T2) runs the project's real commands in this tab,
+> `verify_with_ci` (T3) runs the repository's own workflow — but it must never
+> ship a second implementation that guesses how the project would build. Anything
+> that needs the project's toolchain gets delegated to the project's toolchain.
 
 For Forge, the consequence is concrete and uncomfortable: **the oracle is no
 longer free or instant.** Every candidate costs a real command or a real CI run,
@@ -64,17 +64,17 @@ with a cheap oracle*.
 ## 2. The oracle ladder (what can actually prove a candidate today)
 
 `lib/verification-plan.ts` already answers "which tier can prove this change, and
-has one?" — a pure router over the repository, the change set, the companion's
+has one?" — a pure router over the repository, the change set, the workspace's
 state, the push state and the verification ledger. Forge's prover must be *that
 router applied per candidate*, not a new abstraction beside it: the day there are
 two answers to "what can prove this", one of them will be wrong.
 
 | Probe | Tier | Cost | Proves | Catches |
 |---|---|---|---|---|
-| **P0 Static** | in-page typecheck (`run_checks`), linters via companion | ~ms / ~s | compiles, types line up | syntax, missing exports, type-level breakage |
-| **P1 Build** | companion: the project's own build command | seconds | the project still builds | config, entry points, asset/bundler breakage |
-| **P2 Tests** | companion: the project's own test command | seconds–minutes | behaviour the repo already asserts | **the classic agent failure: fixes the new thing, breaks the old thing** |
-| **P3 Intent** | companion: a command the *user's request* implies | seconds–minutes | the requested behaviour, not just a green suite | "did the right thing, wrong" |
+| **P0 Static** | in-page typecheck (`run_checks`) | ~ms / ~s | compiles, types line up | syntax, missing exports, type-level breakage |
+| **P1 Build** | browser workspace: the project's own build command | seconds | the project still builds | config, entry points, asset/bundler breakage |
+| **P2 Tests** | browser workspace: the project's own test command | seconds–minutes | behaviour the repo already asserts | **the classic agent failure: fixes the new thing, breaks the old thing** |
+| **P3 Intent** | browser workspace: a command the *user's request* implies | seconds–minutes | the requested behaviour, not just a green suite | "did the right thing, wrong" |
 | **P4 CI** | `verify_with_ci` on the pushed branch | minutes | the repository's definition of done, with its secrets and services | everything the local tree approximates |
 
 Three properties of this ladder decide the design:
@@ -191,7 +191,7 @@ interface LedgerEntry {          // proposal — not implemented
   k: number; rounds: number;
   survivor: string | null;       // for the transcript's sake, not for routing
   failingCauses: string[];       // typed errorKinds seen before success
-  oracle: "companion" | "ci" | "static" | "none";
+  oracle: "workspace" | "ci" | "static" | "none";
   outcome: "solved" | "fused" | "escalated" | "honest-stop";
   userVerdict?: "kept" | "regenerated" | "rejected-after-push";
 }
@@ -209,8 +209,8 @@ drift: prefer recording *what proved the change* over *who wrote it*.
 
 | Phase | Work | Needs | Status |
 |---|---|---|---|
-| **F0 — Oracle** | One task class with a cheap, real verifier end to end: companion P1/P2 on a JS/TS repo, with typed verdicts and honest refusals | companion ✅, `command-policy` ✅, verification-plan ✅ | **the only prerequisite** |
-| **F1 — Candidate runner** | K trees (companion trees are capped at 3 today), one candidate per tree, run P0→P2, early exit, collect typed verdicts | F0, `materialize-plan` ✅ | not built |
+| **F0 — Oracle** | One task class with a cheap, real verifier end to end: workspace P1/P2 on a JS/TS repo, with typed verdicts and honest refusals | browser workspace ✅, `command-policy` ✅, verification-plan ✅ | **the only prerequisite** |
+| **F1 — Candidate runner** | K candidate workspaces, one candidate per workspace, run P0→P2, early exit, collect typed verdicts | F0, `materialize-plan` ✅ | not built |
 | **F2 — Seeder** | Model family × temperature ladder × strategy prior × file slice; parallel stream calls | F1 | not built |
 | **F3 — Refinement** | Fused typed-failure re-seed, round cap, honest stop | F1, F2 | not built |
 | **F4 — Fusion** | Touch-set + region consensus, head-to-head probes for divergence | F3 | not built |

@@ -30,6 +30,7 @@ function workspace(over: Partial<WorkspaceState> = {}): WorkspaceState {
 
 const READ: Record<string, string> = {
   "package.json": JSON.stringify({ scripts: { test: "vitest run" } }),
+  "package-lock.json": "{}",
   "src/index.ts": "export const a = 1;",
   "node_modules/left-pad/index.js": "module.exports = () => {}",
   "dist/bundle.js": "!(function(){})()",
@@ -155,6 +156,63 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     if (!result.ok) return;
     expect(result.result.plan.files.map((f) => f.path)).not.toContain("logo.png");
     expect(result.result.notes.join("\n")).toContain("no byte reader");
+  });
+
+  it("hydrates package.json even when the assets have already eaten the byte budget", async () => {
+    // The screenshot's failure, reduced: a photo-heavy Next.js repo whose assets
+    // spend the whole 8 MiB before the text pass begins. The budget may still
+    // leave the manifest out today, but the mount must never answer "declares no
+    // dev script" for a project whose manifest simply was not mounted.
+    const photos = Array.from({ length: 60 }, (_, i) => ({
+      path: `public/photos/photo-${i}.jpg`,
+      type: "blob" as const,
+      size: 160 * 1024,
+    }));
+    const result = await planWorkspaceMount({
+      ws: workspace({
+        tree: [
+          { path: "package.json", type: "blob", size: 600 },
+          { path: "package-lock.json", type: "blob", size: 40 },
+          ...photos,
+        ],
+      }),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async () => new Uint8Array(160 * 1024),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const paths = result.result.plan.files.map((file) => file.path);
+    expect(paths).toContain("package.json");
+    expect(paths).toContain("package-lock.json");
+  });
+
+  it("counts only candidate text files against candidates when assets overflow the budget", async () => {
+    // The note once said "101 of 115 candidate files: 170 beyond the byte
+    // budget" — an impossible sentence, because the asset overage was folded
+    // into the candidate count. Each number here must be reproducible.
+    const photos = Array.from({ length: 60 }, (_, i) => ({
+      path: `public/photos/photo-${i}.jpg`,
+      type: "blob" as const,
+      size: 200 * 1024,
+    }));
+    const result = await planWorkspaceMount({
+      ws: workspace({
+        tree: [
+          { path: "package.json", type: "blob", size: 600 },
+          ...photos,
+        ],
+      }),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async () => new Uint8Array(200 * 1024),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const notes = result.result.notes.join("\n");
+    // One candidate, mounted. The asset overage is stated separately, not folded
+    // into a count of files that were never candidates.
+    expect(notes).toContain("1 of 1 candidate text files");
+    expect(notes).not.toContain("0 beyond");
+    expect(notes).toMatch(/\b20\b.*left out of the workspace/);
   });
 
   it("never fetches archives or executables even with a byte reader", async () => {

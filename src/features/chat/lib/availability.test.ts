@@ -1,10 +1,10 @@
 // ============================================================
-// Availability — The Two Execution Tiers, Described Together
+// Availability — The One Execution Tier, Described Honestly
 // ============================================================
-// The line under test is the one that used to be a lie. It read "`run_command`
-// cannot run anything this turn" whenever the companion was down — which stopped
-// being true the moment this app could run a command in its own tab, and which
-// would have made a model report a green run as UNVERIFIED.
+// The line under test is the one that used to be a lie in two directions. It
+// read "`run_command` cannot run anything this turn" whenever a local runner
+// was unpaired — after the tab could already run commands — and it would have
+// made a model report a green run as UNVERIFIED.
 //
 // The page's own verdict is what decides it, and it is readable before anything
 // boots: `crossOriginIsolated`, plus whether shared memory is exposed. So the
@@ -15,7 +15,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   declaredAvailability,
   describeAvailability,
-  noteCompanionOutcome,
   noteWorkspaceOutcome,
   resetAvailability,
   workspaceSupport,
@@ -60,20 +59,17 @@ describe("workspaceSupport — declared from the page, proven by a boot", () => 
   });
 });
 
-describe("the turn note — one question, two tiers", () => {
-  it("says a command cannot run at all only when NEITHER tier can", () => {
+describe("the turn note — the one execution tier", () => {
+  it("says a command cannot run at all when the page cannot host a workspace", () => {
     setIsolated(false);
-    noteCompanionOutcome("down", "no companion is paired with this app");
     const line = describeAvailability(turn());
     expect(line).toMatch(/cannot run anything this turn/);
     expect(line).toMatch(/current desktop Chromium/);
-    expect(line).toMatch(/pair a companion/);
   });
 
-  it("offers the tab instead — and says where the command ran", () => {
+  it("says where a command runs, and that it is not the user's machine", () => {
     setIsolated(true);
     noteWorkspaceOutcome("up", null);
-    noteCompanionOutcome("down", "no companion is paired with this app");
     const line = describeAvailability(turn());
     expect(line).toMatch(/browser workspace running in this tab/);
     // The consequence that matters: a green result from a WASM runtime is not a
@@ -88,11 +84,11 @@ describe("the turn note — one question, two tiers", () => {
     expect(line).toMatch(/available on this page \(not started yet\)/);
   });
 
-  it("stays quiet about the workspace when the page cannot host one and a companion is paired", () => {
-    setIsolated(false);
-    noteCompanionOutcome("up");
+  it("names the boot's own failure reason rather than a generic 'down'", () => {
+    setIsolated(true);
+    noteWorkspaceOutcome("down", "The workspace runtime would not start: out of memory");
     const line = describeAvailability(turn());
-    expect(line).toMatch(/local companion running/);
-    expect(line).not.toMatch(/cannot run anything this turn/);
+    expect(line).toMatch(/out of memory/);
+    expect(line).toMatch(/cannot run anything this turn/);
   });
 });

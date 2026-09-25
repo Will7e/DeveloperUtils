@@ -29,9 +29,10 @@
 //      "unfinished" into "not proven", and it is deliberately the narrowest
 //      rule here: it needs a passing test command in the evidence, which is
 //      only possible in a turn that can actually run this project's tests. A
-//      conversation with no companion therefore never sees it, and neither
-//      does a documentation-only change — the gate asks for the test it knows
-//      the agent was able to write, in the moment it demonstrably could.
+//      conversation whose workspace never ran anything therefore never sees
+//      it, and neither does a documentation-only change — the gate asks for
+//      the test it knows the agent was able to write, in the moment it
+//      demonstrably could.
 //
 // Everything else is complete. Gating anything more — a stale pass, a
 // missing check, a heuristic read of the closing sentence — would turn
@@ -316,14 +317,10 @@ function untestedChangeReason(input: CompletionInput): IncompleteReason | null {
     .map((c) => c.path);
   if (source.length === 0) return null;
 
-  // Either tier counts: a browser workspace and the user's machine are both
-  // "the suite ran here", and the reason this gate fires is that the SUITE is
-  // green, not that a particular transport produced it.
+  // A green suite is the trigger, wherever in this tab it ran: the reason this
+  // gate fires is that the SUITE is green, not which shell produced it.
   const green = input.evidence.find(
-    (e) =>
-      e.status === "fresh-pass" &&
-      (e.kind === "command" || e.kind === "workspace") &&
-      TEST_COMMAND_RE.test(e.summary)
+    (e) => e.status === "fresh-pass" && e.kind === "workspace" && TEST_COMMAND_RE.test(e.summary)
   );
   if (!green) return null;
 

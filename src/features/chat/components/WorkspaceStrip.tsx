@@ -218,7 +218,10 @@ function describePreview(
           className="h-3.5 w-3.5 chat-workspace-icon chat-workspace-icon-warn"
           aria-hidden="true"
         />
-        <span className="chat-workspace-text" title={[...preview.notes, error ?? ""].join("\n")}>
+        <span
+          className="chat-workspace-text"
+          title={[...preview.notes, ...(error && !preview.notes.includes(error) ? [error] : [])].join("\n")}
+        >
           {error ?? lastNote(preview.notes) ?? "The dev server did not start."}
         </span>
         <button type="button" className="chat-workspace-action" onClick={() => void start()}>

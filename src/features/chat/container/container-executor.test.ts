@@ -337,8 +337,8 @@ describe("runInContainer — installing before judging", () => {
     // The production failure, pinned: the interface once put `writeFile` on the
     // instance, the real SDK keeps it under `fs`, and the first mount succeeded
     // while every later revision threw "instance.writeFile is not a function" —
-    // which surfaced as a fall-through to the companion, i.e. "the agent cannot
-    // run anything after its first command".
+    // which surfaced as "the agent cannot run anything after its first
+    // command".
     const spawn = vi.fn(async () => fakeProcess("2 passed", 0));
     adoptRuntimeForTest({
       mount: vi.fn(async () => {}),

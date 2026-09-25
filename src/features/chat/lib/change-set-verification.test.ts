@@ -63,7 +63,7 @@ describe("failingPaths", () => {
   it("collects across several failing kinds and de-duplicates", () => {
     const paths = failingPaths([
       entry("fresh-fail", ["src/a.ts:1 TS1: x"], "typecheck"),
-      entry("fresh-fail", ["src/a.ts:1 TS1: x", "src/b.ts:2 TS2: y"], "command"),
+      entry("fresh-fail", ["src/a.ts:1 TS1: x", "src/b.ts:2 TS2: y"], "workspace"),
     ]);
     expect([...paths].sort()).toEqual(["src/a.ts", "src/b.ts"]);
   });

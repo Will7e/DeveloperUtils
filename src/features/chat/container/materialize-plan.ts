@@ -13,10 +13,10 @@
 // assertable in a unit test instead of only in the presence of a disk.
 //
 // The threat is not hypothetical. The change set is derived from edits an
-// LLM produced, and it is then written to a real directory on the user's
-// machine. A single `../../` segment in a path escapes the workspace; a
-// write into `.git/` is code execution, because git runs `hooks/` on the
-// very next command the shell issues.
+// LLM produced, and it is then written into the runtime that will execute
+// them. A single `../../` segment in a path escapes the workspace; a write
+// into `.git/` is code execution, because git runs `hooks/` on the very
+// next command the shell issues.
 //
 // Pure: paths and strings in, a plan out.
 // ============================================================
@@ -120,7 +120,7 @@ export function materializeRejection(
     if (normalized === prefix.replace(/[/\\]$/, "") || normalized.startsWith(prefix)) {
       return {
         code: "protected-path",
-        message: `"${normalized}" is inside .git, which is executable: writing it could run code on the user's machine. Not written.`,
+        message: `"${normalized}" is inside .git, which is executable: writing it could run code in the runtime. Not written.`,
       };
     }
   }

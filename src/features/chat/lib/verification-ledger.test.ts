@@ -42,7 +42,8 @@ function typecheck(over: Partial<Parameters<typeof recordVerification>[1]> = {})
 
 function command(over: Partial<Parameters<typeof recordVerification>[1]> = {}) {
   return {
-    kind: "command" as const,
+    // The `workspace` kind is what a command run in this tab records.
+    kind: "workspace" as const,
     at: 3_000,
     workspaceUpdatedAt: 50,
     ok: true,
@@ -83,7 +84,7 @@ describe("recording", () => {
     recordVerification(CONV, typecheck());
     expect(verificationEvidence(CONV, { workspaceUpdatedAt: 50 }).map((e) => e.kind)).toEqual([
       "typecheck",
-      "command",
+      "workspace",
     ]);
   });
 
@@ -94,7 +95,7 @@ describe("recording", () => {
 
   it("caps stored failure details", () => {
     recordVerification(CONV, command({ details: Array.from({ length: 40 }, (_, i) => `f${i}`) }));
-    expect(verificationEvent(CONV, "command")?.details).toHaveLength(20);
+    expect(verificationEvent(CONV, "workspace")?.details).toHaveLength(20);
   });
 });
 
@@ -214,15 +215,15 @@ describe("execution evidence (run_command and CI)", () => {
     recordVerification(CONV, ci());
     expect(verificationEvidence(CONV, { workspaceUpdatedAt: 50 }).map((e) => e.kind)).toEqual([
       "typecheck",
-      "command",
+      "workspace",
       "ci",
     ]);
   });
 
-  it("describes a command as one that ran on the user's machine", () => {
+  it("describes a command as one that ran in this tab's browser workspace", () => {
     recordVerification(CONV, command({ ok: true, summary: "`npm test` exited 0" }));
     const lines = verificationLines(verificationEvidence(CONV, { workspaceUpdatedAt: 50 }));
-    expect(lines[0]).toContain("your machine");
+    expect(lines[0]).toContain("browser workspace");
   });
 
   it("warns the gate when a command failed on the current revision", () => {
