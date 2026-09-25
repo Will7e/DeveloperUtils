@@ -134,6 +134,14 @@ const EXEMPT: Record<string, string> = {
     "pub/sub subscriber list for workspace RUNTIME events (server-ready, preview console messages); holds callbacks, never state, and is cleared with the runtime it belongs to — the events themselves are consumed as they arrive and are not cached",
   "container/preview-bridge.ts:listeners":
     "pub/sub subscriber list for the preview status (starting, running, the dev server's URL); holds callbacks, never state — the console evidence it notifies about lives in the `state` scalar beside it, which is released with the mounted tree by the container host's own registered resource",
+  "container/preview-control-bridge.ts:pending":
+    "in-flight preview-control requests, keyed by request id and removed when the reply or the timeout settles — it empties itself and holds no repository state",
+  "container/process-registry.ts:processes":
+    "live background processes keyed by id: the entries hold the command the model chose and the process handle, and the module's own `workspace-released` subscription kills and clears every entry the moment the lease moves — the release the transition bus would ask for happens there, driven by the same event",
+  "services/auto-verify.ts:timers":
+    "pending auto-verify debounce timers keyed by conversation id; each removes itself when it fires or is cancelled, and holds no repository state — the check reads the store at run time",
+  "services/auto-verify.ts:inFlight":
+    "in-flight auto-verify promises, removed in the run's `finally`, so it empties itself and cannot hold repository state",
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

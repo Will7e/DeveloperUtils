@@ -124,6 +124,17 @@ export const LEAN_TOOL_NAMES: readonly string[] = [
   "read_app",
   "act_app",
   "describe_tools",
+  // ── Runtime evidence, and the flat ones only ──
+  // Two no-argument reads and one flat read, in REGISTRY order (they sit
+  // after the app block, before run_tool_program). The preview's verdict is
+  // the one a weak model is most tempted to invent ("it should work"), and
+  // these carry no structure the profile withholds. run_process/
+  // stop_process and the preview interaction pair stay off — the interact
+  // schema is a nested action array, which is exactly what the lean surface
+  // exists to keep away from small models.
+  "read_preview",
+  "wait_for_preview",
+  "read_process",
 ];
 
 /** Below this context length a model gets the lean surface */

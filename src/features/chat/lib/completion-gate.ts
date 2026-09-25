@@ -90,11 +90,28 @@ export type IncompleteReason =
       files: string[];
       /** The (green) test command that proves tests are runnable here */
       run: string;
+    }
+  | {
+      kind: "preview-failing";
+      /** First lines of the fresh uncaught exceptions, capped by the producer */
+      issues: string[];
     };
 
 export interface CompletionInput {
   /** The agent's published plan for this conversation, when it has one */
   plan?: AgentPlan;
+  /**
+   * The live preview's status and its issues AT THE STOP, when a preview is
+   * running for this conversation. Absent means silent: the gate never asks
+   * about an app nobody started. Read at the stop by the caller (same
+   * "always the CURRENT revision" rule as `changeSet`), never captured earlier.
+   */
+  preview?: {
+    status: "idle" | "starting" | "running" | "failed" | "stopped";
+    /** Epoch ms of the last workspace revision the issues could describe */
+    workspaceUpdatedAt: number;
+    issues: Array<{ kind: string; message: string; at: number }>;
+  };
   /**
    * Evidence for this conversation at the CURRENT workspace revision.
    * Stale entries are ignored here rather than filtered by the caller,
@@ -137,12 +154,13 @@ export type CompletionVerdict =
 export function describeReason(reason: IncompleteReason): string {
   if (reason.kind === "plan-unfinished") {
     return `your plan step ${reason.stepIndex} of ${reason.stepCount} is still open — "${reason.step}"`;
-  }
-  if (reason.kind === "untested-change") {
+  }  if (reason.kind === "untested-change") {
     const files = reason.files.slice(0, 4).join(", ");
-    return `\`${reason.run}\` is green, but ${reason.files.length} source file(s) changed and no test did (${
-      files || "the change set"
-    })`;
+    return `\`${reason.run}\` is green, but ${reason.files.length} source file(s) changed and no test did (${files || "the change set"})`;
+  }
+  if (reason.kind === "preview-failing") {
+    const first = reason.issues.slice(0, 3).join(" | ");
+    return `the RUNNING app threw an unhandled exception (${first}) — the build is green but the page is broken`;
   }
   const failures =
     reason.details.length > 0 ? ` (first failures: ${reason.details.slice(0, 3).join(" | ")})` : "";
@@ -215,6 +233,12 @@ export function evaluateCompletion(input: CompletionInput): CompletionVerdict {
     });
   }
 
+  // 2b. The running app's own verdict. Narrow on purpose — see the rule
+  //     comment below — and revision-checked here, so an exception from
+  //     before the latest edit can never gate a turn that replaced that code.
+  const previewReason = previewFailingReason(input);
+  if (previewReason) reasons.push(previewReason);
+
   // 3. Source changed, the suite is green, and nothing tests the change.
   const untested = untestedChangeReason(input);
   if (untested) reasons.push(untested);
@@ -225,6 +249,46 @@ export function evaluateCompletion(input: CompletionInput): CompletionVerdict {
     reasons,
     nudge: completionNudge(reasons),
     summary: completionSummary(reasons),
+  };
+}
+
+/**
+ * The preview-failing reason, or null when the gate has nothing to stand on.
+ *
+ * Deliberately NARROW, because a gate that fires on noise trains everyone to
+ * ignore it:
+ *
+ *   • Only UNCAUGHT exceptions and unhandled rejections fire. Frameworks log
+ *     plenty of `console.error` about recoverable conditions (a failed fetch
+ *     a catch clause already handled, a React key warning), and gating on
+ *     those would nag turns whose page is working.
+ *   • Only FRESH issues: the issue must be newer than the workspace revision
+ *     the preview could be describing. An exception from code the agent has
+ *     since edited is evidence about the old revision — exactly the class of
+ *     stale claim the ledger rejects, and for the same reason.
+ *   • Only a RUNNING preview. A failed server start says the environment
+ *     could not host the app (a native addon, a Node version); that is
+ *     already diagnosed and surfaced in the turn note, and it is not work
+ *     the agent can fix by continuing.
+ *   • Nothing else about the preview gates: not an empty issue list (the app
+ *     may simply not have exercised the changed path), not console errors.
+ *
+ * Every condition below is a way of NOT firing. The one that fires says: the
+ * build is green and the page is broken.
+ */
+function previewFailingReason(input: CompletionInput): IncompleteReason | null {
+  const preview = input.preview;
+  if (!preview) return null;
+  if (preview.status !== "running") return null;
+  const fresh = preview.issues.filter(
+    (issue) =>
+      (issue.kind === "uncaught" || issue.kind === "unhandled-rejection") &&
+      issue.at >= preview.workspaceUpdatedAt
+  );
+  if (fresh.length === 0) return null;
+  return {
+    kind: "preview-failing",
+    issues: fresh.slice(0, 4).map((issue) => issue.message.split("\n")[0] ?? issue.message),
   };
 }
 

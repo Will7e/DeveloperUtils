@@ -597,4 +597,12 @@ export const LEAN_SURFACE_TODAY: readonly ToolName[] = [
   "read_issue",
   "read_pull_request",
   "read_ci_logs",
+  // Runtime evidence joined the lean surface: two no-argument preview reads
+  // and one flat process read. A weak model is the one most tempted to
+  // answer "does it work" from hope, and these are flat calls with no
+  // structure to get wrong. The interaction pair and run/stop_process stay
+  // off — nested arrays are what this profile withholds.
+  "read_preview",
+  "wait_for_preview",
+  "read_process",
 ];

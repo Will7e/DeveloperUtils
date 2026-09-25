@@ -149,7 +149,18 @@ export type ToolName =
   //    reach does not mean forty schemas on every request.
   | "read_app"
   | "act_app"
-  | "describe_tools";
+  | "describe_tools"
+  // ── Runtime-evidence tools (container/preview-bridge.ts, container/process-registry.ts).
+  //    They read (or drive) the RUNNING app and its processes — the evidence tier
+  //    a build, a type check and a test suite can never supply.
+  | "read_preview"
+  | "wait_for_preview"
+  | "run_process"
+  | "read_process"
+  | "stop_process"
+  | "preview_snapshot"
+  | "preview_interact"
+  | "preview_evaluate";
 
 /** One tool invocation requested by the model (assembled from stream deltas) */
 export interface ToolCallRequest {

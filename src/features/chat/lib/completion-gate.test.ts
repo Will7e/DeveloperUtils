@@ -341,3 +341,86 @@ describe("the wording a stopped turn leaves behind", () => {
     expect(completionNudge([...reasons])).toContain("\n");
   });
 });
+
+// ============================================================
+// preview-failing — the running app's own verdict
+// ============================================================
+// Deliberately narrow, for the same reason the rest of the gate is: only a
+// FRESH uncaught exception (or unhandled rejection) on a RUNNING preview
+// fires. Console errors, stale exceptions, and failed server starts are
+// every one a way of NOT firing — a gate that nags on noise trains everyone
+// to ignore it.
+
+describe("preview-failing — the running app threw and the turn said done", () => {
+  const REVISION = 7;
+  const preview = (
+    issues: Array<{ kind: string; message: string; at: number }>,
+    status: "idle" | "starting" | "running" | "failed" | "stopped" = "running"
+  ) => ({ status, workspaceUpdatedAt: REVISION, issues });
+
+  it("fires on a fresh uncaught exception", () => {
+    const verdict = evaluateCompletion(
+      input({ preview: preview([{ kind: "uncaught", message: "TypeError: x is not a function\n    at render", at: REVISION + 10 }]) })
+    );
+    expect(verdict.complete).toBe(false);
+    const reason = !verdict.complete ? verdict.reasons.find((r) => r.kind === "preview-failing") : undefined;
+    expect(reason).toBeDefined();
+    if (reason?.kind === "preview-failing") {
+      expect(reason.issues[0]).toBe("TypeError: x is not a function");
+      expect(describeReason(reason)).toContain("RUNNING app");
+    }
+  });
+
+  it("fires on an unhandled rejection", () => {
+    const verdict = evaluateCompletion(
+      input({ preview: preview([{ kind: "unhandled-rejection", message: "Unhandled: network gone", at: REVISION + 10 }]) })
+    );
+    expect(verdict.complete).toBe(false);
+  });
+
+  it("does NOT fire on console errors — frameworks log recoverable ones", () => {
+    const verdict = evaluateCompletion(
+      input({ preview: preview([{ kind: "console-error", message: "Failed to load resource: 404", at: REVISION + 10 }]) })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("does NOT fire on a STALE exception — the agent edited past it", () => {
+    const verdict = evaluateCompletion(
+      input({ preview: preview([{ kind: "uncaught", message: "TypeError: old code", at: REVISION - 100 }]) })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+
+  it("does NOT fire when the preview is not running", () => {
+    for (const status of ["idle", "starting", "failed", "stopped"] as const) {
+      const verdict = evaluateCompletion(
+        input({ preview: preview([{ kind: "uncaught", message: "boom", at: REVISION + 10 }], status) })
+      );
+      expect(verdict.complete, status).toBe(true);
+    }
+  });
+
+  it("does NOT fire with no preview at all — absent means silent", () => {
+    expect(evaluateCompletion(input({})).complete).toBe(true);
+  });
+
+  it("fires alongside the other reasons, not instead of them", () => {
+    const verdict = evaluateCompletion(
+      input({
+        plan: plan([["ship it", "active"]]),
+        preview: preview([{ kind: "uncaught", message: "TypeError: boom", at: REVISION + 10 }]),
+      })
+    );
+    if (verdict.complete) throw new Error("expected an unfinished verdict");
+    expect(verdict.reasons.map((r) => r.kind)).toEqual(["plan-unfinished", "preview-failing"]);
+    expect(verdict.nudge).toContain("TypeError: boom");
+  });
+
+  it("the aborted turn still wins over a broken page", () => {
+    const verdict = evaluateCompletion(
+      input({ aborted: true, preview: preview([{ kind: "uncaught", message: "boom", at: REVISION + 10 }]) })
+    );
+    expect(verdict.complete).toBe(true);
+  });
+});

@@ -81,6 +81,17 @@ export const UNTRUSTED_TOOLS: ReadonlySet<string> = new Set([
   "list_pull_requests",
   "read_pull_request",
   "read_ci_logs",
+  // Runtime evidence from the running app and its processes. The page under
+  // the preview renders DATA — the user's records, an API response, a form
+  // value — and a snapshot, an evaluated expression or a console error quotes
+  // it verbatim. A record crafted to read like an instruction reaches the
+  // model the same way a crafted issue body does, and the preview tools are
+  // the pair that can act next (preview_interact, preview_evaluate).
+  "read_preview",
+  "read_process",
+  "preview_snapshot",
+  "preview_interact",
+  "preview_evaluate",
 ]);
 
 export function isUntrustedTool(name: string): boolean {

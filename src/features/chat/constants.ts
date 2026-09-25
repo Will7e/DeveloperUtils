@@ -212,6 +212,18 @@ export const TOOL_RESULT_DIGEST_MAX_CHARS = 240;
 /** Concurrency cap for parallel independent tool execution */
 export const TOOL_EXECUTION_CONCURRENCY = 3;
 
+// ── Auto-verification (the check that runs without being asked) ──
+/**
+ * Quiet window after a workspace write before the auto type check runs.
+ *
+ * Long enough that a burst of edits (an agent rewrites three files in two
+ * seconds) produces ONE check against the final revision, short enough that
+ * the evidence is on the ledger before the model reaches for run_checks.
+ */
+export const AUTO_VERIFY_DEBOUNCE_MS = 2_000;
+/** Global ceiling on conversations with a pending auto-check at once */
+export const AUTO_VERIFY_MAX_QUEUED_PER_CONVERSATION = 20;
+
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   defaultModel: DEFAULT_CHAT_MODEL,
   defaultReasoningEffort: DEFAULT_REASONING_EFFORT,

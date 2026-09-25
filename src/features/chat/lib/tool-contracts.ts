@@ -166,6 +166,114 @@ export const TOOL_CONTRACTS: Readonly<Record<ToolName, ToolContract>> = {
     autonomy: "act",
     sensitivity: "project",
   },
+  // ── Runtime evidence: the running app and its processes ────
+  read_preview: {
+    when: "you have edited files while a preview may be running, or you are about to claim a change works in the app",
+    how: "read_preview({}) — status, URL, the starting command, notes, and the runtime problems the page reported.",
+    insteadOf: {
+      tool: "run_checks",
+      discriminator:
+        "choose this one for the RUNNING app's verdict (a broken page, a thrown exception); run_checks proves the sources compile",
+    },
+    misuse:
+      "a clean preview is not a green build and vice versa — say which one you proved. No preview running is a normal answer: report it, do not treat it as a failure",
+    proves:
+      "this reads the app the harness started over your LATEST edits (hot reload): its issues describe the current revision, its cleanliness describes only what the page has exercised so far.",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  wait_for_preview: {
+    when: "you just wrote files and want the running app's verdict once hot reload has finished rather than mid-apply",
+    how: "wait_for_preview({ timeoutMs: 15000 }) — settles on running-and-quiet, on failure, or on the timeout; then read_preview for the details.",
+    insteadOf: {
+      tool: "read_preview",
+      discriminator: "choose this one immediately after edits, when an error may still be arriving; read_preview when the app has had time to settle",
+    },
+    misuse: "waiting does not start or restart anything — a preview that was never started stays absent; say so rather than retrying",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  run_process: {
+    when: "the project needs something that KEEPS RUNNING — a watcher, a generator, a service — and it must not be restarted on every turn",
+    how: 'run_process({ command: "npx tsc --noEmit --watch", why: "watches while I edit" }) — returns an id for read_process / stop_process.',
+    insteadOf: {
+      tool: "run_command",
+      discriminator:
+        "choose this one only for work that never finishes; run_command is for anything that should run, print and exit",
+    },
+    misuse:
+      "dev/start/serve scripts are refused on purpose — the harness owns the dev server (it is the preview), and two servers on one port is the failure this prevents. Kill watchers with stop_process when you are done with them",
+    proves: "a process running says nothing about correctness until you read what it printed (read_process).",
+    effects: "external",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  read_process: {
+    when: "a process you started has been running and you need its latest output or whether it has exited",
+    how: 'read_process({ id: "p1", tailLines: 40 }) — status, exit code when there is one, and the last lines printed.',
+    insteadOf: {
+      tool: "read_preview",
+      discriminator: "choose this one for a process YOU started; read_preview is for the harness-owned dev server",
+    },
+    misuse: "output is bounded — a flood of lines keeps only the newest; if you need the beginning, restart with a quieter command",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  stop_process: {
+    when: "a watcher is no longer needed, or one is failing in a loop and reprinting its failure on every change",
+    how: 'stop_process({ id: "p1" }) — reported even when it had already exited.',
+    misuse: "stopping is final for that process; start a new one with run_process when the work resumes",
+    effects: "external",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  preview_snapshot: {
+    when: "you need what the user SEES — did the page render, is the heading there, is the form present — without asking them to describe it",
+    how: "preview_snapshot({}) — a text outline of the preview's page with a stable uid per interactive element.",
+    insteadOf: {
+      tool: "read_preview",
+      discriminator:
+        "choose this one for the page's CONTENT and structure; read_preview reports the server and its console, not what the page shows",
+    },
+    misuse:
+      "an empty snapshot on a running preview usually means a crashed render — check read_preview for the exception before concluding the feature is missing",
+    proves: "the outline is the DOM, not a screenshot: layout and styling arrive only approximately.",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  preview_interact: {
+    when: "you built a flow — a form, a route change, a button — and the breakage you are looking for only appears when it is USED",
+    how: 'preview_interact({ actions: [{ type: "click", uid: "b3" }, { type: "wait_for", text: "Saved" }] }) — uids come from preview_snapshot; up to 10 actions in order.',
+    insteadOf: {
+      tool: "preview_evaluate",
+      discriminator: "choose this one to ACT like a user; preview_evaluate reads state a snapshot cannot show",
+    },
+    misuse:
+      "a failing action is evidence about the app, not a prompt to retry: read the error, fix the cause, snapshot again if the page moved",
+    proves:
+      "an action landing (the click happened) is not the same as the feature working — wait_for the outcome you actually care about",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
+  preview_evaluate: {
+    when: "the question is about STATE the snapshot cannot show — a store's contents, localStorage, a computed value, why the UI disagrees with the data",
+    how: 'preview_evaluate({ expression: "localStorage.getItem(\\\"theme\\\")" }) — evaluated in the preview document; the result must be JSON-serialisable.',
+    insteadOf: {
+      tool: "preview_snapshot",
+      discriminator: "choose this one for structure and content; preview_evaluate for state, storage and computed values",
+    },
+    misuse:
+      "this runs with the app's authority: prefer reading over mutating, never use it to work around a tool refusal, and keep expressions small enough to read",
+    proves: "the value returned is what the page holds NOW, mid-session — it does not describe what a fresh load would do.",
+    effects: "none",
+    autonomy: "act",
+    sensitivity: "project",
+  },
   run_tool_program: {
     when: "you already know the three-to-eight read-only calls you want and would otherwise emit them one round at a time",
     how: 'run_tool_program({ program: [{ read: "a", tool: "read_file", args: { path: "src/a.ts" } }, { tool: "search_workspace", args: { query: "$a" } }] })',

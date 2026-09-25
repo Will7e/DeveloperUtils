@@ -1732,7 +1732,7 @@ html body .intab-tooltip.chat-verify-card > span {
 /* Skills hover card — same shell as the context card, different content.
    Read-only on purpose: the chip is the click target that opens Skills,
    because a button inside tooltip content is gone by the time a pointer
-   travels to it. The three dots mirror the three ways a skill can be live. */
+   travels to it. The four dots mirror the four ways a skill can be live. */
 html body .intab-tooltip.chat-skills-card {
   padding: 0;
   background: var(--bg-2);
@@ -1812,6 +1812,10 @@ html body .intab-tooltip.chat-skills-card > span {
 
 .chat-skills-card-dot-auto {
   background: var(--green);
+}
+
+.chat-skills-card-dot-loaded {
+  background: var(--teal);
 }
 
 .chat-skills-card-dot-deferred {

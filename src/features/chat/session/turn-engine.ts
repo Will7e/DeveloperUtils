@@ -77,6 +77,7 @@ import {
   withheldRefusal,
 } from "../lib/tool-surface";
 import { continuationExhaustedNotice, TOOL_LIMIT_NOTICE } from "../lib/harness-notices";
+import { previewOwnerThreadId, previewState } from "../container/preview-bridge";
 import { verificationEvidence } from "../lib/verification-ledger";
 import { collectChanges } from "../workspace/workspace";
 import { isTestPath } from "../lib/project-fingerprint";
@@ -102,11 +103,19 @@ import {
   runEditFile,
   runListMcpTools,
   runPushChanges,
+  runPreviewEvaluate,
+  runPreviewInteract,
+  runPreviewSnapshot,
+  runReadPreview,
+  runReadProcess,
   runRemember,
   runRunChecks,
   runCiVerification,
   runSearchWorkspace,
   runShellCommand,
+  runStartProcess,
+  runStopProcess,
+  runWaitForPreview,
   runWorkspaceDiff,
   runWriteFile,
 } from "../services/agent-actions";
@@ -851,6 +860,30 @@ async function runBridgeTool(
       return runPushChanges(conversationId, args, signal);
     case "run_checks":
       return runRunChecks(conversationId, args);
+    // Runtime evidence. The preview is observed, never started or stopped
+    // from here — the harness owns its lifecycle (preview-bridge.ts) — and a
+    // background process is refused before it starts if it names a dev
+    // script, because the dev server is the preview.
+    case "read_preview":
+      return runReadPreview(conversationId, args);
+    case "wait_for_preview":
+      return runWaitForPreview(conversationId, args, signal);
+    case "run_process":
+      return runStartProcess(conversationId, args);
+    case "read_process":
+      return runReadProcess(conversationId, args);
+    case "stop_process":
+      return runStopProcess(conversationId, args);
+    // The preview interaction pair follows the same authority line as
+    // run_command: snapshot is a read (plan-safe), while driving or
+    // evaluating inside the page runs with the app's own authority and is
+    // withheld from plan mode by the same gate that withholds the writes.
+    case "preview_snapshot":
+      return runPreviewSnapshot(conversationId, args);
+    case "preview_interact":
+      return runPreviewInteract(conversationId, args, signal);
+    case "preview_evaluate":
+      return runPreviewEvaluate(conversationId, args);
     case "update_plan":
       return runUpdatePlan(conversationId, args);
     case "list_mcp_tools":
@@ -1502,6 +1535,24 @@ function completionVerdictFor(conversationId: string, agentTools: boolean): Comp
       workspaceUpdatedAt: workspace?.updatedAt ?? -1,
     }),
     changeSet,
+    // The preview's verdict on the code as it stands now, read at the stop like
+    // the change set above: a value captured when the round started would
+    // describe an app the agent has since replaced. The preview's own issues
+    // are timestamped, so the gate compares them against THIS revision and a
+    // pre-edit exception can never gate a turn that replaced that code.
+    //
+    // Scoped to THIS conversation: the preview state is page-global (one dev
+    // server per page), so a gate that read it unscoped would nudge a turn
+    // for exceptions thrown by ANOTHER thread's app. Only the thread that
+    // owns the running preview contributes its evidence.
+    preview:
+      previewOwnerThreadId() === conversationId && previewState().status !== "idle"
+        ? {
+            status: previewState().status,
+            workspaceUpdatedAt: workspace?.updatedAt ?? -1,
+            issues: previewState().issues,
+          }
+        : undefined,
     projectHasTests: workspace ? workspace.tree.some((e) => isTestPath(e.path)) : undefined,
     agentTools,
     // The stop is the user's, not the model's — a stop always wins.

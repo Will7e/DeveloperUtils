@@ -35,6 +35,7 @@ export const REPO_READ_GROUP: readonly ToolName[] = [
   "read_files",
   "search_code",
   "search_workspace",
+  "read_process",
   "run_tool_program",
   "delegate",
 ];
@@ -53,6 +54,10 @@ export const REPO_CHANGE_GROUP: readonly ToolName[] = [
 export const REPO_VERIFY_GROUP: readonly ToolName[] = [
   "run_checks",
   "run_command",
+  "run_process",
+  "stop_process",
+  "preview_interact",
+  "preview_evaluate",
   "verify_with_ci",
   "create_working_branch",
   "push_changes",
