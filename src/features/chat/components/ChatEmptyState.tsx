@@ -7,12 +7,16 @@
 // repository, recent work, or neither — and the generic set is the fallback
 // rather than the default.
 //
+// The "Pick up where you left off" list used to live here too, but the welcome
+// screen only renders when the current chat is empty, so it hid recent work
+// from exactly the moment it was most useful. It moved to the sidebar as the
+// History section (see ChatSidebar), where it is always on screen.
+//
 // When no OpenRouter key is configured, a prominent CTA opens the connection
 // settings instead of letting suggestions fail later.
 
-import { ArrowRight, GitFork, KeyRound, MessageSquareText, Sparkles } from "lucide-react";
+import { ArrowRight, GitFork, KeyRound, MessageSquareText } from "lucide-react";
 import { useChatStore } from "@/stores/chat.store";
-import { formatRelativeTime } from "../lib/relative-time";
 
 /** Prompts that make sense with no project context at all */
 const GENERAL_SUGGESTIONS = [
@@ -54,14 +58,9 @@ export function ChatEmptyState({
   const repoContext = useChatStore((s) =>
     s.conversations.find((c) => c.id === s.activeConversationId)?.repoContext
   );
-  const recent = useChatStore((s) => s.conversations);
-  const selectConversation = useChatStore((s) => s.selectConversation);
 
   const repoName = repoContext ? `${repoContext.owner}/${repoContext.repo}` : null;
   const suggestions = repoName ? REPO_SUGGESTIONS : GENERAL_SUGGESTIONS;
-  // Other chats worth returning to — excluding this empty one, and capped so the
-  // welcome state stays a welcome state.
-  const others = recent.filter((c) => c.messages.length > 0).slice(0, 3);
 
   return (
     <div className="chat-empty">
@@ -108,30 +107,10 @@ export function ChatEmptyState({
         ))}
       </div>
 
-      {others.length > 0 && (
-        <div className="chat-empty-recent">
-          <span className="chat-empty-recent-title">
-            <Sparkles className="h-3 w-3" aria-hidden="true" />
-            Pick up where you left off
-          </span>
-          <div className="chat-empty-recent-list">
-            {others.map((conv) => (
-              <button
-                key={conv.id}
-                type="button"
-                className="chat-empty-recent-item"
-                onClick={() => selectConversation(conv.id)}
-                title={conv.title}
-              >
-                <span className="chat-empty-recent-item-title">{conv.title}</span>
-                <span className="chat-empty-recent-item-time">
-                  {formatRelativeTime(conv.updatedAt)}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* "Pick up where you left off" moved to the sidebar as its History
+          section — the welcome screen only showed it when THIS chat was
+          empty, so the person who needed it most (came back to the wrong
+          thread) saw it least. The sidebar shows it always. */}
     </div>
   );
 }

@@ -77,7 +77,7 @@ import {
   withheldRefusal,
 } from "../lib/tool-surface";
 import { continuationExhaustedNotice, TOOL_LIMIT_NOTICE } from "../lib/harness-notices";
-import { previewOwnerThreadId, previewState } from "../container/preview-bridge";
+import { livePreviewState, previewOwnerThreadId } from "../container/preview-bridge";
 import { verificationEvidence } from "../lib/verification-ledger";
 import { collectChanges } from "../workspace/workspace";
 import { isTestPath } from "../lib/project-fingerprint";
@@ -1546,11 +1546,14 @@ function completionVerdictFor(conversationId: string, agentTools: boolean): Comp
     // for exceptions thrown by ANOTHER thread's app. Only the thread that
     // owns the running preview contributes its evidence.
     preview:
-      previewOwnerThreadId() === conversationId && previewState().status !== "idle"
+      previewOwnerThreadId() === conversationId && livePreviewState().status !== "idle"
         ? {
-            status: previewState().status,
+            // The LIVE session, not the viewed record: the user may be reading
+            // another repo's archived failure while THIS thread's server runs,
+            // and the gate asks about the app this thread's edits feed.
+            status: livePreviewState().status,
             workspaceUpdatedAt: workspace?.updatedAt ?? -1,
-            issues: previewState().issues,
+            issues: livePreviewState().issues,
           }
         : undefined,
     projectHasTests: workspace ? workspace.tree.some((e) => isTestPath(e.path)) : undefined,

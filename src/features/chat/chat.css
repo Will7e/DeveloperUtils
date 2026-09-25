@@ -251,6 +251,105 @@
   line-height: 1;
 }
 
+/* ── History — "Pick up where you left off" ───────────────
+   The recent-chats list that used to sit on the welcome screen, moved to the
+   sidebar where it is always on screen rather than only when the current chat
+   is empty. Sits between the "New chat" entry and the repository groups:
+   section headers are a Geist eyebrow (11px/500, uppercase), and the rows are
+   the same 30px, 12.5px list rows the empty state's list used, so the section
+   reads as native to this column rather than as a card dropped into it.
+
+   NOT grouped by repo and NOT searchable — the groups below are the archive,
+   filed by project; this is the recency view, filed by WHEN. Five rows: after
+   that the list below is one glance away, and a section that outgrows the
+   viewport's interest becomes noise. */
+.chat-history {
+  margin: 2px 0 14px;
+}
+
+.chat-history-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  color: var(--chat-meta);
+}
+
+.chat-history-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.chat-history-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+}
+
+.chat-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.chat-history-item:hover {
+  background: var(--ds-gray-alpha-100);
+  color: var(--text-1);
+}
+
+.chat-history-item:focus-visible {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}
+
+/* "You are here", when the open chat is also the most recent — same fill ramp
+   as the group rows' active state, because it is the same fact. */
+.chat-history-item-active {
+  background: var(--ds-gray-alpha-200);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.chat-history-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-history-item-time {
+  flex-shrink: 0;
+  color: var(--chat-meta);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-sidebar-groups {
   display: block;
 }
@@ -635,12 +734,9 @@
   background: var(--red-dim);
 }
 
-/* Two-step delete: armed state */
-.chat-conv-action-confirm,
-.chat-conv-action-confirm:hover {
-  color: var(--red);
-  background: var(--red-dim);
-}
+/* Delete is confirmed in the shared popover (components/ui/
+   DeleteConfirmPopover — the same control the file list deletes with), so the
+   click-twice armed style that used to live here is gone with it. */
 
 /* ── The status slot ─────────────────────────────────────────
    Drawn even when empty, so a column of titles never shifts sideways as
@@ -6069,82 +6165,10 @@ typography rather than looking like a control of its own */
   color: var(--text-3);
 }
 
-/* ============================================================
-   EMPTY STATE — recent chats under the suggestions
-   ============================================================
-   Reached only when the current chat has no messages, which means the user is
-   either starting fresh on purpose or came back to the wrong thread. Naming the
-   three most recent real chats answers the second case in one click. */
-
-.chat-empty-recent {
-  width: 100%;
-  max-width: 560px;
-  margin-top: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-}
-
-.chat-empty-recent-title {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-3);
-  font-size: 11px;
-  font-weight: 500;
-  font-family: var(--font-sans);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.chat-empty-recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.chat-empty-recent-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-family: var(--font-sans);
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.chat-empty-recent-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-1);
-}
-
-.chat-empty-recent-item:focus-visible {
-  outline: none;
-  box-shadow: var(--ds-focus-ring);
-}
-
-.chat-empty-recent-item-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-empty-recent-item-time {
-  flex-shrink: 0;
-  margin-left: auto;
-  color: var(--text-3);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
+/* The recent-chats block that lived under the empty state's suggestions moved
+   to the sidebar as the History section (see .chat-history above) — the empty
+   state only rendered it when THIS chat was empty, which hid it from the
+   person who needed it most. */
 
 /* The export control in the header, matching the other header buttons */
 .chat-header-export-btn {
@@ -6445,6 +6469,38 @@ typography rather than looking like a control of its own */
   font-size: 12px;
   font-weight: 600;
   color: var(--text-1);
+}
+
+/* Whose session the panel is showing: the records are per-repo, and an
+   unlabeled panel invites reading another repo's record as one's own. */
+.chat-preview-repo {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-3);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The archived-session note: shown only when the viewed record is NOT the
+   live server, so a stale "running" never reads as a live one. */
+.chat-preview-archived {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--yellow-dim);
+  color: var(--text-2);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.chat-preview-archived svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--yellow);
 }
 
 .chat-preview-command {

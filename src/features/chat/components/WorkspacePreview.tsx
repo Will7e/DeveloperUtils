@@ -21,17 +21,41 @@
 // ============================================================
 
 import React from "react";
-import { AlertTriangle, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Archive, RefreshCw, X } from "lucide-react";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { previewViewAgeMs, previewViewIsLive } from "../container/preview-bridge";
 import { usePreview } from "./useWorkspace";
 
 interface WorkspacePreviewProps {
   open: boolean;
   onClose: () => void;
+  /** The repo the viewed session belongs to ("owner/repo"), for the header */
+  repoKey: string | null;
 }
 
-export function WorkspacePreview({ open, onClose }: WorkspacePreviewProps) {
+/** Coarse age for the archived-session note — prose precision, not a stopwatch */
+function describeAge(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ${minutes % 60} min`;
+  return `${Math.floor(hours / 24)} d`;
+}
+
+export function WorkspacePreview({ open, onClose, repoKey }: WorkspacePreviewProps) {
   const preview = usePreview();
+  // Ticking only while an ARCHIVED record is on screen: its age is part of the
+  // claim it makes (a failure from yesterday is a different reason to retry than
+  // one from a minute ago), and a live preview's age is already on the clock
+  // the strip keeps. A minute step is enough — this is prose, not a stopwatch.
+  const archived = !previewViewIsLive();
+  const [, setAgeTick] = React.useState(0);
+  React.useEffect(() => {
+    if (!open || !archived) return;
+    const timer = window.setInterval(() => setAgeTick((t) => t + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, [open, archived]);
   // Bumped to reload the iframe on demand: the dev server hot-reloads on its own,
   // and this is for the cases it cannot see (a full-page state, a stuck socket).
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -40,6 +64,9 @@ export function WorkspacePreview({ open, onClose }: WorkspacePreviewProps) {
 
   const failed = preview.status === "failed";
   const running = preview.status === "running" && preview.url;
+  const changedAt = previewViewAgeMs();
+  const ageNote =
+    archived && changedAt !== null ? ` — last activity ${describeAge(Date.now() - changedAt)} ago` : "";
 
   return (
     <aside className="chat-preview" aria-label="Live preview of the workspace">
@@ -47,6 +74,10 @@ export function WorkspacePreview({ open, onClose }: WorkspacePreviewProps) {
         <span className="chat-preview-title">
           {running ? "Live preview" : failed ? "Preview failed" : "Preview"}
         </span>
+        {/* Which repo's session this is: the records are per-repo, and a panel
+            that does not say whose it is invites the exact misreading the
+            sessions were built to end. */}
+        {repoKey && <span className="chat-preview-repo">{repoKey}</span>}
         {preview.command && <span className="chat-preview-command">{preview.command}</span>}
         <span className="chat-preview-actions">
           {running && (
@@ -108,6 +139,20 @@ export function WorkspacePreview({ open, onClose }: WorkspacePreviewProps) {
                 : "No preview is running. Start one from the workspace line above the composer."}
             </p>
           )}
+        </div>
+      )}
+
+      {/* An archived session shown while another repo's server is live: the
+          panel says so — and how stale the record is — or a "running" record
+          reads as if it were the live server, the one misreading the per-repo
+          sessions exist to end. */}
+      {!running && !previewViewIsLive() && (
+        <div className="chat-preview-archived" role="note">
+          <Archive className="h-3 w-3" aria-hidden="true" />
+          <span>
+            Archived session{ageNote} — another repo's preview is live in this
+            tab. Start this repo's from the workspace strip to make it live.
+          </span>
         </div>
       )}
 

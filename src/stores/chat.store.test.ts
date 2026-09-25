@@ -122,6 +122,50 @@ describe("workspace summary in the chat list", () => {
     expect(store().workspaces[id]).toBeUndefined();
   });
 
+  it("replaces the last chat with one that keeps its repository", () => {
+    // Deleting the final chat emptied the store, and the fresh chat the page
+    // spun up to keep the composer usable inherited NOTHING — with no active
+    // chat left, there was nothing to inherit from, so the repository
+    // silently detached the moment the user tidied up their chat list.
+    useChatStore.setState({ conversations: [], activeConversationId: null });
+    const id = store().createConversation("model-a", { repo: WEB });
+    store().deleteConversation(id);
+
+    const fresh = store().conversations[0];
+    expect(fresh).toBeDefined();
+    expect(fresh?.repoContext).toEqual(WEB);
+  });
+
+  it("replaces the last chat with a detached one only when it was detached", () => {
+    // `repo: null` is a deliberate seed, not a fallback: the store keeps what
+    // the deleted chat had, even when that was nothing.
+    useChatStore.setState({ conversations: [], activeConversationId: null });
+    const id = store().createConversation("model-a");
+    store().deleteConversation(id);
+
+    const fresh = store().conversations[0];
+    expect(fresh).toBeDefined();
+    expect(fresh?.repoContext).toBeUndefined();
+  });
+
+  it("does not spawn a replacement when other chats remain", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null });
+    const kept = store().createConversation("model-a", { repo: WEB });
+    const deleted = store().createConversation("model-a");
+    store().deleteConversation(deleted);
+
+    expect(store().conversations.map((c) => c.id)).toEqual([kept]);
+  });
+
+  it("carries the deleted chat's mode into the replacement", () => {
+    useChatStore.setState({ conversations: [], activeConversationId: null });
+    const id = store().createConversation("model-a", { repo: WEB, mode: "plan" });
+    store().setConversationMode(id, "plan");
+    store().deleteConversation(id);
+
+    expect(store().conversations[0]?.mode).toBe("plan");
+  });
+
   it("never hands back a workspace from another repository", async () => {
     // The in-memory guard returned whatever workspace the chat had, so
     // attaching a second repo kept editing the first one's files while every

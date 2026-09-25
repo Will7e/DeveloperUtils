@@ -25,7 +25,7 @@ import { getRepoBaseFile, rememberRepoBaseFile } from "../workspace/repo-base";
 import { readFileContent } from "../lib/github-client";
 import type { WorkspaceState } from "../types";
 import { planWorkspaceMount, type MountPlanResult } from "../container/workspace-mount";
-import { startPreview, stopPreview } from "../container/preview-bridge";
+import { repoKeyOf, startPreview, stopPreview } from "../container/preview-bridge";
 import { type WorkspaceOwner } from "../container/container-host";
 
 /**
@@ -168,6 +168,10 @@ export async function startPreviewForConversation(
     revision: ws.updatedAt,
     mountNotes: mount.result.notes,
     owner: workspaceOwnerFor(conversationId),
+    // The session is filed under its REPO, so its record (status, console
+    // errors, notes) follows the repo through sidebar switches instead of
+    // being shown to whichever thread is active.
+    repoKey: repoKeyOf(ws.owner, ws.repo),
   });
   if (!started.ok) return { ok: false, error: started.error };
   return { ok: true, url: started.url };

@@ -770,6 +770,9 @@ export const useChatStore = create<ChatStoreState>()(
         })),
 
       deleteConversation: (id) => {
+        // Read before the set: the replacement chat below is seeded from the
+        // thread being deleted, and `set` has already dropped it by then.
+        const leaving = get().conversations.find((c) => c.id === id);
         set((s) => {
           const remaining = s.conversations.filter((c) => c.id !== id);
           const active =
@@ -793,6 +796,20 @@ export const useChatStore = create<ChatStoreState>()(
             composerDrafts,
           };
         });
+        // Deleting the LAST chat leaves the store empty, and the empty state
+        // is a working chat (the composer must always be usable — the page
+        // counts on a fresh thread existing). That replacement is created
+        // HERE, seeded with the deleted chat's repository and mode, rather
+        // than by the page with no seed: an unseeded create inherits the
+        // active chat's repo, and the active chat is now null, so the fresh
+        // chat used to come up detached — the user's repo silently vanished
+        // because they tidied up their chat list.
+        if (leaving && get().conversations.length === 0) {
+          get().createConversation(undefined, {
+            ...(leaving.repoContext ? { repo: leaving.repoContext } : { repo: null }),
+            ...(leaving.mode ? { mode: leaving.mode } : {}),
+          });
+        }
         // The deleted thread's binding is announced so every cache scoped to it
         // releases its share: file reads, published URLs, recorded evidence.
         // Before, each of those was forgotten (or not) separately, and the ones

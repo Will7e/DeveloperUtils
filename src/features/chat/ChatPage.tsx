@@ -46,6 +46,7 @@ import { ChatSettingsModal } from "./components/ChatSettingsModal";
 import { PushApprovalModal } from "./components/PushApprovalModal";
 import { HttpApprovalModal } from "./components/HttpApprovalModal";
 import { useSkillActivity } from "./lib/skill-activity";
+import { repoKeyOf, setPreviewView } from "./container/preview-bridge";
 import { resolveMentionContext } from "./services/mention-context";
 import { watchGitHubSession } from "./services/github-session";
 import { PlanStrip } from "./components/PlanStrip";
@@ -200,6 +201,18 @@ export function ChatPage() {
   // The live preview is a panel the user opens and dismisses, not a pane they
   // work in — so it is page state, not layout state.
   const [previewOpen, setPreviewOpen] = useState(false);
+  // The preview's RECORD is per-repo (lib/preview-bridge sessions), so the view
+  // follows the active conversation's repository: switching chats in the sidebar
+  // switches the preview state the strip and panel describe. Starting a preview
+  // re-points the view too, but a switch with nothing starting must show THIS
+  // repo's own session — not the last repo's server that happened to be live.
+  const activeRepoKey = repoKeyOf(
+    activeConversation?.repoContext?.owner,
+    activeConversation?.repoContext?.repo
+  );
+  useEffect(() => {
+    setPreviewView(activeRepoKey);
+  }, [activeRepoKey]);
   const panelVisible = Boolean(repoAttached) && closedForAttachment !== attachedAt;
   // Fail closed: the change set in this panel must be the change set of the
   // repository the panel is about. After a switch, the in-memory entry is the
@@ -689,15 +702,14 @@ export function ChatPage() {
     state.setConversationRepo(state.activeConversationId, undefined);
   };
 
+  // deleteConversation in the store already guarantees a usable chat when the
+  // last one is deleted (and seeds it with the deleted chat's repository, so
+  // "closed every chat" no longer detaches the repo) — the page adds nothing
+  // here. An unseeded createConversation would be actively wrong: with the
+  // store empty, inheritance has nothing to inherit and the fresh chat came up
+  // detached, which is how deleting the last chat silently dropped the repo.
   const handleDeleteConversation = (id: string) => {
     useChatStore.getState().deleteConversation(id);
-    // Deleting the last conversation leaves the store empty — spin
-    // up a fresh chat so the composer is always usable (mirrors the
-    // Clear-All behavior in settings).
-    const state = useChatStore.getState();
-    if (state.conversations.length === 0) {
-      state.createConversation(state.settings.defaultModel);
-    }
   };
 
   const handleClearAllConversations = () => {
@@ -1003,7 +1015,11 @@ export function ChatPage() {
       {/* The app the agent is changing, running, beside the diff. Outside the
           two layout branches because it belongs to the page: whether the
           preview is open has nothing to do with how the panes are arranged. */}
-      <WorkspacePreview open={previewOpen} onClose={() => setPreviewOpen(false)} />
+      <WorkspacePreview
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        repoKey={activeRepoKey}
+      />
 
       <PushApprovalModal />
 

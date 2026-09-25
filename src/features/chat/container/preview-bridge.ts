@@ -42,6 +42,7 @@ import {
   type WorkspaceEvent,
   type WorkspaceOwner,
 } from "./container-host";
+import { registerScopedResource } from "../identity/scoped-resources";
 import {
   fileInTree,
   prepareWorkspace,
@@ -109,6 +110,78 @@ export interface PreviewState {
   issues: PreviewIssue[];
   startedAt: number | null;
 }
+
+/**
+ * The key a preview session is filed under: the repository it serves.
+ *
+ * Sessions are PER-REPO because that is the unit the user thinks in — the
+ * sidebar already groups chats by repository, and a preview belongs to the
+ * repo's checkout, not to one conversation. `owner/repo` is stable across
+ * threads and revisions.
+ */
+export function repoKeyOf(owner: string | null | undefined, repo: string | null | undefined): string | null {
+  const o = (owner ?? "").trim();
+  const r = (repo ?? "").trim();
+  if (!o || !r) return null;
+  return `${o}/${r}`;
+}
+
+/** One repo's remembered preview, shown again when the user returns to it */
+interface RepoSession {
+  state: PreviewState;
+  /** The conversation that owned the live session when it was archived */
+  ownerThreadId: string | null;
+  /**
+   * When this record last changed (any setState, archive, or terminal state).
+   *
+   * A record is a claim about a server the user cannot currently see; its AGE
+   * is part of the claim — "failed" ten seconds ago and "failed" yesterday are
+   * different reasons to press Retry.
+   */
+  changedAt: number;
+}
+
+/**
+ * Per-repo SESSIONS over the one physical server.
+ *
+ * The server itself stays single — one workspace lease, one filesystem, one
+ * port space; that is WebContainer physics and no amount of bookkeeping changes
+ * it. What is per-repo is the RECORD: when the user switches repositories, the
+ * live session's state is archived under its repo and the view moves to the
+ * other repo's record. Each repo's status, notes and console errors therefore
+ * survive the switch and follow their repo home — a failed start is read in the
+ * thread it belongs to, not by whichever thread happens to be active.
+ */
+const sessions = new Map<string, RepoSession>();
+/** Which repo the view is showing (null = whatever is live, for a page with no repo context) */
+let viewKey: string | null = null;
+/** The repo the LIVE session belongs to (null = nothing live) */
+let liveKey: string | null = null;
+
+/*
+ * Registered, not exempt, because the records hold thread-owned state (each one
+ * remembers the conversation that owned its live session): a deleted thread's
+ * repo entry describes nothing that exists, so it is dropped on that thread's
+ * deletion alone — a repository moving to another thread must not blank some
+ * other thread's view of the SAME repo. The structural test in
+ * identity/registry.test.ts requires every module-level cache to declare itself;
+ * an undeclared one is how the previous thread's state kept being served after
+ * a move.
+ */
+registerScopedResource({
+  name: "preview-bridge.sessions",
+  scope: "thread",
+  release: ({ transition }) => {
+    if (transition.type !== "thread.deleted") return;
+    for (const [key, session] of sessions) {
+      if (session.ownerThreadId === transition.threadId) {
+        sessions.delete(key);
+        if (viewKey === key) viewKey = null;
+        emitRevision();
+      }
+    }
+  },
+});
 
 const INITIAL: PreviewState = {
   status: "idle",
@@ -199,8 +272,92 @@ export function previewRevision(): number {
   return revision;
 }
 
+/**
+ * What the VIEW shows: the state of `viewKey`'s repo, or the live session when
+ * no repo view was chosen. Callers that want the LIVE server regardless of what
+ * is on screen (the completion gate, the evidence note) read `livePreviewState`
+ * instead — the distinction is the whole point of the split.
+ */
 export function previewState(): PreviewState {
+  const key = viewKey ?? liveKey;
+  if (!key) return state;
+  return sessions.get(key)?.state ?? INITIAL;
+}
+
+/** The LIVE session's state, whichever repo's record is on screen */
+export function livePreviewState(): PreviewState {
   return state;
+}
+
+/** The repo the live session serves, or null when nothing is live */
+export function livePreviewRepoKey(): string | null {
+  return liveKey;
+}
+
+/** The repo the view currently shows (null = following the live session) */
+export function previewViewKey(): string | null {
+  return viewKey;
+}
+
+/**
+ * True when the viewed record IS the live session.
+ *
+ * False means the user is reading an archived session — the strip and panel
+ * should say so, because a "running" record that is not the live server is
+ * otherwise indistinguishable from one that is, and that is exactly the
+ * misreading the per-repo records exist to end.
+ */
+export function previewViewIsLive(): boolean {
+  const key = viewKey ?? liveKey;
+  return key === null || key === liveKey;
+}
+
+/**
+ * How long ago the viewed record last changed, in ms (null: nothing viewed or
+ * never changed). The age is part of what an archived record claims — see
+ * `RepoSession.changedAt`.
+ */
+export function previewViewAgeMs(): number | null {
+  const key = viewKey ?? liveKey;
+  if (!key) return null;
+  return sessions.get(key)?.changedAt ?? null;
+}
+
+/**
+ * Points the view at one repo's session, archiving whatever was on screen.
+ *
+ * The live session is NOT stopped by this — the server keeps serving its repo
+ * while the user looks at another's record. What moves is the record: the
+ * previously-viewed repo keeps its state in `sessions`, and this repo's own
+ * state (running-but-not-live, failed-yesterday, whatever happened) is what the
+ * strip and the panel now read. Same repo is a no-op; a repo with no session
+ * yet shows a fresh idle record, which is also how it enters the map.
+ */
+export function setPreviewView(key: string | null): void {
+  if (key === viewKey) return;
+  // Archive the outgoing view's state. `state` is the LIVE state when the view
+  // follows the live session (the common case: only one repo has ever run);
+  // when the view was on an archived repo, that repo's record is already
+  // current in the map and the live state belongs to `liveKey`.
+  const outgoing = viewKey ?? liveKey;
+  if (outgoing) {
+    const existing = sessions.get(outgoing);
+    const isLiveView = viewKey === null || viewKey === liveKey;
+    sessions.set(outgoing, {
+      state: isLiveView ? state : (existing?.state ?? state),
+      ownerThreadId: isLiveView ? ownerThreadId : (existing?.ownerThreadId ?? null),
+      changedAt: existing?.changedAt ?? Date.now(),
+    });
+  }
+  viewKey = key;
+  revision += 1;
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch {
+      // A UI subscriber is not allowed to break the bridge.
+    }
+  }
 }
 
 /** Test seam: forget everything, including the server process */
@@ -211,11 +368,29 @@ export function resetPreview(): void {
   startToken = 0;
   abortStartup = null;
   ownerThreadId = null;
+  liveKey = null;
+  viewKey = null;
+  sessions.clear();
   state = INITIAL;
   revision += 1;
 }
 function setState(next: Partial<PreviewState>): void {
   state = { ...state, ...next };
+  // The live state IS its repo's record: whatever repo owns the server reads
+  // its own status back after a switch, without a copy step to forget.
+  if (liveKey) {
+    const existing = sessions.get(liveKey);
+    sessions.set(liveKey, {
+      state,
+      ownerThreadId: existing?.ownerThreadId ?? ownerThreadId,
+      changedAt: Date.now(),
+    });
+  }
+  emitRevision();
+}
+
+/** Bumps the store revision and wakes the subscribers — the notify half of both setState and the session bookkeeping */
+function emitRevision(): void {
   revision += 1;
   for (const listener of listeners) {
     try {
@@ -268,6 +443,11 @@ function handleWorkspaceReleased(event: Extract<WorkspaceEvent, { type: "workspa
   const running = process;
   process = null;
   ownerThreadId = null;
+  // The dead session stays filed under its repo — the record with the release
+  // reason in its notes is what the user reads when they return. `liveKey`
+  // clears only AFTER the setState below, which files the terminal state under
+  // the repo that owned the session; clearing first would strand the record at
+  // "running" forever.
   // The release ends any startup in flight too, so it must not be reported later
   // as that attempt failing on its own.
   endStartupWait();
@@ -288,6 +468,7 @@ function handleWorkspaceReleased(event: Extract<WorkspaceEvent, { type: "workspa
       `The dev server was stopped because ${event.reason}. A preview runs in this thread's own tree, so one thread losing the workspace ends its preview.`,
     ],
   });
+  liveKey = null;
 }
 
 function describeArgs(args: unknown[]): string {
@@ -372,6 +553,8 @@ export async function startPreview(input: {
   mountNotes?: string[];
   /** The thread whose revision this server serves; see `ownerThreadId` */
   owner?: WorkspaceOwner;
+  /** The repo this session belongs to ("owner/repo"); see `sessions` */
+  repoKey?: string | null;
 }): Promise<{ ok: true; url: string; port: number } | { ok: false; error: string }> {
   if (state.status === "starting") return { ok: false, error: "the preview is already starting" };
 
@@ -381,6 +564,14 @@ export async function startPreview(input: {
   // the thread being evicted is never mistaken for this thread losing its own
   // workspace.
   if (input.owner) ownerThreadId = input.owner.threadId;
+  // Captured before `liveKey` is re-pointed: the takeover below needs to know
+  // which repo's server it is stopping, and by then the answer has changed.
+  const previousLiveKey = liveKey;
+  // The session's identity rides the start: everything `setState` writes from
+  // here lands in this repo's record, and the view follows the new live repo —
+  // the user just asked for THIS repo's preview, so this repo is what they see.
+  liveKey = input.repoKey ?? liveKey;
+  if (liveKey) viewKey = liveKey;
 
   // A second dev server on the same port is the failure this module exists to
   // prevent, and the guard above only covers the window before the first one
@@ -398,6 +589,21 @@ export async function startPreview(input: {
       // Already gone.
     }
     setState({ status: "stopped", url: null, port: null });
+    // The takeover's "stopped" belongs to the PREVIOUS repo's record, not to
+    // the repo being started: `liveKey` was already re-pointed above, so the
+    // setState above filed B's "stopped" into B. This moves it home — without
+    // it, starting repo B's preview marked repo A stopped though nothing had
+    // touched it, and A's thread read a stopped preview that was never A's.
+    if (previousLiveKey && previousLiveKey !== liveKey) {
+      const record = sessions.get(previousLiveKey);
+      if (record) {
+        sessions.set(previousLiveKey, {
+          ...record,
+          state: { ...record.state, status: "stopped", url: null, port: null },
+          changedAt: Date.now(),
+        });
+      }
+    }
   }
 
   const packageJson = packageJsonOf(input.plan);
@@ -713,7 +919,10 @@ export function stopPreview(reason: string): void {
       // Already gone.
     }
   }
+  // The record stays under its repo (as "stopped", with the reason); liveness
+  // clears after the setState that files it — the same order the release uses.
   setState({ status: running ? "stopped" : state.status, url: null, port: null, notes: [reason] });
+  liveKey = null;
 }
 
 /** Records that the mounted revision moved under a running preview */
@@ -808,6 +1017,10 @@ export function waitForPreviewSettle(options: {
  * has, since neither a type check nor a test suite ever saw the app boot.
  */
 export function previewEvidenceNote(): string {
+  // Evidence belongs to the LIVE server, not to whichever repo is on screen:
+  // a turn for repo B must not quote repo A's console errors just because the
+  // user was looking at B when the evidence was gathered.
+  const state = livePreviewState();
   if (state.status === "failed") {
     return `# Preview\nThe app's dev server did not start: ${state.notes.slice(-2).join(" ")}. Do not describe the change as working in the browser.`;
   }

@@ -5,11 +5,15 @@ import {
   describeDevServerExit,
   detectDevServer,
   diagnoseDevServerFailure,
+  livePreviewRepoKey,
+  livePreviewState,
   notePreviewMessageForTest,
   packageJsonOf,
   previewEvidenceNote,
   previewState,
+  repoKeyOf,
   resetPreview,
+  setPreviewView,
   startPreview,
   stopPreview,
   waitForPreviewSettle,
@@ -36,6 +40,22 @@ async function until(condition: () => boolean): Promise<void> {
   }
   throw new Error("the condition never became true");
 }
+
+describe("repoKeyOf — the identity a session is filed under", () => {
+  it("joins owner and repo", () => {
+    expect(repoKeyOf("acme", "widgets")).toBe("acme/widgets");
+  });
+
+  it("is null without a repository — a preview belongs to a repo or nothing", () => {
+    expect(repoKeyOf("acme", "")).toBeNull();
+    expect(repoKeyOf(null, "widgets")).toBeNull();
+    expect(repoKeyOf("", null)).toBeNull();
+  });
+
+  it("trims sloppy input rather than filing two keys for one repo", () => {
+    expect(repoKeyOf(" acme ", " widgets ")).toBe("acme/widgets");
+  });
+});
 
 describe("detectDevServer — declared scripts only", () => {
   it("finds the dev script and runs it through npm", () => {
@@ -164,6 +184,99 @@ describe("startPreview — the harness owns the dev server, including the one al
       async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
     );
   }
+
+    describe("preview sessions — one record per repository", () => {
+    it("files a started session under its repo, and the view follows it", async () => {
+      bootWith([]);
+      const started = await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+      expect(started.ok).toBe(true);
+      expect(livePreviewRepoKey()).toBe("acme/alpha");
+      expect(previewState().status).toBe("running");
+    });
+
+    it("keeps each repo's failed start out of the other repo's record", async () => {
+      // Repo A's dev script fails; the user switches to repo B. B's record must
+      // read idle — A's failure belongs to A, and showing it to B is how a user
+      // ends up convinced the wrong project is broken.
+      bootWith([]);
+      await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+      setStateForTest({ status: "failed", notes: ["EADDRINUSE"] });
+      setPreviewView("acme/beta");
+      expect(previewState().status).toBe("idle");
+      expect(previewState().notes).toEqual([]);
+      // …and A's failure is still there when they come back.
+      setPreviewView("acme/alpha");
+      expect(previewState().status).toBe("failed");
+      expect(previewState().notes).toContain("EADDRINUSE");
+    });
+
+    it("does not overwrite another repo's record when a takeover stops the old server", async () => {
+    // The takeover's terminal "stopped" is ABOUT repo A's server; with liveKey
+    // already re-pointed at B when the kill lands, the naive setState filed it
+    // under B — and A read as "stopped" though nothing had touched it.
+    const processes: { killed: boolean }[] = [];
+    bootWith(processes);
+    await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+    // Switch the view away first, so the takeover happens while alpha's record
+    // is only in the map, not on screen.
+    setPreviewView("acme/beta");
+    await startPreview({ plan: DEV_PLAN(), revision: 2, repoKey: "acme/beta" });
+    setPreviewView("acme/alpha");
+    expect(previewState().status).toBe("stopped");
+    setPreviewView("acme/beta");
+    expect(previewState().status).toBe("running");
+  });
+
+  it("keeps the live session alive while the view is elsewhere", async () => {
+      // Switching repos looks at another record; it does not kill the server.
+      const processes: { killed: boolean }[] = [];
+      bootWith(processes);
+      await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+      setPreviewView("acme/beta");
+      expect(processes[0]?.killed ?? false).toBe(false);
+      expect(livePreviewState().status).toBe("running");
+      expect(livePreviewRepoKey()).toBe("acme/alpha");
+      // Back to the live repo: its running state is exactly as it was.
+      setPreviewView("acme/alpha");
+      expect(previewState().status).toBe("running");
+      expect(previewState().url).toBe("http://localhost:3000/");
+    });
+
+    it("routes a stop to the live repo's record, not to the viewed one", async () => {
+      bootWith([]);
+      await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+      setPreviewView("acme/beta");
+      stopPreview("stopped by the user");
+      setPreviewView("acme/alpha");
+      expect(previewState().status).toBe("stopped");
+      expect(previewState().notes).toContain("stopped by the user");
+      expect(livePreviewRepoKey()).toBeNull();
+    });
+
+  it("files console errors under the repo that was live when they arrived", () => {
+    bootWith([]);
+    void startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+    notePreviewMessageForTest({ type: "PREVIEW_UNCAUGHT_EXCEPTION", message: "boom in alpha" });
+    setPreviewView("acme/beta");
+    // The only server on the page still belongs to alpha, so its console is
+    // alpha's evidence even while the user is looking at beta's record.
+    notePreviewMessageForTest({ type: "PREVIEW_UNCAUGHT_EXCEPTION", message: "another alpha line" });
+    setPreviewView("acme/alpha");
+    const messages = previewState().issues.map((issue) => issue.message);
+    expect(messages).toContain("boom in alpha");
+    expect(messages).toContain("another alpha line");
+  });
+
+    it("gives the evidence note the live server, not the viewed record", async () => {
+      bootWith([]);
+      await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+      notePreviewMessageForTest({ type: "PREVIEW_UNCAUGHT_EXCEPTION", message: "alpha exploded" });
+      setPreviewView("acme/beta");
+      // Repo B is on screen and has no issues; the note must still describe the
+      // LIVE app, because the agent's next turn is about the running server.
+      expect(previewEvidenceNote()).toContain("alpha exploded");
+    });
+  });
 
   function devRuntime(
     devProcesses: { killed: boolean }[],

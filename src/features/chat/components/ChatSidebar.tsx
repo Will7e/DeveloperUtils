@@ -36,6 +36,7 @@ import {
   Check,
   Copy,
   GitBranch,
+  History,
   Loader2,
   Pencil,
   Pin,
@@ -50,6 +51,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { SearchInput } from "@/components/ui/search-input";
+import { DeleteConfirmPopover } from "@/components/ui/DeleteConfirmPopover";
 import { useLocalStorageState } from "@/hooks/useLocalStorageState";
 import { useNarrowLayout } from "./useNarrowLayout";
 import type { ChatConversation } from "../types";
@@ -71,6 +73,11 @@ import { formatRelativeTime } from "../lib/relative-time";
 export interface RepoSelectionSeed extends RepoIdentity {
   branch: string;
 }
+
+/** How many past chats the History section holds — the same cap the welcome
+    screen used, so the section reads the same way. Older threads are one
+    search (⌘⇧F) away, not gone. */
+const HISTORY_LIMIT = 5;
 
 interface ChatSidebarProps {
   conversations: ChatConversation[];
@@ -156,7 +163,17 @@ export function ChatSidebar({
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
+  /**
+   * The conversation awaiting delete confirmation, and where its popover is
+   * anchored. NOT click-again-to-delete: that armed state expired on a
+   * mouse-leave and a 4s timer, which made a slow deliberate click read as a
+   * cancel, and the context menu's Delete skipped the whole dance and deleted
+   * on the first click. One popover, both entry points, Cancel and Escape.
+   */
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
+  const [deleteAnchor, setDeleteAnchor] = React.useState<{ top: number; left: number } | null>(
+    null
+  );
   /** The row whose right-click menu is open, and where it was asked for */
   const [menu, setMenu] = React.useState<{ id: string; x: number; y: number } | null>(null);
   /** Collapsed group keys, remembered across reloads — folding a repo away is
@@ -192,14 +209,6 @@ export function ChatSidebar({
     setSearchOpen(false);
     window.setTimeout(() => searchToggleRef.current?.focus(), 0);
   }, []);
-
-  // Disarm a pending delete when the pointer leaves that row or the
-  // target changes, so the armed state never goes stale.
-  React.useEffect(() => {
-    if (!confirmDeleteId) return;
-    const t = window.setTimeout(() => setConfirmDeleteId(null), 4000);
-    return () => window.clearTimeout(t);
-  }, [confirmDeleteId]);
 
   // ── Searching ──
   // ⌘⇧F rather than ⌘K: the command palette owns ⌘K app-wide, and a shortcut
@@ -240,6 +249,27 @@ export function ChatSidebar({
   );
 
   /**
+   * The History section: the most recent threads with something to say, the
+   * most recent first — the "Pick up where you left off" list that used to
+   * live on the welcome screen, where it was only reachable when the thread
+   * you opened was empty.
+   *
+   * Same three-cap and has-content rule the empty state used: a fresh chat
+   * with no messages is not history, and five rows is a reminder, not the
+   * archive (the grouped list below already is that). The ACTIVE thread is not
+   * excluded — on it the row reads as "this one", which is true rather than
+   * wrong, and omitting it would shift the other rows as soon as you replied.
+   */
+  const history = React.useMemo(
+    () =>
+      [...conversations]
+        .filter((c) => c.messages.length > 0)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, HISTORY_LIMIT),
+    [conversations]
+  );
+
+  /**
    * Every row's status in one pass, so a group header can roll its threads up
    * without walking them again per render.
    */
@@ -254,10 +284,32 @@ export function ChatSidebar({
     );
   };
 
+  // ── Delete confirmation ──
+  // One popover for both entry points (hover trash, context menu), anchored
+  // under whichever button asked for it — the same control the file list
+  // deletes with, so "delete a chat" and "delete a file" are the same gesture.
+  // The anchor is REQUIRED: the popover only draws with one, and a popover
+  // that mounts invisible behind a full-screen backdrop is a dead click.
+  const requestDelete = (id: string, anchor: { top: number; left: number }) => {
+    setMenu(null);
+    setConfirmDeleteId(id);
+    setDeleteAnchor(anchor);
+  };
+
+  const confirmDelete = () => {
+    if (confirmDeleteId) onDelete(confirmDeleteId);
+    cancelDelete();
+  };
+
+  const cancelDelete = () => {
+    setConfirmDeleteId(null);
+    setDeleteAnchor(null);
+  };
+
   const startRename = (conv: ChatConversation) => {
     setRenamingId(conv.id);
     setRenameValue(conv.title);
-    setConfirmDeleteId(null);
+    cancelDelete();
     setMenu(null);
   };
 
@@ -268,22 +320,13 @@ export function ChatSidebar({
     setRenamingId(null);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirmDeleteId === id) {
-      onDelete(id);
-      setConfirmDeleteId(null);
-    } else {
-      setConfirmDeleteId(id);
-    }
-  };
-
   // ── The right-click menu ──
   // Two actions on hover (pin, delete) and the rest behind a context menu, the
   // way a file list has always worked: hover can afford to be small, and the
   // full set is one gesture away instead of hidden behind it.
   const openMenu = (conv: ChatConversation, x: number, y: number) => {
     setMenu({ id: conv.id, x, y });
-    setConfirmDeleteId(null);
+    cancelDelete();
   };
 
   React.useEffect(() => {
@@ -394,7 +437,6 @@ export function ChatSidebar({
   const renderRow = (conv: ChatConversation, group: ConversationGroup) => {
     const isActive = conv.id === activeId;
     const isRenaming = conv.id === renamingId;
-    const isConfirmingDelete = conv.id === confirmDeleteId;
     const status = statusOf(conv.id);
     // The branch at rest is decided by the repo (only when its threads disagree,
     // where it tells you something); the row being READ asks for it always,
@@ -518,26 +560,22 @@ export function ChatSidebar({
                   )}
                 </button>
               </SimpleTooltip>
-              <SimpleTooltip
-                content={isConfirmingDelete ? "Click again to delete" : "Delete"}
-                side="top"
-              >
+              <SimpleTooltip content="Delete" side="top">
                 <button
                   type="button"
-                  className={cn(
-                    "chat-conv-action chat-conv-action-danger",
-                    isConfirmingDelete && "chat-conv-action-confirm"
-                  )}
-                  onMouseLeave={() => setConfirmDeleteId((id) => (id === conv.id ? null : id))}
+                  className="chat-conv-action chat-conv-action-danger"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleDelete(conv.id);
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    requestDelete(conv.id, {
+                      // Centered under the 24px button, matching the file list's
+                      // popover anchor (half the 236px popover either side).
+                      top: rect.bottom + 6,
+                      left: rect.left + rect.width / 2 - 118,
+                    });
                   }}
-                  aria-label={
-                    isConfirmingDelete
-                      ? "Click again to confirm delete"
-                      : "Delete conversation"
-                  }
+                  aria-label={`Delete conversation ${conv.title}`}
+                  aria-haspopup="dialog"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -597,13 +635,14 @@ export function ChatSidebar({
                     type="button"
                     role="menuitem"
                     className="chat-row-menu-item chat-row-menu-item-danger"
-                    onClick={() => {
-                      onDelete(conv.id);
-                      setMenu(null);
-                    }}
+                    onClick={() =>
+                      // No button rect to anchor to here, so the popover takes
+                      // the point the menu was asked for, centered on it.
+                      requestDelete(conv.id, { top: menuAt.y + 6, left: menuAt.x - 118 })
+                    }
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    Delete
+                    Delete…
                   </button>
                 </div>,
                 document.body
@@ -693,6 +732,46 @@ export function ChatSidebar({
               <kbd className="chat-new-chat-kbd">⌘⇧N</kbd>
             </button>
           </SimpleTooltip>
+
+          {/* ── History — "Pick up where you left off" ──────────
+              Moved here from the welcome screen, where it only appeared when
+              the current chat was empty. Here it is always one glance away:
+              the last threads you actually said something in, newest first,
+              regardless of which repository each belongs to (the groups above
+              file them by project; this section files them by WHEN).
+
+              Hidden while a search is running: results for the query sit
+              directly below, and an unrelated "pick up where you left off"
+              above them reads as a bug. */}
+          {history.length > 0 && !searching && (
+            <section className="chat-history" aria-label="Recent chats">
+              <div className="chat-history-head">
+                <History className="chat-history-icon" aria-hidden="true" />
+                <span className="chat-history-title">Pick up where you left off</span>
+              </div>
+              <div className="chat-history-list" role="list">
+                {history.map((conv) => (
+                  <button
+                    key={conv.id}
+                    type="button"
+                    role="listitem"
+                    className={cn(
+                      "chat-history-item",
+                      conv.id === activeId && "chat-history-item-active"
+                    )}
+                    onClick={() => onSelect(conv.id)}
+                    title={conv.title}
+                    aria-current={conv.id === activeId ? "true" : undefined}
+                  >
+                    <span className="chat-history-item-title">{conv.title}</span>
+                    <span className="chat-history-item-time">
+                      {formatRelativeTime(conv.updatedAt)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           {matchedCount === 0 && (
             <div className="chat-sidebar-empty">
@@ -854,6 +933,26 @@ export function ChatSidebar({
           </div>
         )}
       </aside>
+
+      {/* Delete confirmation — one popover for the hover trash and the
+          context menu's Delete…, anchored to whichever asked. The file list
+          confirms with this same control, so a destructive gesture reads the
+          same everywhere in the app. */}
+      <DeleteConfirmPopover
+        open={Boolean(confirmDeleteId)}
+        file={
+          confirmDeleteId
+            ? {
+                id: confirmDeleteId,
+                name:
+                  conversations.find((c) => c.id === confirmDeleteId)?.title ?? "this chat",
+              }
+            : null
+        }
+        anchor={deleteAnchor}
+        onCancel={cancelDelete}
+        onConfirm={confirmDelete}
+      />
     </>
   );
 }

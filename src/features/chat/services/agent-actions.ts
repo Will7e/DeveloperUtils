@@ -72,8 +72,8 @@ import {
   type ControlOutcome,
 } from "../container/preview-control-bridge";
 import {
+  livePreviewState,
   previewOwnerThreadId,
-  previewState,
   waitForPreviewSettle,
   type PreviewIssue,
 } from "../container/preview-bridge";
@@ -1628,12 +1628,14 @@ function previewIssueLines(issues: PreviewIssue[]): string[] {
  * The shared body of the two preview read tools, scoped to the calling
  * thread.
  *
- * The preview state is page-global — one dev server per page — so a thread
- * that does not own it must be told whose it is rather than handed another
- * app's errors as if they were its own evidence. The owner reads it plainly.
+ * Reads the LIVE session, not the viewed record: the user may be looking at
+ * another repo's archived failure while this thread's server runs. A thread
+ * that does not own the live session is told whose it is rather than handed
+ * another app's errors as if they were its own evidence; the owner reads it
+ * plainly.
  */
 function previewResultData(conversationId: string): Record<string, unknown> {
-  const state = previewState();
+  const state = livePreviewState();
   const owned = previewOwnerThreadId() === conversationId;
   if (!owned) {
     return {

@@ -85,6 +85,7 @@ const REGISTERED: Record<string, string> = {
   "lib/app-action-ledger.ts:entries": "app-action-ledger.entries",
   "lib/skill-activity.ts:byConversation": "skill-activity.records",
   "session/turn-engine.ts:sessions": "session.turn",
+  "container/preview-bridge.ts:sessions": "preview-bridge.sessions",
 };
 
 /**
@@ -182,6 +183,7 @@ describe("scoped-resource registry", () => {
       "ask-user.parked-questions",
       "container.runtime",
       "github-client.tree",
+      "preview-bridge.sessions",
       "repo-base.tree",
       "repo.instructions",
       "session.turn",
