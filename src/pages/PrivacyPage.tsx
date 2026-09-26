@@ -154,11 +154,11 @@ export function PrivacyPage() {
           <article className="legal-section" id="google-user-data">
             <div className="legal-section-header">
               <span className="legal-section-number">02</span>
-              <h2 className="legal-section-title">Google API Services & Google Drive User Data</h2>
+              <h2 className="legal-section-title">Google API Services &amp; Google Drive User Data</h2>
             </div>
             <div className="legal-prose">
               <p>
-                InTab provides an optional <strong>Cloud Sync</strong> feature that allows you to synchronize your encrypted workspace, presets, and conversations across your devices using your own Google Drive account.
+                InTab provides an optional <strong>Cloud Sync</strong> feature that allows developers to synchronize their encrypted workspace settings, code snippets, and custom configurations across their devices using their own personal Google Drive account.
               </p>
 
               {/* Mandatory Google Policy Limited Use Callout Box */}
@@ -180,25 +180,75 @@ export function PrivacyPage() {
                 </p>
               </div>
 
-              <p><strong>Specifically, regarding Google User Data:</strong></p>
+              <h3>1. Specific Google Scopes Requested</h3>
+              <p>InTab requests the absolute minimum permissions required to provide cloud synchronization:</p>
+              <div style={{ overflowX: "auto", margin: "16px 0" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border-subtle)", color: "var(--text-1)" }}>
+                      <th style={{ padding: "8px 12px" }}>Scope</th>
+                      <th style={{ padding: "8px 12px" }}>Type</th>
+                      <th style={{ padding: "8px 12px" }}>Purpose &amp; Access Level</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: "1px solid var(--border-1)" }}>
+                      <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)" }}>
+                        https://www.googleapis.com/auth/drive.appdata
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>Sensitive</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        Allows InTab to create, read, update, and delete its own single encrypted snapshot file inside your private Google Drive Application Data folder. <strong>InTab has zero access to your personal documents, spreadsheets, photos, or other files in Google Drive.</strong>
+                      </td>
+                    </tr>
+                    <tr style={{ borderBottom: "1px solid var(--border-1)" }}>
+                      <td style={{ padding: "10px 12px", fontFamily: "var(--font-mono)" }}>
+                        openid / email
+                      </td>
+                      <td style={{ padding: "10px 12px" }}>Non-sensitive</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        Used exclusively to display your account email address within InTab Settings so you can verify which Google Account is currently connected.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <h3>2. Data Collection, Usage &amp; Encryption</h3>
               <ul>
                 <li>
-                  <strong>Scope Requested:</strong> We only request the <code>https://www.googleapis.com/auth/drive.appdata</code> scope. This is a restricted, application-specific isolated folder (&ldquo;Application Data folder&rdquo;) that only InTab can access. InTab <strong>cannot</strong> see, access, modify, or delete any of your personal files, photos, or documents in your main Google Drive.
+                  <strong>Client-Side Encryption (AES-256-GCM):</strong> Before any backup snapshot leaves your browser to Google Drive, it is sealed using client-side <strong>AES-256-GCM authenticated encryption</strong> with a device-derived salt. InTab servers never see your plaintext data, and the data stored on Google Drive is cryptographically unreadable without your local device keys.
                 </li>
                 <li>
-                  <strong>Purpose of Access:</strong> We access this folder solely to save and restore your encrypted InTab settings, custom templates, and chat workspaces so that you can switch devices seamlessly.
+                  <strong>No InTab Server Storage:</strong> Synchronization occurs directly between your client browser and Google APIs via HTTPS. InTab operates no central database or intermediary servers that store or process your Google user data.
                 </li>
                 <li>
-                  <strong>Client-Side Encryption Before Upload:</strong> Before any backup file leaves your browser to Google Drive, it is sealed using client-side <strong>AES-256-GCM</strong> authenticated encryption. Even if someone inspected your Google Drive appDataFolder, the files are unreadable ciphertext without your local encryption pepper.
+                  <strong>No Human Inspection:</strong> No human, employee, or contractor ever reads, inspects, or accesses your Google user data.
                 </li>
                 <li>
-                  <strong>No Human Inspection:</strong> No human, employee, or automated InTab process ever reads, inspects, or accesses your Google user data.
+                  <strong>Strict Non-Sharing Policy:</strong> We do not sell, rent, commercialize, or transfer Google user data to any third parties, advertisers, marketing networks, or data brokers.
                 </li>
                 <li>
-                  <strong>No Third-Party Sharing:</strong> We do not sell, rent, transfer, or disclose Google user data to any third parties, advertisers, or data brokers.
+                  <strong>No AI/ML Model Training:</strong> Google user data is NEVER used to train, retrain, fine-tune, or evaluate artificial intelligence, machine learning, or large language models.
+                </li>
+              </ul>
+
+              <h3>3. Data Retention &amp; User Deletion Rights</h3>
+              <p>You have complete control over your data retention and can delete your information at any time:</p>
+              <ul>
+                <li>
+                  <strong>In-App Deletion:</strong> In InTab, navigate to <strong>Settings &rarr; Cloud Sync</strong>, click <strong>&ldquo;Disconnect Provider&rdquo;</strong>, and select <strong>&ldquo;Remove Cloud Copy&rdquo;</strong>. This immediately sends a DELETE request to Google Drive API to permanently remove your snapshot file from your Google Drive.
                 </li>
                 <li>
-                  <strong>No AI Model Training:</strong> Your Google user data is never used to train or fine-tune artificial intelligence or machine learning models.
+                  <strong>Google Account Permissions Revocation:</strong> You can revoke InTab's access to your Google Account at any time by visiting{" "}
+                  <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">
+                    Google Account Security &mdash; Third-party apps with account access
+                    <ExternalLink className="inline-block w-3 h-3 ml-1" />
+                  </a>
+                  . Once revoked, all access tokens are invalidated immediately.
+                </li>
+                <li>
+                  <strong>Data Retention Period:</strong> Data is retained in your Google Drive application folder only for as long as you maintain the Cloud Sync connection. InTab does not retain any copies on its own infrastructure.
                 </li>
               </ul>
             </div>

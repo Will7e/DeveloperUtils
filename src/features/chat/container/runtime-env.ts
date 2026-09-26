@@ -249,11 +249,22 @@ export function committedEnvVarsOfTree(tree: unknown): Record<string, string> {
 
 /**
  * The full spawn env for one repo, given the mounted tree: the non-interactive
- * base, then every committed env-file variable, then the user's stored vars.
+ * base, then every committed env-file variable, then the user's stored vars —
+ * with client-alias twins synthesized on top.
  *
  * One function so the executor, the preview and the process registry cannot
  * disagree about the order — and so a non-`VITE_` variable in a committed
  * `.env` reaches `process.env` the way it reaches it on a laptop.
+ *
+ * The aliasing step is the community-standard fix for one specific failure
+ * (vitejs/vite #13189, the Lovable/bolt dual-alias `.env` block): Vite inlines
+ * ONLY `VITE_`-prefixed names into a browser bundle, so an app whose code
+ * reads `import.meta.env.VITE_SUPABASE_URL` gets `undefined` when the repo's
+ * committed `.env` carries the bare `SUPABASE_URL=...` name — no matter what
+ * the process env holds. `withClientAliases` gives every bare public-by-design
+ * key its prefixed twin so the prefixed read finds the value, without ever
+ * touching a repo file. A code-level BARE read (`import.meta.env.SUPABASE_URL`)
+ * still cannot be inlined by Vite — that is what the doctor reports instead.
  */
 export async function spawnEnvFor(
   base: Readonly<Record<string, string>>,
@@ -261,11 +272,45 @@ export async function spawnEnvFor(
   tree: unknown
 ): Promise<Record<string, string>> {
   const state = await load();
-  return {
+  const merged = {
     ...base,
     ...committedEnvVarsOfTree(tree),
     ...envOf(state, repoKey),
   };
+  return withClientAliases(merged);
+}
+
+/**
+ * Client-framework prefixes, and the bare service names whose values are
+ * public by design (URLs and anon keys — the browser already receives both
+ * with every response; row-level security, not secrecy, is the boundary).
+ */
+const CLIENT_ALIAS_SERVICES =
+  /^(SUPABASE|FIREBASE|SENTRY_DSN|POSTHOG|MAPBOX|ALGOLIA|STRIPE_PUBLISHABLE|GA_|GTM_)/i;
+
+const CLIENT_FRAMEWORK_PREFIXES = ["VITE_", "NEXT_PUBLIC_", "NUXT_PUBLIC_"] as const;
+
+/**
+ * The alias twins: for every bare public-by-design key in the env, also set
+ * the `VITE_`-prefixed name (and the Next/Nuxt twins, harmless where unused).
+ *
+ * A name that is already prefixed is left alone, and a twin never overwrites
+ * a value the repo or the user stored under the prefixed name — the alias only
+ * ever FILLS a gap. Only service-shaped bare keys are twinned: twinning
+ * `DATABASE_URL` would hand a private connection string to a client bundle
+ * that never reads it, which is a leak with no upside.
+ */
+export function withClientAliases(env: Readonly<Record<string, string>>): Record<string, string> {
+  const out: Record<string, string> = { ...env };
+  for (const [key, value] of Object.entries(env)) {
+    if (CLIENT_FRAMEWORK_PREFIXES.some((prefix) => key.toUpperCase().startsWith(prefix))) continue;
+    if (!CLIENT_ALIAS_SERVICES.test(key)) continue;
+    for (const prefix of CLIENT_FRAMEWORK_PREFIXES) {
+      if (prefix + key in out) continue; // an explicit prefixed value always wins
+      out[`${prefix}${key}`] = value;
+    }
+  }
+  return out;
 }
 
 /**

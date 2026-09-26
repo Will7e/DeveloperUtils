@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  bareClientReadsOf,
   diagnoseEnv,
   keysWithSourcesOf,
   referencedEnvKeysOf,
@@ -179,6 +180,66 @@ describe("diagnoseEnv — the verdict", () => {
     });
     expect(report.verdict).toBe("connects");
     expect(report.summary).toContain("references no env keys");
+  });
+
+  it("satisfies a VITE_ read from the repo's BARE committed value — the alias twin", () => {
+    // The restaurant-repo shape: .env carries SUPABASE_URL (no prefix), the
+    // code reads import.meta.env.VITE_SUPABASE_URL. Before alias awareness
+    // this reported a missing key and sent the agent to ask the user for a
+    // value the repository itself already ships.
+    const report = diagnoseEnv({
+      files: [
+        file("package.json", PKG({ "@supabase/supabase-js": "^2.0.0" })),
+        file(".env", "SUPABASE_URL=https://x.supabase.co\nSUPABASE_ANON_KEY=eyJhbGciOi"),
+        file("src/client.ts", "export const url = import.meta.env.VITE_SUPABASE_URL;"),
+      ],
+      packageJson: PKG({ "@supabase/supabase-js": "^2.0.0" }),
+    });
+    expect(report.verdict).toBe("connects");
+    expect(report.missingKeys).toEqual([]);
+  });
+
+  it("reports a BARE import.meta.env read as unfixable-by-values, and blocks the verdict", () => {
+    // Vite inlines only prefixed names into a browser bundle — no env source
+    // (file, stored var, literal) can make this read resolve. Saying
+    // "connects" here is exactly how a broken preview got declared healthy.
+    const report = diagnoseEnv({
+      files: [
+        file("package.json", PKG({ "@supabase/supabase-js": "^2.0.0" })),
+        file(".env", "SUPABASE_URL=https://x.supabase.co"),
+        file("src/client.ts", "export const url = import.meta.env.SUPABASE_URL;"),
+      ],
+      packageJson: PKG({ "@supabase/supabase-js": "^2.0.0" }),
+    });
+    expect(report.missingKeys).toEqual([]);
+    expect(report.findings.some((f) => f.kind === "client-read" && f.key === "SUPABASE_URL")).toBe(true);
+    expect(report.verdict).toBe("blocked");
+    expect(report.summary).toContain("BARE");
+  });
+
+  it("does not flag a bare read when the repo's own vite.config widens envPrefix", () => {
+    // envPrefix is the laptop-shape under which a bare read inlines the
+    // process env and just works — the doctor must not "fix" what is not broken.
+    const report = diagnoseEnv({
+      files: [
+        file("package.json", "{}"),
+        file("vite.config.ts", "export default defineConfig({ envPrefix: ['VITE_', 'SUPABASE_'] });"),
+        file(".env", "SUPABASE_URL=https://x.supabase.co"),
+        file("src/client.ts", "export const url = import.meta.env.SUPABASE_URL;"),
+      ],
+      packageJson: "{}",
+    });
+    expect(report.findings.some((f) => f.kind === "client-read")).toBe(false);
+    expect(report.verdict).toBe("connects");
+  });
+
+  it("never reports Vite's own import.meta.env members as missing keys", () => {
+    const report = diagnoseEnv({
+      files: [file("package.json", "{}"), file("src/main.ts", "const mode = import.meta.env.MODE; const dev = import.meta.env.DEV;")],
+      packageJson: "{}",
+    });
+    expect(report.missingKeys).toEqual([]);
+    expect(report.verdict).toBe("connects");
   });
 
   it("bounds the scan so a huge repo cannot burn the tab reading everything", () => {

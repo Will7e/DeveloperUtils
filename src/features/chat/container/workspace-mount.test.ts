@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { planWorkspaceMount } from "./workspace-mount";
 import { describeMount } from "./mount-plan";
+import { HYDRATE_MAX_BYTES, HYDRATE_MAX_ASSET_BYTES, HYDRATE_MAX_VIDEO_BYTES } from "./tree-source";
 import type { WorkspaceState } from "../types";
 
 function workspace(over: Partial<WorkspaceState> = {}): WorkspaceState {
@@ -172,10 +173,13 @@ describe("planWorkspaceMount — what the container actually gets", () => {
   it("hydrates package.json even when the assets have already eaten the byte budget", async () => {
     // The screenshot's failure, reduced: a photo-heavy Next.js repo. The
     // manifests ride in first by construction now; this pins that guarantee.
+    // Sized against the live budget so the test keeps testing the overflow
+    // path if the budget is raised again: 60 × 400 KiB out-spends 24 MiB.
+    const photoSize = Math.ceil(HYDRATE_MAX_BYTES / 45 / 1024) * 1024;
     const photos = Array.from({ length: 60 }, (_, i) => ({
       path: `public/photos/photo-${i}.jpg`,
       type: "blob" as const,
-      size: 160 * 1024,
+      size: photoSize,
     }));
     const result = await planWorkspaceMount({
       ws: workspace({
@@ -186,7 +190,7 @@ describe("planWorkspaceMount — what the container actually gets", () => {
         ],
       }),
       read: async (path) => READ[path] ?? null,
-      readBinary: async () => new Uint8Array(160 * 1024),
+      readBinary: async () => new Uint8Array(photoSize),
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -198,11 +202,14 @@ describe("planWorkspaceMount — what the container actually gets", () => {
   it("counts only candidate text files against candidates when assets overflow the budget", async () => {
     // The note once said "101 of 115 candidate files: 170 beyond the byte
     // budget" — an impossible sentence, because the asset overage was folded
-    // into the candidate count. Each number here must be reproducible.
+    // into the candidate count. Each number here must be reproducible. Sized
+    // against the live budget so exactly 20 of the 60 drop: 40 × photoSize,
+    // plus the text candidate, fits with a KiB to spare, the 41st does not.
+    const photoSize = Math.floor((HYDRATE_MAX_BYTES - 1024) / 40);
     const photos = Array.from({ length: 60 }, (_, i) => ({
       path: `public/photos/photo-${i}.jpg`,
       type: "blob" as const,
-      size: 200 * 1024,
+      size: photoSize,
     }));
     const result = await planWorkspaceMount({
       ws: workspace({
@@ -212,7 +219,7 @@ describe("planWorkspaceMount — what the container actually gets", () => {
         ],
       }),
       read: async (path) => READ[path] ?? null,
-      readBinary: async () => new Uint8Array(200 * 1024),
+      readBinary: async () => new Uint8Array(photoSize),
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -227,15 +234,16 @@ describe("planWorkspaceMount — what the container actually gets", () => {
 
   it("hydrates the source before the photos, when the two cannot both fit", async () => {
     // The second screenshot's failure, reduced: assets hydrated FIRST spent the
-    // whole 8 MiB — 64 × 128 KiB is exactly the budget — so the text pass found
-    // nothing left, `src/` never mounted, and the preview showed only what was
-    // baked into `index.html` while React rendered nothing below it. Source
-    // first, photos with the remainder: a page with broken images is damaged,
-    // a page whose code never arrived is no app at all.
+    // whole budget, so the text pass found nothing left, `src/` never mounted,
+    // and the preview showed only what was baked into `index.html` while React
+    // rendered nothing below it. Source first, photos with the remainder: a page
+    // with broken images is damaged, a page whose code never arrived is no app
+    // at all. Sized against the live budget: 64 × 600 KiB out-spends 24 MiB.
+    const photoSize = Math.ceil(HYDRATE_MAX_BYTES / 30 / 1024) * 1024;
     const photos = Array.from({ length: 64 }, (_, i) => ({
       path: `public/photos/photo-${i}.jpg`,
       type: "blob" as const,
-      size: 128 * 1024,
+      size: photoSize,
     }));
     const result = await planWorkspaceMount({
       ws: workspace({
@@ -246,7 +254,7 @@ describe("planWorkspaceMount — what the container actually gets", () => {
         ],
       }),
       read: async (path) => READ[path] ?? null,
-      readBinary: async () => new Uint8Array(128 * 1024),
+      readBinary: async () => new Uint8Array(photoSize),
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -258,6 +266,32 @@ describe("planWorkspaceMount — what the container actually gets", () => {
     const notes = result.result.notes.join("\n");
     expect(notes).toContain("left out of the workspace");
     expect(notes).toContain("2 of 2 candidate text files");
+  });
+
+  it("mounts videos like any other asset, under their own ceiling", async () => {
+    // The restaurant preview's silence, reduced: video was EXCLUDED by class —
+    // every .mp4 skipped with "beyond this workspace's byte budget" — so a hero
+    // loop could never appear no matter how small it was. Video rides the same
+    // budget as everything now, with the bigger ceiling its shape needs.
+    const hero = new Uint8Array(64);
+    const result = await planWorkspaceMount({
+      ws: workspace({
+        tree: [
+          { path: "package.json", type: "blob", size: 20 },
+          { path: "public/video/hero.mp4", type: "blob", size: 5 * 1024 * 1024 },
+          { path: "public/video/giant.webm", type: "blob", size: HYDRATE_MAX_VIDEO_BYTES + 1024 },
+        ],
+      }),
+      read: async (path) => READ[path] ?? null,
+      readBinary: async () => hero,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const paths = result.result.plan.files.map((f) => f.path);
+    expect(paths).toContain("public/video/hero.mp4");
+    expect(paths).not.toContain("public/video/giant.webm");
+    const written = result.result.plan.tree["public"] as { directory: { video: { directory: { "hero.mp4": { file: { contents: Uint8Array } } } } } };
+    expect(written.directory.video.directory["hero.mp4"].file.contents).toBe(hero);
   });
 
   it("never fetches archives or executables even with a byte reader", async () => {

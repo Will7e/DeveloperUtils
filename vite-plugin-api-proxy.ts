@@ -181,6 +181,135 @@ export function apiProxyPlugin(): Plugin {
       return;
     }
 
+    // ── Dev stub for the OAuth exchange edge function ──
+    // Mirrors api/oauth-exchange.ts: completes the cloud-sync PKCE exchange
+    // server-side in local development — required for Google, whose Web
+    // application client demands client_secret at the token endpoint.
+    if (req.url?.startsWith("/api/oauth-exchange")) {
+      const origin = (req.headers["origin"] as string) || "";
+      const allowedOrigin = isAllowedDevOrigin(origin) ? origin || "http://localhost:5173" : "";
+      res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+      res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+
+      if (req.method === "OPTIONS") {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      if (req.method !== "POST") {
+        res.statusCode = 405;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+        return;
+      }
+
+      let exchangeBodyRaw = "";
+      req.on("data", (chunk) => (exchangeBodyRaw += chunk));
+      req.on("end", async () => {
+        // Dynamically read env so updates to .env while dev is running are picked up
+        const currentEnv = { ...devEnv, ...loadEnv("development", process.cwd(), "") };
+        const googleClientId =
+          currentEnv.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID || currentEnv.VITE_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || "";
+        const googleClientSecret =
+          currentEnv.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET || currentEnv.VITE_GOOGLE_SECRET || process.env.VITE_GOOGLE_SECRET || "";
+        const msftClientId =
+          currentEnv.MSFT_CLIENT_ID || process.env.MSFT_CLIENT_ID || currentEnv.VITE_MSFT_CLIENT_ID || process.env.VITE_MSFT_CLIENT_ID || "";
+
+        let parsedBody: { provider?: string; code?: string; codeVerifier?: string } = {};
+        try {
+          parsedBody = JSON.parse(exchangeBodyRaw || "{}");
+        } catch {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: "Invalid JSON body" }));
+          return;
+        }
+
+        const provider = parsedBody.provider === "googledrive" ? "googledrive" : parsedBody.provider === "onedrive" ? "onedrive" : null;
+        const code = typeof parsedBody.code === "string" ? parsedBody.code : "";
+        const codeVerifier = typeof parsedBody.codeVerifier === "string" ? parsedBody.codeVerifier : "";
+        if (!provider || !code || !codeVerifier) {
+          res.statusCode = 400;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: "Missing provider, code, or codeVerifier." }));
+          return;
+        }
+
+        const isGoogle = provider === "googledrive";
+        const clientId = isGoogle ? googleClientId : msftClientId;
+        const clientSecret = isGoogle ? googleClientSecret : "";
+        if (!clientId || (isGoogle && !clientSecret)) {
+          res.setHeader("Content-Type", "application/json");
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: isGoogle
+                ? "Google token exchange is not configured in local dev — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (or VITE_ equivalents) in your .env file."
+                : "OneDrive token exchange is not configured in local dev — set MSFT_CLIENT_ID (or VITE_MSFT_CLIENT_ID) in your .env file.",
+            })
+          );
+          return;
+        }
+
+        const form = new URLSearchParams({
+          client_id: clientId,
+          code,
+          code_verifier: codeVerifier,
+          redirect_uri: `${origin || "http://localhost:5173"}/oauth/callback.html`,
+          grant_type: "authorization_code",
+        });
+        if (clientSecret) form.set("client_secret", clientSecret);
+
+        const tokenUrl = isGoogle
+          ? "https://oauth2.googleapis.com/token"
+          : "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+
+        try {
+          const tokenRes = await fetch(tokenUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: form,
+          });
+          const data = (await tokenRes.json().catch(() => ({}))) as {
+            access_token?: string;
+            refresh_token?: string;
+            expires_in?: number;
+            scope?: string;
+            error?: string;
+            error_description?: string;
+          };
+          res.setHeader("Content-Type", "application/json");
+          if (!tokenRes.ok || !data.access_token) {
+            res.statusCode = 502;
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: data.error_description || data.error || `Token exchange failed (HTTP ${tokenRes.status}).`,
+              })
+            );
+            return;
+          }
+          res.end(
+            JSON.stringify({
+              ok: true,
+              tokens: {
+                accessToken: data.access_token,
+                refreshToken: data.refresh_token ?? null,
+                expiresIn: data.expires_in ?? 3600,
+                scope: data.scope ?? "",
+              },
+            })
+          );
+        } catch (err) {
+          res.statusCode = 502;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : "Token exchange network error." }));
+        }
+      });
+      return;
+    }
+
     // ── Dev stub for the license edge function ──
     // In production /api/license runs as a Vercel edge function. In dev
     // there is no server route, so without this stub the SPA fallback

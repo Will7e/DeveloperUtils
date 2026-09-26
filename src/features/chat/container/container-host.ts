@@ -179,6 +179,28 @@ function rememberRuntime(instance: ContainerRuntime | null): void {
   (globalThis as Record<string, unknown>)[RUNTIME_SLOT] = instance ?? undefined;
 }
 
+/**
+ * Whether the runtime ACCEPTED the injected preview script.
+ *
+ * `setPreviewScript` is the only mechanism that reaches pages a dev server
+ * GENERATES (Next.js, Nuxt — there is no index.html to rewrite at mount time);
+ * on a runtime that predates the API the call throws, mount-time injection
+ * still covers static pages, and the render smoke probe must not then run
+ * against a page that can never answer it. Recorded at boot so the probe's
+ * gate reads a fact instead of re-deriving one.
+ */
+let previewScriptInstalled = false;
+
+/** Whether the running runtime injects the control bootstrap into served HTML */
+export function previewScriptInstalledAtRuntime(): boolean {
+  return previewScriptInstalled;
+}
+
+/** Test seam: clears the boot-time flag along with the rest of the host state */
+export function resetPreviewScriptInstalled(): void {
+  previewScriptInstalled = false;
+}
+
 const listeners = new Set<() => void>();
 const eventListeners = new Set<(event: WorkspaceEvent) => void>();
 let revision = 0;
@@ -278,6 +300,7 @@ export function resetContainerHost(): void {
   status = IDLE;
   mountedPaths = [];
   holder = null;
+  previewScriptInstalled = false;
   revision += 1;
 }
 
@@ -353,6 +376,7 @@ export async function ensureContainer(): Promise<ContainerRuntime | null> {
       // covers static pages.
       try {
         await instance.setPreviewScript(bootstrapScriptBody());
+        previewScriptInstalled = true;
       } catch {
         // Older runtimes may not expose it; mount-time injection still applies.
       }

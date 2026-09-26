@@ -15,6 +15,7 @@ import {
   formatOutline,
   injectBootstrap,
   looksLikeHtmlDocument,
+  mediaStateOf,
   serializeSnapshot,
   type SerializedSnapshot,
 } from "./preview-control";
@@ -85,7 +86,9 @@ describe("serializeSnapshot — the outline the model reads", () => {
     const doc = fakeDocument(
       fakeElement("div", {}, [
         fakeElement("input", { type: "text", placeholder: "Email" }),
-        fakeElement("img", { alt: "Logo" }),
+        // The src keeps the media diagnostic silent — this test pins LABEL
+        // selection, not media state (which has its own describe block).
+        fakeElement("img", { alt: "Logo", src: "/logo.png" }),
       ])
     ) as Document;
     const snapshot = serializeSnapshot(doc);
@@ -123,6 +126,88 @@ describe("serializeSnapshot — the outline the model reads", () => {
     const snapshot = serializeSnapshot(doc);
     expect(snapshot.nodes).toEqual([]);
     expect(snapshot.truncated).toBe(false);
+  });
+});
+
+describe("mediaStateOf — the three failures a 200-response hides", () => {
+  it("names a broken image — request done, pixels never decoded — instead of reading it as healthy", () => {
+    // The Supabase-Storage shape: the fetch succeeds or the bucket answers,
+    // but the element never gets pixels (CORS, a 403 body, a decode miss).
+    const img = fakeElement("img", { src: "https://x.supabase.co/storage/v1/object/public/menu/hero.jpg", alt: "Hero" });
+    Object.assign(img, { complete: true, naturalWidth: 0 });
+    const state = mediaStateOf(img as unknown as Element);
+    expect(state).toContain("BROKEN");
+    expect(state).toContain("hero.jpg");
+  });
+
+  it("distinguishes loaded-but-0\u00d70 — CSS, not the network — from a failed load", () => {
+    // The case that started this: every request passes and the page still
+    // shows nothing, because the element's box is empty. Different fix, so a
+    // different sentence.
+    const img = fakeElement("img", { src: "https://x/hero.jpg" });
+    Object.assign(img, {
+      complete: true,
+      naturalWidth: 800,
+      getBoundingClientRect: () => ({ width: 0, height: 0 }),
+    });
+    const state = mediaStateOf(img as unknown as Element);
+    expect(state).toContain("0\u00d70");
+    expect(state).toContain("CSS");
+    expect(state).not.toContain("BROKEN");
+  });
+
+  it("stays silent for a healthy image", () => {
+    const img = fakeElement("img", { src: "https://x/hero.jpg" });
+    Object.assign(img, {
+      complete: true,
+      naturalWidth: 800,
+      getBoundingClientRect: () => ({ width: 400, height: 300 }),
+    });
+    expect(mediaStateOf(img as unknown as Element)).toBeNull();
+  });
+
+  it("says what an image with no source is missing", () => {
+    const img = fakeElement("img", { alt: "empty slot" });
+    expect(mediaStateOf(img as unknown as Element)).toContain("no src");
+  });
+
+  it("reports a not-yet-playing video as pending, not broken", () => {
+    const video = fakeElement("video", { src: "https://x/hero.mp4" });
+    Object.assign(video, { readyState: 0, getBoundingClientRect: () => ({ width: 640, height: 360 }) });
+    const state = mediaStateOf(video as unknown as Element);
+    expect(state).toContain("not playing yet");
+    expect(state).not.toContain("BROKEN");
+  });
+
+  it("names a video whose decode failed", () => {
+    const video = fakeElement("video", { src: "https://x/hero.mp4" });
+    Object.assign(video, { readyState: 0, error: new Error("DEMUXER_ERROR"), getBoundingClientRect: () => ({ width: 640, height: 360 }) });
+    expect(mediaStateOf(video as unknown as Element)).toContain("BROKEN");
+  });
+
+  it("leaves a DOM without load state alone — a fixture is not a verdict", () => {
+    // A src WITH no exposed load state says nothing; the src-LESS case is
+    // named by its own test above, because missing source is a structural
+    // fact visible without any load state at all.
+    const img = fakeElement("img", { alt: "Logo", src: "/logo.png" });
+    expect(mediaStateOf(img as unknown as Element)).toBeNull();
+  });
+
+  it("the outline carries the media state on the image row itself", () => {
+    const img = fakeElement("img", { src: "https://x/hero.jpg", alt: "Hero" });
+    Object.assign(img, { complete: true, naturalWidth: 0 });
+    const doc = fakeDocument(fakeElement("div", {}, [img])) as Document;
+    const snapshot = serializeSnapshot(doc);
+    const row = snapshot.nodes.find((n) => n.kind === "image");
+    expect(row?.label).toContain("Hero");
+    expect(row?.label).toContain("BROKEN");
+  });
+
+  it("the bootstrap's media logic tracks the host side (a 0x0 image and a BROKEN one are named)", () => {
+    const source = bootstrapSource();
+    expect(source).toContain("naturalWidth");
+    expect(source).toContain("readyState");
+    expect(source).toContain("check CSS");
   });
 });
 

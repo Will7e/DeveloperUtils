@@ -267,6 +267,65 @@ describe("workspace summary in the chat list", () => {
     const next = await store().ensureWorkspace(id);
     expect(next!.baseCommitSha).toBe("sha");
     expect(store().workspaces[id]).toBe(ws);
+    // This test never calls the mock, so a queued `Once` value would sit here
+    // poisoning the NEXT test that queues one. Reset instead of leaking.
+    vi.mocked(getBranchHead).mockReset();
+  });
+
+  it("re-pins a PERSISTED workspace too — the reload path kept serving the old revision", async () => {
+    // The in-memory re-pin above never fired after a page reload: the first
+    // ensureWorkspace call loaded the pinned record from IndexedDB and
+    // returned it WITHOUT checking the branch, so the first preview after
+    // every reload mounted the old revision (the sulkasnickeri loop,
+    // reload edition — the exact state the user kept retrying into).
+    useChatStore.setState({
+      settings: { ...store().settings, github: { ...store().settings.github, token: "t" } },
+    });
+    const { getBranchHead } = await import("@/features/chat/lib/github-write");
+    vi.mocked(getBranchHead).mockReset();
+    vi.mocked(getBranchHead).mockResolvedValueOnce({ commitSha: "sha-new", object: null } as never);
+
+    const id = store().createConversation("model-a", { repo: WEB });
+    const ws = { ...workspaceWith(0, id), tree: [{ path: "src/app.ts", type: "blob" as const }] };
+    store().setWorkspace(id, ws);
+    await persistWorkspace(ws);
+    // The reload: the in-memory copy is gone; only the IndexedDB record remains.
+    useChatStore.setState((s) => {
+      const workspaces = { ...s.workspaces };
+      delete workspaces[id];
+      return { workspaces };
+    });
+
+    const next = await store().ensureWorkspace(id);
+    expect(next).not.toBeNull();
+    expect(next!.baseCommitSha).toBe("sha-new");
+    expect(next!.tree.length).toBeGreaterThan(0);
+  });
+
+  it("returns the persisted workspace untouched when the branch has not moved", async () => {
+    // The check costs one ref read; a branch that has not moved must not
+    // churn the record (a re-hydrate would reset file mtimes and drop any
+    // lazy reads the working copy had collected).
+    useChatStore.setState({
+      settings: { ...store().settings, github: { ...store().settings.github, token: "t" } },
+    });
+    const { getBranchHead } = await import("@/features/chat/lib/github-write");
+    vi.mocked(getBranchHead).mockReset();
+    vi.mocked(getBranchHead).mockResolvedValueOnce({ commitSha: "sha", object: null } as never);
+
+    const id = store().createConversation("model-a", { repo: WEB });
+    const ws = { ...workspaceWith(0, id), tree: [{ path: "src/app.ts", type: "blob" as const }] };
+    store().setWorkspace(id, ws);
+    await persistWorkspace(ws);
+    useChatStore.setState((s) => {
+      const workspaces = { ...s.workspaces };
+      delete workspaces[id];
+      return { workspaces };
+    });
+
+    const next = await store().ensureWorkspace(id);
+    expect(next).not.toBeNull();
+    expect(next!.baseCommitSha).toBe("sha");
   });
 
   it("leaves other conversations' summaries alone", () => {

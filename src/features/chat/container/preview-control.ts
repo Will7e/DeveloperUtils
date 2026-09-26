@@ -43,7 +43,7 @@ export const PREVIEW_CONTROL_RESPONSE = "intab-preview-control-result";
  */
 export interface OutlineNode {
   uid: string | null;
-  kind: "heading" | "text" | "button" | "link" | "input" | "select" | "image" | "other";
+  kind: "heading" | "text" | "button" | "link" | "input" | "select" | "image" | "video" | "other";
   /** The readable text (label, value, alt) */
   label: string;
   /** Indentation depth, so the outline reads as a tree after flattening */
@@ -83,9 +83,69 @@ function kindOf(tagName: string): OutlineNode["kind"] {
       return "select";
     case "img":
       return "image";
+    case "video":
+      return "video";
     default:
       return "other";
   }
+}
+
+/**
+ * The MEDIA STATE an element carries, as the suffix the outline shows — null
+ * when the element is fine (or when the DOM does not expose the evidence, as
+ * a test fixture does not).
+ *
+ * Three failures a 200-response hides, each named because each has a
+ * different fix:
+ *
+ *   • BROKEN — the request failed at the element level (`img.complete` with
+ *     `naturalWidth 0`, a video `error`): the URL answered, the decode or
+ *     the CORS or the bucket did not.
+ *   • 0×0 — the media LOADED but the element's box is empty: layout, not
+ *     network. The most common way a correctly-fetching site still shows
+ *     nothing.
+ *   • not loaded yet — `img.complete === false` / video `readyState 0` with
+ *     no error: lazy-loading or `preload=none`, not a fault.
+ *
+ * Every probe is gated on the property existing, so a DOM without it (a
+ * fixture, a stub) yields null and the outline stays silent rather than
+ * guessing.
+ */
+export function mediaStateOf(element: Element): string | null {
+  const tag = element.tagName.toLowerCase();
+  if (tag !== "img" && tag !== "video") return null;
+  const el = element as Element & {
+    complete?: boolean;
+    naturalWidth?: number;
+    readyState?: number;
+    error?: unknown;
+  };
+  const src = element.getAttribute("src") ?? "";
+  const rectFn = (element as unknown as { getBoundingClientRect?: () => { width: number; height: number } })
+    .getBoundingClientRect;
+  const box = typeof rectFn === "function" ? rectFn.call(element) : null;
+  const zeroBox = box ? box.width === 0 && box.height === 0 : null;
+
+  if (tag === "img") {
+    const hasSource = Boolean(element.getAttribute("src") || element.getAttribute("srcset"));
+    if (!hasSource) return "has no src attribute";
+    if (typeof el.complete !== "boolean") return null; // no load state exposed — say nothing
+    if (el.complete && (el.naturalWidth ?? 0) === 0) return `BROKEN (failed to load: ${src})`;
+    if (!el.complete) return "still loading";
+    if (zeroBox) return "loaded but rendered at 0\u00d70 — check CSS (display/size/overflow), not the network";
+    return null;
+  }
+
+  // video
+  const hasChildSource = Array.from(element.children ?? []).some(
+    (child) => (child as Element).tagName?.toLowerCase?.() === "source"
+  );
+  if (!src && !hasChildSource && !element.getAttribute("poster")) return "has no source";
+  if (typeof el.readyState !== "number") return null; // no media state exposed — say nothing
+  if (el.error) return `BROKEN (decode failed: ${src})`;
+  if (el.readyState === 0) return `not playing yet (readyState 0${src ? `: ${src}` : ""})`;
+  if (zeroBox) return "ready but rendered at 0\u00d70 — check CSS (display/size/overflow), not the network";
+  return null;
 }
 
 /** The readable text of one element, by kind */
@@ -134,7 +194,8 @@ export function serializeSnapshot(document: Document): SerializedSnapshot {
 
     const isInteractive = INTERACTIVE.has(tag);
     const isHeading = kindOf(tag) === "heading";
-    const hasOwnText = isInteractive || isHeading || tag === "img" || (element.children.length === 0 && (element.textContent ?? "").trim().length > 0);
+    const isMedia = tag === "img" || tag === "video";
+    const hasOwnText = isInteractive || isHeading || isMedia || (element.children.length === 0 && (element.textContent ?? "").trim().length > 0);
 
     // Only nodes that would APPEAR count toward the total: a bare container
     // renders nothing, and counting it would make an empty page read as
@@ -142,7 +203,17 @@ export function serializeSnapshot(document: Document): SerializedSnapshot {
     if (hasOwnText) {
       totalNodes += 1;
       const uid = isInteractive ? nextUid(tag) : null;
-      nodes.push({ uid, kind: kindOf(tag), label: labelOf(element), depth });
+      // The media suffix is what makes a broken page diagnosable from the
+      // outline alone: "image: Hero — BROKEN (failed to load: …)" and
+      // "loaded but rendered at 0×0" are different problems with different
+      // fixes, and without it both read as a healthy image with alt text.
+      const media = mediaStateOf(element);
+      nodes.push({
+        uid,
+        kind: kindOf(tag),
+        label: media ? `${labelOf(element)} — ${media}` : labelOf(element),
+        depth,
+      });
     }
 
     for (const child of Array.from(element.children)) {
@@ -308,13 +379,45 @@ export function bootstrapScriptBody(): string {
       var text = (el.textContent || "").replace(/\\s+/g, " ").trim();
       return text || "(" + tag + ")";
     }
+    // Media state, matching the host-side mediaStateOf: BROKEN (failed at the
+    // element level despite the network), 0x0 (loaded, but CSS gives it no
+    // box), or not-yet-loaded. Gated on the property existing so a stub DOM
+    // stays silent. This is the copy that RUNS — the served page gets this
+    // bootstrap through setPreviewScript — so it must track the host side.
+    function mediaState(el) {
+      var tag = el.tagName.toLowerCase();
+      if (tag !== "img" && tag !== "video") return null;
+      var src = el.getAttribute("src") || "";
+      var box = null;
+      try { box = el.getBoundingClientRect(); } catch (err) { box = null; }
+      var zeroBox = !!(box && box.width === 0 && box.height === 0);
+      if (tag === "img") {
+        if (!src && !el.getAttribute("srcset")) return "has no src attribute";
+        if (typeof el.complete !== "boolean") return null;
+        if (el.complete && (el.naturalWidth || 0) === 0) return "BROKEN (failed to load: " + src + ")";
+        if (!el.complete) return "still loading";
+        if (zeroBox) return "loaded but rendered at 0\u00d70 \u2014 check CSS (display/size/overflow), not the network";
+        return null;
+      }
+      var hasSource = false;
+      for (var s = 0; s < el.children.length; s += 1) {
+        if (el.children[s].tagName && el.children[s].tagName.toLowerCase() === "source") hasSource = true;
+      }
+      if (!src && !hasSource && !el.getAttribute("poster")) return "has no source";
+      if (typeof el.readyState !== "number") return null;
+      if (el.error) return "BROKEN (decode failed: " + src + ")";
+      if (el.readyState === 0) return "not playing yet (readyState 0" + (src ? ": " + src : "") + ")";
+      if (zeroBox) return "ready but rendered at 0\u00d70 \u2014 check CSS (display/size/overflow), not the network";
+      return null;
+    }
     function visit(el, depth) {
       if (nodes.length >= ${PREVIEW_SNAPSHOT_MAX_NODES}) return;
       var tag = el.tagName.toLowerCase();
       if (SKIP[tag]) return;
       var interactiveTag = tag === "a" || tag === "button" || tag === "input" || tag === "textarea" || tag === "select";
       var heading = /^h[1-6]$/.test(tag);
-      var own = interactiveTag || heading || tag === "img" ||
+      var mediaTag = tag === "img" || tag === "video";
+      var own = interactiveTag || heading || mediaTag ||
         (el.children.length === 0 && (el.textContent || "").trim().length > 0);
       // Same rule as the host-side serializer: only visible rows count.
       if (own) {
@@ -325,7 +428,8 @@ export function bootstrapScriptBody(): string {
           uid = tag[0] + interactive;
           el.setAttribute("data-intab-uid", uid);
         }
-        nodes.push({ uid: uid, kind: heading ? "heading" : tag === "a" ? "link" : tag === "button" ? "button" : tag === "img" ? "image" : interactiveTag ? "input" : "other", label: labelOf(el), depth: depth });
+        var state = mediaState(el);
+        nodes.push({ uid: uid, kind: heading ? "heading" : tag === "a" ? "link" : tag === "button" ? "button" : tag === "img" ? "image" : tag === "video" ? "video" : interactiveTag ? "input" : "other", label: state ? labelOf(el) + " \u2014 " + state : labelOf(el), depth: depth });
       }
       for (var i = 0; i < el.children.length; i += 1) visit(el.children[i], depth + 1);
     }

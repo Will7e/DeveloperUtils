@@ -54,7 +54,7 @@ export function InTabLogo({
 
   return (
     <svg
-      viewBox={variant === "glyph" ? "11 15 26 26" : "0 0 48 48"}
+      viewBox={variant === "glyph" ? "12 19 24 18" : "0 0 48 48"}
       width={size}
       height={size}
       fill="none"
@@ -124,33 +124,24 @@ export function InTabLogo({
         </g>
       )}
 
-      {/* Monogram: 'in' */}
-      <g className="intab-logo-monogram">
-        {/* Letter 'i' Dot (Glowing Accent Beacon) */}
-        <circle
-          cx="16"
-          cy="19.5"
-          r="2.4"
-          className="intab-logo-dot"
-        />
-
-        {/* Letter 'i' Stem */}
+      {/* Developer Prompt: Terminal Chevron & Cursor */}
+      <g className="intab-logo-glyph">
         <path
-          d="M 16 27 L 16 36.5"
-          className="intab-logo-letter-i"
+          d="M 15 23 L 21.5 28 L 15 33"
+          className="intab-logo-chevron"
           fill="none"
-          strokeWidth="4.8"
-          strokeLinecap="round"
-        />
-
-        {/* Letter 'n' Arch & Stems */}
-        <path
-          d="M 24 36.5 L 24 27 C 24 24.8 25.8 23.2 28 23.2 C 30.2 23.2 32 24.8 32 27 L 32 36.5"
-          className="intab-logo-letter-n"
-          fill="none"
-          strokeWidth="4.8"
+          stroke="#0070f3"
+          strokeWidth="3.2"
           strokeLinecap="round"
           strokeLinejoin="round"
+        />
+        <path
+          d="M 24.5 33 L 33 33"
+          className="intab-logo-cursor"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
         />
       </g>
     </svg>

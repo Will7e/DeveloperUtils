@@ -45,12 +45,14 @@ export interface TreeEntryLike {
 
 /** Files hydrated for one mount. Below the mount ceiling, leaving room for edits */
 export const HYDRATE_MAX_FILES = 900;
-/** Total bytes hydrated. The container is a tab, not a disk */
-export const HYDRATE_MAX_BYTES = 8 * 1024 * 1024;
+/** Total bytes hydrated. The container is a tab, not a disk — but a media-bearing site is what the preview is FOR, so the budget holds a real gallery plus a hero video */
+export const HYDRATE_MAX_BYTES = 24 * 1024 * 1024;
 /** One file's ceiling for TEXT: beyond this it is data, not source */
 export const HYDRATE_MAX_FILE_BYTES = 512 * 1024;
-/** One asset's ceiling for BYTES: generous for a photo, fatal for a video */
-export const HYDRATE_MAX_ASSET_BYTES = 2 * 1024 * 1024;
+/** One image/font/audio asset's ceiling: hero JPEGs run 3–8 MB unoptimized, and a 2 MB cap was what blanked a restaurant site's gallery */
+export const HYDRATE_MAX_ASSET_BYTES = 8 * 1024 * 1024;
+/** One video's ceiling: a hero loop is routinely 5–15 MB, and skipping every video left restaurant previews permanently silent */
+export const HYDRATE_MAX_VIDEO_BYTES = 16 * 1024 * 1024;
 /** Parallel reads: enough to hide latency, few enough to stay inside rate limits */
 export const HYDRATE_CONCURRENCY = 6;
 
@@ -64,16 +66,20 @@ const EXCLUDED_PREFIXES: { pattern: RegExp; reason: string }[] = [
 /**
  * Extensions fetched as BYTES through `readBinary`, not skipped.
  *
- * Images, fonts, and audio are what a preview is FOR — the most common way a
- * real site is broken is its assets missing, which reads as a broken project
- * rather than a partial mount. Never-fetched classes stay excluded outright:
+ * Images, videos, fonts, and audio are what a preview is FOR — the most common
+ * way a real site is broken is its media missing, which reads as a broken
+ * project rather than a partial mount. A restaurant site without its photos and
+ * its hero video is exactly that. Never-fetched classes stay excluded outright:
  * executables and archives (`zip|gz|exe|wasm…`) have no role inside a browser
- * workspace that installs its own dependencies, documents are not served by a
- * dev server this tier runs, and media beyond the asset cap (video) is a byte
- * budget the tab cannot spare.
+ * workspace that installs its own dependencies, and documents are not served by
+ * a dev server this tier runs. Media rides the SAME budget as everything else
+ * and is dropped by it with a stated reason — never by a class exclusion.
  */
 const BINARY_ASSET =
-  /\.(png|jpe?g|gif|webp|avif|ico|bmp|svgz|woff2?|ttf|otf|eot|mp3|wav|ogg|flac)$/i;
+  /\.(png|jpe?g|gif|webp|avif|ico|bmp|svgz|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|mp4|webm|mov|m4v|avi|mkv|ogv)$/i;
+
+/** Video assets get the video ceiling, not the image one */
+const VIDEO_ASSET = /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/i;
 
 /**
  * Files hydrated ahead of every cap, because the workspace's own decisions read
@@ -90,7 +96,6 @@ const CRITICAL_MANIFESTS = ["package.json", "package-lock.json"] as const;
 
 /** Extensions never fetched, in any form, with the reason a reader gets */
 const BINARY_EXCLUDED: { pattern: RegExp; reason: string }[] = [
-  { pattern: /\.(mp4|webm|mov|avi|mkv)$/i, reason: "video is beyond this workspace's byte budget" },
   { pattern: /\.(zip|gz|tgz|bz2|xz|7z|rar|jar|wasm|exe|dll|so|dylib|node|bin|dat|sqlite3?|db|pack|class|pyc|onnx|pt|safetensors)$/i, reason: "an executable or archive cannot run or be read in a browser workspace" },
   { pattern: /\.(pdf|docx?|xlsx?|pptx?)$/i, reason: "a document is not part of what a dev server serves here" },
 ];
@@ -135,12 +140,14 @@ export async function hydrateTree(input: {
   maxBytes?: number;
   maxFileBytes?: number;
   maxAssetBytes?: number;
+  maxVideoBytes?: number;
   concurrency?: number;
 }): Promise<HydratedTree> {
   const maxFiles = input.maxFiles ?? HYDRATE_MAX_FILES;
   const maxBytes = input.maxBytes ?? HYDRATE_MAX_BYTES;
   const maxFileBytes = input.maxFileBytes ?? HYDRATE_MAX_FILE_BYTES;
   const maxAssetBytes = input.maxAssetBytes ?? HYDRATE_MAX_ASSET_BYTES;
+  const maxVideoBytes = input.maxVideoBytes ?? HYDRATE_MAX_VIDEO_BYTES;
 
   const candidates: string[] = [];
   const assets: string[] = [];
@@ -173,8 +180,11 @@ export async function hydrateTree(input: {
         skipped.push({ path: entry.path, reason: "binary asset: no byte reader available for this mount" });
         continue;
       }
-      if (typeof entry.size === "number" && entry.size > maxAssetBytes) {
-        skipped.push({ path: entry.path, reason: `over ${Math.round(maxAssetBytes / 1024)} KiB asset cap` });
+      // A video's ceiling is its own, because the two shapes differ by an order
+      // of magnitude and one cap for both was how every video got skipped.
+      const cap = VIDEO_ASSET.test(entry.path) ? maxVideoBytes : maxAssetBytes;
+      if (typeof entry.size === "number" && entry.size > cap) {
+        skipped.push({ path: entry.path, reason: `over ${Math.round(cap / 1024)} KiB asset cap` });
         continue;
       }
       assets.push(entry.path);
@@ -314,7 +324,7 @@ export async function hydrateTree(input: {
       let note =
         `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files, all of them present.`;
       if (assetOverByteCap > 0) {
-        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace — a page may show missing images for them, and a command that needs one of those files will fail for that reason, not because of the change.`;
+        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace — a page may show missing images or videos for them, and a command that needs one of those files will fail for that reason, not because of the change.`;
       }
       notes.push(note);
       // Unread entries still get their own note below; nothing else to add.
@@ -322,7 +332,7 @@ export async function hydrateTree(input: {
       let note =
         `The workspace holds ${base.length} file(s) from this revision — ${textMounted} of ${candidates.length} candidate text files; it is too large to mount in full${overClause}. A command that needs a file which is not here will fail for that reason, not because of the change — say so rather than reporting that failure as real.`;
       if (assetOverByteCap > 0) {
-        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them were left out of the workspace.`;
+        note += ` Binary assets share that byte budget and ${assetOverByteCap} of them (images and videos alike) were left out of the workspace.`;
       }
       notes.push(note);
     }

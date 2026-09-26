@@ -137,11 +137,31 @@ export type OAuthPopupResult =
   | { ok: true; tokens: { accessToken: string; refreshToken: string | null; expiresIn: number; scope: string } }
   | { ok: false; error: string };
 
-/** Waits (polling localStorage, storage events, and postMessage) for the callback page to deliver the result. */
+/** BroadcastChannel name the callback page relays on — must match public/oauth/callback.js */
+const OAUTH_BC_NAME = "intab-cloud-sync-oauth";
+
+/**
+ * Subscribes to the callback page's BroadcastChannel relay. COOP
+ * `same-origin` nulls `window.opener` once the popup has crossed to
+ * accounts.google.com / login.microsoftonline.com, so postMessage from the
+ * callback cannot reach us — the channel is per-origin and survives that.
+ */
+function subscribeToCallbackRelay(onMessage: (e: MessageEvent) => void): BroadcastChannel | null {
+  try {
+    const channel = new BroadcastChannel(OAUTH_BC_NAME);
+    channel.onmessage = onMessage;
+    return channel;
+  } catch {
+    return null; // No BroadcastChannel support — localStorage polling remains
+  }
+}
+
+/** Waits (polling localStorage, storage events, and relays) for the callback page to deliver the result. */
 export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<OAuthPopupResult> {
   return new Promise((resolve, reject) => {
     let resolved = false;
     const startedAt = Date.now();
+    let relay: BroadcastChannel | null = null;
 
     const finish = (result: OAuthPopupResult) => {
       if (resolved) return;
@@ -149,6 +169,7 @@ export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<O
       window.clearInterval(poll);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("message", onMessage);
+      relay?.close();
       resolve(result);
     };
 
@@ -161,6 +182,9 @@ export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<O
     window.addEventListener("storage", onStorage);
 
     const onMessage = (e: MessageEvent) => {
+      // BroadcastChannel messages carry the page's own origin; postMessage
+      // from the callback is only trusted when it is genuinely same-origin.
+      if (e.origin !== window.location.origin) return;
       if (e.data?.type === "intab-oauth-complete" && e.data?.state === state) {
         if (e.data.tokens) {
           cleanupOAuthFlow(state);
@@ -175,6 +199,7 @@ export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<O
       }
     };
     window.addEventListener("message", onMessage);
+    relay = subscribeToCallbackRelay(onMessage);
 
     const poll = window.setInterval(() => {
       const result = consumeOAuthResult(state);
@@ -186,6 +211,7 @@ export function waitForOAuthResult(state: string, timeoutMs = 300000): Promise<O
         window.clearInterval(poll);
         window.removeEventListener("storage", onStorage);
         window.removeEventListener("message", onMessage);
+        relay?.close();
         cleanupOAuthFlow(state);
         reject(new Error("Sign-in timed out or was cancelled."));
       }
@@ -223,6 +249,7 @@ export function openOAuthPopupAndAwaitResult(
     let settled = false;
     let pollTimer: number | null = null;
     let timeoutTimer: number | null = null;
+    let relay: BroadcastChannel | null = null;
     const startedAt = Date.now();
 
     const cleanup = () => {
@@ -231,6 +258,7 @@ export function openOAuthPopupAndAwaitResult(
       if (timeoutTimer !== null) clearTimeout(timeoutTimer);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("message", onMessage);
+      relay?.close();
     };
 
     const finish = (result: OAuthPopupResult) => {
@@ -253,6 +281,9 @@ export function openOAuthPopupAndAwaitResult(
     window.addEventListener("storage", onStorage);
 
     const onMessage = (e: MessageEvent) => {
+      // BroadcastChannel messages carry the page's own origin; postMessage
+      // from the callback is only trusted when it is genuinely same-origin.
+      if (e.origin !== window.location.origin) return;
       if (e.data?.type === "intab-oauth-complete" && e.data?.state === state) {
         if (e.data.tokens) {
           cleanupOAuthFlow(state);
@@ -267,6 +298,7 @@ export function openOAuthPopupAndAwaitResult(
       }
     };
     window.addEventListener("message", onMessage);
+    relay = subscribeToCallbackRelay(onMessage);
 
     pollTimer = window.setInterval(() => {
       if (settled) return;
@@ -276,8 +308,13 @@ export function openOAuthPopupAndAwaitResult(
         return;
       }
 
-      // Check popup closed, but give at least 5s grace to avoid COOP false-cancellation
-      if (Date.now() - startedAt > 5000) {
+      // Check popup closed — but NOT on a cross-origin isolated page. COOP
+      // `same-origin` puts the popup in its own browsing context group, and
+      // the handle then reports `closed === true` from the first tick while
+      // the user is still on the provider's consent screen — this check is
+      // what cancelled sign-ins five seconds in. The GitHub popup flow ships
+      // the same guard. The timeout below remains the backstop.
+      if (!window.crossOriginIsolated && Date.now() - startedAt > 5000) {
         try {
           if (popup.closed) {
             const lastCheck = consumeOAuthResult(state);
@@ -286,7 +323,13 @@ export function openOAuthPopupAndAwaitResult(
             } else {
               cleanup();
               cleanupOAuthFlow(state);
-              reject(new Error("Sign-in was cancelled or did not complete."));
+              reject(
+                new Error(
+                  "The sign-in window closed before completing. If it showed a provider error page, the likely cause is the redirect URI registered in the provider console — it must match " +
+                    window.location.origin +
+                    "/oauth/callback.html exactly, path included."
+                )
+              );
             }
           }
         } catch {
@@ -307,6 +350,39 @@ export function openOAuthPopupAndAwaitResult(
       reject(new Error("Sign-in timed out. Please try again."));
     }, timeoutMs);
   });
+}
+
+/** The redirect URI this origin would register with the provider console. */
+function defaultRedirectUri(): string {
+  try {
+    return `${window.location.origin}/oauth/callback.html`;
+  } catch {
+    return "/oauth/callback.html";
+  }
+}
+
+/**
+ * Translates a Microsoft authorize-stage error into actionable guidance, or
+ * null when the error is not one of the known configuration shapes. Azure's
+ * raw messages ("AADSTS9002326: Cross-origin token redemption…") name the
+ * protocol, not the fix — the redirect platform type is the fix, and it is
+ * only editable in the Azure portal.
+ */
+export function describeMicrosoftAuthorizeError(
+  raw: string,
+  redirectUri: string = defaultRedirectUri()
+): string | null {
+  const message = raw ?? "";
+  if (/AADSTS9002326|cross-origin token redemption/i.test(message)) {
+    return `Azure rejected the sign-in: ${redirectUri} is registered as platform "Web". In the Azure app registration, add it under Authentication as platform "Single-page application (SPA)" and retry.`;
+  }
+  if (/AADSTS50199|response_mode/i.test(message)) {
+    return 'Azure rejected the response mode. This app requests the default (fragment) response; if this persists, replace the platform "Web" redirect URI in Azure with a "Single-page application (SPA)" one.';
+  }
+  if (/AADSTS50011/i.test(message)) {
+    return `Azure did not recognize the redirect URI ${redirectUri}. Add it under Azure → Authentication → Redirect URIs as platform "Single-page application (SPA)", including the www host you are signed in on.`;
+  }
+  return null;
 }
 
 /** Reads and removes stored flow context for a state. */
@@ -356,12 +432,17 @@ export async function buildAuthorizeUrl(params: {
   }
 
   // OneDrive / Microsoft identity platform (consumers + orgs)
+  // No `response_mode` parameter: redirect URIs registered as platform "SPA"
+  // (the only type that accepts PKCE authorization-code requests from the
+  // browser) are required by Microsoft to return the code in the URL fragment
+  // and reject an explicit `response_mode=query` — the mismatch read to users
+  // as "the redirect URL was not correct" even with Azure configured exactly
+  // right. The callback page parses the fragment, so the default is fine.
   const url = new URL("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
   url.searchParams.set("client_id", params.clientId);
   url.searchParams.set("redirect_uri", params.redirectUri);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", params.scopes);
-  url.searchParams.set("response_mode", "query");
   url.searchParams.set("state", params.state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");

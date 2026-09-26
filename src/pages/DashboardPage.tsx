@@ -10,6 +10,7 @@ import { DemoStage } from "@/features/dashboard/sections/DemoStage";
 import { FaqSection } from "@/features/dashboard/sections/FaqSection";
 import { HeroSection } from "@/features/dashboard/sections/HeroSection";
 import { PrivacySection } from "@/features/dashboard/sections/PrivacySection";
+import { CloudSyncOverviewSection } from "@/features/dashboard/sections/CloudSyncOverviewSection";
 import { ShortcutsSection } from "@/features/dashboard/sections/ShortcutsSection";
 import { DashFooter } from "@/features/dashboard/sections/DashFooter";
 
@@ -20,6 +21,7 @@ export function DashboardPage() {
         <HeroSection />
         <DemoStage />
         <PrivacySection />
+        <CloudSyncOverviewSection />
         <ShortcutsSection />
         <FaqSection />
         <DashFooter />

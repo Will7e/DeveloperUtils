@@ -44,7 +44,30 @@ const PROCESS_BRACKET_REF = /\bprocess\.env\[\s*["'`]([A-Za-z_][A-Za-z0-9_]*)["'
 const RUNTIME_PROVIDED = new Set([
   "NODE_ENV", "NODE_OPTIONS", "PATH", "HOME", "PWD", "USER", "SHELL", "LANG", "TMPDIR",
   "npm_lifecycle_event", "npm_package_name", "npm_package_version", "PORT", "HOST",
+  // Vite's own import.meta.env members: provided by the framework on every
+  // build, so reading them is not an ask of the user. Without these, every
+  // Vite repo that reads `import.meta.env.MODE` reported a missing key.
+  "MODE", "BASE_URL", "PROD", "DEV", "SSR",
 ]);
+
+/**
+ * The bare service names the spawn env twins with framework prefixes — kept
+ * identical to `CLIENT_ALIAS_SERVICES` in runtime-env, because the doctor's
+ * "satisfied" verdict is only truthful when the spawn really synthesizes the
+ * twin. The dual-alias shape is what Lovable/bolt ship in every generated
+ * `.env` (`SUPABASE_URL` + `VITE_SUPABASE_URL`); here it is synthesized from
+ * whatever the repo carries instead of required in the file.
+ */
+const ALIASABLE_BARE = /^(SUPABASE|FIREBASE|SENTRY_DSN|POSTHOG|MAPBOX|ALGOLIA|STRIPE_PUBLISHABLE|GA_|GTM_)/i;
+
+const CLIENT_PREFIXES = ["VITE_", "NEXT_PUBLIC_", "NUXT_PUBLIC_"];
+
+/** `VITE_SUPABASE_URL` → `SUPABASE_URL`; a name with no client prefix → null */
+function stripClientPrefix(key: string): string | null {
+  const upper = key.toUpperCase();
+  const prefix = CLIENT_PREFIXES.find((candidate) => upper.startsWith(candidate));
+  return prefix ? key.slice(prefix.length) : null;
+}
 
 /**
  * Keys whose values are PUBLIC BY DESIGN in a browser app — the app itself
@@ -83,7 +106,7 @@ const KNOWN_CLIENT_SDKS: { dependency: RegExp; note: string }[] = [
 const DB_DRIVER_SDK = KNOWN_CLIENT_SDKS[KNOWN_CLIENT_SDKS.length - 1]!;
 
 export interface EnvDoctorFinding {
-  kind: "inferred" | "needs-key" | "blocked" | "note";
+  kind: "inferred" | "needs-key" | "blocked" | "note" | "client-read";
   /** The env key, when the finding is about one */
   key: string | null;
   message: string;
@@ -132,6 +155,31 @@ export function referencedEnvKeysOf(files: readonly { path: string; content: str
 }
 
 /**
+ * The BARE names the code reads through `import.meta.env` — the one shape no
+ * env injection can fix, because Vite inlines only prefixed names into a
+ * browser bundle. Key → the first file that reads it, so the report can name
+ * where the impossible read lives.
+ */
+export function bareClientReadsOf(files: readonly { path: string; content: string }[]): Map<string, string> {
+  const reads = new Map<string, string>();
+  for (const file of files) {
+    if (typeof file.content !== "string") continue;
+    if (file.path.startsWith("node_modules/")) continue;
+    for (const pattern of [VITE_REF, VITE_BRACKET_REF]) {
+      pattern.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(file.content)) !== null) {
+        const key = match[1]!;
+        if (RUNTIME_PROVIDED.has(key)) continue;
+        if (CLIENT_PREFIXES.some((prefix) => key.toUpperCase().startsWith(prefix))) continue;
+        if (!reads.has(key)) reads.set(key, file.path);
+      }
+    }
+  }
+  return reads;
+}
+
+/**
  * Values worth suggesting, lifted from public literals.
  *
  * Only two shapes are trusted: a public-endpoint URL appearing anywhere in
@@ -175,8 +223,10 @@ export function suggestableValuesOf(files: readonly { path: string; content: str
 export function keysWithSourcesOf(
   keys: readonly string[],
   files: readonly { path: string; content: string }[]
-): { satisfied: Set<string>; inferred: { key: string; source: string; value: string }[] } {
+): { satisfied: Set<string>; defined: Set<string>; inferred: { key: string; source: string; value: string }[] } {
   const satisfied = new Set<string>();
+  /** Every key any committed env file defines, whether referenced or not — the twin-alias pool */
+  const defined = new Set<string>();
   const inferred: { key: string; source: string; value: string }[] = [];
   const byKey = new Map<string, string>();
   for (const key of keys) byKey.set(key.toUpperCase(), key);
@@ -189,6 +239,7 @@ export function keysWithSourcesOf(
         const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line);
         if (match) {
           const key = match[1]!;
+          defined.add(key);
           const canonical = byKey.get(key.toUpperCase());
           if (canonical) satisfied.add(canonical);
         }
@@ -211,7 +262,18 @@ export function keysWithSourcesOf(
       }
     }
   }
-  return { satisfied, inferred };
+  return { satisfied, defined, inferred };
+}
+
+/**
+ * Whether the repo's `vite.config` widens the client prefix (any `envPrefix:`
+ * key) — the laptop-shape under which a bare `import.meta.env.X` read inlines
+ * the process env and just works, so the doctor must not flag it.
+ */
+function viteConfigWidensPrefixOf(files: readonly { path: string; content: string }[]): boolean {
+  return files.some(
+    (file) => /^vite\.config\.(ts|js|mts|mjs)$/i.test(file.path) && /envPrefix\s*:/.test(file.content)
+  );
 }
 
 /** The dependencies the mounted package.json declares, for the SDK notes */
@@ -258,6 +320,18 @@ export function diagnoseEnv(input: {
   const stored = new Set((input.storedKeys ?? []).map((key) => key.toUpperCase()));
   const withSources = keysWithSourcesOf(referencedKeys, scanned);
   const satisfied = new Set([...withSources.satisfied, ...[...referencedKeys].filter((key) => stored.has(key.toUpperCase()))]);
+  // Alias twins: a referenced `VITE_SUPABASE_URL` is satisfied when the repo
+  // carries the bare `SUPABASE_URL` under any source (committed env file or
+  // stored var), because `withClientAliases` in the spawn env synthesizes the
+  // prefixed twin for exactly those service keys. Marking it missing sent the
+  // agent to ask the user for a value the repository already ships.
+  const aliasSatisfied = referencedKeys.filter((key) => {
+    if (satisfied.has(key)) return false;
+    const bare = stripClientPrefix(key);
+    if (!bare || !ALIASABLE_BARE.test(bare)) return false;
+    return withSources.defined.has(bare) || stored.has(bare.toUpperCase());
+  });
+  for (const key of aliasSatisfied) satisfied.add(key);
   const missingKeys = referencedKeys.filter((key) => !satisfied.has(key));
 
   const suggestions = suggestableValuesOf(scanned);
@@ -267,6 +341,26 @@ export function diagnoseEnv(input: {
   for (const sdk of KNOWN_CLIENT_SDKS) {
     const hit = dependencies.find((dependency) => sdk.dependency.test(dependency));
     if (hit) findings.push({ kind: "note", key: null, message: sdk.note });
+  }
+
+  // A BARE `import.meta.env.X` read is the one shape injection cannot fix —
+  // Vite inlines only prefixed names into a browser bundle. When the repo's
+  // own vite.config widens `envPrefix`, the bare read inlines the process env
+  // and works (that is exactly how the repo runs on a laptop) — so no finding.
+  // Otherwise the read yields `undefined` here AND on any laptop without that
+  // config, and the verdict must say so: every key can have a value and the
+  // app still renders `undefined`, which is the trap this doctor exists to
+  // catch BEFORE the preview is declared broken.
+  const unfixableClientReads: { key: string; source: string }[] = viteConfigWidensPrefixOf(scanned)
+    ? []
+    : [...bareClientReadsOf(scanned)].map(([key, source]) => ({ key, source }));
+  for (const read of unfixableClientReads) {
+    findings.push({
+      kind: "client-read",
+      key: read.key,
+      message:
+        `\`${read.source}\` reads \`import.meta.env.${read.key}\` with a bare (unprefixed) name. Vite inlines only \`VITE_\`-prefixed names into a browser bundle, so that read yields \`undefined\` even with the value present — the runnable shape: read the \`VITE_\`-prefixed twin (synthesized from the bare value at spawn when the repo carries one), or set \`envPrefix\` in vite.config as the repo presumably does wherever this runs today.`,
+    });
   }
 
   // A missing key the repo itself suggests a value for is INFERRED, not a gap:
@@ -309,7 +403,9 @@ export function diagnoseEnv(input: {
   // The verdict answers ONE question: can this project reach its services?
   // A suggestion that fills no gap is a note, not a verdict — an unfetched
   // extra would read as "something is still missing" when nothing is.
-  const verdict: EnvDoctorReport["verdict"] = blocked
+  // An unfixable bare client read blocks like the localhost database does:
+  // it is a fact about the bundler, not a value anyone can supply.
+  const verdict: EnvDoctorReport["verdict"] = blocked || unfixableClientReads.length > 0
     ? "blocked"
     : missingKeys.length > 0
       ? "needs-keys"
@@ -325,6 +421,14 @@ export function diagnoseEnv(input: {
   }
   if (missingKeys.length > 0) {
     parts.push(`Missing: ${missingKeys.map((key) => `\`${key}\``).join(", ")} — ask once, in conversation.`);
+  }
+  if (unfixableClientReads.length > 0) {
+    parts.push(
+      `${unfixableClientReads.length} client file(s) read env keys through \`import.meta.env\` under BARE names (${unfixableClientReads
+        .slice(0, 3)
+        .map((read) => `\`${read.key}\` in \`${read.source}\``)
+        .join(", ")}${unfixableClientReads.length > 3 ? ", …" : ""}) — Vite cannot inline those into a browser bundle, so they read \`undefined\` at runtime regardless of what the environment carries.`
+    );
   }
 
   return {

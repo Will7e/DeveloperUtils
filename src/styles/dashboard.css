@@ -94,6 +94,30 @@ html.light .dash-hero-icon {
 html.light .dash-hero-logo-wrap:hover .dash-hero-icon {
   filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.12)) drop-shadow(0 0 8px rgba(0, 112, 243, 0.2));
 }
+
+.dash-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  letter-spacing: -0.1px;
+  margin-top: 4px;
+}
+
+.dash-hero-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: #0070f3;
+  box-shadow: 0 0 8px rgba(0, 112, 243, 0.6);
+}
+
 .dash-hero-title {
   font-size: 32px;
   font-weight: 800;

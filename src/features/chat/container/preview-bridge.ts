@@ -37,6 +37,7 @@
 import {
   containerStatus,
   ensureContainer,
+  previewScriptInstalledAtRuntime,
   subscribeWorkspaceEvents,
   type ContainerRuntime,
   type WorkspaceEvent,
@@ -413,6 +414,7 @@ export function resetPreview(): void {
   startToken = 0;
   abortStartup = null;
   ownerThreadId = null;
+  invariantRetries = 0;
   liveKey = null;
   viewKey = null;
   sessions.clear();
@@ -788,9 +790,74 @@ function describeArgs(args: unknown[]): string {
   return parts.join(" ").slice(0, 400) || "a console error with no message";
 }
 
+/**
+ * Explains the runtime-level errors a console issue would otherwise carry bare.
+ *
+ * This is the layer `diagnoseDevServerFailure` cannot reach: those hints run
+ * when the PROCESS died, and a Next.js error overlay in a live frame is not a
+ * dead process — the server answers, the exception rides `preview-message`,
+ * and the reader gets a stack with no cause in it. The one failure this
+ * product has already hit that fits that shape is Next's AsyncLocalStorage
+ * invariant: the workStore is lost across an async boundary inside Next's own
+ * render (vercel/next.js#98200 — closed "not planned", fix PR unmerged, and
+ * the bug is timing-shaped, so a retry usually renders clean). Naming it here
+ * is the difference between "a bug in Next.js" and a next action.
+ */
+function decorateIssueMessage(message: string): string {
+  if (!/Expected workStore to be initialized/i.test(message)) return message;
+  return `${message} — Next 16 needs AsyncLocalStorage across async boundaries, which this runtime does not implement (StackBlitz holds its own starter at Next 15.4 for exactly this; vercel/next.js#98200, unfixed upstream). The project fix is pinning next@15.4.x — an upgrade the repo has already applied. Retry the preview first; if the invariant returns, the revision is running pre-pin Next 16 code.`;
+}
+
 function addIssue(kind: PreviewIssue["kind"], message: string): void {
-  const issues = [...state.issues, { kind, message, at: Date.now() }];
+  const decorated = decorateIssueMessage(message);
+  const issues = [...state.issues, { kind, message: decorated, at: Date.now() }];
   setState({ issues: issues.slice(-MAX_PREVIEW_ISSUES) });
+  scheduleInvariantRetry(decorated);
+}
+
+/**
+ * Restarts the dev server ONCE when the runtime's workStore invariant arrives.
+ *
+ * The invariant is a lost AsyncLocalStorage context inside Next's own render —
+ * a per-request race, not a code error, and a fresh render usually succeeds
+ * (Vivari shipped a whole context-tracking polyfill for the same class of
+ * failure; StackBlitz pinned Next 15.4 to avoid it). The one thing a harness
+ * can do about a timing bug is take the retry off the user's hands — once,
+ * capped, because a second invariant on the same page is a pattern no amount of
+ * restarting fixes and an automatic loop would hide it. The delay exists so an
+ * exit-driven failure report (the server dying for a DIFFERENT reason) can
+ * still land and be diagnosed before the restart blurs the evidence.
+ */
+function scheduleInvariantRetry(message: string): void {
+  if (!/Expected workStore to be initialized/i.test(message)) return;
+  if (invariantRetries >= PREVIEW_INVARIANT_RETRY_MAX) return;
+  if (liveKey === null) return;
+  if (state.status !== "running") return;
+  if (process === null) return;
+  const repoKey = liveKey;
+  const plan = lastPlan;
+  invariantRetries += 1;
+  setTimeout(() => {
+    void retryAfterInvariant(repoKey, plan);
+  }, PREVIEW_INVARIANT_RETRY_DELAY_MS);
+}
+
+const INVARIANT_RESTART_REASON =
+  "The page threw Next.js's workStore invariant — request context lost across an async boundary in this runtime, a timing failure and not a code error. The dev server was restarted once, because a fresh render usually succeeds.";
+
+async function retryAfterInvariant(repoKey: string, plan: MountPlan | null): Promise<void> {
+  // The wait may have outlived the condition: a stop, a takeover, or an exit
+  // during the delay changes the story, and the retry must not blur it.
+  if (state.status !== "running") return;
+  const revision = containerStatus().mountedRevision ?? 0;
+  stopPreview(INVARIANT_RESTART_REASON);
+  if (!plan) return;
+  const started = await startPreview({ plan, revision, repoKey }).catch(() => undefined);
+  // `stopPreview` REPLACES the notes (it is a terminal record), so the restart
+  // reason would otherwise be lost the moment the new start writes its own —
+  // and a preview that healed itself with no note of it is how a timing bug
+  // stays invisible. Reason rides the running record instead.
+  if (started?.ok) setState({ notes: [INVARIANT_RESTART_REASON, ...state.notes] });
 }
 
 /**
@@ -1073,6 +1140,15 @@ export async function startPreview(input: {
  */
 export const PREVIEW_POST_READY_DRAIN_MS = 750;
 
+/** Automatic restarts allowed per page for the runtime's workStore invariant */
+export const PREVIEW_INVARIANT_RETRY_MAX = 1;
+
+/** Delay before the invariant retry, so an in-flight failure report can land first */
+export const PREVIEW_INVARIANT_RETRY_DELAY_MS = 750;
+
+/** Automatic invariant retries spent on this page */
+let invariantRetries = 0;
+
 /**
  * Explains a dev server that DIED AFTER answering.
  *
@@ -1187,17 +1263,36 @@ export const PREVIEW_RENDER_SMOKE_DELAY_MS = 4_000;
  * Never throws: every failure shape is a recorded issue or a silence, never an
  * unhandled rejection from a fire-and-forget call.
  */
+/**
+ * Whether the next render smoke probe may fire, for tests only.
+ *
+ * Production gates the probe on `controlInjected` and the host's boot-time
+ * record; tests need a way to arm the runtime-level carrier without a real
+ * boot. One-shot: the probe clears it, so a probe still proves the gate fired.
+ */
+export function previewScriptInstalledForTest(installed: boolean): void {
+  (globalThis as Record<string, unknown>).__intabPreviewControlProbeGate = installed;
+}
+
 export async function probePreviewRender(input: { delayMs?: number } = {}): Promise<boolean> {
   const delayMs = input.delayMs ?? PREVIEW_RENDER_SMOKE_DELAY_MS;
   await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
   // The probe owns no lifecycle: a server stopped during the wait has nothing
   // left to probe, and reporting its ghost would overwrite the real record.
   if (state.status !== "running") return false;
-  // A revision that carries no bootstrap (Next.js et al. — no index.html to
-  // inject into) can never answer, and the timeout it would report names two
-  // causes neither of which is true and a fix (reload) that cannot work.
-  // Unprobed here means unprobed-able, so the silence is the honest answer.
-  if (!controlInjected) return false;
+  // A revision that carries no bootstrap can never answer, and the timeout it
+  // would report names two causes neither of which is true and a fix (reload)
+  // that cannot work. Unprobed here means unprobed-able, so the silence is the
+  // honest answer. There are two carriers of the bootstrap, though: the
+  // mount-time injection into index.html AND the runtime-level setPreviewScript
+  // (which reaches GENERATED pages — Next.js, Nuxt). Either one means the page
+  // can answer, so the gate reads both.
+  const gate = (globalThis as Record<string, unknown>).__intabPreviewControlProbeGate;
+  if (gate === true) {
+    (globalThis as Record<string, unknown>).__intabPreviewControlProbeGate = false;
+  } else if (!controlInjected && !previewScriptInstalledAtRuntime()) {
+    return false;
+  }
 
   const outcome = await sendPreviewControl("get-tree");
   if (!outcome.ok) {
@@ -1314,6 +1409,16 @@ const FAILURE_HINTS: { pattern: RegExp; hint: string }[] = [
     // fix a thing that is not broken.
     pattern: /Cannot find module ['"](?:\.\.?\/|[A-Za-z]:\\|\/home\/)/,
     hint: "The config (or another project file) imports a file Node could not resolve — the missing module is a path into the project itself, not a package, so this is a project import to fix rather than an install to re-run. Next.js projects hit this through their TypeScript config: `next.config.ts` imports a relative file, and Next's own transpile of that config (`next.config.compiled.js`) fails to resolve it.",
+  },
+  {
+    // A config that works on a laptop and dies here for a reason the reader
+    // cannot see: the file was written for CommonJS, but the package declares
+    // "type": "module" and Next loads the compiled config as an ES module —
+    // where the CJS globals were never defined. It kills the dev server AFTER
+    // it printed Ready (the config is read on the first request in webpack
+    // mode), which reads as a random crash rather than a config bug.
+    pattern: /\b(__dirname|__filename|require) is not defined in ES module scope/,
+    hint: "The project's config (or a file it imports) uses a CommonJS global, but the package declares `\"type\": \"module\"`, so Next loads the compiled config as an ES module where those globals do not exist. The fix is in the project: use the ESM equivalent (`import.meta.dirname`, `import.meta.url`) or drop the global.",
   },
   {
     pattern: /command not found|: not found|npm error code 127|Cannot find module|ERR_MODULE_NOT_FOUND/i,

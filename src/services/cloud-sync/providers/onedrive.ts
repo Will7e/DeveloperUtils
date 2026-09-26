@@ -13,6 +13,7 @@ import {
   beginPkceFlow,
   refreshTokens,
   openOAuthPopupAndAwaitResult,
+  describeMicrosoftAuthorizeError,
 } from "../pkce";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -74,7 +75,13 @@ export const oneDriveProvider: CloudProvider = {
     });
 
     const result = await openOAuthPopupAndAwaitResult(authorizeUrl, "onedrive", flow.state);
-    if (!result.ok) throw new Error(result.error);
+    if (!result.ok) {
+      // Azure's raw AADSTS strings name the protocol, not the fix; surface
+      // the redirect-platform guidance for the known configuration shapes.
+      throw new Error(
+        describeMicrosoftAuthorizeError(result.error, redirectUri()) ?? result.error
+      );
+    }
 
     const now = Date.now();
     const base: OAuthTokens = {

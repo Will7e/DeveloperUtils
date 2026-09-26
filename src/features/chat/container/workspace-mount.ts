@@ -26,7 +26,7 @@ import { collectChanges } from "../workspace/workspace";
 import { planMount, flattenTree, type MountPlan } from "./mount-plan";
 import { hydrateTree } from "./tree-source";
 import { diagnoseEnv } from "./env-doctor";
-import { inferRepoEnvFromPublicLiterals } from "./runtime-env";
+import { inferRepoEnvFromPublicLiterals, repoEnvKeys } from "./runtime-env";
 
 export interface MountPlanResult {
   plan: MountPlan;
@@ -125,6 +125,10 @@ export async function planWorkspaceMount(input: {
   const report = diagnoseEnv({
     files: treeFiles,
     packageJson: treeFiles.find((file) => file.path === "package.json")?.content as string | null ?? null,
+    // The stored env satisfies references like a committed file does — and a
+    // stored BARE service key also satisfies the referenced `VITE_`-prefixed
+    // twin, because the spawn env synthesizes that twin from it.
+    storedKeys: await repoEnvKeys(input.ws.owner, input.ws.repo),
   });
   if (report.inferred.length > 0) {
     const inferred = await inferRepoEnvFromPublicLiterals(input.ws.owner, input.ws.repo, report.inferred);

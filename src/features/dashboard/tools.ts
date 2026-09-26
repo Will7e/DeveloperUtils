@@ -97,14 +97,12 @@ export const DASHBOARD_TOOLS: DashboardTool[] = [
 export const TOOL_COUNT = DASHBOARD_TOOLS.length;
 
 export const HERO = {
-  titleLead: "Private, instant, and ",
-  titleAccent: "local-first",
+  titleLead: "InTab — Developer Tools ",
+  titleAccent: "Right in Your Browser",
   subtitle:
-    "Everything runs directly in your browser, no accounts, no tracking, and your data is secure, encrypted, and never leaves your machine or your drive.",
+    "An all-in-one local-first developer suite featuring in-browser code compilers, REST & GraphQL API testing, visual system diagrams, and formatters. 100% free with no login or account required. Optional encrypted Google Drive Cloud Sync backs up your snippets and workspace across devices.",
   primaryCta: { label: "Jump to a tool", shortcut: "⌘K" },
-  /** One compact line of facts, instead of a stats panel. Encryption is left
-      to the privacy card below, which actually explains it. */
-  trust: [`${TOOL_COUNT} tools`, "no account", "nothing uploaded"],
+  trust: [`${TOOL_COUNT} developer tools`, "no account or login required", "runs 100% locally", "optional Google Drive backup"],
 };
 
 export interface PrivacyPoint {

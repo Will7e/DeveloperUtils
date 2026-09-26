@@ -46,9 +46,11 @@ import {
  * machine, competing with their other tabs for the same few gigabytes — and the
  * number that matters is not "can it hold the tree" but "can it hold the tree,
  * `node_modules`, and the dev server at once". A partial tree here is reported,
- * never silent.
+ * never silent. It sits ABOVE the hydrator's byte budget deliberately: the
+ * mount must never be the bottleneck that re-drops what the hydrator decided
+ * to keep (a 24 MiB hydrated tree with media in it must not die at 16).
  */
-export const MOUNT_MAX_BYTES = 16 * 1024 * 1024;
+export const MOUNT_MAX_BYTES = 32 * 1024 * 1024;
 
 /** Files beyond this are dropped with a report; the tail is not arbitrary */
 export const MOUNT_MAX_FILES = 4_000;

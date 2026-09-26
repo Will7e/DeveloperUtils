@@ -17,6 +17,11 @@ export function HeroSection() {
         <InTabLogo size={40} className="dash-hero-icon" />
       </div>
 
+      <div className="dash-hero-badge">
+        <span className="dash-hero-badge-dot" />
+        <span>No Login Required · 100% Free &amp; Open In-Browser Developer Tools</span>
+      </div>
+
       <h1 className="dash-hero-title">
         {HERO.titleLead}
         <span className="dash-hero-accent">{HERO.titleAccent}</span>

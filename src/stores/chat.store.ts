@@ -698,6 +698,35 @@ export const useChatStore = create<ChatStoreState>()(
           branch: repo.branch,
         });
         if (persisted) {
+          // The persisted record pins the commit it was hydrated from, and the
+          // branch does not stand still — the same reason the in-memory path
+          // above re-pins. Skipping this check here is how the FIRST preview
+          // after a page reload kept mounting the old revision (the
+          // sulkasnickeri loop): the in-memory re-pin only fires when the
+          // workspace is already in memory, and after a reload it never is.
+          if (persisted.tree.length > 0 && pendingChangeCount(persisted) === 0) {
+            try {
+              const { getBranchHead } = await import("@/features/chat/lib/github-write");
+              const head = await getBranchHead(token, persisted.owner, persisted.repo, persisted.branch);
+              if (head.commitSha && head.commitSha !== persisted.baseCommitSha) {
+                const { createWorkspace } = await import("@/features/chat/workspace/workspace");
+                const fresh = createWorkspace(
+                  conversationId,
+                  persisted.owner,
+                  persisted.repo,
+                  persisted.branch,
+                  head.commitSha
+                );
+                const hydrated = await hydrateTree(fresh, token);
+                set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: hydrated } }));
+                void flushWorkspaceSave(conversationId, hydrated);
+                return hydrated;
+              }
+            } catch {
+              // Offline, rate-limited, or no write-capable base: the persisted
+              // record still stands, exactly as before this check existed.
+            }
+          }
           set((s) => ({ workspaces: { ...s.workspaces, [conversationId]: persisted } }));
           return persisted;
         }

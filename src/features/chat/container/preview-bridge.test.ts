@@ -12,6 +12,7 @@ vi.mock("@/services/idb-storage.service", () => ({
 import type { FileSystemTree } from "@webcontainer/api";
 import {
   MAX_PREVIEW_ISSUES,
+  PREVIEW_INVARIANT_RETRY_DELAY_MS,
   PREVIEW_POST_READY_DRAIN_MS,
   PREVIEW_RENDER_SMOKE_DELAY_MS,
   describeDevServerExit,
@@ -21,6 +22,7 @@ import {
   livePreviewState,
   notePreviewMessageForTest,
   packageJsonOf,
+  previewScriptInstalledForTest,
   previewEvidenceNote,
   previewState,
   repoKeyOf,
@@ -91,6 +93,22 @@ async function until(condition: () => boolean): Promise<void> {
  */
 function bootWith(devProcesses: { killed: boolean }[]): void {
   const runtime = devRuntime(devProcesses);
+  const boot = vi.fn(async () => runtime);
+  setContainerModuleLoader(
+    async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
+  );
+}
+
+/**
+ * A runtime from BEFORE `setPreviewScript` existed: the API rejects, so neither
+ * bootstrap carrier is present (no mount-time injection for a generated page,
+ * no runtime-level injection) — the shape the probe's gate must skip silently.
+ */
+function bootWithLegacyRuntime(devProcesses: { killed: boolean }[]): void {
+  const runtime = devRuntime(devProcesses) as unknown as Record<string, unknown>;
+  runtime.setPreviewScript = vi.fn(async () => {
+    throw new Error("setPreviewScript is not a function");
+  });
   const boot = vi.fn(async () => runtime);
   setContainerModuleLoader(
     async () => ({ WebContainer: { boot } }) as unknown as typeof import("@webcontainer/api")
@@ -172,6 +190,7 @@ function devRuntime(
       mkdir: vi.fn(async () => {}),
       rm: vi.fn(async () => {}),
     },
+    setPreviewScript: vi.fn(async () => {}),
     spawn: vi.fn(async (command: string, args: string[]) => {
       const line = `${command} ${args.join(" ")}`;
       if (line.includes("node --version")) return simple("v22.0.0\n", 0);
@@ -522,7 +541,7 @@ describe("startPreview — the harness owns the dev server, including the one al
     // document, so the mount had no index.html to inject into — the probe can
     // never be answered, yet its timeout issue told the user the page was
     // "wedged" and to reload a fix that could never work. No bootstrap, no probe.
-    bootWith([]);
+    bootWithLegacyRuntime([]);
     const plan = planMount({
       base: [
         { path: "package.json", content: JSON.stringify({ scripts: { dev: "next dev" } }) },
@@ -826,6 +845,60 @@ describe("startPreview — the harness owns the dev server, including the one al
     expect(previewState().status).toBe("stopped");
     expect(previewState().notes).toContain("stopped by the test");
   });
+
+  it("restarts the dev server ONCE when the workStore invariant arrives on a live preview", async () => {
+    // The invariant is a request-context race inside Next's own render, not a
+    // code error — the retry a user would reach for is the harness's to take.
+    // Capped at one per page: a second invariant is a pattern restarting cannot
+    // fix, and an automatic loop would hide it.
+    const processes: { killed: boolean }[] = [];
+    bootWith(processes);
+    const started = await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+    expect(started.ok).toBe(true);
+    const firstProcess = processes[0];
+
+    previewScriptInstalledForTest(true);
+    notePreviewMessageForTest({
+      type: "PREVIEW_UNCAUGHT_EXCEPTION",
+      message: "Invariant: Expected workStore to be initialized. This is a bug in Next.js.",
+    });
+    // The restart is delayed so an exit-driven failure report can land first.
+    await new Promise((resolve) => setTimeout(resolve, PREVIEW_INVARIANT_RETRY_DELAY_MS + 150));
+
+    expect(firstProcess?.killed).toBe(true);
+    expect(processes.length).toBe(2);
+    // The restarted server answers server-ready on a later turn of the loop,
+    // and the restart's own mount+install cycle runs first — worth a real wait.
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(previewState().status).toBe("running");
+    expect(previewState().notes.join(" ")).toContain("restarted once");
+    // The probe gate is one-shot: consumed by the restart's own smoke check
+    // (with the fake's 4s render delay this just proves it did not stick).
+    previewScriptInstalledForTest(false);
+  });
+
+  it("does not loop: the second invariant is recorded, not restarted", async () => {
+    const processes: { killed: boolean }[] = [];
+    bootWith(processes);
+    await startPreview({ plan: DEV_PLAN(), revision: 1, repoKey: "acme/alpha" });
+
+    previewScriptInstalledForTest(true);
+    notePreviewMessageForTest({
+      type: "PREVIEW_UNCAUGHT_EXCEPTION",
+      message: "Invariant: Expected workStore to be initialized. This is a bug in Next.js.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, PREVIEW_INVARIANT_RETRY_DELAY_MS + 150));
+    expect(processes.length).toBe(2);
+
+    notePreviewMessageForTest({
+      type: "PREVIEW_UNCAUGHT_EXCEPTION",
+      message: "Invariant: Expected workStore to be initialized. This is a bug in Next.js.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, PREVIEW_INVARIANT_RETRY_DELAY_MS + 150));
+    expect(processes.length).toBe(2); // unchanged — the cap held
+    expect(previewState().status).toBe("running");
+    previewScriptInstalledForTest(false);
+  });
 });
 
 describe("a failed preview explains itself", () => {
@@ -855,11 +928,40 @@ describe("a failed preview explains itself", () => {
     expect(diagnoseDevServerFailure("sh: vite: not found", 1)).toMatch(/missing from the workspace/);
   });
 
+  it("names a CJS global in an ESM package's config — the __dirname-after-Ready death", () => {
+    // The sulkasnickeri failure, verbatim: the server printed Ready, answered
+    // server-ready, and died on the first request when Next compiled
+    // next.config.ts into an ES module ("type": "module" package) and the
+    // config read __dirname. Without this hint the output is a bare
+    // ReferenceError, and nothing in it says the fix is one line in the repo.
+    const hint = diagnoseDevServerFailure(
+      "ReferenceError: __dirname is not defined in ES module scope\n    at eval (file:///home/x/next.config.compiled.js:47:15)",
+      1
+    );
+    expect(hint).toContain("ES module");
+    expect(hint).toContain("import.meta.dirname");
+  });
+
   it("invents no cause when the output names none", () => {
     // A wrong cause is worse than no cause: it sends the reader to fix something
     // that is not broken.
     expect(diagnoseDevServerFailure("TypeError: cannot read properties of undefined", 1)).toBeNull();
     expect(diagnoseDevServerFailure("", 1)).toBeNull();
+  });
+
+  it("decorates the Next.js workStore invariant with the runtime limitation and a retry", () => {
+    // Forwarded from a LIVE frame as a console/uncaught issue (the process is
+    // still answering — diagnoseDevServerFailure never runs), so the hint has
+    // to ride the issue layer. The message must name the upstream issue and
+    // say the failure is timing-shaped, or the reader debugs their own code
+    // for what is a runtime limitation.
+    notePreviewMessageForTest({
+      type: "PREVIEW_UNCAUGHT_EXCEPTION",
+      message: "Invariant: Expected workStore to be initialized. This is a bug in Next.js.",
+    });
+    const issue = previewState().issues[previewState().issues.length - 1];
+    expect(issue?.message).toContain("15.4");
+    expect(issue?.message).toContain("Retry the preview");
   });
 
   it("sends Turbopack-in-WASM to the documented --webpack opt-out", () => {

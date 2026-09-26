@@ -18,6 +18,7 @@ import {
   setRepoEnvFromText,
   setRepoEnvVar,
   spawnEnvFor,
+  withClientAliases,
 } from "./runtime-env";
 
 /** A tree shaped the way `planMount` builds one, with a committed env file in it */
@@ -57,6 +58,43 @@ describe("spawnEnvFor — the full precedence the spawn sites share", () => {
     expect(env.SUPABASE_ANON_KEY).toBe("eyJhbGciOi");
     // ...and the user's explicit correction outranks the file.
     expect(env.SUPABASE_URL).toBe("https://user-override.supabase.co");
+  });
+});
+
+describe("withClientAliases — the community's dual-alias fix, synthesized", () => {
+  it("twins every bare public-by-design key with VITE_/NEXT_PUBLIC_/NUXT_PUBLIC_ forms", () => {
+    // The exact shape Lovable/bolt ship as a literal block in every generated
+    // .env (SUPABASE_URL + VITE_SUPABASE_URL); here it is derived, so an
+    // imported repo needs nothing added to its files.
+    const aliased = withClientAliases({ SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "eyJhbGciOi" });
+    expect(aliased.SUPABASE_URL).toBe("https://x.supabase.co");
+    expect(aliased.VITE_SUPABASE_URL).toBe("https://x.supabase.co");
+    expect(aliased.NEXT_PUBLIC_SUPABASE_URL).toBe("https://x.supabase.co");
+    expect(aliased.VITE_SUPABASE_ANON_KEY).toBe("eyJhbGciOi");
+  });
+
+  it("never twins a private-shaped key — a client bundle that never reads it must not receive it", () => {
+    const aliased = withClientAliases({ DATABASE_URL: "postgres://u:p@db.example.com/app", STRIPE_SECRET_KEY: "sk_live_x" });
+    expect(aliased.VITE_DATABASE_URL).toBeUndefined();
+    expect(aliased.VITE_STRIPE_SECRET_KEY).toBeUndefined();
+  });
+
+  it("an explicit prefixed value always wins over the twin of the bare key", () => {
+    const aliased = withClientAliases({
+      SUPABASE_URL: "https://bare.supabase.co",
+      VITE_SUPABASE_URL: "https://explicit.supabase.co",
+    });
+    expect(aliased.VITE_SUPABASE_URL).toBe("https://explicit.supabase.co");
+    expect(aliased.SUPABASE_URL).toBe("https://bare.supabase.co");
+  });
+
+  it("flows through spawnEnvFor: a committed bare .env serves a VITE_ read", async () => {
+    resetRuntimeEnvForTest();
+    const env = await spawnEnvFor({ CI: "1" }, "acme/widgets", TREE_WITH_ENV);
+    // The reference in the app is `import.meta.env.VITE_SUPABASE_URL`; the
+    // file ships only the bare name. The twin is what makes the read resolve.
+    expect(env.VITE_SUPABASE_URL).toBe("https://x.supabase.co");
+    expect(env.VITE_SUPABASE_ANON_KEY).toBe("eyJhbGciOi");
   });
 });
 
